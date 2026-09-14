@@ -16,7 +16,7 @@ export interface SessionStore {
   save(records: SessionRecord[]): Promise<void>
 }
 
-export type EngineFactory = (record: SessionRecord) => CodeSession
+export type EngineFactory = (record: SessionRecord) => Promise<CodeSession>
 
 export type SessionListener = (sessionId: string, event: SessionEvent) => void
 
@@ -68,7 +68,7 @@ export class SessionManager {
       record.title = text.length > 60 ? text.slice(0, 57) + '...' : text
       await this.store.save(this.records)
     }
-    this.ensureLive(record).send(text)
+    ;(await this.ensureLive(record)).send(text)
   }
 
   respondToPermission(id: string, requestId: string, decision: PermissionDecision): void {
@@ -109,10 +109,10 @@ export class SessionManager {
     return record
   }
 
-  private ensureLive(record: SessionRecord): CodeSession {
+  private async ensureLive(record: SessionRecord): Promise<CodeSession> {
     const existing = this.live.get(record.id)
     if (existing) return existing
-    const session = this.createEngine(record)
+    const session = await this.createEngine(record)
     this.live.set(record.id, session)
     void this.pump(record, session)
     return session

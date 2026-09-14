@@ -7,6 +7,15 @@ import type { CodeSession } from './agent/session/code-session'
 import { SdkSession } from './agent/sdk-session/sdk-session'
 import { hostExecutableAsNode, type NodeRuntime } from './agent/sdk-session/node-runtime'
 import { RunLog } from './agent/runs/run-log'
+import { OpenAiSession } from './agent/openai-session/openai-session'
+import { OpenAiClient } from './agent/openai-session/openai-client'
+import { buildSystemPrompt } from './agent/openai-session/system-prompt'
+import { readTool } from './agent/openai-session/tools/read'
+import { writeTool } from './agent/openai-session/tools/write'
+import { editTool } from './agent/openai-session/tools/edit'
+import { globTool } from './agent/openai-session/tools/glob'
+import { grepTool } from './agent/openai-session/tools/grep'
+import { bashTool } from './agent/openai-session/tools/bash'
 import { ChatViewProvider } from './chat/chat-view-provider'
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -21,12 +30,13 @@ export function activate(context: vscode.ExtensionContext): void {
     save: (records) => Promise.resolve(context.workspaceState.update('sessions', records)),
   }
 
-  const createEngine = (record: SessionRecord): CodeSession => {
-    switch (record.profile.engine) {
+  const createEngine = async (record: SessionRecord): Promise<CodeSession> => {
+    const { profile } = record
+    switch (profile.engine) {
       case 'claude-sdk':
         return new SdkSession({
           id: record.id,
-          profile: record.profile,
+          profile,
           cwd: workspaceRoot,
           cliPath,
           runtime: nodeRuntime(),
@@ -35,8 +45,20 @@ export function activate(context: vscode.ExtensionContext): void {
           query,
           onStderr: (chunk) => output.append(chunk),
         })
-      case 'openai-compatible':
-        throw new Error(`Engine "${record.profile.engine}" is not available yet`)
+      case 'openai-compatible': {
+        if (!profile.baseUrl) throw new Error(`Profile "${profile.name}" has no baseUrl`)
+        if (!profile.apiKeySecret) throw new Error(`Profile "${profile.name}" has no apiKeySecret`)
+        const apiKey = await context.secrets.get(secretKey(profile.apiKeySecret))
+        if (!apiKey) throw new Error(`No API key stored for "${profile.apiKeySecret}". Run "KiwiAgent: Set API Key for Profile".`)
+        return new OpenAiSession({
+          id: record.id,
+          profile,
+          cwd: workspaceRoot,
+          client: new OpenAiClient({ baseUrl: profile.baseUrl, apiKey }),
+          tools: [readTool, writeTool, editTool, globTool, grepTool, bashTool()],
+          systemPrompt: await buildSystemPrompt(workspaceRoot, profile.systemPromptFile),
+        })
+      }
     }
   }
 
@@ -82,6 +104,10 @@ async function setApiKey(context: vscode.ExtensionContext): Promise<void> {
   if (!name) return
   const key = await vscode.window.showInputBox({ title: `API key: ${name}`, password: true, ignoreFocusOut: true })
   if (key === undefined) return
-  await context.secrets.store(`kiwiAgent.apiKey.${name}`, key)
+  await context.secrets.store(secretKey(name), key)
   void vscode.window.showInformationMessage(`Stored API key for ${name}.`)
+}
+
+function secretKey(name: string): string {
+  return `kiwiAgent.apiKey.${name}`
 }

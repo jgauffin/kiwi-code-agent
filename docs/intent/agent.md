@@ -61,6 +61,19 @@ Output `plan/<feature>.plan.md`, front-matter `status: draft|approved`, one verd
 
 Authority order is fixed in the prompt: work item, then intent doc, then code. Amendments (`naive`) and drift findings are written back to `docs/intent/**` or the work item as an explicit output, so intent does not rot.
 
+## Retrieval
+
+A sub-session the planner calls with `retrieve(question, known, budget)` to keep file dumps out of its own context. Phase 2 first; phase 1 only when the intent tree or work-item graph outgrows the planner.
+
+- Locates and quotes, never interprets. Output is verbatim excerpts with provenance; the planner rules on them. A summary drops nuance silently, and the planner never sees what was left out.
+- Tools are derived, not configured: the calling phase's tool set minus AskUserQuestion and anything that writes. Phase 1 retrieval is blind by construction.
+- No user interaction, no recursion. "Needs X to answer" goes in `not_found`; the planner decides whether to ask. Depth 1.
+- Result: `findings[]` (excerpt, source as `path#heading`, work item id or URL, one line on why it matches), `not_found[]` (what was looked for, where), `status: complete | partial | budget_exhausted`. Partial is a result, not an error.
+- Written to `.agent/runs/<id>/retrieval/<n>.md`; the tool returns path, status and counts. Files on disk, not conversation context.
+- Budget per call (tool calls, tokens), set by the planner. Exhaustion returns findings so far.
+- Runs as a `CodeSession` under its own profile; a cheap model is fine because the task is search.
+- Independent questions fan out as independent sessions, no shared state.
+
 ## Phase 3: Implement
 
 Tools: Read, Write, Edit, Glob, Grep, Bash, task state. Input is the approved plan file only, fresh session; refuses to start on `status: draft`. Drift items are work items alongside feature items.
@@ -103,3 +116,4 @@ Phase 1 wants the strongest reasoner, phase 3 wants throughput. Profiles carry e
 - Repo map for phases 2 and 3 (project list, public type index, folder conventions).
 - Anthropic Messages API adapter under API key in the own-loop engine.
 - Compaction in the own-loop engine.
+- Retrieval in phase 1 (large intent tree, work-item graph, WebSearch).

@@ -55,7 +55,7 @@ describe('SessionManager', () => {
       const engines: FakeSession[] = []
       const manager = new SessionManager(
         memoryStore(),
-        (r) => {
+        async (r) => {
           const s = new FakeSession(r.id, r.profile, r.engineSessionId)
           engines.push(s)
           return s
@@ -83,7 +83,7 @@ describe('SessionManager', () => {
       const seen: SessionEvent[] = []
       const manager = new SessionManager(
         store,
-        (r) => {
+        async (r) => {
           const s = new FakeSession(r.id, r.profile, r.engineSessionId)
           engines.push(s)
           return s
@@ -118,7 +118,7 @@ describe('SessionManager', () => {
       const engines: FakeSession[] = []
       const manager = new SessionManager(
         memoryStore(),
-        (r) => {
+        async (r) => {
           const s = new FakeSession(r.id, r.profile, r.engineSessionId)
           engines.push(s)
           return s

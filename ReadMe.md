@@ -3,7 +3,7 @@
 VS Code extension that runs coding sessions with a choice of engine per session.
 
 - **Claude**: the Agent SDK's JavaScript build of Claude Code (`dist/cli.mjs`), spawned under Node with the login Claude Code already has. No native binary.
-- **GLM-5.3-Flash / Kimi K3** through Berget AI: own loop, own tools. Not built yet, see `docs/intent/agent.md`.
+- **GLM-5.3-Flash / Kimi K3** through Berget AI (OpenAI-compatible): own loop with Read, Write, Edit, Glob, Grep and Bash. Read-only tools run without asking; the rest prompt, with "always allow" per tool and session. Needs an API key: run *KiwiAgent: Set API Key for Profile*.
 
 The three-phase design (blind plan, reconcile, implement) is the goal; `docs/intent/agent.md` is the definition, the chat agent is the first slice.
 

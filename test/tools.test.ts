@@ -1,0 +1,165 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { ReadTracker } from '../src/agent/openai-session/tools/read-tracker'
+import { readTool } from '../src/agent/openai-session/tools/read'
+import { writeTool } from '../src/agent/openai-session/tools/write'
+import { editTool } from '../src/agent/openai-session/tools/edit'
+import { globTool } from '../src/agent/openai-session/tools/glob'
+import { grepTool } from '../src/agent/openai-session/tools/grep'
+import { bashTool } from '../src/agent/openai-session/tools/bash'
+import { toDefinition, type ToolContext } from '../src/agent/openai-session/tools/tool'
+
+let dir: string
+let ctx: ToolContext
+
+beforeEach(async () => {
+  dir = await mkdtemp(join(tmpdir(), 'tools-'))
+  ctx = { cwd: dir, signal: new AbortController().signal, files: new ReadTracker() }
+})
+
+afterEach(() => rm(dir, { recursive: true, force: true }))
+
+describe('Read', () => {
+  it('numbers_lines_and_honours_offset_and_limit', async () => {
+    await writeFile(join(dir, 'a.txt'), 'one\ntwo\nthree\nfour')
+    const all = await readTool.execute({ file_path: 'a.txt' }, ctx)
+    expect(all.text).toBe('1\tone\n2\ttwo\n3\tthree\n4\tfour')
+    const part = await readTool.execute({ file_path: 'a.txt', offset: 2, limit: 2 }, ctx)
+    expect(part.text).toBe('2\ttwo\n3\tthree')
+  })
+
+  it('missing_file_is_a_tool_error_not_an_exception', async () => {
+    const result = await readTool.execute({ file_path: 'nope.txt' }, ctx)
+    expect(result.isError).toBe(true)
+    expect(result.text).toContain('nope.txt')
+  })
+})
+
+describe('Edit', () => {
+  it('refuses_a_file_that_was_never_read', async () => {
+    await writeFile(join(dir, 'a.txt'), 'hello')
+    const result = await editTool.execute({ file_path: 'a.txt', old_string: 'hello', new_string: 'bye' }, ctx)
+    expect(result.isError).toBe(true)
+    expect(result.text).toContain('not been read')
+  })
+
+  it('refuses_a_file_changed_on_disk_since_it_was_read', async () => {
+    const path = join(dir, 'a.txt')
+    await writeFile(path, 'hello')
+    await readTool.execute({ file_path: 'a.txt' }, ctx)
+    await writeFile(path, 'hello world')
+    const later = new Date(Date.now() + 5000)
+    await utimes(path, later, later)
+    const result = await editTool.execute({ file_path: 'a.txt', old_string: 'hello', new_string: 'bye' }, ctx)
+    expect(result.isError).toBe(true)
+    expect(result.text).toContain('changed on disk')
+  })
+
+  it('replaces_a_unique_match_and_demands_replace_all_for_repeats', async () => {
+    const path = join(dir, 'a.txt')
+    await writeFile(path, 'a b a')
+    await readTool.execute({ file_path: 'a.txt' }, ctx)
+    const ambiguous = await editTool.execute({ file_path: 'a.txt', old_string: 'a', new_string: 'x' }, ctx)
+    expect(ambiguous.isError).toBe(true)
+    expect(ambiguous.text).toContain('2 times')
+    const unique = await editTool.execute({ file_path: 'a.txt', old_string: 'b', new_string: 'y' }, ctx)
+    expect(unique.isError).toBe(false)
+    expect(await readFile(path, 'utf8')).toBe('a y a')
+    const all = await editTool.execute({ file_path: 'a.txt', old_string: 'a', new_string: 'x', replace_all: true }, ctx)
+    expect(all.isError).toBe(false)
+    expect(await readFile(path, 'utf8')).toBe('x y x')
+  })
+
+  it('an_edit_counts_as_a_read_so_the_next_edit_is_allowed', async () => {
+    const path = join(dir, 'a.txt')
+    await writeFile(path, 'one')
+    await readTool.execute({ file_path: 'a.txt' }, ctx)
+    await editTool.execute({ file_path: 'a.txt', old_string: 'one', new_string: 'two' }, ctx)
+    const again = await editTool.execute({ file_path: 'a.txt', old_string: 'two', new_string: 'three' }, ctx)
+    expect(again.isError).toBe(false)
+  })
+})
+
+describe('Write', () => {
+  it('creates_missing_directories_for_a_new_file', async () => {
+    const result = await writeTool.execute({ file_path: 'deep/er/new.txt', content: 'x' }, ctx)
+    expect(result.isError).toBe(false)
+    expect(await readFile(join(dir, 'deep/er/new.txt'), 'utf8')).toBe('x')
+  })
+
+  it('refuses_to_overwrite_an_unread_existing_file', async () => {
+    await writeFile(join(dir, 'a.txt'), 'keep')
+    const result = await writeTool.execute({ file_path: 'a.txt', content: 'lost' }, ctx)
+    expect(result.isError).toBe(true)
+    expect(await readFile(join(dir, 'a.txt'), 'utf8')).toBe('keep')
+  })
+})
+
+describe('Glob and Grep', () => {
+  beforeEach(async () => {
+    await mkdir(join(dir, 'src', 'sub'), { recursive: true })
+    await mkdir(join(dir, 'node_modules', 'dep'), { recursive: true })
+    await writeFile(join(dir, 'src', 'a.ts'), 'export const answer = 42\n')
+    await writeFile(join(dir, 'src', 'sub', 'b.ts'), 'const question = "unknown"\nconst Answer = 1\n')
+    await writeFile(join(dir, 'src', 'c.md'), 'answer in prose\n')
+    await writeFile(join(dir, 'node_modules', 'dep', 'index.ts'), 'const answer = 0\n')
+  })
+
+  it('glob_finds_files_and_skips_dependency_folders', async () => {
+    const result = await globTool.execute({ pattern: '**/*.ts' }, ctx)
+    expect(result.text).toContain(join(dir, 'src', 'a.ts'))
+    expect(result.text).toContain(join(dir, 'src', 'sub', 'b.ts'))
+    expect(result.text).not.toContain('node_modules')
+  })
+
+  it('grep_reports_file_line_and_text_and_filters_by_include', async () => {
+    const result = await grepTool.execute({ pattern: 'answer', include: '*.ts' }, ctx)
+    expect(result.text).toBe(`${join('src', 'a.ts')}:1:export const answer = 42`)
+  })
+
+  it('grep_case_insensitive_and_files_only_mode', async () => {
+    const result = await grepTool.execute({ pattern: 'answer', case_insensitive: true, output_mode: 'files_with_matches' }, ctx)
+    expect(result.text.split('\n').sort()).toEqual([join('src', 'a.ts'), join('src', 'c.md'), join('src', 'sub', 'b.ts')])
+  })
+
+  it('grep_rejects_an_invalid_regex_as_a_tool_error', async () => {
+    const result = await grepTool.execute({ pattern: '(' }, ctx)
+    expect(result.isError).toBe(true)
+  })
+})
+
+describe('Bash', () => {
+  it('returns_output_and_marks_non_zero_exit_as_error', async () => {
+    const tool = bashTool()
+    const ok = await tool.execute({ command: 'echo hi && echo err 1>&2' }, ctx)
+    expect(ok.isError).toBe(false)
+    expect(ok.text).toContain('hi')
+    expect(ok.text).toContain('err')
+    const bad = await tool.execute({ command: 'exit 3' }, ctx)
+    expect(bad.isError).toBe(true)
+    expect(bad.text).toContain('exit code 3')
+  })
+
+  it('times_out_a_command_that_never_ends', async () => {
+    const result = await bashTool().execute({ command: 'sleep 30', timeout_ms: 1000 }, ctx)
+    expect(result.isError).toBe(true)
+    expect(result.text).toContain('timed out')
+  })
+
+  it('missing_shell_is_a_tool_error', async () => {
+    const result = await bashTool('/no/such/bash').execute({ command: 'echo hi' }, ctx)
+    expect(result.isError).toBe(true)
+    expect(result.text).toContain('Cannot run bash')
+  })
+})
+
+describe('tool definitions', () => {
+  it('json_schema_has_no_schema_url_and_marks_required_fields', () => {
+    const def = toDefinition(editTool)
+    expect(def.name).toBe('Edit')
+    expect(def.parameters).not.toHaveProperty('$schema')
+    expect(def.parameters['required']).toEqual(['file_path', 'old_string', 'new_string'])
+  })
+})
