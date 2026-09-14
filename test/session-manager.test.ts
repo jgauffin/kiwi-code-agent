@@ -406,7 +406,12 @@ describe('SessionManager', () => {
     const dir = await mkdtemp(join(tmpdir(), 'sm-'))
     try {
       const store = memoryStore()
-      const manager = new SessionManager(store, async (r) => new FakeSession(r.id, r.profile), (id) => RunLog.forSession(dir, id), () => {})
+      const manager = new SessionManager(
+        store,
+        async (r) => new FakeSession(r.id, r.profile, r.engineSessionId),
+        (id) => RunLog.forSession(dir, id),
+        () => {},
+      )
       const implementer = await manager.create(profile, 'implement', 'Orders')
       const cleanup = await manager.create(profile, 'cleanup', 'Orders', implementer.id, ['src/orders/cancel.ts'])
       expect(cleanup).toMatchObject({ title: 'Cleanup: Orders', parentId: implementer.id, files: ['src/orders/cancel.ts'] })

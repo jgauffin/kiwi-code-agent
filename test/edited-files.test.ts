@@ -5,7 +5,14 @@ import type { FileEditChange } from '../src/agent/edits/file-edit-diff'
 
 const change = (path: string): FileEditChange => ({ path, label: path, diffs: [], omitted: 0 })
 
-const edited = (path: string, isError = false): SessionEvent => ({ type: 'tool_result', toolUseId: 't', text: '', isError, edit: change(path) })
+const edited = (path: string, isError = false, parentToolUseId?: string): SessionEvent => ({
+  type: 'tool_result',
+  toolUseId: 't',
+  text: '',
+  isError,
+  edit: change(path),
+  ...(parentToolUseId ? { parentToolUseId } : {}),
+})
 
 describe('editedFiles', () => {
   it('a_file_is_edited_when_its_step_carried_a_change_and_did_not_fail', () => {
@@ -23,8 +30,8 @@ describe('editedFiles', () => {
     const events: SessionEvent[] = [
       edited('/w/b.ts'),
       edited('/w/a.ts'),
-      { ...edited('/w/b.ts'), parentToolUseId: 'agent' },
-      { ...edited('/w/c.ts'), parentToolUseId: 'agent' },
+      edited('/w/b.ts', false, 'agent'),
+      edited('/w/c.ts', false, 'agent'),
     ]
     expect(editedFiles(events)).toEqual(['/w/b.ts', '/w/a.ts', '/w/c.ts'])
   })
