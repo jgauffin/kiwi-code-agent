@@ -1,4 +1,5 @@
 import type { PermissionDecision } from '../../agent/session/code-session'
+import type { SessionMode } from '../../agent/session/session-manager'
 
 export class PromptSubmittedEvent extends Event {
   static readonly type = 'prompt-submitted'
@@ -26,8 +27,27 @@ export class PermissionDecidedEvent extends Event {
 
 export class NewSessionRequestedEvent extends Event {
   static readonly type = 'new-session-requested'
-  constructor(public readonly profileName: string) {
+  constructor(
+    public readonly mode: SessionMode,
+    public readonly feature: string | undefined,
+    public readonly prompt: string | undefined,
+  ) {
     super(NewSessionRequestedEvent.type, { bubbles: true })
+  }
+}
+
+/** The "+" tab: show the new-session screen. */
+export class NewSessionViewRequestedEvent extends Event {
+  static readonly type = 'new-session-view-requested'
+  constructor() {
+    super(NewSessionViewRequestedEvent.type, { bubbles: true })
+  }
+}
+
+export class SessionClosedEvent extends Event {
+  static readonly type = 'session-closed'
+  constructor(public readonly sessionId: string) {
+    super(SessionClosedEvent.type, { bubbles: true })
   }
 }
 
@@ -58,7 +78,9 @@ declare global {
     [InterruptRequestedEvent.type]: InterruptRequestedEvent
     [PermissionDecidedEvent.type]: PermissionDecidedEvent
     [NewSessionRequestedEvent.type]: NewSessionRequestedEvent
+    [NewSessionViewRequestedEvent.type]: NewSessionViewRequestedEvent
     [SessionSelectedEvent.type]: SessionSelectedEvent
+    [SessionClosedEvent.type]: SessionClosedEvent
     [SessionRemovedEvent.type]: SessionRemovedEvent
     [VerifyToggledEvent.type]: VerifyToggledEvent
   }

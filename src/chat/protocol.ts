@@ -1,26 +1,28 @@
 import type { PermissionDecision, SessionEvent } from '../agent/session/code-session'
-import type { Engine } from '../agent/session/model-profile'
+import type { SessionMode } from '../agent/session/session-manager'
+import type { SessionStatus } from '../agent/session/session-status'
 
-/** What the session list shows. */
-export type SessionSummary = {
+/** One tab: a session that is live, or the one being looked at. */
+export type SessionTab = {
   id: string
   title: string
+  mode: SessionMode
   profileName: string
-  engine: Engine
-  live: boolean
+  status: SessionStatus
+  active: boolean
 }
 
 export type ToWebview =
   | {
       type: 'state'
-      sessions: SessionSummary[]
-      activeSessionId?: string
-      profiles: string[]
-      /** Verify-on-stop for the active session; absent when no verification rules are configured. */
+      tabs: SessionTab[]
+      /** Verify-on-stop for the active session; absent when no verification rules are configured or no session is active. */
       verify?: boolean
     }
   /** Full history of the active session, sent on switch. */
   | { type: 'transcript'; sessionId: string; events: SessionEvent[] }
+  /** Show the new-session screen (from the Sessions view's + button). */
+  | { type: 'show_new_session' }
   | { type: 'event'; sessionId: string; event: SessionEvent }
 
 export type FromWebview =
@@ -28,7 +30,9 @@ export type FromWebview =
   | { type: 'send'; text: string }
   | { type: 'permission'; requestId: string; decision: PermissionDecision }
   | { type: 'interrupt' }
-  | { type: 'new_session'; profileName: string }
-  | { type: 'switch_session'; sessionId: string }
-  | { type: 'remove_session'; sessionId: string }
   | { type: 'set_verify'; enabled: boolean }
+  | { type: 'switch_session'; sessionId: string }
+  /** Stops the engine; the session stays in the list and resumes on the next prompt. */
+  | { type: 'close_session'; sessionId: string }
+  /** `prompt`, when given, is sent as the first message. */
+  | { type: 'new_session'; mode: SessionMode; feature?: string; prompt?: string }

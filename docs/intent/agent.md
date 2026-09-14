@@ -115,6 +115,7 @@ Phase 1 wants the strongest reasoner, phase 3 wants throughput. Profiles carry e
 
 ## Parked
 
+- ADO: `get_work_item` and creating tasks under the user story from the spec's task list. No work items exist yet.
 - Repo map for phases 2 and 3 (project list, public type index, folder conventions).
 - Anthropic Messages API adapter under API key in the own-loop engine.
 - Compaction in the own-loop engine.

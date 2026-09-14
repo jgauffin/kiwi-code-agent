@@ -1,7 +1,8 @@
 import * as vscode from 'vscode'
 import { mkdirSync } from 'node:fs'
 import { query } from '@anthropic-ai/claude-agent-sdk'
-import { SessionManager, type SessionRecord, type SessionStore } from './agent/session/session-manager'
+import { SessionManager, type SessionMode, type SessionRecord, type SessionStore } from './agent/session/session-manager'
+import { SessionsTree } from './chat/sessions-tree'
 import type { ModelProfile } from './agent/session/model-profile'
 import type { CodeSession } from './agent/session/code-session'
 import { SdkSession } from './agent/sdk-session/sdk-session'
@@ -17,6 +18,9 @@ import { globTool } from './agent/openai-session/tools/glob'
 import { grepTool } from './agent/openai-session/tools/grep'
 import { bashTool } from './agent/openai-session/tools/bash'
 import { runShell } from './agent/shell/run-shell'
+import type { SessionHooks } from './agent/session/hooks'
+import { ScopeGuard } from './agent/phases/scope-guard'
+import { BLIND_PLAN_TOOLS, blindPlanPrompt, blindPlanScope } from './agent/phases/blind-plan'
 import { TurnVerifier, type VerifyRule } from './agent/verify/turn-verifier'
 import { ChatViewProvider, type VerifyControl } from './chat/chat-view-provider'
 
@@ -44,14 +48,30 @@ export function activate(context: vscode.ExtensionContext): void {
     },
   }
 
+  /** What a session's mode dictates, independent of engine: hooks, prompt, tool set. */
+  const setupFor = (record: SessionRecord): { hooks?: SessionHooks; systemPrompt?: string; toolNames?: string[] } => {
+    switch (record.mode) {
+      case 'chat': {
+        const hooks = verifier(workspaceRoot)
+        if (!hooks) return {}
+        hooks.enabled = verifyWanted.get(record.id) ?? false
+        verifiers.set(record.id, hooks)
+        return { hooks }
+      }
+      case 'plan': {
+        if (!record.feature) throw new Error('A plan session needs a feature name')
+        return {
+          hooks: new ScopeGuard(workspaceRoot, blindPlanScope(record.feature)),
+          systemPrompt: blindPlanPrompt(record.feature, workspaceRoot),
+          toolNames: BLIND_PLAN_TOOLS,
+        }
+      }
+    }
+  }
+
   const createEngine = async (record: SessionRecord): Promise<CodeSession> => {
     const { profile } = record
-    const hooks = verifier(workspaceRoot)
-    if (hooks) {
-      hooks.enabled = verifyWanted.get(record.id) ?? false
-      verifiers.set(record.id, hooks)
-    }
-    const withHooks = hooks ? { hooks } : {}
+    const setup = setupFor(record)
     switch (profile.engine) {
       case 'claude-sdk':
         return new SdkSession({
@@ -62,7 +82,9 @@ export function activate(context: vscode.ExtensionContext): void {
           runtime: nodeRuntime(),
           ...(record.engineSessionId ? { resumeEngineSessionId: record.engineSessionId } : {}),
           env: { CLAUDE_AGENT_SDK_CLIENT_APP: 'kiwi-agent-vscode/0.0.1' },
-          ...withHooks,
+          ...(setup.hooks ? { hooks: setup.hooks } : {}),
+          ...(setup.systemPrompt !== undefined ? { systemPrompt: setup.systemPrompt } : {}),
+          ...(setup.toolNames ? { tools: setup.toolNames } : {}),
           query,
           onStderr: (chunk) => output.append(chunk),
         })
@@ -71,14 +93,15 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!profile.apiKeySecret) throw new Error(`Profile "${profile.name}" has no apiKeySecret`)
         const apiKey = await context.secrets.get(secretKey(profile.apiKeySecret))
         if (!apiKey) throw new Error(`No API key stored for "${profile.apiKeySecret}". Run "KiwiAgent: Set API Key for Profile".`)
+        const allTools = [readTool, writeTool, editTool, globTool, grepTool, bashTool()]
         return new OpenAiSession({
           id: record.id,
           profile,
           cwd: workspaceRoot,
           client: new OpenAiClient({ baseUrl: profile.baseUrl, apiKey }),
-          tools: [readTool, writeTool, editTool, globTool, grepTool, bashTool()],
-          systemPrompt: await buildSystemPrompt(workspaceRoot, profile.systemPromptFile),
-          ...withHooks,
+          tools: setup.toolNames ? allTools.filter((t) => setup.toolNames!.includes(t.name)) : allTools,
+          systemPrompt: setup.systemPrompt ?? (await buildSystemPrompt(workspaceRoot, profile.systemPromptFile)),
+          ...(setup.hooks ? { hooks: setup.hooks } : {}),
         })
       }
     }
@@ -91,11 +114,21 @@ export function activate(context: vscode.ExtensionContext): void {
     (id) => RunLog.forSession(workspaceRoot, id),
     (id, event) => chat.onSessionEvent(id, event),
   )
-  chat = new ChatViewProvider(context.extensionUri, sessions, profiles, verifyControl)
+  chat = new ChatViewProvider(context.extensionUri, sessions, profileFor, verifyControl)
+  const tree = new SessionsTree(
+    sessions,
+    () => chat.activeId,
+    (id) => chat.statusOf(id),
+  )
 
   context.subscriptions.push(
     output,
     vscode.window.registerWebviewViewProvider('kiwiAgent.chat', chat, { webviewOptions: { retainContextWhenHidden: true } }),
+    vscode.window.registerTreeDataProvider('kiwiAgent.sessions', tree),
+    chat.onDidChange(() => tree.refresh()),
+    vscode.commands.registerCommand('kiwiAgent.newSession', () => chat.showNewSession()),
+    vscode.commands.registerCommand('kiwiAgent.openSession', (id: string) => chat.open(id)),
+    vscode.commands.registerCommand('kiwiAgent.removeSession', (record: SessionRecord) => chat.remove(record.id)),
     vscode.commands.registerCommand('kiwiAgent.openChat', () => chat.openInEditor()),
     vscode.commands.registerCommand('kiwiAgent.setApiKey', () => setApiKey(context)),
     { dispose: () => void sessions.disposeAll() },
@@ -104,6 +137,20 @@ export function activate(context: vscode.ExtensionContext): void {
 
 function profiles(): ModelProfile[] {
   return vscode.workspace.getConfiguration('kiwiAgent').get<ModelProfile[]>('profiles', [])
+}
+
+/** The profile a new session runs on comes from settings, per mode. */
+function profileFor(mode: SessionMode): ModelProfile {
+  const config = vscode.workspace.getConfiguration('kiwiAgent')
+  const all = profiles()
+  const active = config.get<string>('activeProfile', '')
+  const name = (mode === 'plan' && config.get<string>('planProfile', '')) || active
+  const profile = all.find((p) => p.name === name) ?? all[0]
+  if (!profile) throw new Error('No model profiles configured (kiwiAgent.profiles)')
+  if (name && profile.name !== name) {
+    void vscode.window.showWarningMessage(`KiwiAgent: profile "${name}" not found, using "${profile.name}".`)
+  }
+  return profile
 }
 
 function verifyRules(): VerifyRule[] {

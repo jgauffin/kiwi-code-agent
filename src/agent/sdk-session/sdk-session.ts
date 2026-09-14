@@ -28,6 +28,10 @@ export type SdkSessionOptions = {
   /** Extra environment for the engine process, on top of the host's. */
   env?: Record<string, string>
   hooks?: SessionHooks
+  /** Replaces Claude Code's own system prompt; phases use this. */
+  systemPrompt?: string
+  /** Restricts the built-in tools to these names. */
+  tools?: string[]
   query: QueryFn
   onStderr?: (chunk: string) => void
 }
@@ -123,6 +127,8 @@ export class SdkSession implements CodeSession {
     if (profile.effort) options.effort = profile.effort
     if (this.options.resumeEngineSessionId) options.resume = this.options.resumeEngineSessionId
     if (this.options.hooks) options.hooks = this.sdkHooks(this.options.hooks)
+    if (this.options.systemPrompt !== undefined) options.systemPrompt = this.options.systemPrompt
+    if (this.options.tools) options.tools = this.options.tools
     return options
   }
 

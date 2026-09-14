@@ -1,13 +1,10 @@
 import * as vscode from 'vscode'
-import type { SessionManager } from '../agent/session/session-manager'
+import type { SessionManager, SessionMode, SessionRecord } from '../agent/session/session-manager'
 import type { ModelProfile } from '../agent/session/model-profile'
 import type { SessionEvent } from '../agent/session/code-session'
-import type { FromWebview, SessionSummary, ToWebview } from './protocol'
+import { nextStatus, type SessionStatus } from '../agent/session/session-status'
+import type { FromWebview, SessionTab, ToWebview } from './protocol'
 
-/**
- * Hosts the chat UI, in the sidebar view and in editor panels. Every attached
- * webview shows the same active session; the provider fans events out.
- */
 /** Per-session verify-on-stop switch; `available` is false when no rules are configured. */
 export interface VerifyControl {
   readonly available: boolean
@@ -15,16 +12,33 @@ export interface VerifyControl {
   setEnabled(sessionId: string, enabled: boolean): void
 }
 
+/**
+ * Hosts the chat UI, in the sidebar view and in editor panels. Every attached
+ * webview shows the same active session; the provider fans events out and
+ * tracks each session's status for the tabs and the Sessions view.
+ */
 export class ChatViewProvider implements vscode.WebviewViewProvider {
   private readonly webviews = new Set<vscode.Webview>()
+  private readonly statuses = new Map<string, SessionStatus>()
+  private readonly changed = new vscode.EventEmitter<void>()
+  /** Fires when the active session, a status or the session list changed. */
+  readonly onDidChange = this.changed.event
   private activeSessionId: string | undefined
 
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly sessions: SessionManager,
-    private readonly profiles: () => ModelProfile[],
+    private readonly profileFor: (mode: SessionMode) => ModelProfile,
     private readonly verify: VerifyControl,
   ) {}
+
+  get activeId(): string | undefined {
+    return this.activeSessionId
+  }
+
+  statusOf(sessionId: string): SessionStatus {
+    return this.statuses.get(sessionId) ?? 'idle'
+  }
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.attach(view.webview)
@@ -39,10 +53,60 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     panel.onDidDispose(() => this.webviews.delete(panel.webview))
   }
 
+  async newSession(mode: SessionMode, feature?: string, prompt?: string): Promise<void> {
+    if (mode === 'plan' && !feature) throw new Error('A plan session needs a feature name')
+    const record = await this.sessions.create(this.profileFor(mode), mode, feature)
+    this.activeSessionId = record.id
+    this.sendState()
+    this.broadcast({ type: 'transcript', sessionId: record.id, events: [] })
+    this.changed.fire()
+    if (prompt) await this.sessions.send(record.id, prompt)
+  }
+
+  showNewSession(): void {
+    this.broadcast({ type: 'show_new_session' })
+  }
+
+  async open(sessionId: string): Promise<void> {
+    if (!this.sessions.get(sessionId)) return
+    this.activeSessionId = sessionId
+    this.sendState()
+    await this.sendTranscript(sessionId)
+    this.changed.fire()
+  }
+
+  async close(sessionId: string): Promise<void> {
+    await this.sessions.close(sessionId)
+    if (this.activeSessionId === sessionId) this.activeSessionId = undefined
+    this.sendState()
+    this.changed.fire()
+  }
+
+  async remove(sessionId: string): Promise<void> {
+    await this.sessions.remove(sessionId)
+    this.statuses.delete(sessionId)
+    if (this.activeSessionId === sessionId) this.activeSessionId = undefined
+    this.sendState()
+    this.changed.fire()
+  }
+
   /** Called by the session manager for every event of every session. */
   onSessionEvent(sessionId: string, event: SessionEvent): void {
+    const record = this.sessions.get(sessionId)
+    if (record) {
+      const before = this.statuses.get(sessionId) ?? 'idle'
+      const after = nextStatus(before, record.mode, event)
+      if (after !== before) {
+        this.statuses.set(sessionId, after)
+        this.sendState()
+        this.changed.fire()
+      }
+    }
     if (sessionId === this.activeSessionId) this.broadcast({ type: 'event', sessionId, event })
-    if (event.type === 'session_started' || event.type === 'ended') void this.sendState()
+    if (event.type === 'session_started' || event.type === 'ended') {
+      this.sendState()
+      this.changed.fire()
+    }
   }
 
   private attach(webview: vscode.Webview): void {
@@ -60,15 +124,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private async handle(message: FromWebview): Promise<void> {
     switch (message.type) {
       case 'ready':
-        await this.sendState()
+        this.sendState()
         if (this.activeSessionId) await this.sendTranscript(this.activeSessionId)
         return
       case 'send':
-        if (!this.activeSessionId) {
-          const profile = this.profiles()[0]
-          if (!profile) throw new Error('No model profiles configured (kiwiAgent.profiles)')
-          await this.newSession(profile)
-        }
+        if (!this.activeSessionId) await this.newSession('chat')
         await this.sessions.send(this.activeSessionId!, message.text)
         return
       case 'permission':
@@ -77,50 +137,47 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       case 'interrupt':
         if (this.activeSessionId) await this.sessions.interrupt(this.activeSessionId)
         return
-      case 'new_session': {
-        const profile = this.profiles().find((p) => p.name === message.profileName)
-        if (!profile) throw new Error(`Unknown profile ${message.profileName}`)
-        await this.newSession(profile)
-        return
-      }
-      case 'switch_session':
-        this.activeSessionId = message.sessionId
-        await this.sendState()
-        await this.sendTranscript(message.sessionId)
-        return
-      case 'remove_session':
-        await this.sessions.remove(message.sessionId)
-        if (this.activeSessionId === message.sessionId) this.activeSessionId = undefined
-        await this.sendState()
-        return
       case 'set_verify':
         if (this.activeSessionId) this.verify.setEnabled(this.activeSessionId, message.enabled)
-        await this.sendState()
+        this.sendState()
+        return
+      case 'switch_session':
+        await this.open(message.sessionId)
+        return
+      case 'close_session':
+        await this.close(message.sessionId)
+        return
+      case 'new_session':
+        await this.newSession(message.mode, message.feature, message.prompt)
         return
     }
   }
 
-  private async newSession(profile: ModelProfile): Promise<void> {
-    const record = await this.sessions.create(profile)
-    this.activeSessionId = record.id
-    await this.sendState()
-    this.broadcast({ type: 'transcript', sessionId: record.id, events: [] })
+  /** Tabs: live sessions plus the active one, in creation order (list is newest first). */
+  private tabs(): SessionTab[] {
+    return this.sessions
+      .list()
+      .filter((r) => this.sessions.isLive(r.id) || r.id === this.activeSessionId)
+      .reverse()
+      .map((r) => this.tab(r))
   }
 
-  private async sendState(): Promise<void> {
-    const sessions: SessionSummary[] = this.sessions.list().map((r) => ({
-      id: r.id,
-      title: r.title,
-      profileName: r.profile.name,
-      engine: r.profile.engine,
-      live: this.sessions.isLive(r.id),
-    }))
+  private tab(record: SessionRecord): SessionTab {
+    return {
+      id: record.id,
+      title: record.title,
+      mode: record.mode,
+      profileName: record.profile.name,
+      status: this.statusOf(record.id),
+      active: record.id === this.activeSessionId,
+    }
+  }
+
+  private sendState(): void {
     const active = this.activeSessionId
     this.broadcast({
       type: 'state',
-      sessions,
-      ...(active ? { activeSessionId: active } : {}),
-      profiles: this.profiles().map((p) => p.name),
+      tabs: this.tabs(),
       ...(active && this.verify.available ? { verify: this.verify.isEnabled(active) } : {}),
     })
   }

@@ -9,75 +9,153 @@ body {
   height: 100vh;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 chat-app {
   display: grid;
   grid-template-rows: auto 1fr auto;
   height: 100vh;
 
-  & > .sessions {
+  & > .tabs {
     border-bottom: 1px solid var(--vscode-panel-border);
-    padding: 0.4rem;
 
-    & .new-session {
-      display: flex;
-      gap: 0.4rem;
-
-      & select {
-        flex: 1;
-      }
-    }
-
-    & .sessions {
+    & .tabs {
       list-style: none;
-      margin: 0.4rem 0 0;
-      padding: 0;
-      max-height: 8rem;
-      overflow-y: auto;
+      margin: 0;
+      padding: 0 0.3rem;
+      display: flex;
+      gap: 0.2rem;
+      overflow-x: auto;
     }
 
-    & .session {
+    & .tab {
       display: flex;
-      gap: 0.4rem;
-      align-items: baseline;
-      padding: 0.15rem 0.3rem;
+      align-items: center;
+      gap: 0.3rem;
+      padding: 0.35rem 0.5rem;
       cursor: pointer;
-      border-radius: 3px;
+      border-bottom: 2px solid transparent;
+      white-space: nowrap;
+      max-width: 14rem;
+      opacity: 0.75;
 
       &:hover {
+        opacity: 1;
         background: var(--vscode-list-hoverBackground);
       }
 
       &.active {
-        background: var(--vscode-list-activeSelectionBackground);
-        color: var(--vscode-list-activeSelectionForeground);
+        opacity: 1;
+        border-bottom-color: var(--vscode-focusBorder);
       }
 
-      & .live {
-        color: var(--vscode-testing-iconPassed);
+      &.needs_human .status {
+        animation: pulse 1.2s ease-in-out infinite;
+      }
+
+      &.error .status {
+        color: var(--vscode-errorForeground);
       }
 
       & .title {
-        flex: 1;
         overflow: hidden;
         text-overflow: ellipsis;
-        white-space: nowrap;
       }
 
-      & .profile {
-        opacity: 0.7;
-        font-size: 0.85em;
-      }
-
-      & .remove {
+      & .close {
         background: none;
         border: none;
         color: inherit;
         cursor: pointer;
         opacity: 0.5;
+        padding: 0 0.2rem;
 
         &:hover {
           opacity: 1;
         }
+      }
+
+      &.new {
+        font-size: 1.2em;
+        padding-block: 0.15rem;
+      }
+    }
+  }
+
+  & > .new-session {
+    overflow-y: auto;
+    padding: 0.8rem;
+
+    & h2 {
+      margin: 0 0 0.6rem;
+      font-size: 1.1em;
+    }
+
+    & .types {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+      gap: 0.5rem;
+      margin-bottom: 0.8rem;
+    }
+
+    & .type {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.2rem;
+      text-align: left;
+      padding: 0.6rem;
+      background: var(--vscode-input-background);
+      color: var(--vscode-foreground);
+      border: 1px solid var(--vscode-input-border, transparent);
+      border-radius: 6px;
+
+      &.selected {
+        border-color: var(--vscode-focusBorder);
+      }
+
+      & .icon {
+        font-size: 1.4em;
+      }
+
+      & .hint {
+        opacity: 0.7;
+        font-size: 0.85em;
+      }
+    }
+
+    & form {
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+
+      & label {
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+        font-size: 0.9em;
+      }
+
+      & input,
+      & textarea {
+        font-family: inherit;
+        background: var(--vscode-input-background);
+        color: var(--vscode-input-foreground);
+        border: 1px solid var(--vscode-input-border, transparent);
+        border-radius: 3px;
+        padding: 0.4rem;
+      }
+
+      & .hint {
+        margin: 0;
+        opacity: 0.7;
+        font-size: 0.85em;
+      }
+
+      & button[type='submit'] {
+        align-self: flex-start;
       }
     }
   }

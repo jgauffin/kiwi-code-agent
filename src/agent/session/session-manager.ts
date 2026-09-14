@@ -2,10 +2,15 @@ import type { CodeSession, PermissionDecision, SessionEvent } from './code-sessi
 import type { ModelProfile } from './model-profile'
 import type { RunLog } from '../runs/run-log'
 
+export type SessionMode = 'chat' | 'plan'
+
 export type SessionRecord = {
   id: string
   title: string
   profile: ModelProfile
+  mode: SessionMode
+  /** Feature being planned; plan mode only. */
+  feature?: string
   /** Engine-side conversation id, set once the engine reports it. Lets a closed session continue. */
   engineSessionId?: string
   createdAt: string
@@ -35,7 +40,8 @@ export class SessionManager {
     private readonly runLogFor: (sessionId: string) => RunLog,
     private readonly listener: SessionListener,
   ) {
-    this.records = store.list()
+    // Records written before modes existed are chat sessions.
+    this.records = store.list().map((r) => ({ ...r, mode: r.mode ?? 'chat' }))
   }
 
   list(): SessionRecord[] {
@@ -50,11 +56,13 @@ export class SessionManager {
     return this.live.has(id)
   }
 
-  async create(profile: ModelProfile): Promise<SessionRecord> {
+  async create(profile: ModelProfile, mode: SessionMode = 'chat', feature?: string): Promise<SessionRecord> {
     const record: SessionRecord = {
       id: crypto.randomUUID(),
-      title: 'New session',
+      title: mode === 'plan' && feature ? `Plan: ${feature}` : 'New session',
       profile,
+      mode,
+      ...(feature ? { feature } : {}),
       createdAt: new Date().toISOString(),
     }
     this.records.unshift(record)

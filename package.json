@@ -29,25 +29,79 @@
     "views": {
       "kiwiAgent": [
         {
+          "id": "kiwiAgent.sessions",
+          "name": "Sessions"
+        },
+        {
           "type": "webview",
           "id": "kiwiAgent.chat",
-          "name": "Sessions"
+          "name": "Chat"
         }
       ]
     },
     "commands": [
       {
+        "command": "kiwiAgent.newSession",
+        "title": "New Session",
+        "icon": "$(add)"
+      },
+      {
+        "command": "kiwiAgent.removeSession",
+        "title": "Remove Session",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "kiwiAgent.openSession",
+        "title": "Open Session"
+      },
+      {
         "command": "kiwiAgent.openChat",
-        "title": "KiwiAgent: Open in Editor"
+        "title": "KiwiAgent: Open Chat in Editor"
       },
       {
         "command": "kiwiAgent.setApiKey",
         "title": "KiwiAgent: Set API Key for Profile"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "kiwiAgent.newSession",
+          "when": "view == kiwiAgent.sessions",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "kiwiAgent.removeSession",
+          "when": "view == kiwiAgent.sessions",
+          "group": "inline"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "kiwiAgent.removeSession",
+          "when": "false"
+        },
+        {
+          "command": "kiwiAgent.openSession",
+          "when": "false"
+        }
+      ]
+    },
     "configuration": {
       "title": "KiwiAgent",
       "properties": {
+        "kiwiAgent.activeProfile": {
+          "type": "string",
+          "default": "Claude",
+          "description": "Name of the profile in kiwiAgent.profiles used for new sessions."
+        },
+        "kiwiAgent.planProfile": {
+          "type": "string",
+          "default": "",
+          "description": "Profile used for plan sessions. Empty: same as activeProfile."
+        },
         "kiwiAgent.nodePath": {
           "type": "string",
           "default": "",
