@@ -6,6 +6,8 @@ export type Scope = {
   readable: string[]
   /** Globs, workspace-relative, of what Write and Edit may touch. */
   writable: string[]
+  /** Globs carved out of `readable`; a match is denied even when readable allows it. */
+  ignored?: string[]
 }
 
 /**
@@ -45,6 +47,8 @@ export class ScopeGuard implements SessionHooks {
     const absolute = isAbsolute(raw) ? raw : resolve(this.cwd, raw)
     const rel = relative(this.cwd, absolute).split('\\').join('/')
     if (rel.startsWith('..')) return { deny: `Cannot ${verb} outside the workspace: ${raw}` }
+    const ignored = (this.scope.ignored ?? []).find((g) => matchesGlob(rel, g) || (directory && matchesGlob(`${rel}/x`, g)))
+    if (ignored) return { deny: `Cannot ${verb} ${raw}: excluded from this phase by the ignore setting (${ignored}).` }
     // A search directory must itself lie inside the allowed tree: searching
     // from the workspace root would list names of files the phase must not see.
     const allowed = globs.some((g) => matchesGlob(rel, g) || (directory && matchesGlob(`${rel}/x`, g)))

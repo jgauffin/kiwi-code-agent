@@ -1,0 +1,6 @@
+* No diff view of edits. Tool calls show the JSON input; review changes in the editor or git. Claude Code's inline diff is not there.
+* AskUserQuestion is not wired. If the model calls it, you get a raw permission card and the answer never reaches it. Models fall back to asking in text, which works; a proper card is a small follow-up.
+* No @-file references, no image paste, no slash commands from the input box. Type paths in plain text.
+* Per-turn cost only, no session total.
+* Models stop at Opus 4.7 / Sonnet 4.6 (what 2.1.112 knows), no Opus 5 aliases.
+* The new tabs / new-session / approval UI has not been seen rendered by either of us yet. One F5 before relying on it.

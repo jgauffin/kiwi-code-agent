@@ -3,6 +3,7 @@ import { onMessage, post } from './vscode-api'
 import { ChatComposer } from './chat-composer'
 import { ChatTranscript } from './chat-transcript'
 import { NewSessionView } from './new-session-view'
+import { PlanBar } from './plan-bar'
 import { SessionTabs } from './session-tabs'
 import {
   InterruptRequestedEvent,
@@ -12,6 +13,8 @@ import {
   PromptSubmittedEvent,
   SessionClosedEvent,
   SessionSelectedEvent,
+  SpecApprovedEvent,
+  SpecOpenRequestedEvent,
   VerifyToggledEvent,
 } from './events'
 
@@ -22,6 +25,7 @@ import {
  */
 export class ChatApp extends HTMLElement {
   private readonly tabs = new SessionTabs()
+  private readonly planBar = new PlanBar()
   private readonly newSession = new NewSessionView()
   private readonly transcript = new ChatTranscript()
   private readonly composer = new ChatComposer()
@@ -31,10 +35,15 @@ export class ChatApp extends HTMLElement {
   connectedCallback(): void {
     if (this.childElementCount > 0) return
     this.tabs.className = 'tabs'
+    this.planBar.className = 'plan-bar'
+    this.planBar.hidden = true
     this.newSession.className = 'new-session'
     this.transcript.className = 'transcript'
     this.composer.className = 'composer'
-    this.append(this.tabs, this.newSession, this.transcript, this.composer)
+    this.append(this.tabs, this.planBar, this.newSession, this.transcript, this.composer)
+
+    this.addEventListener(SpecApprovedEvent.type, () => post({ type: 'approve_spec' }))
+    this.addEventListener(SpecOpenRequestedEvent.type, () => post({ type: 'open_spec' }))
 
     this.addEventListener(PromptSubmittedEvent.type, (e) => post({ type: 'send', text: e.text }))
     this.addEventListener(InterruptRequestedEvent.type, () => post({ type: 'interrupt' }))
@@ -69,6 +78,7 @@ export class ChatApp extends HTMLElement {
         if (!active && !this.creating) this.showCreating(true)
         this.tabs.update(message.tabs, this.creating)
         this.composer.setVerify(message.verify)
+        this.planBar.update(this.creating ? undefined : message.plan)
         break
       }
       case 'transcript':
@@ -92,7 +102,10 @@ export class ChatApp extends HTMLElement {
     this.newSession.hidden = !creating
     this.transcript.hidden = creating
     this.composer.hidden = creating
-    if (creating) this.newSession.reset()
+    if (creating) {
+      this.planBar.hidden = true
+      this.newSession.reset()
+    }
   }
 }
 

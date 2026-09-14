@@ -12,12 +12,21 @@ export type SessionTab = {
   active: boolean
 }
 
+/** The active plan session's spec, for the approval bar. */
+export type PlanState = {
+  /** Workspace-relative path of the spec file. */
+  specPath: string
+  status: 'missing' | 'draft' | 'approved'
+}
+
 export type ToWebview =
   | {
       type: 'state'
       tabs: SessionTab[]
       /** Verify-on-stop for the active session; absent when no verification rules are configured or no session is active. */
       verify?: boolean
+      /** Present when the active session is a plan session. */
+      plan?: PlanState
     }
   /** Full history of the active session, sent on switch. */
   | { type: 'transcript'; sessionId: string; events: SessionEvent[] }
@@ -36,3 +45,5 @@ export type FromWebview =
   | { type: 'close_session'; sessionId: string }
   /** `prompt`, when given, is sent as the first message. */
   | { type: 'new_session'; mode: SessionMode; feature?: string; prompt?: string }
+  | { type: 'approve_spec' }
+  | { type: 'open_spec' }

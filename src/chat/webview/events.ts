@@ -44,6 +44,20 @@ export class NewSessionViewRequestedEvent extends Event {
   }
 }
 
+export class SpecApprovedEvent extends Event {
+  static readonly type = 'spec-approved'
+  constructor() {
+    super(SpecApprovedEvent.type, { bubbles: true })
+  }
+}
+
+export class SpecOpenRequestedEvent extends Event {
+  static readonly type = 'spec-open-requested'
+  constructor() {
+    super(SpecOpenRequestedEvent.type, { bubbles: true })
+  }
+}
+
 export class SessionClosedEvent extends Event {
   static readonly type = 'session-closed'
   constructor(public readonly sessionId: string) {
@@ -81,6 +95,8 @@ declare global {
     [NewSessionViewRequestedEvent.type]: NewSessionViewRequestedEvent
     [SessionSelectedEvent.type]: SessionSelectedEvent
     [SessionClosedEvent.type]: SessionClosedEvent
+    [SpecApprovedEvent.type]: SpecApprovedEvent
+    [SpecOpenRequestedEvent.type]: SpecOpenRequestedEvent
     [SessionRemovedEvent.type]: SessionRemovedEvent
     [VerifyToggledEvent.type]: VerifyToggledEvent
   }

@@ -23,6 +23,7 @@ import { ScopeGuard } from './agent/phases/scope-guard'
 import { BLIND_PLAN_TOOLS, blindPlanPrompt, blindPlanScope } from './agent/phases/blind-plan'
 import { TurnVerifier, type VerifyRule } from './agent/verify/turn-verifier'
 import { ChatViewProvider, type VerifyControl } from './chat/chat-view-provider'
+import { watchOwnBundle } from './dev-reload'
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('KiwiAgent')
@@ -60,8 +61,9 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       case 'plan': {
         if (!record.feature) throw new Error('A plan session needs a feature name')
+        const ignored = vscode.workspace.getConfiguration('kiwiAgent').get<string[]>('planIgnore', [])
         return {
-          hooks: new ScopeGuard(workspaceRoot, blindPlanScope(record.feature)),
+          hooks: new ScopeGuard(workspaceRoot, blindPlanScope(record.feature, ignored)),
           systemPrompt: blindPlanPrompt(record.feature, workspaceRoot),
           toolNames: BLIND_PLAN_TOOLS,
         }
@@ -114,7 +116,7 @@ export function activate(context: vscode.ExtensionContext): void {
     (id) => RunLog.forSession(workspaceRoot, id),
     (id, event) => chat.onSessionEvent(id, event),
   )
-  chat = new ChatViewProvider(context.extensionUri, sessions, profileFor, verifyControl)
+  chat = new ChatViewProvider(context.extensionUri, sessions, profileFor, verifyControl, workspaceRoot, context.workspaceState)
   const tree = new SessionsTree(
     sessions,
     () => chat.activeId,
@@ -131,6 +133,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('kiwiAgent.removeSession', (record: SessionRecord) => chat.remove(record.id)),
     vscode.commands.registerCommand('kiwiAgent.openChat', () => chat.openInEditor()),
     vscode.commands.registerCommand('kiwiAgent.setApiKey', () => setApiKey(context)),
+    watchOwnBundle(context),
     { dispose: () => void sessions.disposeAll() },
   )
 }

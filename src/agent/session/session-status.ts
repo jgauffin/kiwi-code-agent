@@ -22,11 +22,13 @@ export function nextStatus(current: SessionStatus, mode: SessionMode, event: Ses
     case 'verification_started':
       return 'verifying'
     case 'turn_done':
-      return event.isError ? 'error' : 'idle'
+      // A planner that stops has either a spec to approve or questions to answer.
+      if (event.isError) return 'error'
+      return mode === 'plan' ? 'needs_human' : 'idle'
     case 'error':
       return event.fatal ? 'error' : current
     case 'ended':
-      return current === 'error' ? 'error' : 'idle'
+      return current === 'error' || current === 'needs_human' ? current : 'idle'
     default:
       return current
   }

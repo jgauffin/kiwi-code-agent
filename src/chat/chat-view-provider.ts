@@ -3,7 +3,10 @@ import type { SessionManager, SessionMode, SessionRecord } from '../agent/sessio
 import type { ModelProfile } from '../agent/session/model-profile'
 import type { SessionEvent } from '../agent/session/code-session'
 import { nextStatus, type SessionStatus } from '../agent/session/session-status'
-import type { FromWebview, SessionTab, ToWebview } from './protocol'
+import { readSpecState, setSpecStatus } from '../agent/phases/spec-file'
+import { specPath } from '../agent/phases/blind-plan'
+import { relative } from 'node:path'
+import type { FromWebview, PlanState, SessionTab, ToWebview } from './protocol'
 
 /** Per-session verify-on-stop switch; `available` is false when no rules are configured. */
 export interface VerifyControl {
@@ -30,10 +33,21 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     private readonly sessions: SessionManager,
     private readonly profileFor: (mode: SessionMode) => ModelProfile,
     private readonly verify: VerifyControl,
-  ) {}
+    private readonly workspaceRoot: string,
+    private readonly memento: vscode.Memento,
+  ) {
+    // The open session survives a window reload; its engine resumes on the next prompt.
+    const remembered = memento.get<string>('activeSessionId')
+    if (remembered && sessions.get(remembered)) this.activeSessionId = remembered
+  }
 
   get activeId(): string | undefined {
     return this.activeSessionId
+  }
+
+  private setActive(id: string | undefined): void {
+    this.activeSessionId = id
+    void this.memento.update('activeSessionId', id)
   }
 
   statusOf(sessionId: string): SessionStatus {
@@ -56,8 +70,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   async newSession(mode: SessionMode, feature?: string, prompt?: string): Promise<void> {
     if (mode === 'plan' && !feature) throw new Error('A plan session needs a feature name')
     const record = await this.sessions.create(this.profileFor(mode), mode, feature)
-    this.activeSessionId = record.id
-    this.sendState()
+    this.setActive(record.id)
+    await this.sendState()
     this.broadcast({ type: 'transcript', sessionId: record.id, events: [] })
     this.changed.fire()
     if (prompt) await this.sessions.send(record.id, prompt)
@@ -69,24 +83,24 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   async open(sessionId: string): Promise<void> {
     if (!this.sessions.get(sessionId)) return
-    this.activeSessionId = sessionId
-    this.sendState()
+    this.setActive(sessionId)
+    await this.sendState()
     await this.sendTranscript(sessionId)
     this.changed.fire()
   }
 
   async close(sessionId: string): Promise<void> {
     await this.sessions.close(sessionId)
-    if (this.activeSessionId === sessionId) this.activeSessionId = undefined
-    this.sendState()
+    if (this.activeSessionId === sessionId) this.setActive(undefined)
+    void this.sendState()
     this.changed.fire()
   }
 
   async remove(sessionId: string): Promise<void> {
     await this.sessions.remove(sessionId)
     this.statuses.delete(sessionId)
-    if (this.activeSessionId === sessionId) this.activeSessionId = undefined
-    this.sendState()
+    if (this.activeSessionId === sessionId) this.setActive(undefined)
+    void this.sendState()
     this.changed.fire()
   }
 
@@ -98,15 +112,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       const after = nextStatus(before, record.mode, event)
       if (after !== before) {
         this.statuses.set(sessionId, after)
-        this.sendState()
+        void this.sendState()
         this.changed.fire()
       }
     }
     if (sessionId === this.activeSessionId) this.broadcast({ type: 'event', sessionId, event })
     if (event.type === 'session_started' || event.type === 'ended') {
-      this.sendState()
+      void this.sendState()
       this.changed.fire()
     }
+    // The planner just wrote or rewrote the spec; the approval bar must follow.
+    if (event.type === 'tool_result' && record?.mode === 'plan' && sessionId === this.activeSessionId) void this.sendState()
   }
 
   private attach(webview: vscode.Webview): void {
@@ -124,7 +140,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private async handle(message: FromWebview): Promise<void> {
     switch (message.type) {
       case 'ready':
-        this.sendState()
+        await this.sendState()
         if (this.activeSessionId) await this.sendTranscript(this.activeSessionId)
         return
       case 'send':
@@ -139,7 +155,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         return
       case 'set_verify':
         if (this.activeSessionId) this.verify.setEnabled(this.activeSessionId, message.enabled)
-        this.sendState()
+        void this.sendState()
         return
       case 'switch_session':
         await this.open(message.sessionId)
@@ -150,6 +166,33 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       case 'new_session':
         await this.newSession(message.mode, message.feature, message.prompt)
         return
+      case 'approve_spec': {
+        const path = this.activeSpecPath()
+        if (!path) return
+        await setSpecStatus(path, 'approved')
+        await this.sendState()
+        return
+      }
+      case 'open_spec': {
+        const path = this.activeSpecPath()
+        if (path) await vscode.window.showTextDocument(vscode.Uri.file(path), { preview: false })
+        return
+      }
+    }
+  }
+
+  private activeSpecPath(): string | undefined {
+    const record = this.activeSessionId ? this.sessions.get(this.activeSessionId) : undefined
+    return record?.mode === 'plan' && record.feature ? specPath(this.workspaceRoot, record.feature) : undefined
+  }
+
+  private async planState(): Promise<PlanState | undefined> {
+    const path = this.activeSpecPath()
+    if (!path) return undefined
+    const state = await readSpecState(path)
+    return {
+      specPath: relative(this.workspaceRoot, path).split('\\').join('/'),
+      status: state.exists ? state.status : 'missing',
     }
   }
 
@@ -173,12 +216,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private sendState(): void {
+  private async sendState(): Promise<void> {
     const active = this.activeSessionId
+    const plan = await this.planState().catch((error: unknown) => {
+      void vscode.window.showErrorMessage(`KiwiAgent: cannot read spec: ${error instanceof Error ? error.message : String(error)}`)
+      return undefined
+    })
     this.broadcast({
       type: 'state',
       tabs: this.tabs(),
       ...(active && this.verify.available ? { verify: this.verify.isEnabled(active) } : {}),
+      ...(plan ? { plan } : {}),
     })
   }
 

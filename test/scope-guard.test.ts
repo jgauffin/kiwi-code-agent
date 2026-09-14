@@ -4,21 +4,28 @@ import { BLIND_PLAN_TOOLS, blindPlanPrompt, blindPlanScope, featureSlug, specPat
 import { composeHooks } from '../src/agent/session/hooks'
 
 const cwd = process.platform === 'win32' ? 'D:\\work\\repo' : '/work/repo'
-const guard = new ScopeGuard(cwd, blindPlanScope('Order cancellation'))
+const guard = new ScopeGuard(cwd, blindPlanScope('Order cancellation', ['docs/api/**', 'docs/**/*.generated.md']))
 const use = (toolName: string, input: unknown) => guard.preToolUse({ toolName, input, toolUseId: 't' })
 
 describe('ScopeGuard for blind planning', () => {
-  it('intent_docs_are_readable_source_is_not', async () => {
+  it('docs_are_readable_source_is_not', async () => {
     expect(await use('Read', { file_path: 'docs/intent/orders.md' })).toBeUndefined()
+    expect(await use('Read', { file_path: 'docs/features/refunds.md' })).toBeUndefined()
     expect(await use('Read', { file_path: `${cwd}/docs/intent/sub/deep.md` })).toBeUndefined()
     const denied = await use('Read', { file_path: 'src/Orders/OrderService.cs' })
-    expect(denied).toMatchObject({ deny: expect.stringContaining('limited to docs/intent/**') })
+    expect(denied).toMatchObject({ deny: expect.stringContaining('limited to docs/**') })
   })
 
-  it('searching_is_allowed_only_inside_the_intent_tree_so_no_file_names_leak', async () => {
-    expect(await use('Glob', { pattern: '**/*.md', path: 'docs/intent' })).toBeUndefined()
+  it('ignored_globs_from_settings_are_denied_even_inside_docs', async () => {
+    expect(await use('Read', { file_path: 'docs/api/orders.md' })).toMatchObject({ deny: expect.stringContaining('docs/api/**') })
+    expect(await use('Read', { file_path: 'docs/intent/schema.generated.md' })).toMatchObject({ deny: expect.any(String) })
+    expect(await use('Glob', { pattern: '*', path: 'docs/api' })).toMatchObject({ deny: expect.any(String) })
+  })
+
+  it('searching_is_allowed_only_inside_docs_so_no_file_names_leak', async () => {
+    expect(await use('Glob', { pattern: '**/*.md', path: 'docs' })).toBeUndefined()
     expect(await use('Glob', { pattern: '**/*.md', path: 'docs/intent/orders' })).toBeUndefined()
-    expect(await use('Glob', { pattern: 'docs/intent/**/*.md' })).toMatchObject({ deny: expect.any(String) })
+    expect(await use('Glob', { pattern: 'docs/**/*.md' })).toMatchObject({ deny: expect.any(String) })
     expect(await use('Grep', { pattern: 'cancel', path: 'src' })).toMatchObject({ deny: expect.any(String) })
   })
 
@@ -35,6 +42,12 @@ describe('ScopeGuard for blind planning', () => {
 
   it('the_spec_itself_can_be_read_back_for_revision', async () => {
     expect(await use('Read', { file_path: 'plan/order-cancellation.spec.md' })).toBeUndefined()
+  })
+
+  it('the_root_readme_counts_as_intent_whatever_its_casing', async () => {
+    expect(await use('Read', { file_path: 'README.md' })).toBeUndefined()
+    expect(await use('Read', { file_path: 'ReadMe.md' })).toBeUndefined()
+    expect(await use('Read', { file_path: 'src/README.md' })).toMatchObject({ deny: expect.any(String) })
   })
 })
 

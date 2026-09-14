@@ -12,7 +12,7 @@ The sidebar has a Sessions view (every session, with status) and the Chat view: 
 Session modes:
 
 - **Chat**: work in the code with the full tool set.
-- **Plan**: blind planning of one feature. The session can read `docs/intent/**` only, enforced at the tool call, and writes `plan/<feature>.spec.md` (behaviour, invariants, edge cases, acceptance criteria, tasks, open questions, stable item ids, `status: draft`). The first prompt is the feature or user story description.
+- **Plan**: blind planning of one feature. The session can read `docs/intent/**` only, enforced at the tool call, and writes `plan/<feature>.spec.md` (behaviour, invariants, edge cases, acceptance criteria, tasks, open questions, stable item ids, `status: draft`). The first prompt is the feature or user story description. A bar above the transcript shows the spec's status with Open and Approve; approval sets `status: approved` in the front-matter, which later phases require.
 
 ## Develop
 
@@ -23,6 +23,19 @@ npm run build     # dist/: extension, webview, cli.mjs, ripgrep
 ```
 
 F5 launches the Extension Development Host. Open the "KiwiAgent" view in the activity bar.
+
+## Develop with it
+
+Load the extension from this repo in your normal VS Code instead of a packaged copy:
+
+```
+code --uninstall-extension coderr.kiwi-agent   # if a .vsix was installed
+npm run link-dev                               # links ~/.vscode/extensions/coderr.kiwi-agent-dev -> repo
+```
+
+Reload the window once. From then on, after `npm run build` (or the `npm: watch` task) the extension notices its own bundle changed and offers "Reload Window". Sessions and the open session survive the reload; engines resume on the next prompt. `npm run unlink-dev` removes the link.
+
+Verify-on-stop for this repo (`.vscode/settings.json`) runs typecheck, tests and build after any `.ts` edit.
 
 ## Install elsewhere
 

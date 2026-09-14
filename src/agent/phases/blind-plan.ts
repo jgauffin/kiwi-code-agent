@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import type { Scope } from './scope-guard'
 
-export const INTENT_DIR = 'docs/intent'
+export const DOCS_DIR = 'docs'
 export const PLAN_DIR = 'plan'
 
 export function featureSlug(feature: string): string {
@@ -18,11 +18,16 @@ export function specPath(cwd: string, feature: string): string {
   return join(cwd, PLAN_DIR, `${featureSlug(feature)}.spec.md`)
 }
 
-export function blindPlanScope(feature: string): Scope {
+/** The product's front door counts as intent: what it says it is, not how it is built. */
+export const README_GLOB = '{README,ReadMe,Readme,readme}.md'
+
+/** `ignored` comes from the `kiwiAgent.planIgnore` setting: docs the planner must not see. */
+export function blindPlanScope(feature: string, ignored: string[] = []): Scope {
   const slug = featureSlug(feature)
   return {
-    readable: [`${INTENT_DIR}/**`, `${PLAN_DIR}/${slug}.spec.md`],
+    readable: [`${DOCS_DIR}/**`, README_GLOB, `${PLAN_DIR}/${slug}.spec.md`],
     writable: [`${PLAN_DIR}/${slug}.spec.md`],
+    ignored,
   }
 }
 
@@ -39,7 +44,7 @@ export function blindPlanPrompt(feature: string, cwd: string): string {
 
 Why blind: a planner that reads the code inherits the code's mistakes as constraints, and the feature gets shaped to fit the defects. You derive what the feature should do from intent alone, so that a later phase can compare intent with the code and name every disagreement instead of silently absorbing it.
 
-What you may read: \`${INTENT_DIR}/**\` (product intent: goals, ubiquitous language, rules, constraints) and your own output file. Nothing else exists for you; do not try. Use Glob with path \`${INTENT_DIR}\` to see what is there, then Read what is relevant.
+What you may read: \`${DOCS_DIR}/**\` (product intent: goals, ubiquitous language, rules, constraints, feature descriptions), the README in the workspace root (what the product is, in its own words) and your own output file. Nothing else exists for you; do not try. Use Glob with path \`${DOCS_DIR}\` to see what is there, then Read what is relevant.
 
 Your input: the user's first message describes the feature or user story. Later messages answer your questions or ask for changes.
 
@@ -81,6 +86,6 @@ Rules:
 - Item ids (B1, I1, E1, A1, T1, Q1) are stable: never renumber on revision, only add or mark an item removed.
 - No file paths, class names, tables or code. That is the implementation's business and you cannot know it.
 - Tasks become work items: each must be understandable on its own and small enough to finish in one sitting.
-- If ${INTENT_DIR} has nothing on this feature, or the description is too thin to derive behaviour, do not invent: write the questions under Open questions, write the file, and stop.
+- If ${DOCS_DIR} has nothing on this feature, or the description is too thin to derive behaviour, do not invent: write the questions under Open questions, write the file, and stop.
 - When you have written the file, summarise what it contains in a few sentences and stop.`
 }

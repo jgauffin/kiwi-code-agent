@@ -102,6 +102,14 @@
           "default": "",
           "description": "Profile used for plan sessions. Empty: same as activeProfile."
         },
+        "kiwiAgent.planIgnore": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Workspace-relative globs a Plan session must not read, carved out of docs/** and the root README. Example: docs/api/**."
+        },
         "kiwiAgent.nodePath": {
           "type": "string",
           "default": "",
@@ -150,7 +158,12 @@
             {
               "name": "Claude",
               "engine": "claude-sdk",
-              "model": "opus"
+              "model": "claude-opus-5"
+            },
+            {
+              "name": "Claude Sonnet",
+              "engine": "claude-sdk",
+              "model": "claude-sonnet-5"
             },
             {
               "name": "GLM-5.3-Flash (Berget)",
@@ -219,7 +232,9 @@
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "package": "npm run typecheck && npm run build && vsce package --no-dependencies"
+    "package": "npm run typecheck && npm run build && vsce package --no-dependencies",
+    "link-dev": "node scripts/link-dev.mjs",
+    "unlink-dev": "node scripts/link-dev.mjs --unlink"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.2.112",

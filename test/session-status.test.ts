@@ -46,7 +46,12 @@ describe('session status', () => {
     expect(nextStatus('implementing', 'chat', { type: 'error', message: 'minor', fatal: false })).toBe('implementing')
   })
 
-  it('a_finished_turn_is_idle_waiting_for_the_user', () => {
-    expect(run('plan', [{ type: 'user_message', text: 'x' }, turnDone(), { type: 'ended' }])).toEqual(['planning', 'idle', 'idle'])
+  it('a_finished_chat_turn_is_idle_but_a_finished_plan_turn_needs_the_human', () => {
+    expect(run('chat', [{ type: 'user_message', text: 'x' }, turnDone(), { type: 'ended' }])).toEqual(['implementing', 'idle', 'idle'])
+    expect(run('plan', [{ type: 'user_message', text: 'x' }, turnDone(), { type: 'ended' }])).toEqual([
+      'planning',
+      'needs_human',
+      'needs_human',
+    ])
   })
 })

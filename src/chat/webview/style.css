@@ -14,9 +14,46 @@ body {
 }
 
 chat-app {
-  display: grid;
-  grid-template-rows: auto 1fr auto;
+  display: flex;
+  flex-direction: column;
   height: 100vh;
+
+  & > .transcript,
+  & > .new-session {
+    flex: 1;
+    min-height: 0;
+  }
+
+  & > .plan-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.3rem 0.6rem;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    font-size: 0.9em;
+
+    & .spec {
+      font-family: var(--vscode-editor-font-family);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    & .status {
+      opacity: 0.75;
+      margin-right: auto;
+
+      &.approved {
+        color: var(--vscode-testing-iconPassed);
+        opacity: 1;
+      }
+    }
+
+    & .approve {
+      background: var(--vscode-testing-iconPassed);
+      color: var(--vscode-button-foreground);
+    }
+  }
 
   & > .tabs {
     border-bottom: 1px solid var(--vscode-panel-border);

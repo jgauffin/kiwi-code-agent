@@ -1,0 +1,8 @@
+{
+  "kiwiAgent.verify": [
+    {
+      "match": "{src,test}/**/*.ts",
+      "command": "npm run typecheck && npm test && npm run build"
+    }
+  ]
+}
