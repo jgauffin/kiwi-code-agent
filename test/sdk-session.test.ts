@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk'
 import { SdkSession } from '../src/agent/sdk-session/sdk-session'
+import { TOOL_SERVER_NAME } from '../src/agent/sdk-session/tool-server'
+import { jsonQueryTool } from '../src/agent/openai-session/tools/json'
 import type { SessionEvent } from '../src/agent/session/code-session'
 import { fakeQuery, initMessage, resultMessage } from './fake-query'
 
@@ -153,6 +155,47 @@ describe('SdkSession', () => {
     })
   })
 
+  it('own_tools_are_served_in_process_and_reach_hooks_and_prompts_under_their_bare_name', async () => {
+    const fake = fakeQuery()
+    const seen: string[] = []
+    const session = new SdkSession({
+      id: 'sess-1',
+      profile,
+      cwd: '/w',
+      cliPath: '/ext/dist/cli.js',
+      runtime: { command: 'node', args: [], env: {} },
+      query: fake.query,
+      ownTools: [jsonQueryTool],
+      hooks: {
+        async preToolUse(tool) {
+          seen.push(tool.toolName)
+          return undefined
+        },
+      },
+    })
+    expect(Object.keys(fake.options!.mcpServers!)).toEqual([TOOL_SERVER_NAME])
+    expect(fake.options!.mcpServers![TOOL_SERVER_NAME]).toMatchObject({ type: 'sdk', name: TOOL_SERVER_NAME })
+
+    const base = { session_id: 's', transcript_path: '', cwd: '/w' }
+    await fake.options!.hooks!.PreToolUse![0]!.hooks[0]!(
+      { ...base, hook_event_name: 'PreToolUse', tool_name: `mcp__${TOOL_SERVER_NAME}__JsonQuery`, tool_input: {}, tool_use_id: 't1' },
+      't1',
+      { signal: new AbortController().signal },
+    )
+    expect(seen).toEqual(['JsonQuery'])
+
+    void fake.options!.canUseTool!(`mcp__${TOOL_SERVER_NAME}__JsonQuery`, { file_path: 'a.json' }, { signal: new AbortController().signal, toolUseID: 'tu_1' })
+    const [request] = await take(session, 1)
+    expect(request).toMatchObject({ type: 'permission_request', toolName: 'JsonQuery' })
+    await session.dispose()
+  })
+
+  it('without_own_tools_no_mcp_server_is_registered', () => {
+    const fake = fakeQuery()
+    createSession(fake)
+    expect(fake.options!.mcpServers).toBeUndefined()
+  })
+
   it('hooks_are_mapped_onto_the_sdk_hook_protocol', async () => {
     const fake = fakeQuery()
     const seen: string[] = []
@@ -172,10 +215,6 @@ describe('SdkSession', () => {
         async postToolUse(tool) {
           seen.push(`post:${tool.toolName}:${tool.output}`)
           return { additionalContext: 'noted' }
-        },
-        async stop() {
-          seen.push('stop')
-          return { verifications: [{ command: 'build', cwd: '/w', ok: false, output: 'CS1002' }], block: 'fix it' }
         },
       },
     })
@@ -205,16 +244,8 @@ describe('SdkSession', () => {
       ctx,
     )
     expect(post).toEqual({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: 'noted' } })
-
-    const stop = await hooks.Stop![0]!.hooks[0]!({ ...base, hook_event_name: 'Stop', stop_hook_active: false }, undefined, ctx)
-    expect(stop).toEqual({ decision: 'block', reason: 'fix it' })
-    expect(seen).toEqual(['pre:Bash', 'pre:Write', 'post:Edit:ok', 'stop'])
-
-    const events = await take(session, 2)
-    expect(events).toEqual([
-      { type: 'status', status: 'verifying' },
-      { type: 'verification', command: 'build', cwd: '/w', ok: false, output: 'CS1002' },
-    ])
+    expect(hooks.Stop).toBeUndefined()
+    expect(seen).toEqual(['pre:Bash', 'pre:Write', 'post:Edit:ok'])
     await session.dispose()
   })
 })

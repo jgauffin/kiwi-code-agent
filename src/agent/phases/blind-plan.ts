@@ -35,7 +35,7 @@ export function blindPlanScope(feature: string, ignored: string[] = []): Scope {
 }
 
 /** Tools a blind planner gets, by name, on either engine. Edit is for answering a comment in place. */
-export const BLIND_PLAN_TOOLS = ['Read', 'Glob', 'Write', 'Edit']
+export const BLIND_PLAN_TOOLS = ['Read', 'Glob', 'JsonSchema', 'JsonQuery', 'Write', 'Edit']
 
 /**
  * Phase 1 system prompt. Short on purpose: it states the job and the output
@@ -74,19 +74,17 @@ One paragraph: who, what, why. Domain language only.
 ## Edge cases
 - E1: situation → expected outcome
 
-## Tasks
-- T1: a unit of work small enough to finish in one sitting, naming the items it delivers (B1, E2)
-
 ## Open questions
 - Q1: something intent does not settle and only the user can
 \`\`\`
 
-Only Goal and Behaviour are always there. The other sections exist when the feature has something to put in them: a small feature is a goal, a few behaviours and one task.
+Only Goal and Behaviour are always there. The other sections exist when the feature has something to put in them: a small feature is a goal and a few behaviours.
 
 Rules:
 - To the point, not complete. An item earns its place only if leaving it out would change what gets built or how it is tested. Do not restate a behaviour as an edge case, do not spec the obvious, do not cover every situation that could be imagined. A feature described in two sentences is usually a page, not five.
+- No tasks: what to do and where is settled when the spec is mapped against the code, in a file of its own. A task written blind would only restate the behaviours.
 - Settle what you can. Where intent is silent but a sensible default exists, take it and say so in the direction; a question is for what only the user can answer.
-- Item ids (B1, E1, T1, Q1) are stable: never renumber on revision, only add or mark an item removed.
+- Item ids (B1, E1, Q1) are stable: never renumber on revision, only add or mark an item removed.
 - An item that comes from a section of \`${DOCS_DIR}/**\` cites it in parentheses after the id, as \`path#Heading\`. An item without a citation is your own default. The citation is what a later check against the code reads instead of the docs, so it must be exact.
 - No code paths, class names or code: that is the implementation's business and you cannot know it. No tables; the Findings table below is not yours.
 - A \`## Findings\` section may appear in the file, written by a separate check of the spec against the code: a table with the columns Finding and Proposed solution, one row per finding (F1, F2, ...). Each is something the user rules on. When asked, fill in the Proposed solution cell of each open finding with Edit: how the spec should change, or why it should stand as written, with the reason, in one or two sentences. A proposal is not a ruling: change no item until the user has ruled; then revise the items the finding names per the ruling and append \` [resolved]\` to its Finding cell. Leave the Finding column otherwise alone.
@@ -104,6 +102,22 @@ Cancelling an order releases its reservation immediately.
 - The user reviews the draft by commenting on its items and striking the ones that should not be built; comments, strikes and your answers to them live in \`${PLAN_DIR}/${slug}.review.md\`. A submitted review is direction, not a question: revise the spec as it asks, mark every struck item removed without renumbering anything, never bring a struck item back on your own, and answer every comment in that file as addressed or disagreed with a reason.
 - If ${DOCS_DIR} has nothing on this feature, or the description is too thin to derive a direction, do not invent: ask, and stop.
 - After each write, summarise what changed in a few sentences and stop.`
+}
+
+/**
+ * The first message of a plan session picked up on a spec another session
+ * wrote: the files are the state, so the planner reads them and reports where
+ * the plan stands instead of starting the feature over.
+ */
+export function resumePlanPrompt(feature: string): string {
+  const slug = featureSlug(feature)
+  return [
+    `The spec for "${feature}" already exists at \`${PLAN_DIR}/${slug}.spec.md\`, written in an earlier session that is gone. Do not start over.`,
+    '',
+    `Read it from disk, and \`${PLAN_DIR}/${slug}.review.md\` and \`${PLAN_DIR}/${slug}.intent.md\` where they exist. Then, in chat, where the plan stands in a few sentences: its status, open questions, findings without a ruling, comments not yet answered. An approved spec is settled: change nothing in it unless the user asks.`,
+    '',
+    'Then stop; the user says what happens next.',
+  ].join('\n')
 }
 
 /** The message the planner gets when a check has written findings: propose, do not rule. */

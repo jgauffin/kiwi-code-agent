@@ -23,9 +23,10 @@ describe('ScopeGuard for reconciling', () => {
     expect(await use('Glob', { pattern: '**/*.cs' })).toBeUndefined()
   })
 
-  it('only_the_spec_is_writable_so_findings_cannot_leak_into_code_or_intent', async () => {
+  it('only_the_spec_and_the_tasks_are_writable_so_findings_cannot_leak_into_code_or_intent', async () => {
     expect(await use('Write', { file_path: 'plan/order-cancellation.spec.md' })).toEqual({ allow: true })
     expect(await use('Edit', { file_path: 'plan/order-cancellation.spec.md' })).toEqual({ allow: true })
+    expect(await use('Write', { file_path: 'plan/order-cancellation.tasks.md' })).toEqual({ allow: true })
     expect(await use('Edit', { file_path: 'src/Orders/OrderService.cs' })).toMatchObject({ deny: expect.any(String) })
     // A `naive` finding is also a claim about intent: the reconciler proposes the amendment, the human applies it.
     expect(await use('Write', { file_path: 'plan/order-cancellation.intent.md' })).toEqual({ allow: true })
@@ -52,7 +53,7 @@ describe('reconcile prompt', () => {
     expect(prompt).toContain('[resolved]')
     // Intent that the code proved wrong has to reach docs/, or the next blind plan repeats the assumption.
     expect(prompt).toContain('plan/order-cancellation.intent.md')
-    expect(RECONCILE_TOOLS).toEqual(['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Skill'])
+    expect(RECONCILE_TOOLS).toEqual(['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'Edit', 'Write', 'Skill'])
     expect(RECONCILE_KICKOFF.length).toBeGreaterThan(0)
   })
 
@@ -64,8 +65,18 @@ describe('reconcile prompt', () => {
 
   it('the_proposed_solution_column_belongs_to_the_planner_and_the_run_ends_silently', () => {
     expect(prompt).toContain('leave it empty on a new finding')
-    expect(prompt).toContain('When the section is written, stop.')
+    expect(prompt).toContain('When both files are written, stop.')
     expect(prompt).not.toContain('summarise')
+  })
+
+  it('writes_the_task_board_with_files_after_the_findings_and_leaves_the_implementers_markers_alone', () => {
+    expect(prompt).toContain('plan/order-cancellation.tasks.md')
+    expect(prompt).toContain('- files:')
+    expect(prompt).toContain('(new)')
+    expect(prompt).toContain('[in progress]')
+    expect(prompt).toContain('[tested]')
+    // A task under an unruled finding would pre-empt the ruling.
+    expect(prompt).toContain('No task for what a finding puts in question')
   })
 })
 

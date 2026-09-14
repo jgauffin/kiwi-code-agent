@@ -2,7 +2,7 @@ import type { SessionEvent } from './code-session'
 import { isPlanning, type SessionMode } from './session-manager'
 
 /** What a session is doing right now, as far as the UI needs to know. */
-export type SessionStatus = 'idle' | 'planning' | 'implementing' | 'verifying' | 'needs_human' | 'error'
+export type SessionStatus = 'idle' | 'planning' | 'implementing' | 'needs_human' | 'error'
 
 const working = (mode: SessionMode): SessionStatus => (isPlanning(mode) ? 'planning' : 'implementing')
 
@@ -12,15 +12,12 @@ export function nextStatus(current: SessionStatus, mode: SessionMode, event: Ses
     case 'user_message':
       return working(mode)
     case 'status':
-      if (event.status === 'verifying') return 'verifying'
-      if (event.status === 'idle') return current === 'verifying' ? working(mode) : current
+      if (event.status === 'idle') return current
       return current === 'needs_human' ? current : working(mode)
     case 'permission_request':
       return 'needs_human'
     case 'permission_resolved':
       return working(mode)
-    case 'verification_started':
-      return 'verifying'
     case 'turn_done':
       // A phase session that stops has a spec to approve, findings to rule on, questions, or work done or blocked.
       if (event.isError) return 'error'

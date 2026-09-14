@@ -13,6 +13,9 @@ import type { ModelProfile } from '../session/model-profile'
 import { AsyncQueue } from '../session/async-queue'
 import { SdkEventMapper } from './sdk-event-mapper'
 import { spawnWithRuntime, type NodeRuntime } from './node-runtime'
+import { bareToolName, toolServer } from './tool-server'
+import { ReadTracker } from '../openai-session/tools/read-tracker'
+import type { Tool } from '../openai-session/tools/tool'
 
 type QueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>; options?: Options }) => Query
 
@@ -32,6 +35,8 @@ export type SdkSessionOptions = {
   systemPrompt?: string
   /** Restricts the built-in tools to these names. */
   tools?: string[]
+  /** Tools this extension owns, served to the engine in-process on top of the built-ins. */
+  ownTools?: Tool[]
   query: QueryFn
   onStderr?: (chunk: string) => void
   /** Receives one line per engine message, for diagnosing what the engine does and does not send. */
@@ -130,6 +135,11 @@ export class SdkSession implements CodeSession {
     if (this.options.hooks) options.hooks = this.sdkHooks(this.options.hooks)
     if (this.options.systemPrompt !== undefined) options.systemPrompt = this.options.systemPrompt
     if (this.options.tools) options.tools = this.options.tools
+    if (this.options.ownTools?.length) {
+      const ctx = { cwd: this.options.cwd, signal: this.abort.signal, files: new ReadTracker() }
+      const server = toolServer(this.options.ownTools, ctx)
+      options.mcpServers = { [server.name]: server }
+    }
     return options
   }
 
@@ -140,7 +150,7 @@ export class SdkSession implements CodeSession {
       const pre = hooks.preToolUse.bind(hooks)
       const callback: HookCallback = async (input): Promise<HookJSONOutput> => {
         if (input.hook_event_name !== 'PreToolUse') return {}
-        const outcome = await pre({ toolName: input.tool_name, input: input.tool_input, toolUseId: input.tool_use_id })
+        const outcome = await pre({ toolName: bareToolName(input.tool_name), input: input.tool_input, toolUseId: input.tool_use_id })
         if (outcome && 'deny' in outcome) {
           return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: outcome.deny } }
         }
@@ -161,7 +171,7 @@ export class SdkSession implements CodeSession {
         if (input.hook_event_name !== 'PostToolUse') return {}
         const output = typeof input.tool_response === 'string' ? input.tool_response : JSON.stringify(input.tool_response)
         const outcome = await post({
-          toolName: input.tool_name,
+          toolName: bareToolName(input.tool_name),
           input: input.tool_input,
           toolUseId: input.tool_use_id,
           output,
@@ -173,18 +183,6 @@ export class SdkSession implements CodeSession {
         return {}
       }
       registered.PostToolUse = [{ hooks: [callback] }]
-    }
-    if (hooks.stop) {
-      const stop = hooks.stop.bind(hooks)
-      const callback: HookCallback = async (input): Promise<HookJSONOutput> => {
-        if (input.hook_event_name !== 'Stop') return {}
-        this.output.push({ type: 'status', status: 'verifying' })
-        const outcome = await stop((started) => this.output.push({ type: 'verification_started', ...started }))
-        for (const v of outcome?.verifications ?? []) this.output.push({ type: 'verification', ...v })
-        return outcome?.block ? { decision: 'block', reason: outcome.block } : {}
-      }
-      // Builds can take a while; the SDK's default hook timeout would cut them off.
-      registered.Stop = [{ hooks: [callback], timeout: 900 }]
     }
     return registered
   }
@@ -203,7 +201,7 @@ export class SdkSession implements CodeSession {
       this.output.push({
         type: 'permission_request',
         requestId,
-        toolName,
+        toolName: bareToolName(toolName),
         input,
         ...(ctx.title ? { title: ctx.title } : {}),
         ...(ctx.description ? { description: ctx.description } : {}),

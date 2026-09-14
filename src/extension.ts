@@ -17,18 +17,26 @@ import { editTool } from './agent/openai-session/tools/edit'
 import { globTool } from './agent/openai-session/tools/glob'
 import { grepTool } from './agent/openai-session/tools/grep'
 import { bashTool } from './agent/openai-session/tools/bash'
+import { jsonQueryTool, jsonSchemaTool } from './agent/openai-session/tools/json'
 import { skillTool } from './agent/openai-session/tools/skill'
+import type { Tool } from './agent/openai-session/tools/tool'
 import { indexSkills } from './agent/skills/skill-index'
 import { runShell } from './agent/shell/run-shell'
 import { composeHooks, type SessionHooks } from './agent/session/hooks'
+import { FileEditRecorder } from './agent/edits/file-edit-recorder'
 import { PermissionPolicy, type PermissionRules } from './agent/permissions/permission-policy'
+import { WriteAllowance } from './agent/permissions/write-allowance'
 import { ScopeGuard } from './agent/phases/scope-guard'
 import { BLIND_PLAN_TOOLS, blindPlanPrompt, blindPlanScope } from './agent/phases/blind-plan'
 import { RECONCILE_TOOLS, reconcilePrompt, reconcileScope } from './agent/phases/reconcile'
 import { IMPLEMENT_TOOLS, implementPrompt } from './agent/phases/implement'
-import { TurnVerifier, type VerifyRule } from './agent/verify/turn-verifier'
-import { ChatViewProvider, type PermissionStore, type VerifyControl } from './chat/chat-view-provider'
+import type { VerifyRule } from './agent/phases/verification'
+import { CHAT_PANEL_TYPE, ChatViewProvider, type PermissionStore, type SessionSwitch, type Verifier } from './chat/chat-view-provider'
+import { openDraftPlanAction } from './chat/open-draft-plan'
 import { watchOwnBundle } from './dev-reload'
+
+/** Tools the extension provides to every engine, beside the engine's own file and shell tools. */
+const OWN_TOOLS: Tool[] = [jsonSchemaTool, jsonQueryTool]
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('KiwiAgent')
@@ -42,32 +50,38 @@ export function activate(context: vscode.ExtensionContext): void {
     save: (records) => Promise.resolve(context.workspaceState.update('sessions', records)),
   }
 
-  const verifiers = new Map<string, TurnVerifier>()
-  const verifyWanted = new Map<string, boolean>()
-  const verifyControl: VerifyControl = {
-    available: verifyRules().length > 0,
-    isEnabled: (id) => verifiers.get(id)?.enabled ?? verifyWanted.get(id) ?? false,
-    setEnabled: (id, enabled) => {
-      verifyWanted.set(id, enabled)
-      const v = verifiers.get(id)
-      if (v) v.enabled = enabled
+  /** The test run once a feature's board is all tested: the `kiwiAgent.verify` rules, read when the run starts. */
+  const verifier: Verifier = {
+    rules: () => vscode.workspace.getConfiguration('kiwiAgent').get<VerifyRule[]>('verify', []),
+    failureBudget: () => vscode.workspace.getConfiguration('kiwiAgent').get<number>('verifyFailureBudget', 3),
+    run: async (command, dir) => {
+      const result = await runShell(command, { cwd: dir, timeoutMs: 600_000 })
+      return { ok: result.ended === 'exit' && result.exitCode === 0, output: result.output }
     },
   }
 
-  /** Build/test verification on stop, switchable per session from the composer. */
-  const verifyHooks = (record: SessionRecord): { hooks?: SessionHooks } => {
-    const hooks = verifier(workspaceRoot)
-    if (!hooks) return {}
-    hooks.enabled = verifyWanted.get(record.id) ?? false
-    verifiers.set(record.id, hooks)
-    return { hooks }
+  const writesAllowed = new Map<string, boolean>()
+  const allowWritesControl: SessionSwitch = {
+    isEnabled: (id) => writesAllowed.get(id) ?? false,
+    setEnabled: (id, enabled) => void writesAllowed.set(id, enabled),
   }
+
+  /** The composer's per-session switch: writes without a prompt. */
+  const switchableHooks = (record: SessionRecord): { hooks: SessionHooks } => ({
+    hooks: new WriteAllowance(() => allowWritesControl.isEnabled(record.id)),
+  })
+
+  /** Per session, what captures the file it is about to edit and turns it into the diff the chat shows. */
+  const editRecorders = new Map<string, FileEditRecorder>()
 
   /** What a session's mode dictates, independent of engine: hooks, prompt, tool set. */
   const setupFor = (record: SessionRecord): { hooks?: SessionHooks; systemPrompt?: string; toolNames?: string[] } => {
     const setup = modeSetup(record)
+    // Last in line, so a call another hook denies is never captured: nothing changed.
+    const recorder = new FileEditRecorder({ cwd: workspaceRoot, runDir: RunLog.forSession(workspaceRoot, record.id).dir })
+    editRecorders.set(record.id, recorder)
     // The project's permission rules apply to every session; a mode's own hooks may still deny.
-    return { ...setup, hooks: setup.hooks ? composeHooks(permissionPolicy, setup.hooks) : permissionPolicy }
+    return { ...setup, hooks: composeHooks(permissionPolicy, ...(setup.hooks ? [setup.hooks] : []), recorder) }
   }
 
   const permissionPolicy = new PermissionPolicy(workspaceRoot, permissionRules)
@@ -75,11 +89,11 @@ export function activate(context: vscode.ExtensionContext): void {
   const modeSetup = (record: SessionRecord): { hooks?: SessionHooks; systemPrompt?: string; toolNames?: string[] } => {
     switch (record.mode) {
       case 'chat':
-        return verifyHooks(record)
+        return switchableHooks(record)
       case 'implement': {
         if (!record.feature) throw new Error('An implement session needs a feature name')
         return {
-          ...verifyHooks(record),
+          ...switchableHooks(record),
           systemPrompt: implementPrompt(record.feature, workspaceRoot),
           toolNames: IMPLEMENT_TOOLS,
         }
@@ -107,9 +121,11 @@ export function activate(context: vscode.ExtensionContext): void {
   const createEngine = async (record: SessionRecord): Promise<CodeSession> => {
     const { profile } = record
     const setup = setupFor(record)
+    const allowed = (tools: Tool[]) => (setup.toolNames ? tools.filter((t) => setup.toolNames!.includes(t.name)) : tools)
     switch (profile.engine) {
       case 'claude-sdk':
         return new SdkSession({
+          ownTools: allowed(OWN_TOOLS),
           id: record.id,
           profile,
           cwd: workspaceRoot,
@@ -133,13 +149,13 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!apiKey) throw new Error(`No API key stored for "${profile.apiKeySecret}". Run "KiwiAgent: Set API Key for Profile".`)
         // Indexed per session so a skill added to the workspace shows up on the next one.
         const skills = await indexSkills(workspaceRoot)
-        const allTools = [readTool, writeTool, editTool, globTool, grepTool, bashTool(), ...(skills.length ? [skillTool(skills)] : [])]
+        const allTools = [readTool, writeTool, editTool, globTool, grepTool, ...OWN_TOOLS, bashTool(), ...(skills.length ? [skillTool(skills)] : [])]
         return new OpenAiSession({
           id: record.id,
           profile,
           cwd: workspaceRoot,
           client: new OpenAiClient({ baseUrl: profile.baseUrl, apiKey }),
-          tools: setup.toolNames ? allTools.filter((t) => setup.toolNames!.includes(t.name)) : allTools,
+          tools: allowed(allTools),
           systemPrompt: setup.systemPrompt ?? (await buildSystemPrompt(workspaceRoot, profile.systemPromptFile)),
           ...(setup.hooks ? { hooks: setup.hooks } : {}),
         })
@@ -153,6 +169,8 @@ export function activate(context: vscode.ExtensionContext): void {
     createEngine,
     (id) => RunLog.forSession(workspaceRoot, id),
     (id, event) => chat.onSessionEvent(id, event),
+    // The edit diff is added once, before the event is logged, so a reload shows the same thing.
+    async (id, event) => (await editRecorders.get(id)?.decorate(event)) ?? event,
   )
   const permissionStore: PermissionStore = {
     allowForProject: async (rules) => {
@@ -162,7 +180,7 @@ export function activate(context: vscode.ExtensionContext): void {
       await config.update('permissions.allow', merged, vscode.ConfigurationTarget.Workspace)
     },
   }
-  chat = new ChatViewProvider(context.extensionUri, sessions, profileFor, verifyControl, permissionStore, workspaceRoot, context.workspaceState)
+  chat = new ChatViewProvider(context.extensionUri, sessions, profileFor, verifier, allowWritesControl, permissionStore, workspaceRoot, context.workspaceState)
   const tree = new SessionsTree(
     sessions,
     () => chat.activeId,
@@ -172,6 +190,9 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     output,
     vscode.window.registerWebviewViewProvider('kiwiAgent.chat', chat, { webviewOptions: { retainContextWhenHidden: true } }),
+    vscode.window.registerWebviewPanelSerializer(CHAT_PANEL_TYPE, {
+      deserializeWebviewPanel: async (panel) => chat.adoptPanel(panel),
+    }),
     vscode.window.registerTreeDataProvider('kiwiAgent.sessions', tree),
     chat.onDidChange(() => tree.refresh()),
     vscode.commands.registerCommand('kiwiAgent.newSession', () => chat.showNewSession()),
@@ -179,6 +200,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('kiwiAgent.removeSession', (record: SessionRecord) => chat.remove(record.id)),
     vscode.commands.registerCommand('kiwiAgent.openChat', () => chat.openInEditor()),
     vscode.commands.registerCommand('kiwiAgent.setApiKey', () => setApiKey(context)),
+    openDraftPlanAction(chat, sessions, workspaceRoot, output),
     watchOwnBundle(context),
     { dispose: () => void sessions.disposeAll() },
   )
@@ -202,29 +224,10 @@ function profileFor(mode: SessionMode): ModelProfile {
   return profile
 }
 
-function verifyRules(): VerifyRule[] {
-  return vscode.workspace.getConfiguration('kiwiAgent').get<VerifyRule[]>('verify', [])
-}
-
 /** Read on every tool call, so a rule just written applies at once. */
 function permissionRules(): PermissionRules {
   const config = vscode.workspace.getConfiguration('kiwiAgent')
   return { allow: config.get<string[]>('permissions.allow', []), deny: config.get<string[]>('permissions.deny', []) }
-}
-
-/** Turn-boundary build/test verification from the `kiwiAgent.verify` rules; none configured means no hook. */
-function verifier(cwd: string): TurnVerifier | undefined {
-  const rules = verifyRules()
-  if (rules.length === 0) return undefined
-  return new TurnVerifier({
-    cwd,
-    rules,
-    failureBudget: vscode.workspace.getConfiguration('kiwiAgent').get<number>('verifyFailureBudget', 3),
-    run: async (command, dir) => {
-      const result = await runShell(command, { cwd: dir, timeoutMs: 600_000 })
-      return { ok: result.ended === 'exit' && result.exitCode === 0, output: result.output }
-    },
-  })
 }
 
 /**

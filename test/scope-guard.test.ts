@@ -71,7 +71,7 @@ describe('blind plan helpers', () => {
     expect(prompt).toContain('status: draft')
     expect(prompt).toContain('never renumber')
     expect(prompt).toContain('Write nothing until the user says go')
-    expect(BLIND_PLAN_TOOLS).toEqual(['Read', 'Glob', 'Write', 'Edit'])
+    expect(BLIND_PLAN_TOOLS).toEqual(['Read', 'Glob', 'JsonSchema', 'JsonQuery', 'Write', 'Edit'])
   })
 })
 
@@ -92,16 +92,5 @@ describe('composeHooks', () => {
     const use = { toolName: 'Write', input: {}, toolUseId: 't' }
     expect(await composeHooks(allowing, noting).preToolUse!(use)).toEqual({ allow: true, additionalContext: 'n' })
     expect(await composeHooks(allowing, denying).preToolUse!(use)).toEqual({ deny: 'no' })
-  })
-
-  it('stop_collects_verifications_until_one_blocks', async () => {
-    const hooks = composeHooks(
-      { async stop() { return { verifications: [{ command: 'a', cwd: '/', ok: true, output: '' }] } } },
-      { async stop() { return { verifications: [{ command: 'b', cwd: '/', ok: false, output: 'x' }], block: 'fix b' } } },
-      { async stop() { throw new Error('must not run') } },
-    )
-    const outcome = await hooks.stop!(() => {})
-    expect(outcome?.block).toBe('fix b')
-    expect(outcome?.verifications?.map((v) => v.command)).toEqual(['a', 'b'])
   })
 })

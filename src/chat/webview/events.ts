@@ -36,6 +36,14 @@ export class NewSessionRequestedEvent extends Event {
   }
 }
 
+/** The new-session screen's pick of a plan already on disk. */
+export class PlanResumeRequestedEvent extends Event {
+  static readonly type = 'plan-resume-requested'
+  constructor(public readonly feature: string) {
+    super(PlanResumeRequestedEvent.type, { bubbles: true })
+  }
+}
+
 /** The "+" tab: show the new-session screen. */
 export class NewSessionViewRequestedEvent extends Event {
   static readonly type = 'new-session-view-requested'
@@ -51,19 +59,27 @@ export class SpecApprovedEvent extends Event {
   }
 }
 
-/** The plan bar's "Check against code": start a reconcile session on the spec. */
-export class SpecCheckRequestedEvent extends Event {
-  static readonly type = 'spec-check-requested'
+/** The plan bar's "Map against code": start a mapping run on the spec. */
+export class SpecMapRequestedEvent extends Event {
+  static readonly type = 'spec-map-requested'
   constructor() {
-    super(SpecCheckRequestedEvent.type, { bubbles: true })
+    super(SpecMapRequestedEvent.type, { bubbles: true })
   }
 }
 
-/** The plan bar's stop on a running check. */
-export class SpecCheckStoppedEvent extends Event {
-  static readonly type = 'spec-check-stopped'
+/** The plan bar's stop on a running mapping. */
+export class SpecMapStoppedEvent extends Event {
+  static readonly type = 'spec-map-stopped'
   constructor() {
-    super(SpecCheckStoppedEvent.type, { bubbles: true })
+    super(SpecMapStoppedEvent.type, { bubbles: true })
+  }
+}
+
+/** The plan bar's "Verify again": run the test commands over the tasks' files once more. */
+export class VerifyRequestedEvent extends Event {
+  static readonly type = 'verify-requested'
+  constructor() {
+    super(VerifyRequestedEvent.type, { bubbles: true })
   }
 }
 
@@ -83,7 +99,7 @@ export class IntentUpdateRequestedEvent extends Event {
   }
 }
 
-/** Any gesture of the review panel, on its way to the extension host. */
+/** Any review gesture on the plan view, on its way to the extension host. */
 export class ReviewActionEvent extends Event {
   static readonly type = 'review-action'
   constructor(public readonly action: ReviewAction) {
@@ -91,9 +107,9 @@ export class ReviewActionEvent extends Event {
   }
 }
 
-export type PlanView = 'plan' | 'chat' | 'review'
+export type PlanView = 'plan' | 'chat'
 
-/** The plan bar's Plan / Review / Chat switch. */
+/** The plan bar's Plan / Chat switch. */
 export class PlanViewSelectedEvent extends Event {
   static readonly type = 'plan-view-selected'
   constructor(public readonly view: PlanView) {
@@ -115,10 +131,10 @@ export class SessionSelectedEvent extends Event {
   }
 }
 
-export class VerifyToggledEvent extends Event {
-  static readonly type = 'verify-toggled'
+export class AllowWritesToggledEvent extends Event {
+  static readonly type = 'allow-writes-toggled'
   constructor(public readonly enabled: boolean) {
-    super(VerifyToggledEvent.type, { bubbles: true })
+    super(AllowWritesToggledEvent.type, { bubbles: true })
   }
 }
 
@@ -136,16 +152,18 @@ declare global {
     [PermissionDecidedEvent.type]: PermissionDecidedEvent
     [NewSessionRequestedEvent.type]: NewSessionRequestedEvent
     [NewSessionViewRequestedEvent.type]: NewSessionViewRequestedEvent
+    [PlanResumeRequestedEvent.type]: PlanResumeRequestedEvent
     [SessionSelectedEvent.type]: SessionSelectedEvent
     [SessionClosedEvent.type]: SessionClosedEvent
     [SpecApprovedEvent.type]: SpecApprovedEvent
-    [SpecCheckRequestedEvent.type]: SpecCheckRequestedEvent
-    [SpecCheckStoppedEvent.type]: SpecCheckStoppedEvent
+    [SpecMapRequestedEvent.type]: SpecMapRequestedEvent
+    [SpecMapStoppedEvent.type]: SpecMapStoppedEvent
+    [VerifyRequestedEvent.type]: VerifyRequestedEvent
     [ImplementRequestedEvent.type]: ImplementRequestedEvent
     [IntentUpdateRequestedEvent.type]: IntentUpdateRequestedEvent
     [PlanViewSelectedEvent.type]: PlanViewSelectedEvent
     [ReviewActionEvent.type]: ReviewActionEvent
     [SessionRemovedEvent.type]: SessionRemovedEvent
-    [VerifyToggledEvent.type]: VerifyToggledEvent
+    [AllowWritesToggledEvent.type]: AllowWritesToggledEvent
   }
 }

@@ -1,4 +1,6 @@
 import type { SessionEvent } from '../../agent/session/code-session'
+import { editDiffView, fileLink } from './edit-diff'
+import { formatUsage } from './format-usage'
 import { renderMarkdown } from './markdown'
 import { PermissionCard } from './permission-card'
 
@@ -13,7 +15,6 @@ export class ChatTranscript extends HTMLElement {
   private readonly bubbles = new Map<string, AssistantBubble>()
   private readonly tools = new Map<string, HTMLDetailsElement>()
   private readonly permissions = new Map<string, PermissionCard>()
-  private readonly runningVerifications = new Map<string, { element: HTMLElement; stop: () => void }>()
   private statusLine!: HTMLElement
   private busy = false
   private working: { element: HTMLElement; stop: () => void } | undefined
@@ -31,8 +32,6 @@ export class ChatTranscript extends HTMLElement {
     this.bubbles.clear()
     this.tools.clear()
     this.permissions.clear()
-    for (const running of this.runningVerifications.values()) running.stop()
-    this.runningVerifications.clear()
     this.working?.stop()
     this.working = undefined
     this.busy = false
@@ -82,6 +81,7 @@ export class ChatTranscript extends HTMLElement {
         result.className = event.isError ? 'result error' : 'result'
         result.textContent = event.text
         if (details) {
+          if (event.edit) showEdit(details, event.edit)
           details.appendChild(result)
           details.classList.toggle('failed', event.isError)
         } else {
@@ -106,54 +106,14 @@ export class ChatTranscript extends HTMLElement {
       case 'status':
         // 'idle' also arrives mid-turn (after compaction, between requests); only the turn's end clears busy.
         if (event.status !== 'idle') this.busy = true
-        this.classList.toggle('verifying', event.status === 'verifying')
         break
-      case 'verification_started': {
-        const row = document.createElement('p')
-        row.className = 'verification running'
-        const key = `${event.cwd}::${event.command}`
-        const startedAt = Date.now()
-        row.textContent = `Running: ${event.command}`
-        const timer = live
-          ? window.setInterval(() => {
-              row.textContent = `Running: ${event.command} (${Math.round((Date.now() - startedAt) / 1000)}s)`
-            }, 1000)
-          : undefined
-        this.runningVerifications.get(key)?.element.remove()
-        this.runningVerifications.set(key, {
-          element: row,
-          stop: () => {
-            if (timer !== undefined) window.clearInterval(timer)
-          },
-        })
-        this.insert(row)
-        break
-      }
-      case 'verification': {
-        const key = `${event.cwd}::${event.command}`
-        const running = this.runningVerifications.get(key)
-        this.runningVerifications.delete(key)
-        running?.stop()
-        const details = document.createElement('details')
-        details.className = event.ok ? 'verification ok' : 'verification failed'
-        const summary = document.createElement('summary')
-        summary.textContent = `${event.ok ? 'Verified' : 'Verification failed'}: ${event.command}`
-        const out = document.createElement('pre')
-        out.className = 'result'
-        out.textContent = event.output || '(no output)'
-        details.append(summary, out)
-        if (running) running.element.replaceWith(details)
-        else this.insert(details)
-        break
-      }
       case 'turn_done': {
         this.busy = false
-        this.classList.remove('verifying')
         const line = document.createElement('p')
         line.className = event.isError ? 'turn error' : 'turn'
         const usage = event.usage
         const parts = []
-        if (usage) parts.push(`${usage.inputTokens + usage.cacheReadTokens} in / ${usage.outputTokens} out`)
+        if (usage) parts.push(formatUsage(usage))
         if (usage?.costUsd) parts.push(`$${usage.costUsd.toFixed(4)}`)
         if (event.durationMs) parts.push(`${(event.durationMs / 1000).toFixed(1)}s`)
         if (event.errors.length) parts.push(event.errors.join('; '))
@@ -241,6 +201,31 @@ export class ChatTranscript extends HTMLElement {
   private scrollToEnd(): void {
     this.scrollTop = this.scrollHeight
   }
+}
+
+/**
+ * An edit step shows what it did, open, where every other step shows only its
+ * name: the edit is the session's output, not its plumbing, and the diff is
+ * capped so it cannot swallow the transcript. The arguments it was called with
+ * say nothing the diff does not, so they give way to it.
+ */
+function showEdit(details: HTMLDetailsElement, change: Parameters<typeof editDiffView>[0]): void {
+  details.classList.add('edit-step')
+  details.open = true
+  const summary = details.querySelector('summary')
+  if (summary) {
+    const name = summary.textContent?.split(' ')[0] ?? ''
+    summary.replaceChildren(document.createTextNode(`${name} `), fileLink(change))
+    if (change.added !== undefined || change.removed !== undefined) {
+      const stats = document.createElement('span')
+      stats.className = 'stats'
+      stats.textContent = ` +${change.added ?? 0} −${change.removed ?? 0}`
+      summary.appendChild(stats)
+    }
+  }
+  const input = details.querySelector('pre.input')
+  if (input instanceof HTMLElement) input.hidden = true
+  details.appendChild(editDiffView(change))
 }
 
 function block(className: string, text: string): HTMLElement {

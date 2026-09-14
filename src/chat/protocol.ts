@@ -1,5 +1,7 @@
 import type { PermissionDecision, SessionEvent } from '../agent/session/code-session'
 import type { PlanItem, Review } from '../agent/phases/plan-review'
+import type { PlanStage } from '../agent/phases/plan-stage'
+import type { Task, VerificationRecord } from '../agent/phases/tasks-file'
 import type { SessionMode } from '../agent/session/session-manager'
 import type { SessionStatus } from '../agent/session/session-status'
 
@@ -13,33 +15,46 @@ export type SessionTab = {
   active: boolean
 }
 
-/** The active planning session's spec: the approval bar and the plan view. */
+/** The active feature's plan: the plan bar and the plan view follow its stage. */
 export type PlanState = {
   /** Workspace-relative path of the spec file. */
   specPath: string
+  /** Workspace-relative path of the tasks file, whether or not it exists yet. */
+  tasksPath: string
+  /** Where the feature stands, derived from its files. */
+  stage: PlanStage
+  /** The spec's front-matter status; `missing` while no spec is written. */
   status: 'missing' | 'draft' | 'approved'
   /** Spec markdown without its front matter; absent while no spec is written. */
   body?: string
-  /** A code check can be started from here: a plan session with a draft spec and no check running. */
-  checkable: boolean
-  /** The check run under this plan session: what it is doing, or how the last one ended. Absent before the first. */
-  check?: CheckState
-  /** Implementation can be started from here: a plan session with an approved spec. */
+  /** Mapping can be started from here: a plan session with a draft spec, no review in flight and no run live. */
+  mappable: boolean
+  /** The mapping run under this plan session: what it is doing, or how the last one ended. Absent before the first. */
+  mapping?: RunState
+  /** Implementation can be started from here: a plan session with an approved, mapped spec whose board is not all tested. */
   implementable: boolean
+  /** The test run can be started from here: every task is tested and no run is live. */
+  verifiable: boolean
+  /** The test run: what it is doing, or how the last one in this window ended. Absent before the first. */
+  verification?: RunState
+  /** The newest record in the tasks file, the outcome that stands. */
+  lastVerification?: VerificationRecord
+  /** The task board; empty until the spec is mapped. */
+  tasks: Task[]
   /** The plan's items by id, what a comment or a strike is attached to. */
   items: PlanItem[]
   /** Comments, strikes and resolutions so far; kept after approval as the record of how the plan was reached. */
   review: Review
   /** Comments can be attached: the artifact is a draft. */
   commentable: boolean
-  /** No comment is open, so the plan may be approved. */
+  /** The plan is mapped and no comment is open, so it may be approved. */
   approvable: boolean
   /** Amendments to product intent this feature settled; absent when none were proposed. */
   intent?: IntentState
 }
 
-/** One line on the check: its current step while it runs, its outcome once it ended. */
-export type CheckState = { live: boolean; text: string }
+/** One line on a run under the plan: its current step while it runs, its outcome once it ended. */
+export type RunState = { live: boolean; text: string }
 
 /** The proposed write-back to `docs/**`: what the agent wrote, what the human has yet to apply. */
 export type IntentState = {
@@ -53,14 +68,19 @@ export type IntentState = {
   applicable: boolean
 }
 
+/** A plan on disk the new-session screen offers to pick up; verified ones are finished and not offered. */
+export type ResumablePlan = { feature: string; status: 'draft' | 'approved' }
+
 export type ToWebview =
   | {
       type: 'state'
       tabs: SessionTab[]
-      /** Verify-on-stop for the active session; absent when no verification rules are configured or no session is active. */
-      verify?: boolean
+      /** Allow-writes for the active session; absent when its phase decides writes itself or no session is active. */
+      allowWrites?: boolean
       /** Present when the active session is a plan session. */
       plan?: PlanState
+      /** Plans under `plan/` still in progress, for the new-session screen. */
+      plans: ResumablePlan[]
     }
   /** Full history of the active session, sent on switch. */
   | { type: 'transcript'; sessionId: string; events: SessionEvent[] }
@@ -89,19 +109,28 @@ export type FromWebview =
   | { type: 'send'; text: string }
   | { type: 'permission'; requestId: string; decision: UserPermissionDecision }
   | { type: 'interrupt' }
-  | { type: 'set_verify'; enabled: boolean }
+  /** File writes in the active session go through without a prompt while on. */
+  | { type: 'set_allow_writes'; enabled: boolean }
   | { type: 'switch_session'; sessionId: string }
   /** Stops the engine; the session stays in the list and resumes on the next prompt. */
   | { type: 'close_session'; sessionId: string }
   /** `prompt`, when given, is sent as the first message. */
   | { type: 'new_session'; mode: SessionMode; feature?: string; prompt?: string }
+  /** Opens the plan session behind a spec on disk, or starts one on it when none remains; what it offers follows the spec's status. */
+  | { type: 'resume_plan'; feature: string }
   | { type: 'approve_spec' }
   | ReviewAction
-  /** Starts a check of the active plan session's spec as a run under it; the plan bar shows its progress. */
-  | { type: 'check_spec' }
-  /** Stops the check running under the active plan session. */
-  | { type: 'stop_check' }
+  /** Maps the active plan session's spec against the code as a run under it; the plan bar shows its progress. */
+  | { type: 'map_spec' }
+  /** Stops the mapping running under the active plan session. */
+  | { type: 'stop_map' }
   /** Starts an implement session on the approved spec and switches to it; refused on a draft. */
   | { type: 'implement_spec' }
+  /** Runs the test commands over the tasks' files again, whatever the last record says. */
+  | { type: 'verify_spec' }
   /** Writes the pending intent amendments into `docs/`; refused on a draft. */
   | { type: 'update_intent' }
+  /** Opens an edited file, at the line the edit changed when one is known. */
+  | { type: 'open_file'; path: string; line?: number }
+  /** Opens the whole edit in the editor's diff view: the pre-edit snapshot against the file as it now stands. */
+  | { type: 'open_edit_diff'; snapshot: string; path: string; label: string }

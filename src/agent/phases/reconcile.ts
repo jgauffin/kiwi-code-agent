@@ -1,20 +1,21 @@
 import { DOCS_DIR, PLAN_DIR, featureSlug } from './blind-plan'
 import type { Scope } from './scope-guard'
+import { tasksFile } from './tasks-file'
 import type { SessionEvent } from '../session/code-session'
 
-/** The reconciler sees everything and may change nothing but the spec and its intent amendments. */
+/** The mapping run sees everything and may change nothing but the spec, its tasks and its intent amendments. */
 export function reconcileScope(feature: string): Scope {
   const slug = featureSlug(feature)
   return {
     readable: ['**'],
-    writable: [`${PLAN_DIR}/${slug}.spec.md`, `${PLAN_DIR}/${slug}.intent.md`],
+    writable: [`${PLAN_DIR}/${slug}.spec.md`, tasksFile(feature), `${PLAN_DIR}/${slug}.intent.md`],
   }
 }
 
-export const RECONCILE_TOOLS = ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Skill']
+export const RECONCILE_TOOLS = ['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'Edit', 'Write', 'Skill']
 
-/** The first prompt of a check run; the system prompt carries the instructions. */
-export const RECONCILE_KICKOFF = 'Check the spec against the code and write your findings.'
+/** The first prompt of a mapping run; the system prompt carries the instructions. */
+export const RECONCILE_KICKOFF = 'Map the spec against the code: write your findings, then the tasks.'
 
 export const FINDINGS_SECTION = 'Findings'
 
@@ -53,9 +54,10 @@ export const openFindings = (body: string): Finding[] => findings(body).filter((
  */
 export function reconcilePrompt(feature: string, cwd: string): string {
   const spec = `${PLAN_DIR}/${featureSlug(feature)}.spec.md`
-  return `You are checking the spec for the feature "${feature}" against the source code it will be built in.
+  const tasks = tasksFile(feature)
+  return `You are mapping the spec for the feature "${feature}" against the source code it will be built in.
 
-The spec at \`${spec}\` under ${cwd} was written blind, from product intent alone, so that the code's mistakes would not become requirements. Your job is the other half: find what in the code stands in the feature's way before implementation starts. You are not grading the spec. A spec item the code accommodates without incident is not mentioned. An empty result is a valid result.
+The spec at \`${spec}\` under ${cwd} was written blind, from product intent alone, so that the code's mistakes would not become requirements. Your job is the other half, in two parts: find what in the code stands in the feature's way before implementation starts, then say what to do and where. You are not grading the spec. A spec item the code accommodates without incident is not mentioned. An empty findings list is a valid result.
 
 Read the spec first. Then search the code for what the spec touches: the rules it changes, the behaviour it adds to, the places its terms already live.
 
@@ -80,14 +82,14 @@ A cancelled order keeps its invoice; the invoice is credited rather than withdra
 
 The mode is \`append\`, \`replace\` or \`new\`. Write it as intent reads: the product's language, present tense, no code, no reference to this spec or its ids. Amendment ids are stable and never reused; leave an applied one alone.
 
-Your output: a \`## ${FINDINGS_SECTION}\` section at the end of the spec, a table, and nothing else in the file changes. Structure:
+Your first output: a \`## ${FINDINGS_SECTION}\` section at the end of the spec, a table, and nothing else in the file changes. Structure:
 
 \`\`\`markdown
 ## ${FINDINGS_SECTION}
 | Finding | Proposed solution |
 |---|---|
 | F1 (contradiction, B3): what the code does, where (path and symbol), and what the spec says. | |
-| F2 (breakage, T2): what changes for existing behaviour, where. | |
+| F2 (breakage, B2): what changes for existing behaviour, where. | |
 | F3 (naive, E1): what the spec assumes, what the code shows, what the spec should say. | |
 \`\`\`
 
@@ -97,7 +99,24 @@ Rules:
 - Finding ids are stable: never renumber, only add. On a re-run, keep findings that still hold, append \` [resolved]\` to those that no longer apply, and add new ones with new ids.
 - Name the code by path and symbol so the finding can be verified; do not paste code.
 - Touch nothing outside the ${FINDINGS_SECTION} section; the spec's items are the planner's and the user's.
-- When the section is written, stop. Say nothing more: the findings are read from the file.`
+
+Your second output: the task board, \`${tasks}\`, written with Write. One task per unit of work small enough to finish in one sitting, in build order, each naming the spec items it delivers and the files it touches. Structure:
+
+\`\`\`markdown
+# Tasks for ${feature}
+
+- T1 (B1, E2): what to do, in one line
+  - files: src/orders/cancel.ts, src/orders/cancel.test.ts (new)
+- T2 (B3): ...
+  - files: src/orders/reservation.ts
+\`\`\`
+
+Rules:
+- The files are workspace-relative paths that exist, or paths to create marked \`(new)\`, placed where the code around them says such a file belongs. The tests that prove a task's items are files of that task.
+- Task ids are stable: never renumber. On a re-run, keep a task that still holds and update its text and files, append \` [removed]\` to one that no longer applies, add new ones with new ids. Never touch a marker the implementer left on a task (\`[in progress]\`, \`[done]\`, \`[tested]\`, \`[blocked: ...]\`).
+- No task for what a finding puts in question: the user rules on the finding first. Say in the finding what the task would be.
+- A \`## Verification\` section at the end of the file is the extension's; leave it alone.
+- When both files are written, stop. Say nothing more: findings and tasks are read from the files.`
 }
 
 /** What a check is doing right now, as the plan bar shows it; undefined when the event says nothing worth showing. */

@@ -1,0 +1,12 @@
+{
+  "empty_object": {},
+  "empty_array": [],
+  "escapes": "quote=\" backslash=\\ slash=\/ tab=\t newline=\n unicode=åäö",
+  "unicode": "räksmörgås åäö 😀 日本語",
+  "numbers": [0, -1, 1.5, -2.25e3, 1e-7, 12345678901234, -0.0],
+  "literals": [true, false, null],
+  "deep": { "a": { "b": { "c": { "d": { "e": "bottom" } } } } },
+  "mixed": [1, "two", null, true, { "k": "v" }, [1, 2]],
+  "key with spaces": "yes",
+  "": "empty key"
+}

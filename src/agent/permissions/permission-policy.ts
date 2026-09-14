@@ -7,9 +7,9 @@ import { splitShellCommand, type ShellSegment } from './shell-split'
 export type PermissionRules = { allow: string[]; deny: string[] }
 
 /** Tools that only look; their calls never prompt unless a deny rule names them. */
-const READ_ONLY_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS', 'NotebookRead', 'TodoRead', 'TodoWrite'])
+const READ_ONLY_TOOLS = new Set(['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'LS', 'NotebookRead', 'TodoRead', 'TodoWrite'])
 
-const FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'NotebookRead', 'Glob', 'Grep', 'LS'])
+const FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'NotebookRead', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'LS'])
 
 /**
  * Decides tool calls before any permission prompt, on every engine: a deny

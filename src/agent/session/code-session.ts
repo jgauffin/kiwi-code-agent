@@ -1,4 +1,7 @@
 import type { ModelProfile } from './model-profile'
+import type { FileEditChange } from '../edits/file-edit-diff'
+
+export type { FileEditChange }
 
 /** Token accounting for one assistant turn, as far as the engine reports it. */
 export type TurnUsage = {
@@ -26,7 +29,8 @@ export type SessionEvent =
   /** Final text of an assistant message, replaces whatever was streamed under the same id. */
   | { type: 'assistant_message'; messageId: string; text: string; parentToolUseId?: string }
   | { type: 'tool_call'; toolUseId: string; name: string; input: unknown; parentToolUseId?: string }
-  | { type: 'tool_result'; toolUseId: string; text: string; isError: boolean; parentToolUseId?: string }
+  /** `edit` is set on a file edit that changed something: the diff the step made, as the chat shows it. */
+  | { type: 'tool_result'; toolUseId: string; text: string; isError: boolean; parentToolUseId?: string; edit?: FileEditChange }
   | {
       type: 'permission_request'
       requestId: string
@@ -34,11 +38,11 @@ export type SessionEvent =
       input: unknown
       title?: string
       description?: string
+      /** The change the call proposes, shown in place of the raw arguments. */
+      edit?: FileEditChange
     }
   | { type: 'permission_resolved'; requestId: string; decision: PermissionDecision['kind'] }
-  | { type: 'status'; status: 'requesting' | 'compacting' | 'verifying' | 'idle' }
-  | { type: 'verification_started'; command: string; cwd: string }
-  | { type: 'verification'; command: string; cwd: string; ok: boolean; output: string }
+  | { type: 'status'; status: 'requesting' | 'compacting' | 'idle' }
   | { type: 'turn_done'; usage?: TurnUsage; durationMs?: number; isError: boolean; errors: string[] }
   | { type: 'error'; message: string; fatal: boolean }
   | { type: 'ended' }

@@ -1,34 +1,41 @@
 import { compileTemplate } from '@relax.js/core/html'
 import type { PlanState } from '../protocol'
+import type { PlanStage } from '../../agent/phases/plan-stage'
 import {
   ImplementRequestedEvent,
   IntentUpdateRequestedEvent,
   PlanViewSelectedEvent,
   SpecApprovedEvent,
-  SpecCheckRequestedEvent,
-  SpecCheckStoppedEvent,
+  SpecMapRequestedEvent,
+  SpecMapStoppedEvent,
+  VerifyRequestedEvent,
   type PlanView,
 } from './events'
 
-const LABEL: Record<PlanState['status'], string> = {
+const STAGE: Record<PlanStage, string> = {
   missing: 'no spec written yet',
-  draft: 'draft, waiting for your approval',
-  approved: 'approved',
+  created: 'created',
+  under_review: 'under review',
+  final_draft: 'final draft',
+  mapped: 'mapped',
+  under_development: 'under development',
+  verification: 'verification',
+  verified: 'verified',
 }
 
-/** The feature session's header: Plan / Review / Chat switch, spec status, and the next step (check, approve, implement). */
+/** The feature session's header: Plan / Chat switch, the stage, and the next step (map, approve, implement, verify). */
 export class PlanBar extends HTMLElement {
   private readonly template = compileTemplate(`
-    <button type="button" class="view {{planState}}" if="exists" title="{{specPath}}" r-click="show('plan')">Plan</button>
-    <button type="button" class="view {{reviewState}}" if="reviewable" title="Comment on the plan's items, strike what should not be built." r-click="show('review')">Review{{openMark}}</button>
+    <button type="button" class="view {{planState}}" if="exists" title="{{planHint}}" r-click="show('plan')">Plan{{openMark}}</button>
     <button type="button" class="view {{chatState}}" r-click="show('chat')">Chat</button>
-    <span class="status {{status}}" unless="checking">{{label}}</span>
-    <span class="status checking" if="checking" title="{{checkText}}">{{checkText}}</span>
-    <button type="button" class="stop" if="checking" title="Stop the check." r-click="stopCheck()">Stop</button>
-    <span class="checked" if="checked" title="{{checkText}}">{{checkText}}</span>
-    <button type="button" class="check" if="checkable" title="Read the code and write what contradicts or breaks under this spec into its Findings table; the planner then proposes a solution per finding." r-click="check()">Check against code</button>
+    <span class="status {{stage}}" unless="running">{{label}}</span>
+    <span class="status running" if="running" title="{{runText}}">{{runText}}</span>
+    <button type="button" class="stop" if="mapping" title="Stop the mapping." r-click="stopMap()">Stop</button>
+    <span class="ran" if="ran" title="{{ranText}}">{{ranText}}</span>
+    <button type="button" class="map" if="mappable" title="Read the code and write what contradicts or breaks under this spec into its Findings table, and the tasks with the files they touch into the tasks file." r-click="map()">Map against code</button>
     <button type="button" class="approve" if="isDraft" disabled="{{blocked}}" title="{{approveHint}}" r-click="approve()">Approve</button>
-    <button type="button" class="implement" if="implementable" title="Start a fresh session that builds the approved spec task by task." r-click="implement()">Implement</button>
+    <button type="button" class="implement" if="implementable" title="Start a fresh session that builds the tasks one by one." r-click="implement()">Implement</button>
+    <button type="button" class="verify" if="verifiable" title="Run the test commands over the files the tasks name." r-click="verify()">{{verifyLabel}}</button>
     <button type="button" class="intent" if="amendable" title="{{intentHint}}" r-click="updateIntent()">Update intent{{intentMark}}</button>
   `)
 
@@ -40,24 +47,32 @@ export class PlanBar extends HTMLElement {
     this.hidden = plan === undefined
     if (!plan) return
     const open = openCount(plan)
+    const mapping = plan.mapping?.live === true
+    const verifying = plan.verification?.live === true
+    // The last run's outcome shows beside the stage until the stage moves on; the file's record is the one that stands.
+    const ran = mapping || verifying ? undefined : (plan.mapping?.text ?? plan.verification?.text)
     this.template.render(
       {
-        specPath: plan.specPath,
-        status: plan.status,
-        label: LABEL[plan.status],
+        planHint: plan.commentable
+          ? `${plan.specPath}\nComment on the plan's items, strike what should not be built.`
+          : plan.specPath,
+        stage: plan.stage,
+        label: stageLabel(plan),
         exists: plan.status !== 'missing',
-        isDraft: plan.status === 'draft',
-        checkable: plan.checkable,
-        checking: plan.check?.live === true,
-        checked: plan.check !== undefined && !plan.check.live,
-        checkText: plan.check?.text ?? '',
+        isDraft: plan.stage === 'mapped' && plan.status === 'draft',
+        mappable: plan.mappable,
+        mapping,
+        running: mapping || verifying,
+        runText: mapping ? plan.mapping!.text : verifying ? plan.verification!.text : '',
+        ran: ran !== undefined && ran.length > 0,
+        ranText: ran ?? '',
         implementable: plan.implementable,
-        // Commenting is offered on a draft; a closed review stays readable after approval.
-        reviewable: plan.commentable || plan.review.rounds.length > 0,
+        verifiable: plan.verifiable,
+        verifyLabel: plan.lastVerification ? 'Verify again' : 'Verify',
         openMark: open > 0 ? ` (${open})` : '',
         blocked: !plan.approvable,
         approveHint: plan.approvable
-          ? 'Approve this plan.'
+          ? 'Approve this plan: the spec and its tasks.'
           : `Approval is blocked while ${open} comment${open === 1 ? ' is' : 's are'} open.`,
         amendable: plan.intent?.applicable === true,
         intentMark: plan.intent && plan.intent.pending > 0 ? ` (${plan.intent.pending})` : '',
@@ -65,18 +80,36 @@ export class PlanBar extends HTMLElement {
           ? `Write the ${plan.intent.pending} amendment${plan.intent.pending === 1 ? '' : 's'} in ${plan.intent.path} into the intent docs, so the next feature is planned from what this one settled.`
           : '',
         planState: view === 'plan' ? 'active' : '',
-        reviewState: view === 'review' ? 'active' : '',
         chatState: view === 'chat' ? 'active' : '',
       },
       {
         show: (next: PlanView) => this.dispatchEvent(new PlanViewSelectedEvent(next)),
         approve: () => this.dispatchEvent(new SpecApprovedEvent()),
-        check: () => this.dispatchEvent(new SpecCheckRequestedEvent()),
-        stopCheck: () => this.dispatchEvent(new SpecCheckStoppedEvent()),
+        map: () => this.dispatchEvent(new SpecMapRequestedEvent()),
+        stopMap: () => this.dispatchEvent(new SpecMapStoppedEvent()),
         implement: () => this.dispatchEvent(new ImplementRequestedEvent()),
+        verify: () => this.dispatchEvent(new VerifyRequestedEvent()),
         updateIntent: () => this.dispatchEvent(new IntentUpdateRequestedEvent()),
       },
     )
+  }
+}
+
+/** The stage in words, with what the stage alone does not say: approval on a mapped plan, progress on a board. */
+function stageLabel(plan: PlanState): string {
+  const base = STAGE[plan.stage]
+  switch (plan.stage) {
+    case 'mapped':
+      return plan.status === 'approved' ? `${base}, approved` : base
+    case 'under_development': {
+      const live = plan.tasks.filter((t) => !t.removed)
+      const tested = live.filter((t) => t.state === 'tested').length
+      return `${base}: ${tested} of ${live.length} tested`
+    }
+    case 'verification':
+      return plan.lastVerification ? `${base}: tests failed` : `${base}: tests not run yet`
+    default:
+      return base
   }
 }
 

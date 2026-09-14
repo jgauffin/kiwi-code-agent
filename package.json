@@ -15,7 +15,9 @@
     "Chat"
   ],
   "main": "./dist/extension.js",
-  "activationEvents": [],
+  "activationEvents": [
+    "onWebviewPanel:kiwiAgent.chatPanel"
+  ],
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -55,6 +57,11 @@
         "title": "Open Session"
       },
       {
+        "command": "kiwiAgent.openDraftPlan",
+        "title": "Open Draft Plan",
+        "icon": "$(checklist)"
+      },
+      {
         "command": "kiwiAgent.openChat",
         "title": "KiwiAgent: Open Chat in Editor"
       },
@@ -68,7 +75,12 @@
         {
           "command": "kiwiAgent.newSession",
           "when": "view == kiwiAgent.sessions",
-          "group": "navigation"
+          "group": "navigation@1"
+        },
+        {
+          "command": "kiwiAgent.openDraftPlan",
+          "when": "view == kiwiAgent.sessions && kiwiAgent.hasDraftPlans",
+          "group": "navigation@2"
         }
       ],
       "view/item/context": [
@@ -85,6 +97,10 @@
         },
         {
           "command": "kiwiAgent.openSession",
+          "when": "false"
+        },
+        {
+          "command": "kiwiAgent.openDraftPlan",
           "when": "false"
         }
       ]
@@ -140,12 +156,17 @@
         },
         "kiwiAgent.verify": {
           "type": "array",
-          "description": "Commands run when the model wants to stop after editing matching files. {project} is the nearest file matching 'project' above the edited file, {projectDir} its directory. Errors are sent back to the model and the stop is blocked, up to the failure budget.",
+          "description": "Test commands run once every task of a feature is marked tested, over the files its tasks name: a matching file runs its rule's command once per project. {project} is the nearest file matching 'project' above the file, {projectDir} its directory. A failure is handed to the implement session, up to the failure budget.",
           "default": [
             {
               "match": "**/*.cs",
               "project": "*.csproj",
-              "command": "dotnet build \"{project}\" --nologo -clp:ErrorsOnly;NoSummary"
+              "command": "dotnet test \"{project}\" --nologo"
+            },
+            {
+              "match": "src/**/*.{ts,tsx,js}",
+              "project": "package.json",
+              "command": "npm test"
             }
           ],
           "items": {
@@ -157,11 +178,11 @@
             "properties": {
               "match": {
                 "type": "string",
-                "description": "Glob on the workspace-relative path of the edited file."
+                "description": "Glob on the workspace-relative path of a file a task touches."
               },
               "project": {
                 "type": "string",
-                "description": "Glob for the project file to look for upwards from the edited file, e.g. *.csproj."
+                "description": "Glob for the project file to look for upwards from the file, e.g. *.csproj."
               },
               "command": {
                 "type": "string"
@@ -172,7 +193,7 @@
         "kiwiAgent.verifyFailureBudget": {
           "type": "integer",
           "default": 3,
-          "description": "Consecutive failed verifications before the model may stop anyway."
+          "description": "Consecutive failed test runs handed to the implement session before the failed record is left for you."
         },
         "kiwiAgent.profiles": {
           "type": "array",

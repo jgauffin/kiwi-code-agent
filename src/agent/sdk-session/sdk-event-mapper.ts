@@ -1,5 +1,6 @@
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { SessionEvent, TurnUsage } from '../session/code-session'
+import { bareToolName } from './tool-server'
 
 /**
  * Turns the Agent SDK's message stream into SessionEvents.
@@ -81,7 +82,7 @@ export class SdkEventMapper {
       if (block.type === 'text') {
         textParts.push(block.text)
       } else if (block.type === 'tool_use') {
-        events.push({ type: 'tool_call', toolUseId: block.id, name: block.name, input: block.input, ...parent })
+        events.push({ type: 'tool_call', toolUseId: block.id, name: bareToolName(block.name), input: block.input, ...parent })
       }
     }
     if (textParts.length > 0) {

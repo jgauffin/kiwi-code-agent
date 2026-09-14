@@ -109,12 +109,7 @@ export class OpenAiSession implements CodeSession {
         this.output.push({ type: 'status', status: 'requesting' })
         const assistant = await this.complete(`${turn}.${round}`, signal, usage)
         this.messages.push(assistant)
-        if (assistant.toolCalls.length === 0) {
-          const block = await this.verifyBeforeStop()
-          if (block === undefined) return this.finishTurn(usage, started, false, [])
-          this.messages.push({ role: 'user', content: block })
-          continue
-        }
+        if (assistant.toolCalls.length === 0) return this.finishTurn(usage, started, false, [])
         for (const call of assistant.toolCalls) {
           if (signal.aborted) throw new InterruptedError()
           const result = await this.runTool(call, signal)
@@ -210,16 +205,6 @@ export class OpenAiSession implements CodeSession {
     const post = await this.options.hooks?.postToolUse?.({ ...use, output: output.text, isError: output.isError })
     const context = [pre?.additionalContext, post?.additionalContext].filter((c): c is string => !!c)
     return context.length ? { ...output, text: `${output.text}\n\n${context.join('\n\n')}` } : output
-  }
-
-  /** Runs the stop hook; returns the text to continue with, or undefined when the turn may end. */
-  private async verifyBeforeStop(): Promise<string | undefined> {
-    const stop = this.options.hooks?.stop
-    if (!stop) return undefined
-    this.output.push({ type: 'status', status: 'verifying' })
-    const outcome = await stop((started) => this.output.push({ type: 'verification_started', ...started }))
-    for (const v of outcome?.verifications ?? []) this.output.push({ type: 'verification', ...v })
-    return outcome?.block
   }
 
   private askPermission(requestId: string, toolName: string, input: unknown, signal: AbortSignal): Promise<PermissionDecision> {

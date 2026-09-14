@@ -1,5 +1,8 @@
 import { compileTemplate } from '@relax.js/core/html'
-import { InterruptRequestedEvent, PromptSubmittedEvent, VerifyToggledEvent } from './events'
+import { AllowWritesToggledEvent, InterruptRequestedEvent, PromptSubmittedEvent } from './events'
+
+/** The composer's per-session switches; `undefined` hides a switch the session has no use for. */
+type Switches = { allowWrites: boolean | undefined }
 
 /** Prompt input. Enter sends, Shift+Enter breaks the line. */
 export class ChatComposer extends HTMLElement {
@@ -7,15 +10,17 @@ export class ChatComposer extends HTMLElement {
     <form r-submit="submit(event)">
       <textarea name="prompt" rows="3" placeholder="Ask for a change..." r-keydown="keydown(event)"></textarea>
       <div class="actions">
-        <label class="verify" if="verifyAvailable" title="Run the configured build/test commands when the model stops after editing. Leave off while still discussing the plan.">
-          <input type="checkbox" name="verify" checked="{{verify}}" r-change="toggleVerify(event)"> Verify on stop
-        </label>
+        <span class="switches">
+          <label class="allow-writes" if="allowWritesAvailable" title="Let this session write files without asking. Bash and other tools still ask; deny rules still block.">
+            <input type="checkbox" name="allowWrites" checked="{{allowWrites}}" r-change="toggleAllowWrites(event)"> Allow writes
+          </label>
+        </span>
         <button type="button" class="stop" r-click="stop()">Stop</button>
         <button type="submit" class="send">Send</button>
       </div>
     </form>
   `)
-  private verifyState: { verifyAvailable: boolean; verify: boolean } = { verifyAvailable: false, verify: false }
+  private switches: Switches = { allowWrites: undefined }
 
   connectedCallback(): void {
     if (this.childElementCount > 0) return
@@ -23,9 +28,8 @@ export class ChatComposer extends HTMLElement {
     this.render()
   }
 
-  /** `undefined` hides the toggle (no verification rules configured). */
-  setVerify(enabled: boolean | undefined): void {
-    this.verifyState = { verifyAvailable: enabled !== undefined, verify: enabled ?? false }
+  setSwitches(switches: Switches): void {
+    this.switches = switches
     this.render()
   }
 
@@ -34,8 +38,12 @@ export class ChatComposer extends HTMLElement {
   }
 
   private render(): void {
+    const { allowWrites } = this.switches
     this.template.render(
-      { ...this.verifyState },
+      {
+        allowWritesAvailable: allowWrites !== undefined,
+        allowWrites: allowWrites ?? false,
+      },
       {
         submit: (event: SubmitEvent) => {
           event.preventDefault()
@@ -48,8 +56,8 @@ export class ChatComposer extends HTMLElement {
           }
         },
         stop: () => this.dispatchEvent(new InterruptRequestedEvent()),
-        toggleVerify: (event: Event) => {
-          this.dispatchEvent(new VerifyToggledEvent((event.target as HTMLInputElement).checked))
+        toggleAllowWrites: (event: Event) => {
+          this.dispatchEvent(new AllowWritesToggledEvent((event.target as HTMLInputElement).checked))
         },
       },
     )

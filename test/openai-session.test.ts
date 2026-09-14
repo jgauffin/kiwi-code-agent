@@ -216,36 +216,6 @@ describe('OpenAiSession', () => {
     await s.dispose()
   })
 
-  it('stop_hook_can_block_the_end_of_turn_and_its_verifications_are_reported', async () => {
-    const model = new ScriptedModel(text('done?'), text('fixed'))
-    const stops: number[] = []
-    const s = new OpenAiSession({
-      id: 's1',
-      profile: { name: 'GLM', engine: 'openai-compatible', model: 'glm' },
-      cwd: process.cwd(),
-      client: model,
-      tools: [],
-      systemPrompt: 'sys',
-      hooks: {
-        async stop() {
-          stops.push(1)
-          const verification = { command: 'build', cwd: '/w', ok: stops.length > 1, output: stops.length > 1 ? '' : 'CS1002' }
-          return stops.length === 1 ? { verifications: [verification], block: 'build failed: CS1002' } : { verifications: [verification] }
-        },
-      },
-    })
-    s.send('go')
-    const events = await untilTurnDone(s)
-    expect(stops).toHaveLength(2)
-    expect(events.filter((e) => e.type === 'verification')).toEqual([
-      { type: 'verification', command: 'build', cwd: '/w', ok: false, output: 'CS1002' },
-      { type: 'verification', command: 'build', cwd: '/w', ok: true, output: '' },
-    ])
-    expect(model.requests[1]!.messages.at(-1)).toEqual({ role: 'user', content: 'build failed: CS1002' })
-    expect(events.at(-1)).toMatchObject({ type: 'turn_done', isError: false })
-    await s.dispose()
-  })
-
   it('a_writing_tool_the_pre_hook_allows_runs_without_a_permission_prompt', async () => {
     const model = new ScriptedModel(toolCall('c1', 'Danger', '{"value":"a"}'), text('ok'))
     const s = new OpenAiSession({

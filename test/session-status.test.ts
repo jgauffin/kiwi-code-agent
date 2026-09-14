@@ -39,12 +39,6 @@ describe('session status', () => {
     expect(nextStatus('needs_human', 'chat', { type: 'permission_resolved', requestId: 'r', decision: 'allow' })).toBe('implementing')
   })
 
-  it('verification_shows_as_verifying_then_returns_to_work_or_idle', () => {
-    const started: SessionEvent = { type: 'verification_started', command: 'build', cwd: '/' }
-    expect(run('chat', [started, { type: 'status', status: 'idle' }], 'implementing')).toEqual(['verifying', 'implementing'])
-    expect(run('chat', [started, turnDone()], 'implementing')).toEqual(['verifying', 'idle'])
-  })
-
   it('a_failed_turn_or_fatal_error_is_an_error_until_the_next_prompt', () => {
     expect(run('chat', [turnDone(true), { type: 'ended' }], 'implementing')).toEqual(['error', 'error'])
     expect(run('chat', [{ type: 'error', message: 'boom', fatal: true }, { type: 'user_message', text: 'retry' }], 'implementing')).toEqual([

@@ -4,5 +4,10 @@
       "match": "{src,test}/**/*.ts",
       "command": "npm run typecheck && npm test && npm run build"
     }
+  ],
+  "kiwiAgent.permissions.allow": [
+    "Write",
+    "Bash(npx vitest:*)",
+    "Bash(npx tsc:*)"
   ]
 }

@@ -19,6 +19,9 @@ export function formatRule(rule: PermissionRule): string {
   return rule.pattern === undefined ? rule.tool : `${rule.tool}(${rule.pattern})`
 }
 
+/** Tools that write a file. A write is answered per call or per session, never remembered for the project. */
+export const WRITE_TOOLS: ReadonlySet<string> = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
+
 /** Tools whose command word takes a subcommand that decides what they do. */
 const SUBCOMMAND_TOOLS = new Set(['npm', 'npx', 'pnpm', 'yarn', 'git', 'dotnet', 'cargo', 'go', 'docker', 'gh', 'az', 'kubectl'])
 
@@ -31,8 +34,9 @@ export function commandPrefix(tokens: string[]): string[] {
   return [name]
 }
 
-/** The rules "Allow for project" writes for this call. */
+/** The rules "Allow for project" writes for this call; none for a file write, which is never remembered. */
 export function projectRulesFor(toolName: string, input: unknown): string[] {
+  if (WRITE_TOOLS.has(toolName)) return []
   if (toolName !== 'Bash') return [toolName]
   const command = (input as { command?: unknown })?.command
   if (typeof command !== 'string') return [toolName]

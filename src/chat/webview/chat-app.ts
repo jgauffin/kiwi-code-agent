@@ -6,24 +6,25 @@ import { ChatTranscript } from './chat-transcript'
 import { NewSessionView } from './new-session-view'
 import { PlanBar } from './plan-bar'
 import { PlanView } from './plan-view'
-import { ReviewPanel } from './review-panel'
 import { SessionTabs } from './session-tabs'
 import {
+  AllowWritesToggledEvent,
   ImplementRequestedEvent,
   IntentUpdateRequestedEvent,
   InterruptRequestedEvent,
   NewSessionRequestedEvent,
   NewSessionViewRequestedEvent,
   PermissionDecidedEvent,
+  PlanResumeRequestedEvent,
   PlanViewSelectedEvent,
   PromptSubmittedEvent,
   ReviewActionEvent,
   SessionClosedEvent,
   SessionSelectedEvent,
   SpecApprovedEvent,
-  SpecCheckRequestedEvent,
-  SpecCheckStoppedEvent,
-  VerifyToggledEvent,
+  SpecMapRequestedEvent,
+  SpecMapStoppedEvent,
+  VerifyRequestedEvent,
   type PlanView as PlanViewName,
 } from './events'
 
@@ -36,7 +37,6 @@ export class ChatApp extends HTMLElement {
   private readonly tabs = new SessionTabs()
   private readonly planBar = new PlanBar()
   private readonly planView = new PlanView()
-  private readonly reviewPanel = new ReviewPanel()
   private readonly newSession = new NewSessionView()
   private readonly transcript = new ChatTranscript()
   private readonly composer = new ChatComposer()
@@ -52,18 +52,17 @@ export class ChatApp extends HTMLElement {
     this.planBar.hidden = true
     this.planView.className = 'plan-view'
     this.planView.hidden = true
-    this.reviewPanel.className = 'review-panel'
-    this.reviewPanel.hidden = true
     this.newSession.className = 'new-session'
     this.transcript.className = 'transcript'
     this.composer.className = 'composer'
-    this.append(this.tabs, this.planBar, this.newSession, this.planView, this.reviewPanel, this.transcript, this.composer)
+    this.append(this.tabs, this.planBar, this.newSession, this.planView, this.transcript, this.composer)
 
     this.addEventListener(SpecApprovedEvent.type, () => post({ type: 'approve_spec' }))
     this.addEventListener(ReviewActionEvent.type, (e) => post(e.action))
-    this.addEventListener(SpecCheckRequestedEvent.type, () => post({ type: 'check_spec' }))
-    this.addEventListener(SpecCheckStoppedEvent.type, () => post({ type: 'stop_check' }))
+    this.addEventListener(SpecMapRequestedEvent.type, () => post({ type: 'map_spec' }))
+    this.addEventListener(SpecMapStoppedEvent.type, () => post({ type: 'stop_map' }))
     this.addEventListener(ImplementRequestedEvent.type, () => post({ type: 'implement_spec' }))
+    this.addEventListener(VerifyRequestedEvent.type, () => post({ type: 'verify_spec' }))
     this.addEventListener(IntentUpdateRequestedEvent.type, () => post({ type: 'update_intent' }))
     this.addEventListener(PlanViewSelectedEvent.type, (e) => this.show(e.view))
 
@@ -72,13 +71,14 @@ export class ChatApp extends HTMLElement {
     this.addEventListener(PermissionDecidedEvent.type, (e) =>
       post({ type: 'permission', requestId: e.requestId, decision: e.decision }),
     )
-    this.addEventListener(VerifyToggledEvent.type, (e) => post({ type: 'set_verify', enabled: e.enabled }))
+    this.addEventListener(AllowWritesToggledEvent.type, (e) => post({ type: 'set_allow_writes', enabled: e.enabled }))
     this.addEventListener(SessionSelectedEvent.type, (e) => {
       this.showCreating(false)
       post({ type: 'switch_session', sessionId: e.sessionId })
     })
     this.addEventListener(SessionClosedEvent.type, (e) => post({ type: 'close_session', sessionId: e.sessionId }))
     this.addEventListener(NewSessionViewRequestedEvent.type, () => this.showCreating(true))
+    this.addEventListener(PlanResumeRequestedEvent.type, (e) => post({ type: 'resume_plan', feature: e.feature }))
     this.addEventListener(NewSessionRequestedEvent.type, (e) =>
       post({
         type: 'new_session',
@@ -99,10 +99,10 @@ export class ChatApp extends HTMLElement {
         this.activeSessionId = active?.id
         if (!active && !this.creating) this.showCreating(true)
         this.tabs.update(message.tabs, this.creating)
-        this.composer.setVerify(message.verify)
+        this.newSession.update(message.plans)
+        this.composer.setSwitches({ allowWrites: message.allowWrites })
         this.plan = message.plan
-        this.planView.update(this.plan?.body)
-        this.reviewPanel.update(this.plan)
+        this.planView.update(this.plan)
         this.layout()
         break
       }
@@ -154,12 +154,9 @@ export class ChatApp extends HTMLElement {
   private layout(): void {
     const plan = this.creating ? undefined : this.plan
     const planShown = this.view === 'plan' && plan?.body !== undefined
-    // The review is where comments are written, and where a closed review stays readable after approval.
-    const reviewShown = this.view === 'review' && (plan?.commentable === true || (plan?.review.rounds.length ?? 0) > 0)
     this.planView.hidden = !planShown
-    this.reviewPanel.hidden = !reviewShown
-    this.transcript.hidden = this.creating || planShown || reviewShown
-    this.planBar.update(plan, planShown ? 'plan' : reviewShown ? 'review' : 'chat')
+    this.transcript.hidden = this.creating || planShown
+    this.planBar.update(plan, planShown ? 'plan' : 'chat')
   }
 
   private showCreating(creating: boolean): void {

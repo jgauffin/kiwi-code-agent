@@ -2,13 +2,12 @@ import * as vscode from 'vscode'
 import type { SessionManager, SessionMode, SessionRecord } from '../agent/session/session-manager'
 import type { SessionStatus } from '../agent/session/session-status'
 
-const MODE_LABEL: Record<SessionMode, string> = { chat: 'Chat', plan: 'Plan', reconcile: 'Check against code', implement: 'Implement' }
+const MODE_LABEL: Record<SessionMode, string> = { chat: 'Chat', plan: 'Plan', reconcile: 'Map against code', implement: 'Implement' }
 
 const STATUS_ICON: Record<SessionStatus, { icon: string; color?: string }> = {
   idle: { icon: 'circle-outline' },
   planning: { icon: 'checklist', color: 'charts.blue' },
   implementing: { icon: 'tools', color: 'charts.blue' },
-  verifying: { icon: 'beaker', color: 'charts.yellow' },
   needs_human: { icon: 'person', color: 'charts.orange' },
   error: { icon: 'error', color: 'charts.red' },
 }

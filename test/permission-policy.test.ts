@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { isReadOnlyCommand } from '../src/agent/permissions/read-only-commands'
 import { PermissionPolicy, type PermissionRules } from '../src/agent/permissions/permission-policy'
 import { projectRulesFor, ruleLabel } from '../src/agent/permissions/permission-rules'
+import { WriteAllowance } from '../src/agent/permissions/write-allowance'
+import { composeHooks, type SessionHooks } from '../src/agent/session/hooks'
 
 const cwd = process.platform === 'win32' ? 'D:\\work\\repo' : '/work/repo'
 
@@ -24,9 +26,12 @@ describe('projectRulesFor', () => {
     expect(projectRulesFor('Bash', { command: 'rm -rf dist' })).toEqual(['Bash(rm:*)'])
   })
 
-  it('file_tools_and_other_tools_are_remembered_by_tool_for_the_whole_project', () => {
-    expect(projectRulesFor('Edit', { file_path: 'src/a.ts' })).toEqual(['Edit'])
+  it('other_tools_are_remembered_by_tool_for_the_whole_project', () => {
     expect(projectRulesFor('WebFetch', { url: 'x' })).toEqual(['WebFetch'])
+  })
+
+  it('a_file_write_is_never_remembered_for_the_project', () => {
+    for (const tool of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']) expect(projectRulesFor(tool, { file_path: 'src/a.ts' }), tool).toEqual([])
   })
 
   it('the_label_says_what_will_be_allowed', () => {
@@ -83,5 +88,25 @@ describe('PermissionPolicy', () => {
 
   it('command_substitution_always_prompts_because_the_inner_command_is_unknown', async () => {
     expect(await use(policy({ allow: ['Bash'] }), 'Bash', { command: 'echo $(ls)' })).toBeUndefined()
+  })
+})
+
+describe('WriteAllowance', () => {
+  const use = (h: SessionHooks, toolName: string, input: unknown) => h.preToolUse!({ toolName, input, toolUseId: 't' })
+
+  it('file_writes_pass_without_a_prompt_while_the_session_switch_is_on', async () => {
+    let on = false
+    const allowance = new WriteAllowance(() => on)
+    expect(await use(allowance, 'Edit', { file_path: 'src/a.ts' })).toBeUndefined()
+    on = true
+    for (const tool of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']) expect(await use(allowance, tool, { file_path: 'src/a.ts' }), tool).toEqual({ allow: true })
+    expect(await use(allowance, 'Bash', { command: 'echo hi > f' })).toBeUndefined()
+  })
+
+  it('a_deny_rule_still_blocks_a_write_the_switch_would_allow', async () => {
+    const policy = new PermissionPolicy(cwd, () => ({ allow: [], deny: ['Write(**/.env)'] }))
+    const hooks = composeHooks(policy, new WriteAllowance(() => true))
+    expect(await use(hooks, 'Write', { file_path: 'config/.env' })).toMatchObject({ deny: expect.stringContaining('Write(**/.env)') })
+    expect(await use(hooks, 'Write', { file_path: 'src/a.ts' })).toEqual({ allow: true })
   })
 })

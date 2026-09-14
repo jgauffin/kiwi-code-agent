@@ -18,7 +18,7 @@ import {
   type Review,
 } from '../src/agent/phases/plan-review'
 import { emptied, reviewPrompt, standingStrikes, submitReview, type ReviewCourier } from '../src/agent/phases/review-handoff'
-import { blindPlanPrompt, specPath } from '../src/agent/phases/blind-plan'
+import { resumePlanPrompt, blindPlanPrompt, specPath } from '../src/agent/phases/blind-plan'
 import { reconcilePrompt } from '../src/agent/phases/reconcile'
 
 const spec = `---
@@ -224,6 +224,16 @@ describe('the plan session knows what a review asks of it', () => {
     const prompt = reconcilePrompt('Order cancellation', '/work/repo')
     expect(prompt).not.toContain('review.md')
     expect(blindPlanPrompt('Order cancellation', '/work/repo')).toContain('[resolved]')
+  })
+
+  it('a_session_picking_up_a_spec_reads_the_files_reports_where_it_stands_and_leaves_an_approved_spec_alone', () => {
+    const prompt = resumePlanPrompt('Order cancellation')
+    expect(prompt).toContain('plan/order-cancellation.spec.md')
+    expect(prompt).toContain('plan/order-cancellation.review.md')
+    expect(prompt).toContain('plan/order-cancellation.intent.md')
+    expect(prompt).toContain('Do not start over')
+    expect(prompt).toContain('An approved spec is settled')
+    expect(prompt).toContain('Then stop')
   })
 })
 

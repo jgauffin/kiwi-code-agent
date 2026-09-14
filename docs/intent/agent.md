@@ -15,23 +15,39 @@ The extension only sees `CodeSession`: send a prompt, stream events, answer perm
 
 ## Shape
 
-Three phases, each a separate session with its own system prompt and tool set. Handoff is files on disk, never conversation context. Planning produces one document, the spec, approved once; reconcile is part of planning and writes its findings into that document.
+Three phases, each a separate session with its own system prompt and tool set. Handoff is files on disk, never conversation context. Planning produces the spec, approved once; mapping is part of planning and writes its findings into the spec and the tasks into a file of their own.
 
 ```
-docs/intent/**  +  work item  →  spec.md  →  spec.md + findings  →  approved spec  →  code
-                    (blind)                  (reconcile)                            (implement)
+docs/intent/**  +  work item  →  spec.md  →  spec.md + findings, tasks.md  →  approved spec  →  code  →  tests pass
+                    (blind)                  (map against code)                              (implement)  (verification)
 ```
+
+### Stages
+
+Where a feature stands is derived from its files under `plan/` and held nowhere else, so the stage and the files can never disagree. The plan view adapts to it.
+
+| stage | derived from |
+|---|---|
+| created | spec is `draft`, no review in flight, no tasks file |
+| under review | comments or strikes are being written, or the planner has yet to answer them |
+| final draft | every comment is answered; the human reads the revised spec and accepts, or comments again |
+| mapped | no open comment, `tasks.md` exists, no task marker yet; Approve is offered here, on a draft |
+| under development | approved, at least one task marker, not every task `[tested]` |
+| verification | every task `[tested]`; the test commands have yet to pass |
+| verified | every task `[tested]` and the last recorded run passed |
+
+Accepting the last open comment maps the spec against the code by itself; a spec nobody commented on is mapped from the plan bar.
 
 ## Phase 1: Blind plan
 
 Sees: feature description, domain brief (ubiquitous language, stack, constraints), `docs/intent/**`, one work item closure when ADO is connected.
 Never sees: source, descriptive docs, PRs, build output.
 
-Until ADO is connected the feature description is typed by the user or picked from `docs/intent/**`. The agent plans the user story itself; the spec's task list is the source for the ADO tasks created under the story once ADO is connected (write-back, not read-only).
+Until ADO is connected the feature description is typed by the user or picked from `docs/intent/**`. The agent plans the user story itself; the tasks file is the source for the ADO tasks created under the story once ADO is connected (write-back, not read-only).
 
 Tools: Read/Glob scoped to `docs/intent/**`, `get_work_item(id)`, AskUserQuestion, optionally WebSearch. Bash denied by bare name (allow-lists only auto-approve; a bare-name deny removes the tool from context).
 
-First a direction in chat (the decisions that shape the feature, the questions that would change them); nothing is written until the user says go. Then `plan/<feature>.spec.md`: goal and behaviour always, edge cases, tasks and open questions when the feature has them, stable item IDs. An item derived from intent cites its section (`B2 (docs/intent/orders.md#Cancellation)`); an uncited item is the planner's default. To the point, not complete: an item earns its place by changing what gets built or how it is tested. No code paths. If `docs/intent/**` has nothing on the feature, ask and stop.
+First a direction in chat (the decisions that shape the feature, the questions that would change them); nothing is written until the user says go. Then `plan/<feature>.spec.md`: goal and behaviour always, edge cases and open questions when the feature has them, stable item IDs. No tasks: written blind they would only restate the behaviours, so they come from the mapping against the code. An item derived from intent cites its section (`B2 (docs/intent/orders.md#Cancellation)`); an uncited item is the planner's default. To the point, not complete: an item earns its place by changing what gets built or how it is tested. No code paths. If `docs/intent/**` has nothing on the feature, ask and stop.
 
 ### get_work_item
 
@@ -47,9 +63,9 @@ Hand-coded, read-only, Azure DevOps. Server-side filtering is the enforcement.
 
 `docs/intent/**` is phase 1 scope. Everything else is phase 2 only. Descriptive docs drift with the code in the same direction and arrive labelled as authority.
 
-## Phase 2: Reconcile
+## Phase 2: Map against code
 
-Tools: Read, Glob, Grep, Skill; Edit and Write on the spec and its intent amendments only. Bash denied by bare name.
+Tools: Read, Glob, Grep, JsonSchema, JsonQuery, Skill; Edit and Write on the spec, its tasks file and its intent amendments only. Bash denied by bare name.
 Input: spec + context + repo. Not the phase 1 transcript, and not `docs/**`: the spec is the intent for this feature, and the citations on its items are what the check opens when it needs intent's exact words.
 
 A run, not a session: started from the plan bar, it runs under the plan session's tab with no tab or transcript of its own, only a one-line progress indicator in the plan bar and a stop. It ends when its turn ends; a re-check is a new run. Its full transcript is in the run log for inspection.
@@ -64,7 +80,14 @@ A finding is one of:
 | breakage | existing behaviour the feature would change or break, that the spec does not mention |
 | naive | the spec assumes something the code shows to be wrong; amend the spec, reason required |
 
-Output: a `Findings` table in the spec with the columns Finding and Proposed solution, each finding naming the spec item and the code it rests on, short enough to read in one sitting. The check fills the Finding column only. When the run ends with findings that have no proposal, the plan session is handed their ids and fills in Proposed solution for each: how the spec should change, or why it should stand, with the reason. The user rules on findings as on any other plan item, in the plan session, which revises the spec per ruling and marks the finding `[resolved]`; the spec is approved once. No separate plan document, no file list: phase 3 finds its files itself.
+Output, two files. A `Findings` table in the spec with the columns Finding and Proposed solution, each finding naming the spec item and the code it rests on, short enough to read in one sitting. The run fills the Finding column only. When the run ends with findings that have no proposal, the plan session is handed their ids and fills in Proposed solution for each: how the spec should change, or why it should stand, with the reason. The user rules on findings as on any other plan item, in the plan session, which revises the spec per ruling and marks the finding `[resolved]`; the spec is approved once.
+
+And `plan/<feature>.tasks.md`: one task per unit of work, the spec items it delivers in parentheses, the files it touches on an indented `files:` line (existing paths; `(new)` for ones to create). Task ids are stable across re-runs: a re-run keeps, updates or marks `[removed]`, never renumbers. No task is written under a finding the user has not ruled on.
+
+```markdown
+- T1 (B1, E2): add the cancel command
+  - files: src/orders/cancel.ts, src/orders/cancel.test.ts (new)
+```
 
 Authority order is fixed in the prompt: work item, then intent doc, then code. Amendments (`naive`) and contradictions ruled in the spec's favour are written back to `docs/intent/**` or the work item as an explicit output, so intent does not rot.
 
@@ -101,11 +124,14 @@ A sub-session the planner calls with `retrieve(question, known, budget)` to keep
 
 ## Phase 3: Implement
 
-Tools: Read, Write, Edit, Glob, Grep, Bash. Input is the approved spec only, fresh session started from the plan bar; refuses to start on `status: draft`. Breakage findings the user chose to fix are work items alongside the spec's tasks. Writes go through the ordinary permission prompt; no scope guard.
+Tools: Read, Write, Edit, Glob, Grep, JsonSchema, JsonQuery, Bash. Input is the approved spec and its tasks file, fresh session started from the plan bar; refuses to start on `status: draft` or without a tasks file. Breakage findings the user chose to fix are work with the task they touch. Writes go through the ordinary permission prompt; no scope guard.
 
-- Task state is the spec: the implementer appends `[done]` or `[blocked: reason]` to a task line, so item 4 of 7 survives a fresh session and shows in the plan view.
-- Verification on stop through the `kiwiAgent.verify` rules, switchable per session, with the failure budget from settings.
-- Done when the tests for the behaviours pass, not when the model stops.
+- Task state is the tasks file: the implementer appends `[in progress]` when it starts a task, `[done]` when the code is written, `[tested]` when the tests for it pass, `[blocked: reason]` when it cannot finish, so task 4 of 7 survives a fresh session and shows in the plan view. The task's `files:` line is kept true to what was touched.
+- Only `[tested]` is a finish. A board whose every task is tested goes to verification; the plan bar stops offering Implement, since a second session would re-read the code and decide for itself what to redo. `[blocked: reason]` is unfinished work, so it still takes a fresh session. The state is derived from the markers, not a `status` of its own: adding a task to a finished board makes it unfinished again with nothing to reset, and the two can never disagree.
+
+## Verification
+
+Mechanical, no model: once every task is `[tested]`, the extension runs the `kiwiAgent.verify` rules over the files the tasks name. A rule is a file glob, a project marker and a command (`**/*.cs` with `*.csproj` runs `dotnet test` in that project; `src/**/*.ts` with `package.json` runs `npm test` there), so a feature that touched only the backend runs only the backend's tests, and a repo with a backend and a frontend bundle runs each once. The outcome is recorded under `## Verification` in the tasks file, newest first; the output tail goes to the run log. A failure is handed to the implement session (the live one for the feature, or a fresh one) with the command and its output; the run repeats when the board is all tested again, up to `kiwiAgent.verifyFailureBudget` consecutive failures, after which the failed record stays for the user. Verify again is offered from the plan bar.
 
 Parked: build scoped to the project owning the edited file; read-before-edit staleness enforced in a hook rather than by prompt.
 

@@ -35,7 +35,7 @@ function titleFor(mode: SessionMode, feature: string | undefined): string {
     case 'plan':
       return `Plan: ${feature}`
     case 'reconcile':
-      return `Check: ${feature}`
+      return `Map: ${feature}`
     case 'implement':
       return `Implement: ${feature}`
     case 'chat':
@@ -48,6 +48,15 @@ export type EngineFactory = (record: SessionRecord) => Promise<CodeSession>
 export type SessionListener = (sessionId: string, event: SessionEvent) => void
 
 /**
+ * A last pass over an event before it is logged and shown, for what the host
+ * knows and the engine does not — the diff of a file edit, say. It runs once,
+ * so what it adds is in the run log and survives a reload.
+ */
+export type EventDecorator = (sessionId: string, event: SessionEvent) => Promise<SessionEvent>
+
+const noDecoration: EventDecorator = async (_sessionId, event) => event
+
+/**
  * Owns the list of sessions and the live engines behind them. A session is
  * started lazily on its first prompt, and continued from its engine session
  * id after the extension host restarted.
@@ -55,12 +64,15 @@ export type SessionListener = (sessionId: string, event: SessionEvent) => void
 export class SessionManager {
   private records: SessionRecord[]
   private readonly live = new Map<string, CodeSession>()
+  /** Per session, the call the user allowed after its engine had stopped; answered for them when the resumed engine asks. */
+  private readonly preapproved = new Map<string, { toolName: string; input: string }>()
 
   constructor(
     private readonly store: SessionStore,
     private readonly createEngine: EngineFactory,
     private readonly runLogFor: (sessionId: string) => RunLog,
     private readonly listener: SessionListener,
+    private readonly decorate: EventDecorator = noDecoration,
   ) {
     // Records written before modes existed are chat sessions.
     this.records = store.list().map((r) => ({ ...r, mode: r.mode ?? 'chat' }))
@@ -107,8 +119,24 @@ export class SessionManager {
     ;(await this.ensureLive(record)).send(text)
   }
 
-  respondToPermission(id: string, requestId: string, decision: PermissionDecision): void {
-    this.live.get(id)?.respondToPermission(requestId, decision)
+  /**
+   * A request the engine still holds is answered in place. One the engine let
+   * go of (it stopped with the prompt open, say over a window reload) resumes
+   * the session: the decision becomes the next user turn, and an allow is
+   * honoured once more should the resumed engine ask for the same call again.
+   */
+  async respondToPermission(id: string, requestId: string, decision: PermissionDecision): Promise<void> {
+    const live = this.live.get(id)
+    if (live) {
+      live.respondToPermission(requestId, decision)
+      return
+    }
+    const record = this.require(id)
+    const request = await this.openRequest(record, requestId)
+    if (!request) throw new Error(`Permission request ${requestId} is no longer open`)
+    await this.emit(record, { type: 'permission_resolved', requestId, decision: decision.kind })
+    if (decision.kind === 'allow') this.preapproved.set(id, { toolName: request.toolName, input: JSON.stringify(request.input) })
+    await this.send(id, decisionPrompt(request, decision))
   }
 
   async interrupt(id: string): Promise<void> {
@@ -157,7 +185,9 @@ export class SessionManager {
 
   private async pump(record: SessionRecord, session: CodeSession): Promise<void> {
     const log = this.runLogFor(record.id)
-    for await (const event of session.events()) {
+    for await (const raw of session.events()) {
+      // A decoration that fails must not cost the event itself.
+      const event = await this.decorate(record.id, raw).catch(() => raw)
       if (event.type === 'session_started' && record.engineSessionId !== event.engineSessionId) {
         record.engineSessionId = event.engineSessionId
         await this.store.save(this.records)
@@ -167,7 +197,52 @@ export class SessionManager {
         this.listener(record.id, { type: 'error', message: `Run log write failed: ${message}`, fatal: false })
       })
       this.listener(record.id, event)
+      this.answerPreapproved(record.id, session, event)
     }
     if (this.live.get(record.id) === session) this.live.delete(record.id)
+  }
+
+  /** The allow given after a restart covers one call, in the turn it resumed; anything else is the user's to decide. */
+  private answerPreapproved(id: string, session: CodeSession, event: SessionEvent): void {
+    const approved = this.preapproved.get(id)
+    if (!approved) return
+    if (event.type === 'turn_done' || event.type === 'ended') {
+      this.preapproved.delete(id)
+      return
+    }
+    if (event.type !== 'permission_request') return
+    if (event.toolName !== approved.toolName || JSON.stringify(event.input) !== approved.input) return
+    this.preapproved.delete(id)
+    session.respondToPermission(event.requestId, { kind: 'allow' })
+  }
+
+  /** An event of the session's own, outside its engine: logged and shown like the engine's. */
+  private async emit(record: SessionRecord, event: SessionEvent): Promise<void> {
+    await this.runLogFor(record.id).append(event)
+    this.listener(record.id, event)
+  }
+
+  /** The request as logged, if nothing has decided it since. */
+  private async openRequest(record: SessionRecord, requestId: string): Promise<PermissionRequest | undefined> {
+    let request: PermissionRequest | undefined
+    for (const event of await this.transcript(record.id)) {
+      if (event.type === 'permission_request' && event.requestId === requestId) request = event
+      if (event.type === 'permission_resolved' && event.requestId === requestId) request = undefined
+    }
+    return request
+  }
+}
+
+type PermissionRequest = Extract<SessionEvent, { type: 'permission_request' }>
+
+/** The decision as the model hears it once the engine that asked is gone: the call is named in full so nothing rests on what the resumed engine remembers. */
+export function decisionPrompt(request: PermissionRequest, decision: PermissionDecision): string {
+  const call = `the \`${request.toolName}\` call you proposed`
+  const input = `\`\`\`json\n${JSON.stringify(request.input, null, 2)}\n\`\`\``
+  switch (decision.kind) {
+    case 'allow':
+      return `Go ahead with ${call}; it is allowed.\n\n${input}`
+    case 'deny':
+      return `Do not make ${call}; it is denied${decision.message ? `: ${decision.message}` : ''}.\n\n${input}`
   }
 }

@@ -1,0 +1,5 @@
+{"id":1,"level":"info","ms":12,"message":"started"}
+
+{"id":2,"level":"error","ms":340,"message":"disk full"}
+{"id":3,"level":"info","ms":7,"message":"ok"}
+{"id":4,"level":"error","ms":90,"message":"retry"}

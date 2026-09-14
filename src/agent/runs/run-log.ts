@@ -15,7 +15,8 @@ export type RunLogEntry = { at: string; event: SessionEvent }
 export class RunLog {
   private chain: Promise<void> = Promise.resolve()
 
-  constructor(private readonly dir: string) {}
+  /** The session's run directory; what belongs to this run and not to the workspace lives here. */
+  constructor(readonly dir: string) {}
 
   static forSession(workspaceRoot: string, sessionId: string): RunLog {
     return new RunLog(join(workspaceRoot, '.agent', 'runs', sessionId))
