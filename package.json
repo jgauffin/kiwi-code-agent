@@ -1,0 +1,148 @@
+{
+  "name": "kiwi-agent",
+  "displayName": "KiwiAgent",
+  "description": "Coding sessions in VS Code with a choice of model engine per session.",
+  "version": "0.0.1",
+  "publisher": "coderr",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.104.0",
+    "node": ">=22.0.0"
+  },
+  "categories": [
+    "AI",
+    "Chat"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "kiwiAgent",
+          "title": "KiwiAgent",
+          "icon": "$(hubot)"
+        }
+      ]
+    },
+    "views": {
+      "kiwiAgent": [
+        {
+          "type": "webview",
+          "id": "kiwiAgent.chat",
+          "name": "Sessions"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "kiwiAgent.openChat",
+        "title": "KiwiAgent: Open in Editor"
+      },
+      {
+        "command": "kiwiAgent.setApiKey",
+        "title": "KiwiAgent: Set API Key for Profile"
+      }
+    ],
+    "configuration": {
+      "title": "KiwiAgent",
+      "properties": {
+        "kiwiAgent.nodePath": {
+          "type": "string",
+          "default": "",
+          "description": "Node executable used to run the Claude engine. Empty: VS Code's own executable in Node mode."
+        },
+        "kiwiAgent.profiles": {
+          "type": "array",
+          "description": "Model profiles selectable per session.",
+          "default": [
+            {
+              "name": "Claude",
+              "engine": "claude-sdk",
+              "model": "opus"
+            },
+            {
+              "name": "GLM-5.3-Flash (Berget)",
+              "engine": "openai-compatible",
+              "model": "zai-org/GLM-5.3-Flash",
+              "baseUrl": "https://api.berget.ai/v1",
+              "apiKeySecret": "berget"
+            },
+            {
+              "name": "Kimi K3 (Berget)",
+              "engine": "openai-compatible",
+              "model": "moonshotai/Kimi-K3",
+              "baseUrl": "https://api.berget.ai/v1",
+              "apiKeySecret": "berget"
+            }
+          ],
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "engine",
+              "model"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "engine": {
+                "type": "string",
+                "enum": [
+                  "claude-sdk",
+                  "openai-compatible"
+                ]
+              },
+              "model": {
+                "type": "string"
+              },
+              "baseUrl": {
+                "type": "string"
+              },
+              "apiKeySecret": {
+                "type": "string",
+                "description": "Name under which the API key is stored in VS Code secret storage."
+              },
+              "effort": {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ]
+              },
+              "systemPromptFile": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "package": "npm run typecheck && npm run build && vsce package --no-dependencies"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.2.112",
+    "@anthropic-ai/sdk": "^0.81.0",
+    "@relax.js/core": "^1.8.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.104.0",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.9.0",
+    "vitest": "^5.0.0"
+  }
+}
