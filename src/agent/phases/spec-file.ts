@@ -2,7 +2,8 @@ import { readFile, writeFile } from 'node:fs/promises'
 
 export type SpecStatus = 'draft' | 'approved'
 
-export type SpecState = { exists: false } | { exists: true; status: SpecStatus }
+/** `body` is the markdown after the front matter, what a reader should see. */
+export type SpecState = { exists: false } | { exists: true; status: SpecStatus; body: string }
 
 const FRONT_MATTER = /^---\r?\n([\s\S]*?)\r?\n---(\r?\n|$)/
 
@@ -19,7 +20,11 @@ export async function readSpecState(path: string): Promise<SpecState> {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { exists: false }
     throw error
   }
-  return { exists: true, status: statusOf(text) }
+  return { exists: true, status: statusOf(text), body: bodyOf(text) }
+}
+
+export function bodyOf(text: string): string {
+  return text.replace(FRONT_MATTER, '').replace(/^\s+/, '')
 }
 
 export function statusOf(text: string): SpecStatus {

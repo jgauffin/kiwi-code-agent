@@ -1,27 +1,28 @@
-// Links this repo into VS Code's extensions folder so the built extension
-// loads from here. After `npm run build`, "Developer: Reload Window" picks
-// up the new dist. Run once; `--unlink` removes the link.
-import { existsSync, lstatSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
+// Makes VS Code load the extension straight from this repo. VS Code only
+// loads extensions it installed itself, so: package, install the .vsix so
+// it gets registered, then replace the installed folder with a junction to
+// the repo. After `npm run build`, "Developer: Reload Window" picks up the
+// new dist. `--unlink` uninstalls.
+import { execSync } from 'node:child_process'
+import { existsSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
-const repo = resolve(new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'))
-const linkPath = join(homedir(), '.vscode', 'extensions', `${pkg.publisher}.${pkg.name}-dev`)
+const repo = fileURLToPath(new URL('..', import.meta.url)).replace(/[\\/]$/, '')
+const pkg = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8'))
+const id = `${pkg.publisher}.${pkg.name}`
+const installed = join(homedir(), '.vscode', 'extensions', `${id}-${pkg.version}`)
+const vsix = join(repo, `${pkg.name}-${pkg.version}.vsix`)
+const run = (cmd) => execSync(cmd, { stdio: 'inherit', shell: true })
 
 if (process.argv.includes('--unlink')) {
-  if (existsSync(linkPath)) rmSync(linkPath, { recursive: false, force: true })
-  console.log(`removed ${linkPath}`)
+  run(`code --uninstall-extension ${id}`)
   process.exit(0)
 }
 
-if (existsSync(linkPath)) {
-  const stat = lstatSync(linkPath)
-  if (!stat.isSymbolicLink() && !stat.isDirectory()) throw new Error(`${linkPath} exists and is not a link`)
-  console.log(`already linked: ${linkPath}`)
-} else {
-  symlinkSync(repo, linkPath, 'junction')
-  console.log(`linked ${linkPath} -> ${repo}`)
-}
-console.log(`If a packaged copy is installed, remove it first: code --uninstall-extension ${pkg.publisher}.${pkg.name}`)
-console.log('Then reload VS Code.')
+if (!existsSync(vsix)) run('npm run package')
+run(`code --install-extension "${vsix}"`)
+rmSync(installed, { recursive: true, force: true })
+symlinkSync(repo, installed, 'junction')
+console.log(`\n${installed} -> ${repo}\nReload VS Code once (Developer: Reload Window).`)

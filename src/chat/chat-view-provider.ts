@@ -3,16 +3,45 @@ import type { SessionManager, SessionMode, SessionRecord } from '../agent/sessio
 import type { ModelProfile } from '../agent/session/model-profile'
 import type { SessionEvent } from '../agent/session/code-session'
 import { nextStatus, type SessionStatus } from '../agent/session/session-status'
-import { readSpecState, setSpecStatus } from '../agent/phases/spec-file'
-import { specPath } from '../agent/phases/blind-plan'
-import { relative } from 'node:path'
-import type { FromWebview, PlanState, SessionTab, ToWebview } from './protocol'
+import { readSpecState, setSpecStatus, type SpecState } from '../agent/phases/spec-file'
+import { PLAN_DIR, featureSlug, findingsHandoffPrompt, specPath } from '../agent/phases/blind-plan'
+import { RECONCILE_KICKOFF, openFindings, progressLine } from '../agent/phases/reconcile'
+import { IMPLEMENT_KICKOFF, assertImplementable } from '../agent/phases/implement'
+import {
+  acceptResolution,
+  addComment,
+  assertApprovable,
+  assertCommentable,
+  editComment,
+  emptyReview,
+  findItem,
+  isCommentable,
+  openComments,
+  planItems,
+  readReview,
+  removeComment,
+  reviewPath,
+  strikeItem,
+  unstrikeItem,
+  writeReview,
+  type Review,
+} from '../agent/phases/plan-review'
+import { submitReview, type ReviewCourier } from '../agent/phases/review-handoff'
+import { assertAmendable, intentPath, pending, readAmendments, writeBackIntent } from '../agent/phases/intent-writeback'
+import { mkdir } from 'node:fs/promises'
+import { dirname, join, relative } from 'node:path'
+import type { CheckState, FromWebview, PlanState, SessionTab, ToWebview } from './protocol'
 
 /** Per-session verify-on-stop switch; `available` is false when no rules are configured. */
 export interface VerifyControl {
   readonly available: boolean
   isEnabled(sessionId: string): boolean
   setEnabled(sessionId: string, enabled: boolean): void
+}
+
+/** Where "Allow for project" writes its rules: the workspace's permission allow list. */
+export interface PermissionStore {
+  allowForProject(rules: string[]): Promise<void>
 }
 
 /**
@@ -23,6 +52,8 @@ export interface VerifyControl {
 export class ChatViewProvider implements vscode.WebviewViewProvider {
   private readonly webviews = new Set<vscode.Webview>()
   private readonly statuses = new Map<string, SessionStatus>()
+  /** The check under each plan session, by the plan session's id: the current step, or how the last run ended. */
+  private readonly checks = new Map<string, CheckState>()
   private readonly changed = new vscode.EventEmitter<void>()
   /** Fires when the active session, a status or the session list changed. */
   readonly onDidChange = this.changed.event
@@ -33,6 +64,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     private readonly sessions: SessionManager,
     private readonly profileFor: (mode: SessionMode) => ModelProfile,
     private readonly verify: VerifyControl,
+    private readonly permissions: PermissionStore,
     private readonly workspaceRoot: string,
     private readonly memento: vscode.Memento,
   ) {
@@ -50,8 +82,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     void this.memento.update('activeSessionId', id)
   }
 
+  /** A session's status, or its running check's: the check has no tab, so its state shows on the plan's. */
   statusOf(sessionId: string): SessionStatus {
-    return this.statuses.get(sessionId) ?? 'idle'
+    const child = this.sessions.liveChildOf(sessionId)
+    return this.statuses.get(child?.id ?? sessionId) ?? 'idle'
   }
 
   resolveWebviewView(view: vscode.WebviewView): void {
@@ -68,7 +102,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   async newSession(mode: SessionMode, feature?: string, prompt?: string): Promise<void> {
-    if (mode === 'plan' && !feature) throw new Error('A plan session needs a feature name')
+    if (mode !== 'chat' && !feature) throw new Error(`A ${mode} session needs a feature name`)
     const record = await this.sessions.create(this.profileFor(mode), mode, feature)
     this.setActive(record.id)
     await this.sendState()
@@ -116,13 +150,62 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this.changed.fire()
       }
     }
+    if (record?.parentId) {
+      this.followCheck(record, event)
+      return
+    }
     if (sessionId === this.activeSessionId) this.broadcast({ type: 'event', sessionId, event })
     if (event.type === 'session_started' || event.type === 'ended') {
       void this.sendState()
       this.changed.fire()
     }
-    // The planner just wrote or rewrote the spec; the approval bar must follow.
-    if (event.type === 'tool_result' && record?.mode === 'plan' && sessionId === this.activeSessionId) void this.sendState()
+    // The session just wrote the spec (a revision, findings, a task marker); the plan bar and view must follow.
+    if (event.type === 'tool_result' && record?.feature && sessionId === this.activeSessionId) void this.sendState()
+  }
+
+  /** A check has no transcript in the UI: its events become the one line the plan bar shows. */
+  private followCheck(child: SessionRecord, event: SessionEvent): void {
+    const parentId = child.parentId!
+    const check = this.checks.get(parentId)
+    if (!check?.live) return
+    if (event.type === 'turn_done') {
+      void this.finishCheck(child, event.isError ? (event.errors.length > 0 ? event.errors : ['the run ended with an error']) : [])
+      return
+    }
+    if (event.type === 'error' && event.fatal) {
+      void this.finishCheck(child, [event.message])
+      return
+    }
+    const line = progressLine(event)
+    if (line === undefined || line === check.text) return
+    this.checks.set(parentId, { live: true, text: line })
+    void this.sendState()
+  }
+
+  /**
+   * The run is over: stop its engine, count what it left in the spec and, when
+   * there are findings without a proposal, hand them to the planner to propose on.
+   */
+  private async finishCheck(child: SessionRecord, errors: string[]): Promise<void> {
+    const parentId = child.parentId!
+    // Marked over before the first await, so a late event from the dying engine cannot finish it twice.
+    this.checks.set(parentId, { live: false, text: this.checks.get(parentId)?.text ?? '' })
+    await this.sessions.close(child.id)
+    let text: string
+    if (errors.length > 0) {
+      text = `Check failed: ${errors.join('; ')}`
+    } else {
+      const state = await readSpecState(specPath(this.workspaceRoot, child.feature!))
+      const open = state.exists ? openFindings(state.body) : []
+      text = open.length === 0 ? 'Checked: the code is clear' : `Checked: ${open.length} finding${open.length === 1 ? '' : 's'}`
+      const unproposed = open.filter((f) => f.proposal.length === 0).map((f) => f.id)
+      if (unproposed.length > 0 && this.sessions.get(parentId)) {
+        await this.sessions.send(parentId, findingsHandoffPrompt(child.feature!, unproposed))
+      }
+    }
+    this.checks.set(parentId, { live: false, text })
+    await this.sendState()
+    this.changed.fire()
   }
 
   private attach(webview: vscode.Webview): void {
@@ -147,9 +230,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         if (!this.activeSessionId) await this.newSession('chat')
         await this.sessions.send(this.activeSessionId!, message.text)
         return
-      case 'permission':
-        if (this.activeSessionId) this.sessions.respondToPermission(this.activeSessionId, message.requestId, message.decision)
+      case 'permission': {
+        if (!this.activeSessionId) return
+        // The rule is written before the call runs, so a second identical call in the same turn already passes.
+        if (message.decision.kind === 'allow_project') await this.permissions.allowForProject(message.decision.rules)
+        const decision = message.decision.kind === 'allow_project' ? { kind: 'allow' as const } : message.decision
+        this.sessions.respondToPermission(this.activeSessionId, message.requestId, decision)
         return
+      }
       case 'interrupt':
         if (this.activeSessionId) await this.sessions.interrupt(this.activeSessionId)
         return
@@ -168,39 +256,189 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         return
       case 'approve_spec': {
         const path = this.activeSpecPath()
-        if (!path) return
+        const feature = this.activeRecord()?.feature
+        if (!path || !feature) return
+        // Agreement is reached, not assumed: every comment has to be closed first.
+        assertApprovable(await readReview(reviewPath(this.workspaceRoot, feature)))
         await setSpecStatus(path, 'approved')
         await this.sendState()
         return
       }
-      case 'open_spec': {
+      case 'add_comment':
+        await this.reviewing(async (review, state) => {
+          const item = message.target === 'plan' ? undefined : findItem(state.exists ? state.body : '', message.target)
+          addComment(review, message.target, message.text, item ? `${item.id}: ${item.text}` : undefined)
+        })
+        return
+      case 'edit_comment':
+        await this.reviewing((review) => editComment(review, message.commentId, message.text))
+        return
+      case 'remove_comment':
+        await this.reviewing((review) => removeComment(review, message.commentId))
+        return
+      case 'strike_item':
+        await this.reviewing((review) => strikeItem(review, message.itemId))
+        return
+      case 'unstrike_item':
+        await this.reviewing((review) => unstrikeItem(review, message.itemId))
+        return
+      case 'accept_resolution':
+        // Accepting a resolution, including a disagreement, is the human's own act; it needs no draft.
+        await this.reviewing((review) => acceptResolution(review, message.commentId), false)
+        return
+      case 'submit_review': {
+        const record = this.activeRecord()
+        if (!record?.feature) return
+        await submitReview({
+          courier: this.courier(),
+          cwd: this.workspaceRoot,
+          feature: record.feature,
+          owner: { sessionId: record.id },
+        })
+        await this.sendState()
+        return
+      }
+      case 'check_spec': {
+        const record = this.activeRecord()
+        if (record?.mode !== 'plan' || !record.feature || this.sessions.liveChildOf(record.id)) return
+        const child = await this.sessions.create(this.profileFor('reconcile'), 'reconcile', record.feature, record.id)
+        this.checks.set(record.id, { live: true, text: 'Checking the spec against the code…' })
+        await this.sendState()
+        await this.sessions.send(child.id, RECONCILE_KICKOFF)
+        return
+      }
+      case 'stop_check': {
+        const record = this.activeRecord()
+        const child = record ? this.sessions.liveChildOf(record.id) : undefined
+        if (!record || !child) return
+        this.checks.set(record.id, { live: false, text: 'Check stopped' })
+        await this.sessions.close(child.id)
+        await this.sendState()
+        this.changed.fire()
+        return
+      }
+      case 'implement_spec': {
+        const record = this.activeRecord()
         const path = this.activeSpecPath()
-        if (path) await vscode.window.showTextDocument(vscode.Uri.file(path), { preview: false })
+        if (record?.mode !== 'plan' || !record.feature || !path) return
+        assertImplementable(await readSpecState(path))
+        await this.newSession('implement', record.feature, IMPLEMENT_KICKOFF)
+        return
+      }
+      case 'update_intent': {
+        const feature = this.activeRecord()?.feature
+        const path = this.activeSpecPath()
+        if (!feature || !path) return
+        assertAmendable(await readSpecState(path))
+        const result = await writeBackIntent({ cwd: this.workspaceRoot, feature })
+        await this.sendState()
+        await this.reportWriteBack(result.docs, result.failed)
         return
       }
     }
   }
 
+  /** What landed in `docs/` and what did not: the user is applying these, so nothing happens silently. */
+  private async reportWriteBack(
+    docs: string[],
+    failed: { amendment: { id: string }; reason: string }[],
+  ): Promise<void> {
+    if (failed.length > 0) {
+      const detail = failed.map((f) => `${f.amendment.id}: ${f.reason}`).join('; ')
+      void vscode.window.showWarningMessage(
+        `KiwiAgent: ${docs.length > 0 ? `updated ${docs.join(', ')}. ` : ''}${failed.length} amendment${failed.length === 1 ? '' : 's'} could not be applied — ${detail}`,
+      )
+      return
+    }
+    if (docs.length === 0) {
+      void vscode.window.showInformationMessage('KiwiAgent: no intent amendments are waiting to be applied.')
+      return
+    }
+    const open = 'Open'
+    const choice = await vscode.window.showInformationMessage(`KiwiAgent: intent updated in ${docs.join(', ')}.`, open)
+    if (choice !== open) return
+    const file = vscode.Uri.file(join(this.workspaceRoot, docs[0]!))
+    await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file))
+  }
+
+  private activeRecord(): SessionRecord | undefined {
+    return this.activeSessionId ? this.sessions.get(this.activeSessionId) : undefined
+  }
+
   private activeSpecPath(): string | undefined {
-    const record = this.activeSessionId ? this.sessions.get(this.activeSessionId) : undefined
-    return record?.mode === 'plan' && record.feature ? specPath(this.workspaceRoot, record.feature) : undefined
+    const feature = this.activeRecord()?.feature
+    return feature ? specPath(this.workspaceRoot, feature) : undefined
+  }
+
+  /**
+   * One review edit: read the plan and the review from disk, change the
+   * review, write it back. The file is the only state, so a reload loses
+   * nothing and the agent sees the same thing the human does.
+   */
+  private async reviewing(change: (review: Review, state: SpecState) => void, draftOnly = true): Promise<void> {
+    const feature = this.activeRecord()?.feature
+    const path = this.activeSpecPath()
+    if (!feature || !path) return
+    const state = await readSpecState(path)
+    if (draftOnly) assertCommentable(state)
+    const file = reviewPath(this.workspaceRoot, feature)
+    const review = await readReview(file)
+    change(review, state)
+    await mkdir(dirname(file), { recursive: true })
+    await writeReview(file, review, `${PLAN_DIR}/${featureSlug(feature)}.spec.md`)
+    await this.sendState()
+  }
+
+  /** A submitted review goes to the plan session that wrote the spec, or a fresh plan session when it is gone. */
+  private courier(): ReviewCourier {
+    return {
+      isLive: (sessionId) => this.sessions.isLive(sessionId),
+      send: (sessionId, text) => this.sessions.send(sessionId, text),
+      start: (feature, prompt) => this.newSession('plan', feature, prompt),
+    }
   }
 
   private async planState(): Promise<PlanState | undefined> {
     const path = this.activeSpecPath()
-    if (!path) return undefined
+    const record = this.activeRecord()
+    const feature = record?.feature
+    if (!path || !record || !feature) return undefined
     const state = await readSpecState(path)
+    const fromPlan = record.mode === 'plan' && state.exists
+    const check = this.checks.get(record.id)
+    const review = await readReview(reviewPath(this.workspaceRoot, feature)).catch(() => emptyReview())
+    const amendments = await readAmendments(intentPath(this.workspaceRoot, feature)).catch(() => [])
+    const waiting = pending(amendments).length
     return {
       specPath: relative(this.workspaceRoot, path).split('\\').join('/'),
       status: state.exists ? state.status : 'missing',
+      ...(state.exists ? { body: state.body } : {}),
+      checkable: fromPlan && state.status === 'draft' && check?.live !== true,
+      ...(check ? { check } : {}),
+      implementable: fromPlan && state.status === 'approved',
+      items: state.exists ? planItems(state.body) : [],
+      review,
+      commentable: isCommentable(state),
+      approvable: openComments(review).length === 0,
+      ...(amendments.length > 0
+        ? {
+            intent: {
+              path: relative(this.workspaceRoot, intentPath(this.workspaceRoot, feature)).split('\\').join('/'),
+              pending: waiting,
+              applied: amendments.length - waiting,
+              // Offered after approval, and still offered once the feature is built: intent owes the same debt either way.
+              applicable: state.exists && state.status === 'approved' && waiting > 0,
+            },
+          }
+        : {}),
     }
   }
 
-  /** Tabs: live sessions plus the active one, in creation order (list is newest first). */
+  /** Tabs: live sessions plus the active one, in creation order (list is newest first). A run under a session has no tab. */
   private tabs(): SessionTab[] {
     return this.sessions
       .list()
-      .filter((r) => this.sessions.isLive(r.id) || r.id === this.activeSessionId)
+      .filter((r) => !r.parentId && (this.sessions.isLive(r.id) || r.id === this.activeSessionId))
       .reverse()
       .map((r) => this.tab(r))
   }

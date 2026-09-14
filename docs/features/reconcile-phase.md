@@ -1,16 +1,13 @@
 # Reconcile phase
 
-A session mode that compares an approved spec with the code and rules on every disagreement.
+A check of a draft spec against the code, run under the plan session from the plan bar.
 
-- Starts from a plan session's spec; refuses a spec whose `status` is not `approved`.
-- Tools: Read, Glob, Grep over the whole workspace; writes only `plan/<feature>.plan.md`.
-- Input is the spec and the repo. It never sees the plan session's transcript.
-- Output `plan/<feature>.plan.md` with front-matter `feature`, `spec`, `status: draft`, and one verdict per spec item, keyed by the spec's stable ids: `matches`, `drifted` (code is wrong, correct it), `naive` (spec is wrong, reason required), `conflict` (sources disagree, human decides).
-- Authority order fixed in the prompt: work item, then intent docs, then code. Code is the presumed-wrong party.
-- Every `drifted` verdict becomes a work item in the plan alongside the feature's tasks, with the files it concerns.
-- `naive` verdicts are listed under an Amendments section as concrete spec changes, for the human to apply or reject; the phase never edits the spec.
-- The plan bar shows the plan's status with Open and Approve; approval sets `status: approved`.
-- Session status while working is `planning`; a finished turn is `needs_human`.
-- Verdict counts per kind are shown in the transcript summary line.
+- Runs as a child of the plan session: no tab, no transcript in the chat. The plan bar shows one line (the current tool call or message) and a Stop; afterwards `Checked: N findings`, `Checked: the code is clear` or the error, until the next check.
+- Tools: Read, Glob, Grep, Skill over the whole workspace; Edit/Write on `plan/<feature>.spec.md` and `plan/<feature>.intent.md` only.
+- Input is the spec and the repo. It never sees the plan session's transcript and does not browse `docs/**`: the spec is the intent, and an item's citation (`B2 (docs/intent/orders.md#Cancellation)`) is what it opens to quote intent in a contradiction.
+- Output: a `## Findings` table in the spec with the columns Finding and Proposed solution. A finding is a `contradiction` (code says otherwise, human decides), a `breakage` (existing behaviour the feature changes, unmentioned) or `naive` (the spec assumes something the code disproves). Ids are stable; a re-run appends `[resolved]` to findings that no longer hold.
+- `naive` findings, and contradictions ruled in the spec's favour, are recorded as intent amendments in `plan/<feature>.intent.md` for the human to apply.
+- When the run ends with findings that have no proposal, the plan session is told their ids and fills in Proposed solution for each; it changes no item until the user rules. Rulings go through the review (comments and strikes on F-ids) or chat, to the plan session.
+- The plan tab's status is the check's while it runs; the Sessions view does not list the check.
 
-Not included: applying amendments automatically, ADO write-back, retrieval sub-sessions.
+Not included: permission prompts from a check (reads are auto-allowed, in-scope writes pass the guard), retrieval sub-sessions.

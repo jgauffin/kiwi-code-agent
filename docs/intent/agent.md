@@ -15,11 +15,11 @@ The extension only sees `CodeSession`: send a prompt, stream events, answer perm
 
 ## Shape
 
-Three phases, each a separate session with its own system prompt and tool set. Handoff is files on disk, never conversation context.
+Three phases, each a separate session with its own system prompt and tool set. Handoff is files on disk, never conversation context. Planning produces one document, the spec, approved once; reconcile is part of planning and writes its findings into that document.
 
 ```
-docs/intent/**  +  work item  →  spec.md  →  plan.md  →  code
-                    (blind)      (reconcile)   (implement)
+docs/intent/**  +  work item  →  spec.md  →  spec.md + findings  →  approved spec  →  code
+                    (blind)                  (reconcile)                            (implement)
 ```
 
 ## Phase 1: Blind plan
@@ -31,7 +31,7 @@ Until ADO is connected the feature description is typed by the user or picked fr
 
 Tools: Read/Glob scoped to `docs/intent/**`, `get_work_item(id)`, AskUserQuestion, optionally WebSearch. Bash denied by bare name (allow-lists only auto-approve; a bare-name deny removes the tool from context).
 
-Output `plan/<feature>.spec.md`: behaviour, invariants, edge cases, acceptance criteria with stable item IDs. No file paths. If `docs/intent/**` has nothing on the feature, output questions and stop.
+First a direction in chat (the decisions that shape the feature, the questions that would change them); nothing is written until the user says go. Then `plan/<feature>.spec.md`: goal and behaviour always, edge cases, tasks and open questions when the feature has them, stable item IDs. An item derived from intent cites its section (`B2 (docs/intent/orders.md#Cancellation)`); an uncited item is the planner's default. To the point, not complete: an item earns its place by changing what gets built or how it is tested. No code paths. If `docs/intent/**` has nothing on the feature, ask and stop.
 
 ### get_work_item
 
@@ -49,19 +49,42 @@ Hand-coded, read-only, Azure DevOps. Server-side filtering is the enforcement.
 
 ## Phase 2: Reconcile
 
-Tools: Read, Glob, Grep. Edit/Write/Bash denied by bare name.
-Input: spec + context + repo. Not the phase 1 transcript.
+Tools: Read, Glob, Grep, Skill; Edit and Write on the spec and its intent amendments only. Bash denied by bare name.
+Input: spec + context + repo. Not the phase 1 transcript, and not `docs/**`: the spec is the intent for this feature, and the citations on its items are what the check opens when it needs intent's exact words.
 
-Output `plan/<feature>.plan.md`, front-matter `status: draft|approved`, one verdict per spec item:
+A run, not a session: started from the plan bar, it runs under the plan session's tab with no tab or transcript of its own, only a one-line progress indicator in the plan bar and a stop. It ends when its turn ends; a re-check is a new run. Its full transcript is in the run log for inspection.
 
-| verdict | meaning |
+The job is to find what stands in the feature's way before implementation starts, not to grade the spec. Only findings are reported; a spec item the code accommodates without incident is not mentioned. An empty list is a valid result.
+
+A finding is one of:
+
+| finding | meaning |
 |---|---|
-| matches | nothing to do |
-| drifted | correct the code |
-| naive | amend spec, reason required |
-| conflict | sources disagree, human decides |
+| contradiction | a business rule in the code says otherwise; human decides which side is right |
+| breakage | existing behaviour the feature would change or break, that the spec does not mention |
+| naive | the spec assumes something the code shows to be wrong; amend the spec, reason required |
 
-Authority order is fixed in the prompt: work item, then intent doc, then code. Amendments (`naive`) and drift findings are written back to `docs/intent/**` or the work item as an explicit output, so intent does not rot.
+Output: a `Findings` table in the spec with the columns Finding and Proposed solution, each finding naming the spec item and the code it rests on, short enough to read in one sitting. The check fills the Finding column only. When the run ends with findings that have no proposal, the plan session is handed their ids and fills in Proposed solution for each: how the spec should change, or why it should stand, with the reason. The user rules on findings as on any other plan item, in the plan session, which revises the spec per ruling and marks the finding `[resolved]`; the spec is approved once. No separate plan document, no file list: phase 3 finds its files itself.
+
+Authority order is fixed in the prompt: work item, then intent doc, then code. Amendments (`naive`) and contradictions ruled in the spec's favour are written back to `docs/intent/**` or the work item as an explicit output, so intent does not rot.
+
+### Intent write-back
+
+Phase 1 is blind: it reads `docs/**` and nothing else. A ruling that lives only in a spec is therefore invisible to the next feature's planner, which will re-derive the same question and may settle it the other way. So what a feature settles has to reach the docs it was planned from.
+
+The agent never edits `docs/`: intent is the user's. It proposes, in `plan/<feature>.intent.md`, one section per amendment — an id, a mode, the doc and heading it lands in, where it came from and why, then the text as intent would read it.
+
+```markdown
+## A1 (append) docs/intent/orders.md#Cancellation
+- from: F3 (naive)
+- why: intent does not say what happens to the reservation.
+
+Cancelling an order releases its reservation immediately.
+```
+
+The modes are `append` (add to the section), `replace` (rewrite its body) and `new` (add a section, or a document). The plan and reconcile scopes make that file writable; `docs/**` stays read-only to every phase.
+
+Applying is the human's act, from the plan bar, and mechanical: the extension writes each pending amendment into its document and appends `[applied]` to it, so nothing is written twice and what lands in `docs/` is what was proposed, reviewable as a git diff. It is offered on an approved spec only — on a draft the rulings can still change — and stays offered after the feature is built, which is when a spec that named no amendments is worth a second look. An amendment that cannot be applied (no such heading, a path outside `docs/`) is reported and stays pending; the others still go through.
 
 ## Retrieval
 
@@ -78,12 +101,13 @@ A sub-session the planner calls with `retrieve(question, known, budget)` to keep
 
 ## Phase 3: Implement
 
-Tools: Read, Write, Edit, Glob, Grep, Bash, task state. Input is the approved plan file only, fresh session; refuses to start on `status: draft`. Drift items are work items alongside feature items.
+Tools: Read, Write, Edit, Glob, Grep, Bash. Input is the approved spec only, fresh session started from the plan bar; refuses to start on `status: draft`. Breakage findings the user chose to fix are work items alongside the spec's tasks. Writes go through the ordinary permission prompt; no scope guard.
 
-- Verification hook after edits: build scoped to the project owning the edited file, test selection, run on plan-item boundary; failure budget of N consecutive failed fixes per item, then stop and write the failure into the plan.
-- Read-before-edit staleness: refuse to edit an unread file, re-read when changed underneath.
-- Explicit task state so item 4 of 7 does not vanish.
-- Done when the acceptance-criteria tests pass, not when the model stops.
+- Task state is the spec: the implementer appends `[done]` or `[blocked: reason]` to a task line, so item 4 of 7 survives a fresh session and shows in the plan view.
+- Verification on stop through the `kiwiAgent.verify` rules, switchable per session, with the failure budget from settings.
+- Done when the tests for the behaviours pass, not when the model stops.
+
+Parked: build scoped to the project owning the edited file; read-before-edit staleness enforced in a hook rather than by prompt.
 
 ## Instructions
 
@@ -92,6 +116,10 @@ Small shared core plus a per-phase file. Per-type rules inject via PreToolUse ho
 - Checkable rules (no `#region`, no AutoMapper/MediatR, nullable on, no `Any`) go to analyzers, `.editorconfig`, BannedApiAnalyzers, grep in the verification hook.
 - Judgment rules (rule of three, earned abstraction) go to the prompt.
 - A phase file over a page means the excess is checkable or is spec. Remove alternatives instead of instructing tool preference.
+
+### Skills
+
+`.claude/skills/<name>/SKILL.md` and `.agent/skills/<name>/SKILL.md`, Claude Code's layout, so one skill serves both engines; `.agent/skills` wins on a shared name. The index (name and description from the frontmatter) rides in the `Skill` tool's description; the model loads a skill itself when a task matches, and the tool returns the body with the skill's folder for relative paths. Phases 2 and 3 and chat carry the tool; the blind planner does not, since skills describe how code is written.
 
 ## Coordination
 

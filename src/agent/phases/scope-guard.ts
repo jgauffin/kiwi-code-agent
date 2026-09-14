@@ -13,7 +13,8 @@ export type Scope = {
 /**
  * Enforces a phase's file scope at the tool call, where the model cannot
  * talk its way around it. A blind planner reads intent docs and writes one
- * spec; everything else is denied with the reason.
+ * spec; everything else is denied with the reason. A write inside the scope
+ * is the phase's deliverable, so it goes through without a permission prompt.
  */
 export class ScopeGuard implements SessionHooks {
   constructor(
@@ -32,9 +33,9 @@ export class ScopeGuard implements SessionHooks {
       case 'Write':
       case 'Edit':
       case 'MultiEdit':
-        return this.check(input['file_path'], this.scope.writable, 'write')
+        return this.check(input['file_path'], this.scope.writable, 'write') ?? { allow: true }
       case 'NotebookEdit':
-        return this.check(input['notebook_path'], this.scope.writable, 'write')
+        return this.check(input['notebook_path'], this.scope.writable, 'write') ?? { allow: true }
       case 'Bash':
         return { deny: 'Bash is not available in this phase.' }
       default:

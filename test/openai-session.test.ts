@@ -127,7 +127,7 @@ describe('OpenAiSession', () => {
     await s.dispose()
   })
 
-  it('writing_tools_wait_for_permission_and_always_allow_sticks_for_the_session', async () => {
+  it('every_writing_call_waits_for_permission_because_remembering_is_the_host_policy_not_the_engine', async () => {
     const model = new ScriptedModel(
       toolCall('c1', 'Danger', '{"value":"a"}'),
       toolCall('c2', 'Danger', '{"value":"b"}'),
@@ -138,10 +138,10 @@ describe('OpenAiSession', () => {
     const events: SessionEvent[] = []
     for await (const e of s.events()) {
       events.push(e)
-      if (e.type === 'permission_request') s.respondToPermission(e.requestId, { kind: 'allow_always' })
+      if (e.type === 'permission_request') s.respondToPermission(e.requestId, { kind: 'allow' })
       if (e.type === 'turn_done') break
     }
-    expect(events.filter((e) => e.type === 'permission_request')).toHaveLength(1)
+    expect(events.filter((e) => e.type === 'permission_request')).toHaveLength(2)
     expect(events.filter((e) => e.type === 'tool_result')).toEqual([
       { type: 'tool_result', toolUseId: 'c1', text: 'echo:a', isError: false },
       { type: 'tool_result', toolUseId: 'c2', text: 'echo:b', isError: false },
@@ -243,6 +243,24 @@ describe('OpenAiSession', () => {
     ])
     expect(model.requests[1]!.messages.at(-1)).toEqual({ role: 'user', content: 'build failed: CS1002' })
     expect(events.at(-1)).toMatchObject({ type: 'turn_done', isError: false })
+    await s.dispose()
+  })
+
+  it('a_writing_tool_the_pre_hook_allows_runs_without_a_permission_prompt', async () => {
+    const model = new ScriptedModel(toolCall('c1', 'Danger', '{"value":"a"}'), text('ok'))
+    const s = new OpenAiSession({
+      id: 's1',
+      profile: { name: 'GLM', engine: 'openai-compatible', model: 'glm' },
+      cwd: process.cwd(),
+      client: model,
+      tools: [dangerTool as Tool],
+      systemPrompt: 'sys',
+      hooks: { async preToolUse() { return { allow: true } } },
+    })
+    s.send('go')
+    const events = await untilTurnDone(s)
+    expect(events.filter((e) => e.type === 'permission_request')).toHaveLength(0)
+    expect(events).toContainEqual({ type: 'tool_result', toolUseId: 'c1', text: 'echo:a', isError: false })
     await s.dispose()
   })
 

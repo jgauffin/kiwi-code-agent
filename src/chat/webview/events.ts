@@ -1,5 +1,5 @@
-import type { PermissionDecision } from '../../agent/session/code-session'
 import type { SessionMode } from '../../agent/session/session-manager'
+import type { ReviewAction, UserPermissionDecision } from '../protocol'
 
 export class PromptSubmittedEvent extends Event {
   static readonly type = 'prompt-submitted'
@@ -19,7 +19,7 @@ export class PermissionDecidedEvent extends Event {
   static readonly type = 'permission-decided'
   constructor(
     public readonly requestId: string,
-    public readonly decision: PermissionDecision,
+    public readonly decision: UserPermissionDecision,
   ) {
     super(PermissionDecidedEvent.type, { bubbles: true })
   }
@@ -51,10 +51,53 @@ export class SpecApprovedEvent extends Event {
   }
 }
 
-export class SpecOpenRequestedEvent extends Event {
-  static readonly type = 'spec-open-requested'
+/** The plan bar's "Check against code": start a reconcile session on the spec. */
+export class SpecCheckRequestedEvent extends Event {
+  static readonly type = 'spec-check-requested'
   constructor() {
-    super(SpecOpenRequestedEvent.type, { bubbles: true })
+    super(SpecCheckRequestedEvent.type, { bubbles: true })
+  }
+}
+
+/** The plan bar's stop on a running check. */
+export class SpecCheckStoppedEvent extends Event {
+  static readonly type = 'spec-check-stopped'
+  constructor() {
+    super(SpecCheckStoppedEvent.type, { bubbles: true })
+  }
+}
+
+/** The plan bar's "Implement": start an implement session on the approved spec. */
+export class ImplementRequestedEvent extends Event {
+  static readonly type = 'implement-requested'
+  constructor() {
+    super(ImplementRequestedEvent.type, { bubbles: true })
+  }
+}
+
+/** The plan bar's "Update intent": write the proposed amendments into `docs/`. */
+export class IntentUpdateRequestedEvent extends Event {
+  static readonly type = 'intent-update-requested'
+  constructor() {
+    super(IntentUpdateRequestedEvent.type, { bubbles: true })
+  }
+}
+
+/** Any gesture of the review panel, on its way to the extension host. */
+export class ReviewActionEvent extends Event {
+  static readonly type = 'review-action'
+  constructor(public readonly action: ReviewAction) {
+    super(ReviewActionEvent.type, { bubbles: true })
+  }
+}
+
+export type PlanView = 'plan' | 'chat' | 'review'
+
+/** The plan bar's Plan / Review / Chat switch. */
+export class PlanViewSelectedEvent extends Event {
+  static readonly type = 'plan-view-selected'
+  constructor(public readonly view: PlanView) {
+    super(PlanViewSelectedEvent.type, { bubbles: true })
   }
 }
 
@@ -96,7 +139,12 @@ declare global {
     [SessionSelectedEvent.type]: SessionSelectedEvent
     [SessionClosedEvent.type]: SessionClosedEvent
     [SpecApprovedEvent.type]: SpecApprovedEvent
-    [SpecOpenRequestedEvent.type]: SpecOpenRequestedEvent
+    [SpecCheckRequestedEvent.type]: SpecCheckRequestedEvent
+    [SpecCheckStoppedEvent.type]: SpecCheckStoppedEvent
+    [ImplementRequestedEvent.type]: ImplementRequestedEvent
+    [IntentUpdateRequestedEvent.type]: IntentUpdateRequestedEvent
+    [PlanViewSelectedEvent.type]: PlanViewSelectedEvent
+    [ReviewActionEvent.type]: ReviewActionEvent
     [SessionRemovedEvent.type]: SessionRemovedEvent
     [VerifyToggledEvent.type]: VerifyToggledEvent
   }

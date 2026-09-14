@@ -11,7 +11,7 @@ export function bashTool(bashPath: string = findBash()): Tool<typeof schema> {
   return {
     name: 'Bash',
     description:
-      'Runs a shell command in the working directory (bash, Git Bash on Windows) and returns stdout and stderr. Use for builds, tests and git. Not for reading or searching files; use Read, Grep and Glob.',
+      'Runs a shell command (bash, Git Bash on Windows) and returns stdout and stderr. Every command starts in the project root; a cd does not carry over to the next call, so never cd to the root. Use for builds, tests and git. Not for reading or searching files; use Read, Grep and Glob.',
     schema,
     readOnly: false,
     async execute(input, ctx) {

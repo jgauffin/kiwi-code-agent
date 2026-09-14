@@ -3,8 +3,8 @@ import type {
   HookJSONOutput,
   Options,
   PermissionResult,
-  PermissionUpdate,
   Query,
+  SDKMessage,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
 import type { CodeSession, PermissionDecision, SessionEvent } from '../session/code-session'
@@ -34,12 +34,13 @@ export type SdkSessionOptions = {
   tools?: string[]
   query: QueryFn
   onStderr?: (chunk: string) => void
+  /** Receives one line per engine message, for diagnosing what the engine does and does not send. */
+  trace?: (line: string) => void
 }
 
 type PendingPermission = {
   resolve: (result: PermissionResult) => void
   input: Record<string, unknown>
-  suggestions: PermissionUpdate[] | undefined
 }
 
 /**
@@ -89,7 +90,7 @@ export class SdkSession implements CodeSession {
     if (!pending) return
     this.pending.delete(requestId)
     this.output.push({ type: 'permission_resolved', requestId, decision: decision.kind })
-    pending.resolve(toPermissionResult(decision, pending.input, pending.suggestions))
+    pending.resolve(toPermissionResult(decision, pending.input))
   }
 
   async interrupt(): Promise<void> {
@@ -143,10 +144,14 @@ export class SdkSession implements CodeSession {
         if (outcome && 'deny' in outcome) {
           return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: outcome.deny } }
         }
-        if (outcome?.additionalContext) {
-          return { hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: outcome.additionalContext } }
+        if (!outcome?.allow && !outcome?.additionalContext) return {}
+        return {
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            ...(outcome.allow ? { permissionDecision: 'allow' } : {}),
+            ...(outcome.additionalContext ? { additionalContext: outcome.additionalContext } : {}),
+          },
         }
-        return {}
       }
       registered.PreToolUse = [{ hooks: [callback] }]
     }
@@ -191,7 +196,7 @@ export class SdkSession implements CodeSession {
   ): Promise<PermissionResult> {
     return new Promise((resolve) => {
       const requestId = ctx.toolUseID
-      this.pending.set(requestId, { resolve, input, suggestions: ctx.suggestions })
+      this.pending.set(requestId, { resolve, input })
       ctx.signal.addEventListener('abort', () => {
         if (this.pending.delete(requestId)) resolve({ behavior: 'deny', message: 'Cancelled' })
       })
@@ -202,7 +207,6 @@ export class SdkSession implements CodeSession {
         input,
         ...(ctx.title ? { title: ctx.title } : {}),
         ...(ctx.description ? { description: ctx.description } : {}),
-        canAllowAlways: (ctx.suggestions?.length ?? 0) > 0,
       })
     })
   }
@@ -217,6 +221,7 @@ export class SdkSession implements CodeSession {
   private async pump(): Promise<void> {
     try {
       for await (const message of this.query) {
+        this.options.trace?.(describeMessage(message))
         for (const event of this.mapper.map(message)) {
           if (event.type === 'session_started') this.engineSessionId = event.engineSessionId
           this.output.push(event)
@@ -244,18 +249,10 @@ export class SdkSession implements CodeSession {
  * unchanged input is echoed back; the typings mark it optional but the
  * CLI does not.
  */
-function toPermissionResult(
-  decision: PermissionDecision,
-  input: Record<string, unknown>,
-  suggestions: PermissionUpdate[] | undefined,
-): PermissionResult {
+function toPermissionResult(decision: PermissionDecision, input: Record<string, unknown>): PermissionResult {
   switch (decision.kind) {
     case 'allow':
       return { behavior: 'allow', updatedInput: input, decisionClassification: 'user_temporary' }
-    case 'allow_always':
-      return suggestions
-        ? { behavior: 'allow', updatedInput: input, updatedPermissions: suggestions, decisionClassification: 'user_permanent' }
-        : { behavior: 'allow', updatedInput: input, decisionClassification: 'user_temporary' }
     case 'deny':
       return { behavior: 'deny', message: decision.message ?? 'Denied by user', decisionClassification: 'user_reject' }
   }
@@ -263,4 +260,27 @@ function toPermissionResult(
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+/** One line per engine message: kind, and for stream events the raw event and delta kinds. */
+export function describeMessage(msg: SDKMessage): string {
+  switch (msg.type) {
+    case 'stream_event': {
+      const event = msg.event as { type: string; delta?: { type?: string }; content_block?: { type?: string } }
+      const detail = event.delta?.type ?? event.content_block?.type
+      return `stream_event ${event.type}${detail ? ` ${detail}` : ''}`
+    }
+    case 'system':
+      return `system ${msg.subtype}${'status' in msg ? ` ${String(msg.status)}` : ''}`
+    case 'assistant':
+      return `assistant [${msg.message.content.map((b) => b.type).join(', ')}]`
+    case 'user': {
+      const content = msg.message.content
+      return `user ${typeof content === 'string' ? 'text' : `[${content.map((b) => b.type).join(', ')}]`}`
+    }
+    case 'result':
+      return `result ${msg.subtype} ${msg.duration_ms}ms`
+    default:
+      return msg.type
+  }
 }

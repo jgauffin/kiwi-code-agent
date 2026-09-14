@@ -2,15 +2,23 @@ import type { CodeSession, PermissionDecision, SessionEvent } from './code-sessi
 import type { ModelProfile } from './model-profile'
 import type { RunLog } from '../runs/run-log'
 
-export type SessionMode = 'chat' | 'plan'
+/**
+ * `plan` writes a feature's spec blind, `reconcile` checks it against the code
+ * (together: planning), `implement` builds the approved spec.
+ */
+export type SessionMode = 'chat' | 'plan' | 'reconcile' | 'implement'
+
+export const isPlanning = (mode: SessionMode): boolean => mode === 'plan' || mode === 'reconcile'
 
 export type SessionRecord = {
   id: string
   title: string
   profile: ModelProfile
   mode: SessionMode
-  /** Feature being planned; plan mode only. */
+  /** The feature whose spec the session works on; every mode but chat. */
   feature?: string
+  /** The session whose tab this one runs under: a check runs under its plan session and never gets a tab of its own. */
+  parentId?: string
   /** Engine-side conversation id, set once the engine reports it. Lets a closed session continue. */
   engineSessionId?: string
   createdAt: string
@@ -19,6 +27,20 @@ export type SessionRecord = {
 export interface SessionStore {
   list(): SessionRecord[]
   save(records: SessionRecord[]): Promise<void>
+}
+
+function titleFor(mode: SessionMode, feature: string | undefined): string {
+  if (!feature) return 'New session'
+  switch (mode) {
+    case 'plan':
+      return `Plan: ${feature}`
+    case 'reconcile':
+      return `Check: ${feature}`
+    case 'implement':
+      return `Implement: ${feature}`
+    case 'chat':
+      return 'New session'
+  }
 }
 
 export type EngineFactory = (record: SessionRecord) => Promise<CodeSession>
@@ -56,13 +78,19 @@ export class SessionManager {
     return this.live.has(id)
   }
 
-  async create(profile: ModelProfile, mode: SessionMode = 'chat', feature?: string): Promise<SessionRecord> {
+  /** The live session running under another one's tab, if any. */
+  liveChildOf(parentId: string): SessionRecord | undefined {
+    return this.records.find((r) => r.parentId === parentId && this.live.has(r.id))
+  }
+
+  async create(profile: ModelProfile, mode: SessionMode = 'chat', feature?: string, parentId?: string): Promise<SessionRecord> {
     const record: SessionRecord = {
       id: crypto.randomUUID(),
-      title: mode === 'plan' && feature ? `Plan: ${feature}` : 'New session',
+      title: titleFor(mode, feature),
       profile,
       mode,
       ...(feature ? { feature } : {}),
+      ...(parentId ? { parentId } : {}),
       createdAt: new Date().toISOString(),
     }
     this.records.unshift(record)
@@ -87,8 +115,9 @@ export class SessionManager {
     await this.live.get(id)?.interrupt()
   }
 
-  /** Stop the engine but keep the record; a later prompt resumes it. */
+  /** Stop the engine but keep the record; a later prompt resumes it. A run under the session stops with it. */
   async close(id: string): Promise<void> {
+    for (const child of this.records.filter((r) => r.parentId === id)) await this.close(child.id)
     const session = this.live.get(id)
     if (!session) return
     this.live.delete(id)
@@ -97,7 +126,7 @@ export class SessionManager {
 
   async remove(id: string): Promise<void> {
     await this.close(id)
-    this.records = this.records.filter((r) => r.id !== id)
+    this.records = this.records.filter((r) => r.id !== id && r.parentId !== id)
     await this.store.save(this.records)
   }
 

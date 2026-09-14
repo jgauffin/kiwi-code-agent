@@ -1,6 +1,8 @@
 import * as vscode from 'vscode'
-import type { SessionManager, SessionRecord } from '../agent/session/session-manager'
+import type { SessionManager, SessionMode, SessionRecord } from '../agent/session/session-manager'
 import type { SessionStatus } from '../agent/session/session-status'
+
+const MODE_LABEL: Record<SessionMode, string> = { chat: 'Chat', plan: 'Plan', reconcile: 'Check against code', implement: 'Implement' }
 
 const STATUS_ICON: Record<SessionStatus, { icon: string; color?: string }> = {
   idle: { icon: 'circle-outline' },
@@ -26,8 +28,9 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionRecord> {
     this.changed.fire()
   }
 
+  /** A run under another session (a check) shows on its parent, not as an entry of its own. */
   getChildren(): SessionRecord[] {
-    return this.sessions.list()
+    return this.sessions.list().filter((r) => !r.parentId)
   }
 
   getTreeItem(record: SessionRecord): vscode.TreeItem {
@@ -38,7 +41,7 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionRecord> {
     item.id = record.id
     item.description = `${record.profile.name} · ${status.replace('_', ' ')}${active ? ' · open' : ''}`
     item.iconPath = new vscode.ThemeIcon(icon, color ? new vscode.ThemeColor(color) : undefined)
-    item.tooltip = `${record.mode === 'plan' ? 'Plan' : 'Chat'} · ${record.profile.name} · ${status.replace('_', ' ')}`
+    item.tooltip = `${MODE_LABEL[record.mode]} · ${record.profile.name} · ${status.replace('_', ' ')}`
     item.contextValue = 'session'
     item.command = { command: 'kiwiAgent.openSession', title: 'Open Session', arguments: [record.id] }
     return item

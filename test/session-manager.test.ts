@@ -139,4 +139,38 @@ describe('SessionManager', () => {
       await rm(dir, { recursive: true, force: true })
     }
   })
+
+  it('a_run_under_a_session_is_found_while_live_and_goes_when_its_parent_closes_or_is_removed', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+    try {
+      const engines: FakeSession[] = []
+      const manager = new SessionManager(
+        memoryStore(),
+        async (r) => {
+          const s = new FakeSession(r.id, r.profile, r.engineSessionId)
+          engines.push(s)
+          return s
+        },
+        (id) => RunLog.forSession(dir, id),
+        () => {},
+      )
+      const plan = await manager.create(profile, 'plan', 'Orders')
+      const check = await manager.create(profile, 'reconcile', 'Orders', plan.id)
+      expect(check.parentId).toBe(plan.id)
+      expect(manager.liveChildOf(plan.id)).toBeUndefined()
+
+      await manager.send(check.id, 'check')
+      expect(manager.liveChildOf(plan.id)?.id).toBe(check.id)
+
+      await manager.close(plan.id)
+      expect(engines[0]!.disposed).toBe(true)
+      expect(manager.liveChildOf(plan.id)).toBeUndefined()
+
+      await manager.remove(plan.id)
+      expect(manager.get(check.id)).toBeUndefined()
+      await manager.disposeAll()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
 })

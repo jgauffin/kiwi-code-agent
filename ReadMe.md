@@ -12,7 +12,7 @@ The sidebar has a Sessions view (every session, with status) and the Chat view: 
 Session modes:
 
 - **Chat**: work in the code with the full tool set.
-- **Plan**: blind planning of one feature. The session can read `docs/intent/**` only, enforced at the tool call, and writes `plan/<feature>.spec.md` (behaviour, invariants, edge cases, acceptance criteria, tasks, open questions, stable item ids, `status: draft`). The first prompt is the feature or user story description. A bar above the transcript shows the spec's status with Open and Approve; approval sets `status: approved` in the front-matter, which later phases require.
+- **Plan**: blind planning of one feature. The session can read `docs/intent/**` only, enforced at the tool call, and writes `plan/<feature>.spec.md` (behaviour, invariants, edge cases, acceptance criteria, tasks, open questions, stable item ids, `status: draft`). The first prompt is the feature or user story description. Writing the spec needs no permission prompt. A bar above the transcript switches between the spec (Plan) and the conversation (Chat), shows the spec's status and has Approve; the view follows the work: Chat while the planner responds, Plan when its turn ends. Approval sets `status: approved` in the front-matter, which later phases require.
 
 ## Develop
 
@@ -29,8 +29,7 @@ F5 launches the Extension Development Host. Open the "KiwiAgent" view in the act
 Load the extension from this repo in your normal VS Code instead of a packaged copy:
 
 ```
-code --uninstall-extension coderr.kiwi-agent   # if a .vsix was installed
-npm run link-dev                               # links ~/.vscode/extensions/coderr.kiwi-agent-dev -> repo
+npm run link-dev   # installs the .vsix so VS Code registers it, then points the installed folder at this repo
 ```
 
 Reload the window once. From then on, after `npm run build` (or the `npm: watch` task) the extension notices its own bundle changed and offers "Reload Window". Sessions and the open session survive the reload; engines resume on the next prompt. `npm run unlink-dev` removes the link.
@@ -51,6 +50,7 @@ Requires Node in the environment only if `kiwiAgent.nodePath` is set; otherwise 
 - `kiwiAgent.profiles`: engine, model, effort per profile.
 - `kiwiAgent.activeProfile`: profile name used for new sessions; `kiwiAgent.planProfile` overrides it for plan sessions.
 - `kiwiAgent.nodePath`: Node executable for the Claude engine; empty uses VS Code's executable.
+- `kiwiAgent.traceEngine`: one line per Claude engine message in the KiwiAgent output channel, to see what the engine sends (thinking deltas, status) when the UI shows nothing.
 - `kiwiAgent.verify`: commands run when the model wants to stop after editing matching files, in the directory of the nearest `project` file. Failures go back to the model and it keeps working, up to `kiwiAgent.verifyFailureBudget` consecutive failures. Default: `dotnet build` of the `.csproj` owning any edited `.cs` file. Applies to every engine.
 - Command *KiwiAgent: Set API Key for Profile* stores keys for profiles that declare `apiKeySecret`.
 

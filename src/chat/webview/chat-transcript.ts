@@ -15,6 +15,8 @@ export class ChatTranscript extends HTMLElement {
   private readonly permissions = new Map<string, PermissionCard>()
   private readonly runningVerifications = new Map<string, { element: HTMLElement; stop: () => void }>()
   private statusLine!: HTMLElement
+  private busy = false
+  private working: { element: HTMLElement; stop: () => void } | undefined
 
   connectedCallback(): void {
     if (this.childElementCount === 0) {
@@ -31,12 +33,16 @@ export class ChatTranscript extends HTMLElement {
     this.permissions.clear()
     for (const running of this.runningVerifications.values()) running.stop()
     this.runningVerifications.clear()
+    this.working?.stop()
+    this.working = undefined
+    this.busy = false
     this.setStatus('')
     for (const event of events) this.apply(event, false)
     // Streamed text is rendered once at the end of a replay, not per delta.
     for (const bubble of this.bubbles.values()) {
       if (bubble.finalParts.length === 0) renderMarkdown(bubble.streamed, bubble.text, true)
     }
+    this.showWorking()
     this.scrollToEnd()
   }
 
@@ -47,6 +53,7 @@ export class ChatTranscript extends HTMLElement {
         break
       case 'user_message':
         this.insert(block('user', event.text))
+        this.busy = true
         break
       case 'assistant_text': {
         const bubble = this.bubble(event.messageId, event.parentToolUseId)
@@ -88,13 +95,17 @@ export class ChatTranscript extends HTMLElement {
         this.insert(card)
         card.show(event)
         this.permissions.set(event.requestId, card)
+        // The card is the indicator now; a ticking clock would say the model is at work.
+        this.busy = false
         break
       }
       case 'permission_resolved':
         this.permissions.get(event.requestId)?.resolve(event.decision)
+        this.busy = true
         break
       case 'status':
-        this.classList.toggle('busy', event.status !== 'idle')
+        // 'idle' also arrives mid-turn (after compaction, between requests); only the turn's end clears busy.
+        if (event.status !== 'idle') this.busy = true
         this.classList.toggle('verifying', event.status === 'verifying')
         break
       case 'verification_started': {
@@ -136,7 +147,8 @@ export class ChatTranscript extends HTMLElement {
         break
       }
       case 'turn_done': {
-        this.classList.remove('busy')
+        this.busy = false
+        this.classList.remove('verifying')
         const line = document.createElement('p')
         line.className = event.isError ? 'turn error' : 'turn'
         const usage = event.usage
@@ -151,13 +163,38 @@ export class ChatTranscript extends HTMLElement {
       }
       case 'error':
         this.insert(block(event.fatal ? 'error fatal' : 'error', event.message))
+        if (event.fatal) this.busy = false
         break
       case 'ended':
-        this.classList.remove('busy')
+        this.busy = false
         this.insert(block('ended', 'Engine stopped. The next prompt resumes the conversation.'))
         break
     }
-    if (live) this.scrollToEnd()
+    if (live) {
+      this.showWorking()
+      this.scrollToEnd()
+    }
+  }
+
+  /** A pulsing "Working…" row with elapsed time, kept last, while the model is at work. */
+  private showWorking(): void {
+    if (!this.busy) {
+      this.working?.stop()
+      this.working?.element.remove()
+      this.working = undefined
+      return
+    }
+    if (!this.working) {
+      const row = document.createElement('p')
+      row.className = 'working'
+      row.textContent = 'Working…'
+      const startedAt = Date.now()
+      const timer = window.setInterval(() => {
+        row.textContent = `Working… ${Math.round((Date.now() - startedAt) / 1000)}s`
+      }, 1000)
+      this.working = { element: row, stop: () => window.clearInterval(timer) }
+    }
+    this.appendChild(this.working.element)
   }
 
   private bubble(messageId: string, parentToolUseId: string | undefined): AssistantBubble {

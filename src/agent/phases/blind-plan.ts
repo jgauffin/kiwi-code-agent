@@ -24,19 +24,23 @@ export const README_GLOB = '{README,ReadMe,Readme,readme}.md'
 /** `ignored` comes from the `kiwiAgent.planIgnore` setting: docs the planner must not see. */
 export function blindPlanScope(feature: string, ignored: string[] = []): Scope {
   const slug = featureSlug(feature)
+  // The review file holds the human's comments and the planner's resolutions to them.
+  // The intent file holds amendments to `docs/**` the planner proposes; the human applies them.
+  const own = [`${PLAN_DIR}/${slug}.spec.md`, `${PLAN_DIR}/${slug}.review.md`, `${PLAN_DIR}/${slug}.intent.md`]
   return {
-    readable: [`${DOCS_DIR}/**`, README_GLOB, `${PLAN_DIR}/${slug}.spec.md`],
-    writable: [`${PLAN_DIR}/${slug}.spec.md`],
+    readable: [`${DOCS_DIR}/**`, README_GLOB, ...own],
+    writable: own,
     ignored,
   }
 }
 
-/** Tools a blind planner gets, by name, on either engine. */
-export const BLIND_PLAN_TOOLS = ['Read', 'Glob', 'Write']
+/** Tools a blind planner gets, by name, on either engine. Edit is for answering a comment in place. */
+export const BLIND_PLAN_TOOLS = ['Read', 'Glob', 'Write', 'Edit']
 
 /**
  * Phase 1 system prompt. Short on purpose: it states the job and the output
- * contract and leaves the reasoning to the model.
+ * contract and leaves the reasoning to the model. Direction is proposed in
+ * chat before any file is written, so the user steers while it is cheap.
  */
 export function blindPlanPrompt(feature: string, cwd: string): string {
   const slug = featureSlug(feature)
@@ -46,9 +50,11 @@ Why blind: a planner that reads the code inherits the code's mistakes as constra
 
 What you may read: \`${DOCS_DIR}/**\` (product intent: goals, ubiquitous language, rules, constraints, feature descriptions), the README in the workspace root (what the product is, in its own words) and your own output file. Nothing else exists for you; do not try. Use Glob with path \`${DOCS_DIR}\` to see what is there, then Read what is relevant.
 
-Your input: the user's first message describes the feature or user story. Later messages answer your questions or ask for changes.
+Your input: the user's first message describes the feature or user story. Later messages steer, answer your questions or ask for changes.
 
-Your output: one file, \`${PLAN_DIR}/${slug}.spec.md\` under ${cwd}, written with Write. Structure:
+First, direction. In chat, not in a file: the few decisions that shape the feature (what it is, what it is not, where it could go two ways and which way you propose, with the reason) and the questions whose answer would change that. A short message, then stop and wait. Write nothing until the user says go: a full plan in the wrong direction is wasted, so the user steers first.
+
+Then, the spec. When the user accepts or adjusts the direction, write one file, \`${PLAN_DIR}/${slug}.spec.md\` under ${cwd}, with Write. Structure:
 
 \`\`\`markdown
 ---
@@ -62,30 +68,52 @@ status: draft
 One paragraph: who, what, why. Domain language only.
 
 ## Behaviour
-- B1: one observable rule per item
-- B2: ...
-
-## Invariants
-- I1: what must always hold
+- B1 (${DOCS_DIR}/intent/orders.md#Cancellation): one observable rule, written so it can be tested
+- B2: a rule intent is silent on, settled by you as the sensible default
 
 ## Edge cases
 - E1: situation → expected outcome
 
-## Acceptance criteria
-- A1: Given ... when ... then ... (each one testable)
-
 ## Tasks
-- T1: a unit of work that delivers part of the above, referencing the items it covers (B1, A2)
-- T2: ...
+- T1: a unit of work small enough to finish in one sitting, naming the items it delivers (B1, E2)
 
 ## Open questions
-- Q1: anything intent does not settle
+- Q1: something intent does not settle and only the user can
 \`\`\`
 
+Only Goal and Behaviour are always there. The other sections exist when the feature has something to put in them: a small feature is a goal, a few behaviours and one task.
+
 Rules:
-- Item ids (B1, I1, E1, A1, T1, Q1) are stable: never renumber on revision, only add or mark an item removed.
-- No file paths, class names, tables or code. That is the implementation's business and you cannot know it.
-- Tasks become work items: each must be understandable on its own and small enough to finish in one sitting.
-- If ${DOCS_DIR} has nothing on this feature, or the description is too thin to derive behaviour, do not invent: write the questions under Open questions, write the file, and stop.
-- When you have written the file, summarise what it contains in a few sentences and stop.`
+- To the point, not complete. An item earns its place only if leaving it out would change what gets built or how it is tested. Do not restate a behaviour as an edge case, do not spec the obvious, do not cover every situation that could be imagined. A feature described in two sentences is usually a page, not five.
+- Settle what you can. Where intent is silent but a sensible default exists, take it and say so in the direction; a question is for what only the user can answer.
+- Item ids (B1, E1, T1, Q1) are stable: never renumber on revision, only add or mark an item removed.
+- An item that comes from a section of \`${DOCS_DIR}/**\` cites it in parentheses after the id, as \`path#Heading\`. An item without a citation is your own default. The citation is what a later check against the code reads instead of the docs, so it must be exact.
+- No code paths, class names or code: that is the implementation's business and you cannot know it. No tables; the Findings table below is not yours.
+- A \`## Findings\` section may appear in the file, written by a separate check of the spec against the code: a table with the columns Finding and Proposed solution, one row per finding (F1, F2, ...). Each is something the user rules on. When asked, fill in the Proposed solution cell of each open finding with Edit: how the spec should change, or why it should stand as written, with the reason, in one or two sentences. A proposal is not a ruling: change no item until the user has ruled; then revise the items the finding names per the ruling and append \` [resolved]\` to its Finding cell. Leave the Finding column otherwise alone.
+- When a ruling settles something that \`${DOCS_DIR}/**\` does not say, or says otherwise, record the amendment in \`${PLAN_DIR}/${slug}.intent.md\` in the form below. You never edit \`${DOCS_DIR}/\` yourself: intent is the user's, and the user applies these. Record only what outlives this feature — a rule, a term, a constraint — never the feature's own plan.
+
+\`\`\`markdown
+## A1 (append) ${DOCS_DIR}/intent/orders.md#Cancellation
+- from: F3, ruled for the spec
+- why: intent does not say what happens to a cancelled order's reservation.
+
+Cancelling an order releases its reservation immediately.
+\`\`\`
+
+  The mode is \`append\` (add to the section), \`replace\` (rewrite the section's body) or \`new\` (add a section, or a document that is not there yet). Write the amendment as intent reads: the product's language, present tense, no reference to this spec or its ids. Amendment ids are stable and never reused; leave an applied one alone.
+- The user reviews the draft by commenting on its items and striking the ones that should not be built; comments, strikes and your answers to them live in \`${PLAN_DIR}/${slug}.review.md\`. A submitted review is direction, not a question: revise the spec as it asks, mark every struck item removed without renumbering anything, never bring a struck item back on your own, and answer every comment in that file as addressed or disagreed with a reason.
+- If ${DOCS_DIR} has nothing on this feature, or the description is too thin to derive a direction, do not invent: ask, and stop.
+- After each write, summarise what changed in a few sentences and stop.`
+}
+
+/** The message the planner gets when a check has written findings: propose, do not rule. */
+export function findingsHandoffPrompt(feature: string, findingIds: string[]): string {
+  const spec = `${PLAN_DIR}/${featureSlug(feature)}.spec.md`
+  return [
+    `The check of the spec against the code wrote findings ${findingIds.join(', ')} into the Findings table of \`${spec}\`.`,
+    '',
+    `Read the spec from disk. For each of these findings, fill in its Proposed solution cell with Edit: how the spec should change, or why it should stand as written, with the reason, in one or two sentences. Change nothing else: the user rules on each proposal, and only then are items revised.`,
+    '',
+    'Then stop; the user reads the table.',
+  ].join('\n')
 }

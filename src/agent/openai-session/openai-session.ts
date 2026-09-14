@@ -30,7 +30,6 @@ export class OpenAiSession implements CodeSession {
   private readonly messages: ChatMessage[]
   private readonly queue: string[] = []
   private readonly files = new ReadTracker()
-  private readonly alwaysAllowed = new Set<string>()
   private readonly pending = new Map<string, (d: PermissionDecision) => void>()
   private readonly definitions
   private turnAbort = new AbortController()
@@ -198,10 +197,9 @@ export class OpenAiSession implements CodeSession {
     const use = { toolName: tool.name, input: parsed.data, toolUseId: call.id }
     const pre = await this.options.hooks?.preToolUse?.(use)
     if (pre && 'deny' in pre) return { text: `Blocked: ${pre.deny}`, isError: true }
-    if (!tool.readOnly && !this.alwaysAllowed.has(tool.name)) {
+    if (!tool.readOnly && !pre?.allow) {
       const decision = await this.askPermission(call.id, tool.name, parsed.data, signal)
       if (decision.kind === 'deny') return { text: `Denied by user${decision.message ? `: ${decision.message}` : ''}`, isError: true }
-      if (decision.kind === 'allow_always') this.alwaysAllowed.add(tool.name)
     }
     let output: ToolOutput
     try {
@@ -230,7 +228,7 @@ export class OpenAiSession implements CodeSession {
       signal.addEventListener('abort', () => {
         if (this.pending.delete(requestId)) resolve({ kind: 'deny', message: 'Interrupted' })
       })
-      this.output.push({ type: 'permission_request', requestId, toolName, input, canAllowAlways: true })
+      this.output.push({ type: 'permission_request', requestId, toolName, input })
     })
   }
 

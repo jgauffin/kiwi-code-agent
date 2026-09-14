@@ -110,6 +110,29 @@
           "default": [],
           "description": "Workspace-relative globs a Plan session must not read, carved out of docs/** and the root README. Example: docs/api/**."
         },
+        "kiwiAgent.permissions.allow": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "resource",
+          "description": "Tool calls that run without a prompt, on every engine. A rule is a tool name (Edit), a tool with a glob on the workspace-relative path (Edit(src/**)), or Bash with a command: Bash(npm test) for that exact command, Bash(npm run:*) for any command starting with those words. Every segment of a chained command must be covered or read-only. \"Allow for project\" on a prompt writes here. Read-only tools and commands (Read, Grep, ls, git status, ...) never prompt."
+        },
+        "kiwiAgent.permissions.deny": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "resource",
+          "description": "Tool calls blocked outright, same rule shape as permissions.allow. Wins over allow rules and over read-only calls: Read(**/.env), Bash(curl:*)."
+        },
+        "kiwiAgent.traceEngine": {
+          "type": "boolean",
+          "default": false,
+          "description": "Log every message from the Claude engine (one line each) to the KiwiAgent output channel. Applies to sessions started after the change."
+        },
         "kiwiAgent.nodePath": {
           "type": "string",
           "default": "",

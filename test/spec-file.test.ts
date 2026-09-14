@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { readSpecState, setSpecStatus, statusOf, withStatus } from '../src/agent/phases/spec-file'
+import { bodyOf, readSpecState, setSpecStatus, statusOf, withStatus } from '../src/agent/phases/spec-file'
 
 const spec = '---\nfeature: Orders\nstatus: draft\n---\n\n# Orders\n\n- B1: rule\n'
 
@@ -24,15 +24,20 @@ describe('spec front-matter status', () => {
     expect(withStatus('# Orders\n', 'approved')).toBe('---\nstatus: approved\n---\n\n# Orders\n')
   })
 
+  it('the_body_shown_to_the_reader_starts_after_the_front_matter', () => {
+    expect(bodyOf(spec)).toBe('# Orders\n\n- B1: rule\n')
+    expect(bodyOf('# Orders\n')).toBe('# Orders\n')
+  })
+
   it('reads_and_writes_the_file_and_reports_a_missing_spec', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'spec-'))
     try {
       const path = join(dir, 'orders.spec.md')
       expect(await readSpecState(path)).toEqual({ exists: false })
       await writeFile(path, spec)
-      expect(await readSpecState(path)).toEqual({ exists: true, status: 'draft' })
+      expect(await readSpecState(path)).toEqual({ exists: true, status: 'draft', body: '# Orders\n\n- B1: rule\n' })
       await setSpecStatus(path, 'approved')
-      expect(await readSpecState(path)).toEqual({ exists: true, status: 'approved' })
+      expect(await readSpecState(path)).toMatchObject({ exists: true, status: 'approved' })
       expect(await readFile(path, 'utf8')).toContain('# Orders')
     } finally {
       await rm(dir, { recursive: true, force: true })

@@ -70,29 +70,12 @@ describe('SdkSession', () => {
       requestId: 'tu_9',
       toolName: 'Bash',
       input: { command: 'ls' },
-      canAllowAlways: true,
     })
     session.respondToPermission('tu_9', { kind: 'allow' })
     const result: PermissionResult = await resultPromise
     expect(result).toEqual({ behavior: 'allow', updatedInput: { command: 'ls' }, decisionClassification: 'user_temporary' })
     const [resolved] = await take(session, 1)
     expect(resolved).toEqual({ type: 'permission_resolved', requestId: 'tu_9', decision: 'allow' })
-    await session.dispose()
-  })
-
-  it('allow_always_hands_the_engine_its_own_permission_suggestions', async () => {
-    const fake = fakeQuery()
-    const session = createSession(fake)
-    const suggestions = [{ type: 'addRules' as const, rules: [{ toolName: 'Read' }], behavior: 'allow' as const, destination: 'session' as const }]
-    const resultPromise = fake.options!.canUseTool!('Read', {}, { signal: new AbortController().signal, toolUseID: 'tu_1', suggestions })
-    await take(session, 1)
-    session.respondToPermission('tu_1', { kind: 'allow_always' })
-    expect(await resultPromise).toEqual({
-      behavior: 'allow',
-      updatedInput: {},
-      updatedPermissions: suggestions,
-      decisionClassification: 'user_permanent',
-    })
     await session.dispose()
   })
 
@@ -130,6 +113,32 @@ describe('SdkSession', () => {
     ])
   })
 
+  it('trace_gets_one_line_per_engine_message_naming_its_kind', async () => {
+    const fake = fakeQuery()
+    const lines: string[] = []
+    const session = new SdkSession({
+      id: 'sess-1',
+      profile,
+      cwd: '/w',
+      cliPath: '/ext/dist/cli.js',
+      runtime: { command: 'node', args: [], env: {} },
+      query: fake.query,
+      trace: (line) => lines.push(line),
+    })
+    fake.emit(initMessage('e1'))
+    fake.emit({
+      type: 'stream_event',
+      event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'hm' } },
+      parent_tool_use_id: null,
+      uuid: 'u',
+      session_id: 's',
+    } as never)
+    fake.emit(resultMessage())
+    await take(session, 2)
+    expect(lines).toEqual(['system init', 'stream_event content_block_delta thinking_delta', 'result success 1200ms'])
+    await session.dispose()
+  })
+
   it('resume_and_model_and_cli_path_are_passed_to_the_engine', () => {
     const fake = fakeQuery()
     createSession(fake, 'engine-old')
@@ -157,7 +166,8 @@ describe('SdkSession', () => {
       hooks: {
         async preToolUse(tool) {
           seen.push(`pre:${tool.toolName}`)
-          return tool.toolName === 'Bash' ? { deny: 'no shell' } : undefined
+          if (tool.toolName === 'Bash') return { deny: 'no shell' }
+          return tool.toolName === 'Write' ? { allow: true } : undefined
         },
         async postToolUse(tool) {
           seen.push(`post:${tool.toolName}:${tool.output}`)
@@ -182,6 +192,13 @@ describe('SdkSession', () => {
       hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'no shell' },
     })
 
+    const allowed = await hooks.PreToolUse![0]!.hooks[0]!(
+      { ...base, hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: 'plan/x.spec.md' }, tool_use_id: 't3' },
+      't3',
+      ctx,
+    )
+    expect(allowed).toEqual({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } })
+
     const post = await hooks.PostToolUse![0]!.hooks[0]!(
       { ...base, hook_event_name: 'PostToolUse', tool_name: 'Edit', tool_input: {}, tool_response: 'ok', tool_use_id: 't2' },
       't2',
@@ -191,7 +208,7 @@ describe('SdkSession', () => {
 
     const stop = await hooks.Stop![0]!.hooks[0]!({ ...base, hook_event_name: 'Stop', stop_hook_active: false }, undefined, ctx)
     expect(stop).toEqual({ decision: 'block', reason: 'fix it' })
-    expect(seen).toEqual(['pre:Bash', 'post:Edit:ok', 'stop'])
+    expect(seen).toEqual(['pre:Bash', 'pre:Write', 'post:Edit:ok', 'stop'])
 
     const events = await take(session, 2)
     expect(events).toEqual([

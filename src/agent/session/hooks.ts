@@ -6,9 +6,10 @@
 
 export type ToolUse = { toolName: string; input: unknown; toolUseId: string }
 
+/** `allow` skips the permission prompt: the hook has ruled the call safe. */
 export type PreToolUseOutcome =
   | { deny: string }
-  | { additionalContext?: string }
+  | { allow?: true; additionalContext?: string }
   | undefined
 
 export type PostToolUseOutcome = { additionalContext?: string } | undefined
@@ -27,17 +28,20 @@ export interface SessionHooks {
   stop?(onStarted: (started: VerificationStarted) => void): Promise<StopOutcome>
 }
 
-/** Runs several hooks in order: the first deny or block wins, contexts are joined. */
+/** Runs several hooks in order: the first deny or block wins, any allow allows, contexts are joined. */
 export function composeHooks(...hooks: SessionHooks[]): SessionHooks {
   return {
     async preToolUse(tool) {
       const contexts: string[] = []
+      let allow = false
       for (const hook of hooks) {
         const outcome = await hook.preToolUse?.(tool)
         if (outcome && 'deny' in outcome) return outcome
+        if (outcome?.allow) allow = true
         if (outcome?.additionalContext) contexts.push(outcome.additionalContext)
       }
-      return contexts.length ? { additionalContext: contexts.join('\n\n') } : undefined
+      if (!allow && contexts.length === 0) return undefined
+      return { ...(allow ? { allow: true as const } : {}), ...(contexts.length ? { additionalContext: contexts.join('\n\n') } : {}) }
     },
     async postToolUse(tool) {
       const contexts: string[] = []

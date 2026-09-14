@@ -32,26 +32,239 @@ chat-app {
     border-bottom: 1px solid var(--vscode-panel-border);
     font-size: 0.9em;
 
-    & .spec {
-      font-family: var(--vscode-editor-font-family);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+    & .view {
+      background: none;
+      color: inherit;
+      opacity: 0.7;
+      border-bottom: 2px solid transparent;
+      border-radius: 0;
+      padding: 0.2rem 0.5rem;
+
+      &:hover {
+        opacity: 1;
+        background: var(--vscode-list-hoverBackground);
+      }
+
+      &.active {
+        opacity: 1;
+        border-bottom-color: var(--vscode-focusBorder);
+      }
     }
 
     & .status {
       opacity: 0.75;
       margin-right: auto;
+      margin-left: 0.3rem;
 
       &.approved {
         color: var(--vscode-testing-iconPassed);
         opacity: 1;
       }
+
+      &.checking {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-family: var(--vscode-editor-font-family);
+      }
     }
 
-    & .approve {
+    & .checked {
+      opacity: 0.75;
+      white-space: nowrap;
+    }
+
+    & .stop,
+    & .check,
+    & .intent {
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+    }
+
+    & .approve,
+    & .implement {
       background: var(--vscode-testing-iconPassed);
       color: var(--vscode-button-foreground);
+    }
+  }
+
+  & > .plan-view {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0.6rem 0.8rem;
+    line-height: 1.45;
+
+    & h1 {
+      font-size: 1.3em;
+      margin: 0 0 0.6rem;
+    }
+
+    & h2 {
+      font-size: 1.05em;
+      margin: 1rem 0 0.3rem;
+      border-bottom: 1px solid var(--vscode-panel-border);
+    }
+
+    & p,
+    & ul,
+    & ol {
+      margin: 0.4rem 0;
+    }
+
+    & ul,
+    & ol {
+      list-style-position: outside;
+      padding-left: 1.6em;
+    }
+
+    & li {
+      margin: 0.45rem 0;
+    }
+  }
+
+  & > .review-panel {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0.6rem 0.8rem;
+    line-height: 1.45;
+
+    & .heading {
+      font-size: 1.02em;
+      margin: 0.9rem 0 0.3rem;
+      border-bottom: 1px solid var(--vscode-panel-border);
+    }
+
+    & .note {
+      opacity: 0.75;
+      margin: 0.3rem 0;
+    }
+
+    & .pending {
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 4px;
+      padding: 0.4rem 0.6rem;
+
+      & .heading {
+        margin-top: 0;
+      }
+
+      & .submit {
+        margin-top: 0.4rem;
+      }
+    }
+
+    & .item {
+      padding: 0.25rem 0;
+      border-bottom: 1px solid var(--vscode-panel-border);
+
+      &.struck .line > .text {
+        text-decoration: line-through;
+        opacity: 0.6;
+      }
+    }
+
+    & .line {
+      display: flex;
+      align-items: baseline;
+      gap: 0.4rem;
+
+      & > .text {
+        flex: 1;
+      }
+
+      & button {
+        background: var(--vscode-button-secondaryBackground);
+        color: var(--vscode-button-secondaryForeground);
+        font-size: 0.85em;
+        padding: 0.1rem 0.4rem;
+      }
+    }
+
+    & .badge {
+      font-size: 0.8em;
+      opacity: 0.8;
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 3px;
+      padding: 0 0.3rem;
+    }
+
+    & .comments {
+      list-style: none;
+      margin: 0.2rem 0 0.2rem 1rem;
+      padding: 0;
+    }
+
+    & .comment {
+      margin: 0.25rem 0;
+      border-left: 2px solid var(--vscode-focusBorder);
+      padding-left: 0.5rem;
+
+      &.closed {
+        border-left-color: var(--vscode-testing-iconPassed);
+        opacity: 0.8;
+      }
+
+      & .id {
+        opacity: 0.7;
+        font-size: 0.85em;
+      }
+    }
+
+    & .resolution {
+      display: flex;
+      align-items: baseline;
+      gap: 0.4rem;
+      margin-top: 0.15rem;
+      opacity: 0.9;
+
+      & .kind {
+        font-size: 0.8em;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+      }
+
+      &.disagreed .kind {
+        color: var(--vscode-editorWarning-foreground);
+      }
+
+      &.addressed .kind {
+        color: var(--vscode-testing-iconPassed);
+      }
+
+      & .text {
+        flex: 1;
+      }
+    }
+
+    & .awaiting {
+      font-size: 0.85em;
+      opacity: 0.65;
+    }
+
+    & .strikes {
+      opacity: 0.85;
+    }
+
+    & .editor {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.3rem;
+      margin: 0.3rem 0 0.3rem 1rem;
+
+      & textarea {
+        width: 100%;
+        background: var(--vscode-input-background);
+        color: var(--vscode-input-foreground);
+        border: 1px solid var(--vscode-input-border, transparent);
+        border-radius: 3px;
+        padding: 0.3rem;
+        font: inherit;
+        resize: vertical;
+      }
     }
   }
 
@@ -247,6 +460,16 @@ chat-app {
           margin: 0.4rem 0;
         }
 
+        & ul,
+        & ol {
+          list-style-position: outside;
+          padding-left: 1.6em;
+        }
+
+        & li {
+          margin: 0.45rem 0;
+        }
+
         & code {
           font-family: var(--vscode-editor-font-family);
           font-size: 0.9em;
@@ -419,9 +642,15 @@ chat-app {
       font-style: italic;
     }
 
-    &.busy:not(.verifying)::after {
-      content: '…';
-      opacity: 0.6;
+    & .working {
+      margin: 0;
+      opacity: 0.7;
+      font-size: 0.9em;
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+
+    &.verifying .working {
+      display: none;
     }
   }
 

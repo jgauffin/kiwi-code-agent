@@ -29,9 +29,13 @@ describe('ScopeGuard for blind planning', () => {
     expect(await use('Grep', { pattern: 'cancel', path: 'src' })).toMatchObject({ deny: expect.any(String) })
   })
 
-  it('only_the_spec_file_is_writable', async () => {
-    expect(await use('Write', { file_path: 'plan/order-cancellation.spec.md' })).toBeUndefined()
+  it('only_the_spec_file_and_its_review_are_writable_and_writing_them_needs_no_permission_prompt', async () => {
+    expect(await use('Write', { file_path: 'plan/order-cancellation.spec.md' })).toEqual({ allow: true })
+    expect(await use('Edit', { file_path: 'plan/order-cancellation.review.md' })).toEqual({ allow: true })
+    expect(await use('Read', { file_path: 'plan/order-cancellation.review.md' })).toBeUndefined()
     expect(await use('Write', { file_path: 'plan/other.spec.md' })).toMatchObject({ deny: expect.any(String) })
+    // Intent is amended by proposing, never by writing: the planner owns the amendment file, not the doc.
+    expect(await use('Write', { file_path: 'plan/order-cancellation.intent.md' })).toEqual({ allow: true })
     expect(await use('Edit', { file_path: 'docs/intent/orders.md' })).toMatchObject({ deny: expect.any(String) })
   })
 
@@ -66,7 +70,8 @@ describe('blind plan helpers', () => {
     expect(prompt).toContain('plan/order-cancellation.spec.md')
     expect(prompt).toContain('status: draft')
     expect(prompt).toContain('never renumber')
-    expect(BLIND_PLAN_TOOLS).toEqual(['Read', 'Glob', 'Write'])
+    expect(prompt).toContain('Write nothing until the user says go')
+    expect(BLIND_PLAN_TOOLS).toEqual(['Read', 'Glob', 'Write', 'Edit'])
   })
 })
 
@@ -78,6 +83,15 @@ describe('composeHooks', () => {
     )
     expect(await hooks.preToolUse!({ toolName: 'Read', input: {}, toolUseId: 't' })).toEqual({ additionalContext: 'a\n\nb' })
     expect(await hooks.preToolUse!({ toolName: 'Bash', input: {}, toolUseId: 't' })).toEqual({ deny: 'no' })
+  })
+
+  it('an_allow_from_any_hook_survives_composition_unless_another_denies', async () => {
+    const allowing = { async preToolUse() { return { allow: true as const } } }
+    const noting = { async preToolUse() { return { additionalContext: 'n' } } }
+    const denying = { async preToolUse() { return { deny: 'no' } } }
+    const use = { toolName: 'Write', input: {}, toolUseId: 't' }
+    expect(await composeHooks(allowing, noting).preToolUse!(use)).toEqual({ allow: true, additionalContext: 'n' })
+    expect(await composeHooks(allowing, denying).preToolUse!(use)).toEqual({ deny: 'no' })
   })
 
   it('stop_collects_verifications_until_one_blocks', async () => {

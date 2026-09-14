@@ -9,11 +9,8 @@ export type TurnUsage = {
   costUsd?: number
 }
 
-export type PermissionDecision =
-  | { kind: 'allow' }
-  /** Allow and remember for the rest of the session, when the engine offers that. */
-  | { kind: 'allow_always' }
-  | { kind: 'deny'; message?: string }
+/** What an engine is told about one call. Remembering a decision is the host's business, not the engine's. */
+export type PermissionDecision = { kind: 'allow' } | { kind: 'deny'; message?: string }
 
 /**
  * What a session emits. One shape for every engine so the UI, the run log and
@@ -37,7 +34,6 @@ export type SessionEvent =
       input: unknown
       title?: string
       description?: string
-      canAllowAlways: boolean
     }
   | { type: 'permission_resolved'; requestId: string; decision: PermissionDecision['kind'] }
   | { type: 'status'; status: 'requesting' | 'compacting' | 'verifying' | 'idle' }
