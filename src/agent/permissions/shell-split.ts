@@ -6,6 +6,8 @@
  */
 
 export type ShellSegment = {
+  /** The command as written, redirects and quotes included, without the operator around it. */
+  text: string
   /** The words of one simple command, quotes and escapes resolved. */
   tokens: string[]
   /** A `>` or `>>` redirect to something other than /dev/null or a file descriptor. */
@@ -26,6 +28,7 @@ export function splitShellCommand(command: string): ShellCommand {
   let writesFile = false
   let substitutes = false
   let redirectPending = false
+  let segmentStart = 0
 
   const endWord = () => {
     if (!inWord) return
@@ -38,15 +41,17 @@ export function splitShellCommand(command: string): ShellCommand {
     word = ''
     inWord = false
   }
-  const endSegment = () => {
+  let i = 0
+  /** Closes the segment before the operator at `i`; the next one starts after the operator's `length` characters. */
+  const endSegment = (length = 0) => {
     endWord()
-    if (tokens.length > 0) segments.push({ tokens, writesFile })
+    if (tokens.length > 0) segments.push({ text: command.slice(segmentStart, i).trim(), tokens, writesFile })
     tokens = []
     writesFile = false
     redirectPending = false
+    segmentStart = i + length
   }
 
-  let i = 0
   while (i < command.length) {
     const c = command[i]!
     const next = command[i + 1]
@@ -88,7 +93,7 @@ export function splitShellCommand(command: string): ShellCommand {
       continue
     }
     if (c === '&' && next === '&') {
-      endSegment()
+      endSegment(2)
       i += 2
       continue
     }
@@ -100,12 +105,12 @@ export function splitShellCommand(command: string): ShellCommand {
       continue
     }
     if (c === '|' && next === '|') {
-      endSegment()
+      endSegment(2)
       i += 2
       continue
     }
     if (c === ';' || c === '|' || c === '&' || c === '\n') {
-      endSegment()
+      endSegment(1)
       i++
       continue
     }

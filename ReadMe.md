@@ -1,9 +1,13 @@
-# KiwiAgent
+# KiwiCodeAgent
+
+![A mad motha f00ker bird logo for them to see](/docs/kiwi-bird-320.png)
+
+***still early, nothing to try yet***
 
 VS Code extension that runs coding sessions with a choice of engine per session.
 
 - **Claude**: the Agent SDK's JavaScript build of Claude Code (`dist/cli.mjs`), spawned under Node with the login Claude Code already has. No native binary. Gets the extension's own tools (JsonSchema, JsonQuery) through an in-process MCP server, shown under their bare names.
-- **GLM-5.3-Flash / Kimi K3** through Berget AI (OpenAI-compatible): own loop with Read, Write, Edit, Glob, Grep, JsonSchema, JsonQuery and Bash. The JSON tools stream a file and return its shape or the rows an expression selects, so a large JSON file never has to be read whole. Read-only tools run without asking; the rest prompt, with "always allow" per tool and session. Needs an API key: run *KiwiAgent: Set API Key for Profile*.
+- **Any OpenAI-compatible endpoint** (tested with GLM-5.3-Flash and Kimi K3 through Berget AI): own loop with Read, Write, Edit, Glob, Grep, JsonSchema, JsonQuery and Bash. The JSON tools stream a file and return its shape or the rows an expression selects, so a large JSON file never has to be read whole. Read-only tools run without asking; the rest prompt. A shell call is prompted command by command, each allowed for the session or the project (`kiwiAgent.permissions.allow`) or denied. Add a profile with `baseUrl`, `model` and `apiKeySecret`, then run *KiwiAgent: Set API Key for Profile*.
 
 The three-phase design (blind plan, map against code, implement) is the goal; `docs/intent/agent.md` is the definition.
 
@@ -12,9 +16,9 @@ The sidebar has a Sessions view (every session, with status) and the Chat view: 
 Session modes:
 
 - **Chat**: work in the code with the full tool set.
-- **Plan**: blind planning of one feature. The session can read `docs/intent/**` only, enforced at the tool call, and writes `plan/<feature>.spec.md` (goal, behaviour, edge cases, open questions, stable item ids, `status: draft`). The first prompt is the feature or user story description. Writing the spec needs no permission prompt. A bar above the transcript switches between the plan (Plan) and the conversation (Chat), names the feature's stage and offers the next step; the view follows the work: Chat while the planner responds, Plan when its turn ends.
+- **Plan**: blind planning of one feature. The session can read `docs/intent/**` only, enforced at the tool call, and writes `plan/<feature>.spec.md` to a contract: a goal, one section per scenario holding behaviours with their edge cases nested under the rule they qualify, open questions, stable item ids, `status: draft`. A write that departs from the contract is answered on the spot and the plan bar offers Repair. The first prompt is the feature or user story description. Writing the spec needs no permission prompt. A bar above the transcript switches between the plan (Plan) and the conversation (Chat), names the feature's stage and offers the next step; the view follows the work: Chat while the planner responds, Plan when its turn ends.
 
-The Plan view follows the stage: comment on and strike the spec's items while it is a draft; once the review is closed (or from the bar) the spec is mapped against the code, which writes findings into the spec and `plan/<feature>.tasks.md` with the files each task touches; Approve sets `status: approved`; Implement works the tasks and marks each `[in progress]`, `[done]`, `[tested]` or `[blocked: reason]` in the tasks file, which the view shows; once every task is tested the `kiwiAgent.verify` test commands run over the tasks' files and the outcome is recorded in the tasks file.
+The Plan view is one card per scenario and follows the stage: comment on and strike items while the spec is a draft; once the review is closed (or from the bar on an uncommented spec) the spec is mapped against the code, which writes findings into the spec and `plan/<feature>.tasks.md`, one task per scenario by default, with the files each touches; every item shows which task delivers it; a spec changed after mapping is re-mapped when the plan turn ends. Approve sets `status: approved`; Implement works the tasks and marks each `[in progress]`, `[done]`, `[tested]` or `[blocked: reason]`, naming on a `proves:` line the test that proves each delivered item, which the view shows on the item; once every task is tested the `kiwiAgent.verify` test commands run over the tasks' files and the outcome is recorded in the tasks file. *KiwiAgent: Migrate plans* brings plans written before the contract into it.
 
 ## Develop
 
@@ -47,7 +51,11 @@ Requires Node in the environment only if `kiwiAgent.nodePath` is set; otherwise 
 
 ## Settings
 
-- `kiwiAgent.profiles`: engine, model, effort per profile.
+- `kiwiAgent.profiles`: one entry per model: `name`, `engine` (`claude-sdk` or `openai-compatible`), `model`, optional `effort` and `systemPromptFile`; `openai-compatible` also takes `baseUrl` and `apiKeySecret`. Defaults: Claude Opus and Sonnet. Example:
+
+  ```json
+  { "name": "Kimi K3", "engine": "openai-compatible", "model": "moonshotai/Kimi-K3", "baseUrl": "https://api.berget.ai/v1", "apiKeySecret": "berget" }
+  ```
 - `kiwiAgent.activeProfile`: profile name used for new sessions; `kiwiAgent.planProfile` overrides it for plan sessions.
 - `kiwiAgent.nodePath`: Node executable for the Claude engine; empty uses VS Code's executable.
 - `kiwiAgent.traceEngine`: one line per Claude engine message in the KiwiAgent output channel, to see what the engine sends (thinking deltas, status) when the UI shows nothing.

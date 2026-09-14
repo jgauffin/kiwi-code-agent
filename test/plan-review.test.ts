@@ -27,28 +27,29 @@ import {
 
 const body = `# Orders
 
-## Behaviour
-- B1: an order can be cancelled
-- B2: a cancelled order is refunded [removed]
+## Goal
+Orders can be cancelled.
 
-## Tasks
-- T1: cancellation (B1, B2)
+## Cancelling
+- B1: an order can be cancelled
+  - E1: a shipped order cannot
+- B2: a cancelled order is refunded [removed]
 
 ## Findings
 | Finding | Proposed solution |
 |---|---|
 | F1 (contradiction, B1): the code says otherwise | keep B1, amend intent |
-| F2 (breakage, T1): reports break [removed] | |
+| F2 (breakage, B2): reports break [removed] | |
 `
 
 describe('plan items', () => {
   it('items_are_addressed_by_id_and_a_removed_item_is_still_an_item', () => {
     expect(planItems(body)).toEqual([
-      { id: 'B1', text: 'an order can be cancelled', section: 'Behaviour', removed: false },
-      { id: 'B2', text: 'a cancelled order is refunded [removed]', section: 'Behaviour', removed: true },
-      { id: 'T1', text: 'cancellation (B1, B2)', section: 'Tasks', removed: false },
-      { id: 'F1', text: '(contradiction, B1) the code says otherwise', section: 'Findings', removed: false },
-      { id: 'F2', text: '(breakage, T1) reports break [removed]', section: 'Findings', removed: true },
+      { id: 'B1', text: 'an order can be cancelled', section: 'Cancelling', removed: false },
+      { id: 'E1', text: 'a shipped order cannot', section: 'Cancelling', removed: false },
+      { id: 'B2', text: 'a cancelled order is refunded [removed]', section: 'Cancelling', removed: true },
+      { id: 'F1', text: '(contradiction, B1): the code says otherwise', section: 'Findings', removed: false },
+      { id: 'F2', text: '(breakage, B2): reports break [removed]', section: 'Findings', removed: true },
     ])
   })
 })

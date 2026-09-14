@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { OpenAiSession } from '../src/agent/openai-session/openai-session'
 import type { ChatCompletionClient, CompletionDelta, CompletionRequest } from '../src/agent/openai-session/chat-messages'
 import type { Tool } from '../src/agent/openai-session/tools/tool'
+import { askUserTool } from '../src/agent/openai-session/tools/ask-user'
 import type { SessionEvent } from '../src/agent/session/code-session'
 
 /** A scripted model: each call to stream() plays the next scripted reply. */
@@ -259,5 +260,97 @@ describe('OpenAiSession', () => {
       { type: 'tool_result', toolUseId: 'c2', text: 'echo:b\n\nseen c2', isError: false },
     ])
     await s.dispose()
+  })
+
+  describe('asking the user', () => {
+    const card = {
+      questions: [
+        { header: 'Scope', question: 'How far?', options: [{ label: 'Small' }, { label: 'Large' }] },
+        { header: 'Engines', question: 'Which?', options: [{ label: 'Claude' }, { label: 'GLM' }], multiSelect: true },
+      ],
+    }
+    const askCall = (id = 'q1') => toolCall(id, 'AskUser', JSON.stringify(card))
+    const asking = (model: ChatCompletionClient) => session(model, [askUserTool as Tool])
+
+    it('a_question_from_the_model_becomes_a_request_and_the_session_makes_no_further_progress_until_it_is_resolved', async () => {
+      const model = new ScriptedModel(askCall(), text('thanks'))
+      const s = asking(model)
+      s.send('go')
+      const events: SessionEvent[] = []
+      for await (const e of s.events()) {
+        events.push(e)
+        if (e.type === 'question_request') break
+      }
+      expect(events.at(-1)).toEqual({ type: 'question_request', requestId: 'q1', request: card })
+      await new Promise((r) => setTimeout(r, 20))
+      // One completion so far: the loop holds the call open, so no result, no further call, no output.
+      expect(model.requests).toHaveLength(1)
+      expect(events.filter((e) => e.type === 'tool_result')).toHaveLength(0)
+      await s.dispose()
+    })
+
+    it('answers_to_every_question_of_one_request_come_back_at_once_as_that_tool_calls_own_result', async () => {
+      const model = new ScriptedModel(askCall(), text('thanks'))
+      const s = asking(model)
+      s.send('go')
+      const events: SessionEvent[] = []
+      for await (const e of s.events()) {
+        events.push(e)
+        if (e.type === 'question_request') {
+          s.respondToQuestion(e.requestId, {
+            kind: 'answered',
+            answers: [{ chosen: ['Large'] }, { chosen: ['Claude', 'GLM'], other: 'and Kimi' }],
+          })
+        }
+        if (e.type === 'turn_done') break
+      }
+      const results = events.filter((e) => e.type === 'tool_result')
+      expect(results).toHaveLength(1)
+      expect(results[0]).toMatchObject({ toolUseId: 'q1', isError: false })
+      expect(results[0]!.text).toContain('Chose: Large')
+      expect(results[0]!.text).toContain('Chose: Claude, GLM')
+      expect(results[0]!.text).toContain('and Kimi')
+      expect(events).toContainEqual({
+        type: 'question_resolved',
+        requestId: 'q1',
+        outcome: { kind: 'answered', answers: [{ chosen: ['Large'] }, { chosen: ['Claude', 'GLM'], other: 'and Kimi' }] },
+      })
+      // The session carried on in the same turn: the model was asked again with the answer as the tool's result.
+      expect(model.requests).toHaveLength(2)
+      expect(model.requests[1]!.messages.at(-1)).toMatchObject({ role: 'tool', toolCallId: 'q1' })
+      expect(events.at(-1)).toMatchObject({ type: 'turn_done', isError: false })
+      await s.dispose()
+    })
+
+    it('an_interrupted_question_is_resolved_unanswered_and_no_choice_is_invented', async () => {
+      const model = new ScriptedModel(askCall(), text('after'))
+      const s = asking(model)
+      s.send('go')
+      const events: SessionEvent[] = []
+      for await (const e of s.events()) {
+        events.push(e)
+        if (e.type === 'question_request') void s.interrupt()
+        if (e.type === 'turn_done') break
+      }
+      const resolved = events.filter((e) => e.type === 'question_resolved')
+      expect(resolved).toHaveLength(1)
+      expect(resolved[0]).toMatchObject({ requestId: 'q1', outcome: { kind: 'unanswered' } })
+      expect(events.some((e) => e.type === 'tool_result' && e.text.includes('Chose'))).toBe(false)
+      await s.dispose()
+    })
+
+    it('a_disposed_session_leaves_no_question_waiting_for_an_answer', async () => {
+      const model = new ScriptedModel(askCall(), text('after'))
+      const s = asking(model)
+      s.send('go')
+      const seen: SessionEvent[] = []
+      const reading = (async () => {
+        for await (const e of s.events()) seen.push(e)
+      })()
+      await new Promise((r) => setTimeout(r, 20))
+      await s.dispose()
+      await reading
+      expect(seen.filter((e) => e.type === 'question_resolved')).toMatchObject([{ requestId: 'q1', outcome: { kind: 'unanswered' } }])
+    })
   })
 })

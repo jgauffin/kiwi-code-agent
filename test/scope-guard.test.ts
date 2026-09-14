@@ -71,7 +71,15 @@ describe('blind plan helpers', () => {
     expect(prompt).toContain('status: draft')
     expect(prompt).toContain('never renumber')
     expect(prompt).toContain('Write nothing until the user says go')
-    expect(BLIND_PLAN_TOOLS).toEqual(['Read', 'Glob', 'JsonSchema', 'JsonQuery', 'Write', 'Edit'])
+    expect(BLIND_PLAN_TOOLS).toEqual(['Read', 'Glob', 'JsonSchema', 'JsonQuery', 'Write', 'Edit', 'AskUser'])
+  })
+
+  it('prompt_states_the_contract_scenarios_with_nested_edges_and_no_restating_sections', () => {
+    const prompt = blindPlanPrompt('Order cancellation', cwd)
+    expect(prompt).toContain('one `##` section per scenario')
+    expect(prompt).toContain('indented under the behaviour it qualifies')
+    expect(prompt).toContain('no invariants, acceptance criteria or task sections')
+    expect(prompt).toContain('  - E1:')
   })
 })
 

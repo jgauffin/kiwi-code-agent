@@ -5,7 +5,26 @@ export type SpecStatus = 'draft' | 'approved'
 /** `body` is the markdown after the front matter, what a reader should see. */
 export type SpecState = { exists: false } | { exists: true; status: SpecStatus; body: string }
 
-const FRONT_MATTER = /^---\r?\n([\s\S]*?)\r?\n---(\r?\n|$)/
+export const FRONT_MATTER = /^---\r?\n([\s\S]*?)\r?\n---(\r?\n|$)/
+
+/** The value of one front-matter line, `key: value`; undefined without front matter or the key. */
+export function frontMatterValue(text: string, key: string): string | undefined {
+  const match = FRONT_MATTER.exec(text)
+  const line = match?.[1]?.split(/\r?\n/).find((l) => l.startsWith(`${key}:`))
+  const value = line?.slice(key.length + 1).trim()
+  return value || undefined
+}
+
+/** Sets one front-matter line, adding the front matter when the text has none. */
+export function withFrontMatterValue(text: string, key: string, value: string): string {
+  const match = FRONT_MATTER.exec(text)
+  if (!match) return `---\n${key}: ${value}\n---\n\n${text}`
+  const lines = match[1]!.split(/\r?\n/)
+  const index = lines.findIndex((l) => l.startsWith(`${key}:`))
+  if (index === -1) lines.push(`${key}: ${value}`)
+  else lines[index] = `${key}: ${value}`
+  return text.replace(FRONT_MATTER, `---\n${lines.join('\n')}\n---${match[2]}`)
+}
 
 /**
  * The spec's front-matter `status` is the approval gate: phase 2 refuses a
@@ -28,9 +47,7 @@ export function bodyOf(text: string): string {
 }
 
 export function statusOf(text: string): SpecStatus {
-  const match = FRONT_MATTER.exec(text)
-  const line = match?.[1]?.split(/\r?\n/).find((l) => /^status:/.test(l))
-  return line?.slice('status:'.length).trim() === 'approved' ? 'approved' : 'draft'
+  return frontMatterValue(text, 'status') === 'approved' ? 'approved' : 'draft'
 }
 
 export async function setSpecStatus(path: string, status: SpecStatus): Promise<void> {
@@ -39,12 +56,5 @@ export async function setSpecStatus(path: string, status: SpecStatus): Promise<v
 }
 
 export function withStatus(text: string, status: SpecStatus): string {
-  const match = FRONT_MATTER.exec(text)
-  if (!match) return `---\nstatus: ${status}\n---\n\n${text}`
-  const body = match[1]!
-  const lines = body.split(/\r?\n/)
-  const index = lines.findIndex((l) => /^status:/.test(l))
-  if (index === -1) lines.push(`status: ${status}`)
-  else lines[index] = `status: ${status}`
-  return text.replace(FRONT_MATTER, `---\n${lines.join('\n')}\n---${match[2]}`)
+  return withFrontMatterValue(text, 'status', status)
 }

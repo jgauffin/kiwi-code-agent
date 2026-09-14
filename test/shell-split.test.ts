@@ -15,6 +15,11 @@ describe('splitShellCommand', () => {
     ])
   })
 
+  it('each_segment_keeps_its_text_as_written_without_the_operators_around_it', () => {
+    const { segments } = splitShellCommand('npm test 2>&1 && echo "a && b" | grep a;  ls -la > out.txt\nrm x')
+    expect(segments.map((s) => s.text)).toEqual(['npm test 2>&1', 'echo "a && b"', 'grep a', 'ls -la > out.txt', 'rm x'])
+  })
+
   it('honours_single_quotes_double_quotes_and_backslash_escapes', () => {
     const { segments } = splitShellCommand(`git commit -m 'it''s done' "x\\"y" a\\ b`)
     expect(segments[0]!.tokens).toEqual(['git', 'commit', '-m', 'its done', 'x"y', 'a b'])

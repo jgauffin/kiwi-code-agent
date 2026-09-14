@@ -1,12 +1,14 @@
 import type { CodeSession, PermissionDecision, SessionEvent } from './code-session'
 import type { ModelProfile } from './model-profile'
 import type { RunLog } from '../runs/run-log'
+import { answerText, UNANSWERED_RESULT, type QuestionOutcome, type UserQuestionRequest } from './user-question'
 
 /**
  * `plan` writes a feature's spec blind, `reconcile` checks it against the code
- * (together: planning), `implement` builds the approved spec.
+ * (together: planning), `implement` builds the approved spec, `cleanup` splits
+ * what the implementation left oversized.
  */
-export type SessionMode = 'chat' | 'plan' | 'reconcile' | 'implement'
+export type SessionMode = 'chat' | 'plan' | 'reconcile' | 'implement' | 'cleanup'
 
 export const isPlanning = (mode: SessionMode): boolean => mode === 'plan' || mode === 'reconcile'
 
@@ -19,6 +21,8 @@ export type SessionRecord = {
   feature?: string
   /** The session whose tab this one runs under: a check runs under its plan session and never gets a tab of its own. */
   parentId?: string
+  /** Workspace-relative paths a cleanup run was given to split; what it may write, beside new files next to them. */
+  files?: string[]
   /** Engine-side conversation id, set once the engine reports it. Lets a closed session continue. */
   engineSessionId?: string
   createdAt: string
@@ -38,6 +42,8 @@ function titleFor(mode: SessionMode, feature: string | undefined): string {
       return `Map: ${feature}`
     case 'implement':
       return `Implement: ${feature}`
+    case 'cleanup':
+      return `Cleanup: ${feature}`
     case 'chat':
       return 'New session'
   }
@@ -95,7 +101,7 @@ export class SessionManager {
     return this.records.find((r) => r.parentId === parentId && this.live.has(r.id))
   }
 
-  async create(profile: ModelProfile, mode: SessionMode = 'chat', feature?: string, parentId?: string): Promise<SessionRecord> {
+  async create(profile: ModelProfile, mode: SessionMode = 'chat', feature?: string, parentId?: string, files?: string[]): Promise<SessionRecord> {
     const record: SessionRecord = {
       id: crypto.randomUUID(),
       title: titleFor(mode, feature),
@@ -103,6 +109,7 @@ export class SessionManager {
       mode,
       ...(feature ? { feature } : {}),
       ...(parentId ? { parentId } : {}),
+      ...(files ? { files } : {}),
       createdAt: new Date().toISOString(),
     }
     this.records.unshift(record)
@@ -137,6 +144,22 @@ export class SessionManager {
     await this.emit(record, { type: 'permission_resolved', requestId, decision: decision.kind })
     if (decision.kind === 'allow') this.preapproved.set(id, { toolName: request.toolName, input: JSON.stringify(request.input) })
     await this.send(id, decisionPrompt(request, decision))
+  }
+
+  /**
+   * The answer goes to the engine that asked while it still holds the
+   * question. One that let go of it — the turn ended around the card, the
+   * window was reloaded — is not a reason to throw a decision the user already
+   * made away: it becomes the session's next prompt, so the answer arrives a
+   * turn late rather than not at all.
+   */
+  async respondToQuestion(id: string, requestId: string, outcome: QuestionOutcome): Promise<void> {
+    if (this.live.get(id)?.respondToQuestion(requestId, outcome)) return
+    const record = this.require(id)
+    const request = await this.openQuestion(record, requestId)
+    if (!request) throw new Error(`Question ${requestId} is no longer open`)
+    await this.emit(record, { type: 'question_resolved', requestId, outcome })
+    await this.send(id, questionPrompt(request.request, outcome))
   }
 
   async interrupt(id: string): Promise<void> {
@@ -231,9 +254,26 @@ export class SessionManager {
     }
     return request
   }
+
+  /** The question as logged, if nothing has resolved it since; a request is resolved at most once. */
+  private async openQuestion(record: SessionRecord, requestId: string): Promise<QuestionRequest | undefined> {
+    let request: QuestionRequest | undefined
+    for (const event of await this.transcript(record.id)) {
+      if (event.type === 'question_request' && event.requestId === requestId) request = event
+      if (event.type === 'question_resolved' && event.requestId === requestId) request = undefined
+    }
+    return request
+  }
 }
 
 type PermissionRequest = Extract<SessionEvent, { type: 'permission_request' }>
+type QuestionRequest = Extract<SessionEvent, { type: 'question_request' }>
+
+/** The answers as the model hears them once the engine that asked is gone: the questions are repeated so nothing rests on what the resumed engine remembers. */
+export function questionPrompt(request: UserQuestionRequest, outcome: QuestionOutcome): string {
+  if (outcome.kind === 'unanswered') return `The question you asked was not answered.\n\n${UNANSWERED_RESULT}`
+  return `Your question was answered:\n\n${answerText(request, outcome.answers)}`
+}
 
 /** The decision as the model hears it once the engine that asked is gone: the call is named in full so nothing rests on what the resumed engine remembers. */
 export function decisionPrompt(request: PermissionRequest, decision: PermissionDecision): string {

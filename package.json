@@ -68,6 +68,10 @@
       {
         "command": "kiwiAgent.setApiKey",
         "title": "KiwiAgent: Set API Key for Profile"
+      },
+      {
+        "command": "kiwiAgent.migratePlans",
+        "title": "KiwiAgent: Migrate plans to the spec contract"
       }
     ],
     "menus": {
@@ -133,7 +137,7 @@
           },
           "default": [],
           "scope": "resource",
-          "description": "Tool calls that run without a prompt, on every engine. A rule is a tool name (Edit), a tool with a glob on the workspace-relative path (Edit(src/**)), or Bash with a command: Bash(npm test) for that exact command, Bash(npm run:*) for any command starting with those words. Every segment of a chained command must be covered or read-only. \"Allow for project\" on a prompt writes here. Read-only tools and commands (Read, Grep, ls, git status, ...) never prompt."
+          "description": "Tool calls that run without a prompt, on every engine. A rule is a tool name (Edit), a tool with a glob on the workspace-relative path (Edit(src/**)), or Bash with a command: Bash(npm test) for that exact command, Bash(npm run:*) for any command starting with those words. Every segment of a chained command must be covered or read-only. \"Allow for project\" on a prompt writes here; \"Allow for session\" keeps the rule in memory for that session instead. Read-only tools and commands (Read, Grep, ls, git status, ...) never prompt."
         },
         "kiwiAgent.permissions.deny": {
           "type": "array",
@@ -195,6 +199,27 @@
           "default": 3,
           "description": "Consecutive failed test runs handed to the implement session before the failed record is left for you."
         },
+        "kiwiAgent.cleanup.functionLines": {
+          "type": "integer",
+          "default": 25,
+          "description": "Code lines a function may have before the cleanup run after a feature's tests pass splits it; 0 turns the limit off."
+        },
+        "kiwiAgent.cleanup.typeLines": {
+          "type": "integer",
+          "default": 200,
+          "description": "Code lines a class, struct or other type may have before the cleanup run splits it; 0 turns the limit off."
+        },
+        "kiwiAgent.cleanup.fileLines": {
+          "type": "integer",
+          "default": 400,
+          "description": "Code lines a file may have before the cleanup run splits it; 0 turns the limit off."
+        },
+        "kiwiAgent.cleanup.ignore": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["**/*.test.*", "**/*.spec.*", "**/__tests__/**"],
+          "description": "Workspace-relative globs of edited files the cleanup never measures: tests, generated code."
+        },
         "kiwiAgent.profiles": {
           "type": "array",
           "description": "Model profiles selectable per session.",
@@ -208,20 +233,6 @@
               "name": "Claude Sonnet",
               "engine": "claude-sdk",
               "model": "claude-sonnet-5"
-            },
-            {
-              "name": "GLM-5.3-Flash (Berget)",
-              "engine": "openai-compatible",
-              "model": "zai-org/GLM-5.3-Flash",
-              "baseUrl": "https://api.berget.ai/v1",
-              "apiKeySecret": "berget"
-            },
-            {
-              "name": "Kimi K3 (Berget)",
-              "engine": "openai-compatible",
-              "model": "moonshotai/Kimi-K3",
-              "baseUrl": "https://api.berget.ai/v1",
-              "apiKeySecret": "berget"
             }
           ],
           "items": {
@@ -294,6 +305,7 @@
     "@types/vscode": "^1.104.0",
     "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.28.2",
+    "jsdom": "^30.0.1",
     "typescript": "^5.9.0",
     "vitest": "^5.0.0"
   }

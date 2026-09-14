@@ -1,13 +1,14 @@
 import type { PlanState } from '../protocol'
-import type { PlanItem, Review, ReviewComment, ReviewRound } from '../../agent/phases/plan-review'
+import type { Review, ReviewComment, ReviewRound } from '../../agent/phases/plan-review'
+import type { Finding } from '../../agent/phases/reconcile'
+import type { Item, Scenario, Spec } from '../../agent/phases/spec-model'
 import type { Task, TaskState } from '../../agent/phases/tasks-file'
 import { ReviewActionEvent } from './events'
 import { renderMarkdown } from './markdown'
 import { post } from './vscode-api'
 
 const PLAN_TARGET = 'plan'
-const ITEM_ID = /^\s*([A-Z]{1,3}\d+)\b/
-const MARKER = /\s*\[(?:in progress|done|tested|removed|blocked[^\]]*)\]/gi
+const MARKER = /\s*\[(?:in progress|done|tested|removed|resolved|blocked[^\]]*)\]/gi
 
 const TASK_STATE: Record<TaskState, string> = {
   open: 'open',
@@ -20,10 +21,11 @@ const TASK_STATE: Record<TaskState, string> = {
 type Editor = { target: string; commentId?: string; text: string }
 
 /**
- * The spec, rendered where the transcript normally is, with what the stage
- * adds: the review on a draft (each item line carries its comments, its
- * strike, and the controls to add more; the pending batch sits on top), the
- * task board once the spec is mapped, each task's state once work has
+ * The plan, built from the spec as the contract reads it: the goal, one card
+ * per scenario with its rules and their edge cases, the open questions, the
+ * findings, and the task board grouped under the scenarios it delivers. What
+ * the stage adds rides on the rows: the review controls on a draft, the task
+ * that delivers an item once mapped, the test that proves it once work has
  * started. Built by hand rather than from a template so an open comment box
  * keeps its text and caret while the plan around it is re-rendered.
  */
@@ -39,10 +41,10 @@ export class PlanView extends HTMLElement {
             body: plan.body,
             stage: plan.stage,
             status: plan.status,
-            items: plan.items,
             review: plan.review,
             commentable: plan.commentable,
             tasks: plan.tasks,
+            stale: plan.stale,
             lastVerification: plan.lastVerification,
           }
         : null,
@@ -65,57 +67,39 @@ export class PlanView extends HTMLElement {
   private draw(): void {
     this.replaceChildren()
     const plan = this.plan
-    if (!plan?.body) return
+    if (!plan?.body || !plan.spec) return
+    const spec = plan.spec
+    this.append(el('h1', 'title', spec.title || plan.specPath))
+    if (spec.problems.length > 0) {
+      // Off contract: the file as written, so nothing the model put there is hidden, and no review on it until it is repaired.
+      this.append(this.problemsBox(spec.problems))
+      const raw = el('div', 'body')
+      renderMarkdown(plan.body, raw, true)
+      this.append(raw)
+      return
+    }
     if (!plan.commentable && plan.review.rounds.length > 0) {
       this.append(
         note('This plan is approved. Its review is kept as the record of how it was reached; reopen or supersede the plan to comment again.'),
       )
     }
-    // The batch is shown while it is being written; once sent it lives on the items, and the spec reads unobstructed.
+    if (plan.stale) this.append(note('The tasks predate the last change to the spec; they are re-mapped when the plan session’s turn ends.'))
     const round = pendingRound(plan.review)
     if (round) this.append(this.pendingSection(plan, round))
-    const body = el('div', 'body')
-    renderMarkdown(plan.body, body, true)
-    this.decorate(body, plan)
-    this.append(body)
+    this.append(this.wholePlanRow(plan), this.goalSection(spec))
+    for (const scenario of spec.scenarios) this.append(this.scenarioCard(scenario, plan))
+    if (spec.questions.length > 0) this.append(this.questionsSection(spec, plan))
+    if (spec.findings.length > 0) this.append(this.findingsSection(spec, plan))
     if (plan.tasks.length > 0) this.append(this.tasksSection(plan))
   }
 
-  // --- the task board ---------------------------------------------------------
-
-  /** Tasks with the items they deliver and the files they touch; a state badge once work has started. */
-  private tasksSection(plan: PlanState): HTMLElement {
-    const section = el('section', 'tasks')
-    const heading = el('h2', 'heading', 'Tasks')
-    heading.title = plan.tasksPath
-    section.append(heading)
-    const list = el('ul', 'board')
-    for (const task of plan.tasks) list.append(this.taskRow(task, plan))
-    section.append(list)
-    const record = plan.lastVerification
-    if (record) {
-      const line = el('p', `verification ${record.ok ? 'ok' : 'failed'}`)
-      line.append(el('span', 'kind', record.ok ? 'tests passed' : 'tests failed'), el('span', 'text', `${record.text} (${record.at})`))
-      section.append(line)
-    }
-    return section
-  }
-
-  private taskRow(task: Task, plan: PlanState): HTMLElement {
-    const started = plan.stage !== 'mapped'
-    const row = el('li', `task ${task.state}${task.removed ? ' removed' : ''}`)
-    const line = el('div', 'line')
-    line.append(el('span', 'id', task.id), el('span', 'text', task.text.replace(MARKER, '').trim()))
-    if (task.delivers.length > 0) line.append(el('span', 'delivers', task.delivers.join(', ')))
-    if (task.removed) line.append(el('span', 'badge removed', 'removed'))
-    else if (started) line.append(el('span', `badge state ${task.state}`, blockedReason(task) ?? TASK_STATE[task.state]))
-    row.append(line)
-    if (task.files.length > 0) {
-      const files = el('div', 'files')
-      for (const file of task.files) files.append(fileLink(file))
-      row.append(files)
-    }
-    return row
+  private problemsBox(problems: string[]): HTMLElement {
+    const box = el('section', 'problems')
+    box.append(el('h3', 'heading', 'Off contract'))
+    const list = el('ul', 'list')
+    for (const problem of problems) list.append(el('li', 'problem', problem))
+    box.append(list, note('Repair from the plan bar: the planner rearranges the spec, the rules stay the rules.'))
+    return box
   }
 
   // --- the pending batch ------------------------------------------------------
@@ -138,22 +122,7 @@ export class PlanView extends HTMLElement {
     return section
   }
 
-  // --- the rendered spec, item by item ----------------------------------------
-
-  /** Attaches the review to the rendered markdown: the whole-plan row under the title, then every list item and table row that starts with an item id. */
-  private decorate(body: HTMLElement, plan: PlanState): void {
-    const whole = this.wholePlanRow(plan)
-    const title = body.querySelector('h1')
-    if (title) title.after(whole)
-    else body.prepend(whole)
-    for (const line of body.querySelectorAll<HTMLElement>('li, tr')) {
-      const id = ITEM_ID.exec(line.textContent ?? '')?.[1]
-      const item = id ? plan.items.find((i) => i.id === id) : undefined
-      if (!item) continue
-      if (line instanceof HTMLTableRowElement) this.decorateRow(line, plan, item)
-      else this.decorateListItem(line, plan, item)
-    }
-  }
+  // --- the spec, section by section -------------------------------------------
 
   private wholePlanRow(plan: PlanState): HTMLElement {
     const row = el('div', 'item whole')
@@ -164,41 +133,203 @@ export class PlanView extends HTMLElement {
     return row
   }
 
-  private decorateListItem(li: HTMLElement, plan: PlanState, item: PlanItem): void {
-    li.classList.add('item')
-    // The item's own line is wrapped so a strike hits it alone, not the comments or a nested list under it.
-    const nested = li.querySelector(':scope > ul, :scope > ol')
-    const text = wrapText(li, nested)
-    text.after(this.controls(plan, item))
-    if (struckItems(plan.review).includes(item.id) || item.removed) li.classList.add('struck')
-    li.append(...this.attachments(plan, item.id))
+  private goalSection(spec: Spec): HTMLElement {
+    const section = el('section', 'goal')
+    section.append(el('h2', 'heading', 'Goal'))
+    const prose = el('div', 'prose')
+    renderMarkdown(spec.goal, prose, true)
+    section.append(prose)
+    return section
   }
 
-  private decorateRow(tr: HTMLTableRowElement, plan: PlanState, item: PlanItem): void {
-    tr.classList.add('item')
-    for (const cell of tr.cells) wrapText(cell, null)
-    tr.cells[0]?.append(this.controls(plan, item))
-    if (struckItems(plan.review).includes(item.id) || item.removed) tr.classList.add('struck')
-    const attachments = this.attachments(plan, item.id)
-    if (attachments.length === 0) return
-    const extra = tr.insertAdjacentElement('afterend', el('tr', 'attachments')) as HTMLTableRowElement
-    const cell = extra.insertCell()
-    cell.colSpan = tr.cells.length
-    cell.append(...attachments)
+  /** One scenario: its rules, each with the edge cases that qualify it indented beneath. */
+  private scenarioCard(scenario: Scenario, plan: PlanState): HTMLElement {
+    const card = el('section', 'scenario')
+    card.append(el('h2', 'heading', scenario.title))
+    if (scenario.intro) {
+      const intro = el('div', 'prose intro')
+      renderMarkdown(scenario.intro, intro, true)
+      card.append(intro)
+    }
+    const rules = el('ul', 'rules')
+    for (const behaviour of scenario.behaviours) {
+      const row = this.itemRow(behaviour, plan, 'behaviour')
+      if (behaviour.edges.length > 0) {
+        const edges = el('ul', 'edges')
+        for (const edge of behaviour.edges) edges.append(this.itemRow(edge, plan, 'edge'))
+        row.append(edges)
+      }
+      rules.append(row)
+    }
+    card.append(rules)
+    return card
   }
 
-  private controls(plan: PlanState, item: PlanItem): HTMLElement {
+  private questionsSection(spec: Spec, plan: PlanState): HTMLElement {
+    const section = el('section', 'questions')
+    section.append(el('h2', 'heading', 'Open questions'))
+    const list = el('ul', 'rules')
+    for (const question of spec.questions) list.append(this.itemRow(question, plan, 'question'))
+    section.append(list)
+    return section
+  }
+
+  private findingsSection(spec: Spec, plan: PlanState): HTMLElement {
+    const section = el('section', 'findings')
+    section.append(el('h2', 'heading', 'Findings'))
+    const list = el('ul', 'rules')
+    for (const finding of spec.findings) list.append(this.findingRow(finding, plan))
+    section.append(list)
+    return section
+  }
+
+  /**
+   * A behaviour, edge case or question: id, text, and to the right what the
+   * reader needs at a glance: a gap in coverage, a strike, the intent link;
+   * what is in order stays quiet, and the review controls show on hover.
+   */
+  private itemRow(item: Item, plan: PlanState, kind: 'behaviour' | 'edge' | 'question'): HTMLElement {
     const struck = struckItems(plan.review).includes(item.id)
-    const controls = el('span', 'controls')
-    if (item.removed) controls.append(el('span', 'badge removed', 'removed'))
-    else if (struck) controls.append(el('span', 'badge struck', 'struck'))
-    if (!plan.commentable) return controls
-    controls.append(button('Comment', () => this.openEditor({ target: item.id, text: '' })))
-    const pending = pendingRound(plan.review)?.strikes.includes(item.id) ?? false
-    if (!struck) controls.append(button('Strike', () => this.act({ type: 'strike_item', itemId: item.id })))
-    else if (pending) controls.append(button('Unstrike', () => this.act({ type: 'unstrike_item', itemId: item.id })))
-    return controls
+    const row = el('li', `item ${kind}${struck || item.removed ? ' struck' : ''}`)
+    const line = el('div', 'line')
+    const aside = el('span', 'aside')
+    if (item.citation) {
+      const link = fileLink(item.citation.split('#')[0]!, 'intent')
+      link.classList.add('citation')
+      link.title = item.citation
+      aside.append(link)
+    }
+    if (item.removed) aside.append(el('span', 'badge removed', 'removed'))
+    else if (struck) aside.append(el('span', 'badge struck', 'struck'))
+    if (kind !== 'question') aside.append(...this.coverage(item.id, plan))
+    aside.append(...this.controls(item.id, plan, true))
+    line.append(el('span', 'id', item.id), el('span', 'text', item.text.replace(MARKER, '').trim()), aside)
+    row.append(line, ...this.attachments(plan, item.id))
+    return row
   }
+
+  private findingRow(finding: Finding, plan: PlanState): HTMLElement {
+    const struck = struckItems(plan.review).includes(finding.id)
+    const row = el('li', `item finding${finding.resolved ? ' resolved' : ''}${struck ? ' struck' : ''}`)
+    const line = el('div', 'line')
+    const aside = el('span', 'aside')
+    aside.append(el('span', `badge state ${finding.resolved ? 'resolved' : 'open'}`, finding.resolved ? 'resolved' : 'to rule on'))
+    if (struck) aside.append(el('span', 'badge struck', 'struck'))
+    aside.append(...this.controls(finding.id, plan, false))
+    line.append(el('span', 'id', finding.id), el('span', 'text', finding.text.replace(MARKER, '').trim()), aside)
+    row.append(line)
+    if (finding.proposal) {
+      const proposal = el('div', 'proposal')
+      proposal.append(el('span', 'kind', 'proposed'), el('span', 'text', finding.proposal))
+      row.append(proposal)
+    }
+    row.append(...this.attachments(plan, finding.id))
+    return row
+  }
+
+  /** What builds the item and what proves it, once there is a board to say so: a gap is a badge, what is in order a quiet mark. */
+  private coverage(id: string, plan: PlanState): HTMLElement[] {
+    if (plan.tasks.length === 0) return []
+    const marks: HTMLElement[] = []
+    const live = plan.tasks.filter((t) => !t.removed)
+    const task = live.find((t) => t.delivers.includes(id))
+    if (task) {
+      const chip = el('span', 'chip task', task.id)
+      chip.title = `Delivered by ${task.id}: ${task.text.replace(MARKER, '').trim()}`
+      marks.push(chip)
+    } else marks.push(el('span', 'badge gap', 'no task'))
+    if (plan.stage === 'under_development' || plan.stage === 'verification' || plan.stage === 'verified') {
+      const proof = live.flatMap((t) => t.proves).find((p) => p.item === id)
+      if (proof) {
+        const link = fileLink(proof.file, '✓')
+        link.classList.add('chip', 'proof')
+        link.title = `Proven by ${proof.test} in ${proof.file}`
+        marks.push(link)
+      } else marks.push(el('span', 'badge gap', 'no test'))
+    }
+    return marks
+  }
+
+  private controls(id: string, plan: PlanState, strikeable: boolean): HTMLElement[] {
+    if (!plan.commentable) return []
+    const controls: HTMLElement[] = [button('Comment', () => this.openEditor({ target: id, text: '' }))]
+    if (strikeable) {
+      const struck = struckItems(plan.review).includes(id)
+      const pending = pendingRound(plan.review)?.strikes.includes(id) ?? false
+      if (!struck) controls.push(button('Strike', () => this.act({ type: 'strike_item', itemId: id })))
+      else if (pending) controls.push(button('Unstrike', () => this.act({ type: 'unstrike_item', itemId: id })))
+    }
+    const wrap = el('span', 'controls')
+    wrap.append(...controls)
+    return [wrap]
+  }
+
+  // --- the task board ---------------------------------------------------------
+
+  /** Tasks under the scenarios they deliver; a foundation task appears under each it serves. */
+  private tasksSection(plan: PlanState): HTMLElement {
+    const section = el('section', 'tasks')
+    const heading = el('h2', 'heading', 'Tasks')
+    heading.title = plan.tasksPath
+    section.append(heading)
+    const spec = plan.spec!
+    const placed = new Set<string>()
+    for (const scenario of spec.scenarios) {
+      const ids = new Set(scenario.behaviours.flatMap((b) => [b.id, ...b.edges.map((e) => e.id)]))
+      const tasks = plan.tasks.filter((t) => t.delivers.some((d) => ids.has(d)))
+      if (tasks.length === 0) continue
+      for (const task of tasks) placed.add(task.id)
+      section.append(this.taskGroup(scenario.title, tasks, plan))
+    }
+    const rest = plan.tasks.filter((t) => !placed.has(t.id))
+    if (rest.length > 0) section.append(this.taskGroup(placed.size > 0 ? 'Other' : '', rest, plan))
+    const record = plan.lastVerification
+    if (record) {
+      const line = el('p', `verification ${record.ok ? 'ok' : 'failed'}`)
+      line.append(el('span', 'kind', record.ok ? 'tests passed' : 'tests failed'), el('span', 'text', `${record.text} (${record.at})`))
+      section.append(line)
+    }
+    return section
+  }
+
+  private taskGroup(title: string, tasks: Task[], plan: PlanState): HTMLElement {
+    const group = el('div', 'group')
+    if (title) group.append(el('h3', 'heading', title))
+    const list = el('ul', 'board')
+    for (const task of tasks) list.append(this.taskRow(task, plan))
+    group.append(list)
+    return group
+  }
+
+  private taskRow(task: Task, plan: PlanState): HTMLElement {
+    const started = plan.stage !== 'mapped'
+    const row = el('li', `task ${task.state}${task.removed ? ' removed' : ''}`)
+    const line = el('div', 'line')
+    line.append(el('span', 'id', task.id), el('span', 'text', task.text.replace(MARKER, '').trim()))
+    if (task.delivers.length > 0) line.append(el('span', 'delivers', task.delivers.join(', ')))
+    if (task.removed) line.append(el('span', 'badge removed', 'removed'))
+    else if (started) {
+      line.append(el('span', `badge state ${task.state}`, blockedReason(task) ?? TASK_STATE[task.state]))
+      const unproven = task.state === 'tested' ? task.delivers.filter((d) => !task.proves.some((p) => p.item === d)) : []
+      if (unproven.length > 0) line.append(el('span', 'badge gap', `no test for ${unproven.join(', ')}`))
+    }
+    row.append(line)
+    if (task.files.length > 0) {
+      const files = el('div', 'files')
+      for (const file of task.files) files.append(fileLink(file, file))
+      row.append(files)
+    }
+    if (task.context.length > 0) {
+      const context = el('div', 'files context')
+      context.title = 'What the mapping read to arrive at this task; the implementer starts here.'
+      context.append(el('span', 'label', 'context'))
+      for (const file of task.context) context.append(fileLink(file, file))
+      row.append(context)
+    }
+    return row
+  }
+
+  // --- comments ---------------------------------------------------------------
 
   /** The comments on a target and, when one is being written for it, the editor. */
   private attachments(plan: PlanState, target: string): HTMLElement[] {
@@ -284,15 +415,6 @@ function commentsFor(review: Review, target: string): ReviewComment[] {
   return review.rounds.flatMap((r) => r.comments).filter((c) => c.target === target)
 }
 
-/** Moves the children of `parent` up to `before` (all of them when null) into a `span.text`, so a style can hit the line's own text alone. */
-function wrapText(parent: HTMLElement, before: Element | null): HTMLElement {
-  const text = el('span', 'text')
-  while (parent.firstChild && parent.firstChild !== before) text.append(parent.firstChild)
-  if (before) before.before(text)
-  else parent.append(text)
-  return text
-}
-
 function el(tag: string, className: string, text?: string): HTMLElement {
   const node = document.createElement(tag)
   node.className = className
@@ -312,8 +434,8 @@ function blockedReason(task: Task): string | undefined {
   return reason ? `blocked: ${reason}` : 'blocked'
 }
 
-function fileLink(path: string): HTMLButtonElement {
-  const link = button(path, () => post({ type: 'open_file', path }))
+function fileLink(path: string, label: string): HTMLButtonElement {
+  const link = button(label, () => post({ type: 'open_file', path }))
   link.className = 'link file'
   link.title = `Open ${path}`
   return link

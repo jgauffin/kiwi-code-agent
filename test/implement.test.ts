@@ -34,8 +34,14 @@ describe('implement phase', () => {
     expect(prompt).toContain('plan/order-cancellation.tasks.md')
     for (const marker of ['[in progress]', '[done]', '[tested]', '[blocked:']) expect(prompt).toContain(marker)
     expect(prompt).toContain('files:')
+    // Tested is backed by evidence the user reads on the spec: a test named per delivered item.
+    expect(prompt).toContain('proves:')
+    expect(prompt).toContain('<item id> <test file> <test name>')
+    // The mapping's reading is the starting point, not a search of the code.
+    expect(prompt).toContain('context:')
+    expect(prompt).toContain('search the code only for what they do not answer')
     expect(prompt).toContain('docs/')
-    expect(IMPLEMENT_TOOLS).toEqual(['Read', 'Write', 'Edit', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'Bash', 'Skill'])
+    expect(IMPLEMENT_TOOLS).toEqual(['Read', 'Write', 'Edit', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'Bash', 'Skill', 'AskUser'])
     expect(IMPLEMENT_KICKOFF.length).toBeGreaterThan(0)
   })
 })

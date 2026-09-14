@@ -4,6 +4,7 @@ import { fail, ok, truncate, type Tool } from './tool'
 
 const schema = z.object({
   command: z.string().describe('Shell command to run'),
+  description: z.string().optional().describe('What the command does, in a few words; the user sees it as the title of the call'),
   timeout_ms: z.number().int().min(1000).max(600_000).optional().describe('Timeout in milliseconds, default 120000'),
 })
 

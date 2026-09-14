@@ -47,7 +47,27 @@ Until ADO is connected the feature description is typed by the user or picked fr
 
 Tools: Read/Glob scoped to `docs/intent/**`, `get_work_item(id)`, AskUserQuestion, optionally WebSearch. Bash denied by bare name (allow-lists only auto-approve; a bare-name deny removes the tool from context).
 
-First a direction in chat (the decisions that shape the feature, the questions that would change them); nothing is written until the user says go. Then `plan/<feature>.spec.md`: goal and behaviour always, edge cases and open questions when the feature has them, stable item IDs. No tasks: written blind they would only restate the behaviours, so they come from the mapping against the code. An item derived from intent cites its section (`B2 (docs/intent/orders.md#Cancellation)`); an uncited item is the planner's default. To the point, not complete: an item earns its place by changing what gets built or how it is tested. No code paths. If `docs/intent/**` has nothing on the feature, ask and stop.
+First a direction in chat (the decisions that shape the feature, the questions that would change them); nothing is written until the user says go. Then `plan/<feature>.spec.md`, to the contract below. An item derived from intent cites its section (`B2 (docs/intent/orders.md#Cancellation)`); an uncited item is the planner's default. To the point, not complete: an item earns its place by changing what gets built or how it is tested. No code paths. If `docs/intent/**` has nothing on the feature, ask and stop.
+
+### The spec contract
+
+```markdown
+## Goal
+Prose.
+
+## Cancelling an order            ← a scenario: a situation from the user's side
+- B1: a rule, written so a test can prove it
+  - E1: situation → outcome, an edge of B1
+- B2: another rule
+
+## Open questions
+- Q1: what only the user can settle
+
+## Findings
+| Finding | Proposed solution |
+```
+
+`Goal`, `Open questions` and `Findings` are reserved; every other `##` is a scenario, and a small feature has one. Behaviours (`B`) sit directly under a scenario; an edge case (`E`) is nested under the behaviour it qualifies, one level, no deeper. There are no invariants, acceptance criteria or task sections: an invariant is a behaviour, an acceptance criterion restates one, and the evidence that an item holds is the test the implementer names for it. Ids are global and stable. The extension parses the spec into this model on every write and hands what does not fit back to the model on the same tool result; the plan view shows the problems and offers Repair, which runs the migration (below) for that plan.
 
 ### get_work_item
 
@@ -82,12 +102,20 @@ A finding is one of:
 
 Output, two files. A `Findings` table in the spec with the columns Finding and Proposed solution, each finding naming the spec item and the code it rests on, short enough to read in one sitting. The run fills the Finding column only. When the run ends with findings that have no proposal, the plan session is handed their ids and fills in Proposed solution for each: how the spec should change, or why it should stand, with the reason. The user rules on findings as on any other plan item, in the plan session, which revises the spec per ruling and marks the finding `[resolved]`; the spec is approved once.
 
-And `plan/<feature>.tasks.md`: one task per unit of work, the spec items it delivers in parentheses, the files it touches on an indented `files:` line (existing paths; `(new)` for ones to create). Task ids are stable across re-runs: a re-run keeps, updates or marks `[removed]`, never renumbers. No task is written under a finding the user has not ruled on.
+And `plan/<feature>.tasks.md`: one task per scenario by default, departing only for a reason the task names (a scenario too big for one sitting is split in build order; a foundation every scenario needs is one task shared by all). Each task lists the spec items it delivers in parentheses and the files it touches on an indented `files:` line (existing paths; `(new)` for ones to create); every behaviour and edge case is delivered by some task, and an item no task delivers shows as a gap. Task ids are stable across re-runs: a re-run keeps, updates or marks `[removed]`, never renumbers. No task is written under a finding the user has not ruled on. A legacy `## Tasks` section in the spec is deleted once the board holds it.
 
 ```markdown
+---
+spec: 3f9a1c2e
+---
 - T1 (B1, E2): add the cancel command
   - files: src/orders/cancel.ts, src/orders/cancel.test.ts (new)
+  - context: src/orders/order.ts, src/orders/ship.test.ts
 ```
+
+`context:` is what the run read to arrive at the task (the modules the files lean on, the test showing the pattern, where the term already lives), so the implementer starts from `files:` and `context:` and searches only for what they do not answer. Handoff stays files on disk: the mapper's conversation is stale by the time implementing starts, bound to its engine and profile, and one session's context cannot serve the several implement sessions a feature may take.
+
+The front matter records the fingerprint of the spec the board was mapped from (goal, scenarios and questions; not findings, so a proposal does not count). A plan turn that changes the spec under a mapped board makes it stale: the plan bar says so, approval is refused, and the board is re-mapped when that turn ends. Mapping is offered as a button only on a spec nobody has commented on; after that it runs by itself.
 
 Authority order is fixed in the prompt: work item, then intent doc, then code. Amendments (`naive`) and contradictions ruled in the spec's favour are written back to `docs/intent/**` or the work item as an explicit output, so intent does not rot.
 
@@ -126,8 +154,13 @@ A sub-session the planner calls with `retrieve(question, known, budget)` to keep
 
 Tools: Read, Write, Edit, Glob, Grep, JsonSchema, JsonQuery, Bash. Input is the approved spec and its tasks file, fresh session started from the plan bar; refuses to start on `status: draft` or without a tasks file. Breakage findings the user chose to fix are work with the task they touch. Writes go through the ordinary permission prompt; no scope guard.
 
-- Task state is the tasks file: the implementer appends `[in progress]` when it starts a task, `[done]` when the code is written, `[tested]` when the tests for it pass, `[blocked: reason]` when it cannot finish, so task 4 of 7 survives a fresh session and shows in the plan view. The task's `files:` line is kept true to what was touched.
+- Task state is the tasks file: the implementer appends `[in progress]` when it starts a task, `[done]` when the code is written, `[tested]` when every item the task delivers is proven by a passing test, `[blocked: reason]` when it cannot finish, so task 4 of 7 survives a fresh session and shows in the plan view. The task's `files:` line is kept true to what was touched.
+- Coverage is the evidence: a `proves:` line on the task names, per delivered item, the test file and the test whose name states the rule (`proves: B1 test/orders/cancel.test.ts an_open_order_can_be_cancelled, E1 ...`). The plan view shows on each behaviour and edge case which task delivers it and which test proves it, or `no task` / `no test`; a task marked tested with an item it names no test for is flagged. That is what an acceptance section used to promise, made checkable.
 - Only `[tested]` is a finish. A board whose every task is tested goes to verification; the plan bar stops offering Implement, since a second session would re-read the code and decide for itself what to redo. `[blocked: reason]` is unfinished work, so it still takes a fresh session. The state is derived from the markers, not a `status` of its own: adding a task to a finished board makes it unfinished again with nothing to reset, and the two can never disagree.
+
+## Migration
+
+`KiwiAgent: Migrate plans` brings every plan under `plan/` to the contract; Repair in the plan bar does it for one. By rule first: a legacy `## Tasks` section becomes the tasks file (delivered ids first, markers kept), the board is stamped, the intent file is parsed and a broken one reported, the review file is untouched. What remains (invariants, acceptance criteria, flat edge cases) goes to the plan session as a prompt: group into scenarios, nest edges, fold restated rules, keep every id, and mark a folded rule that survives under a new id with `(was I3)`. When that turn ends the extension follows each rename through the review targets, the tasks' delivered ids and the findings, drops the notes and stamps the board. Approval is kept on a migrated approved spec: the arrangement changed, not the rules.
 
 ## Verification
 
@@ -174,3 +207,7 @@ Phase 1 wants the strongest reasoner, phase 3 wants throughput. Profiles carry e
 - Anthropic Messages API adapter under API key in the own-loop engine.
 - Compaction in the own-loop engine.
 - Retrieval in phase 1 (large intent tree, work-item graph, WebSearch).
+
+## Interrupting
+
+Interrupting a session ends the turn it is in. Anything the session was waiting on is abandoned rather than answered, and the session learns how it ended when the person next prompts it.

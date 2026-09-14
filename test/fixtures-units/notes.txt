@@ -1,0 +1,3 @@
+first line { with brace
+
+third line

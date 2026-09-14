@@ -2,6 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { PLAN_DIR, featureSlug } from './blind-plan'
 import type { SpecState } from './spec-file'
+import { parseSpec, specItems } from './spec-model'
 
 /**
  * A review of a draft plan artifact: the human's comments and strikes, the
@@ -47,7 +48,7 @@ export type PlanItem = {
   id: string
   /** The line's text after the id, as written. */
   text: string
-  /** Section heading the item sits under, for display. */
+  /** The scenario the item sits in, or `Open questions` / `Findings`. */
   section: string
   /** The artifact says the item is gone (B5). */
   removed: boolean
@@ -64,32 +65,9 @@ export function reviewFile(feature: string): string {
   return `${PLAN_DIR}/${featureSlug(feature)}.review.md`
 }
 
-const ITEM = /^-\s+([A-Z]{1,3}\d+)\b\s*(?:\(([^)]*)\))?\s*:\s*(.*)$/
-/** A table row whose first cell starts with an id: the item's text is that cell, the other cells are commentary on it. */
-const ROW = /^\|\s*([A-Z]{1,3}\d+)\b\s*(?:\(([^)]*)\))?\s*:?\s*([^|]*)\|/
-const REMOVED = /\[removed\]/i
-const HEADING = /^#{1,6}\s+(.*)$/
-
-/** The artifact's items, in file order, with the section they sit under. */
+/** The artifact's items, in file order, with the scenario or section they sit under. */
 export function planItems(body: string): PlanItem[] {
-  const items: PlanItem[] = []
-  let section = ''
-  for (const line of body.split(/\r?\n/)) {
-    const heading = HEADING.exec(line.trim())
-    if (heading) {
-      section = heading[1]!.trim()
-      continue
-    }
-    const match = ITEM.exec(line.trim()) ?? ROW.exec(line.trim())
-    if (!match) continue
-    items.push({
-      id: match[1]!,
-      text: (match[2] ? `(${match[2]}) ` : '') + match[3]!.trim(),
-      section,
-      removed: REMOVED.test(line),
-    })
-  }
-  return items
+  return specItems(parseSpec(body))
 }
 
 export function findItem(body: string, id: string): PlanItem | undefined {

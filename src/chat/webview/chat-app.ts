@@ -9,6 +9,7 @@ import { PlanView } from './plan-view'
 import { SessionTabs } from './session-tabs'
 import {
   AllowWritesToggledEvent,
+  CleanupStoppedEvent,
   ImplementRequestedEvent,
   IntentUpdateRequestedEvent,
   InterruptRequestedEvent,
@@ -18,12 +19,14 @@ import {
   PlanResumeRequestedEvent,
   PlanViewSelectedEvent,
   PromptSubmittedEvent,
+  QuestionAnsweredEvent,
   ReviewActionEvent,
   SessionClosedEvent,
   SessionSelectedEvent,
   SpecApprovedEvent,
   SpecMapRequestedEvent,
   SpecMapStoppedEvent,
+  SpecRepairRequestedEvent,
   VerifyRequestedEvent,
   type PlanView as PlanViewName,
 } from './events'
@@ -61,6 +64,8 @@ export class ChatApp extends HTMLElement {
     this.addEventListener(ReviewActionEvent.type, (e) => post(e.action))
     this.addEventListener(SpecMapRequestedEvent.type, () => post({ type: 'map_spec' }))
     this.addEventListener(SpecMapStoppedEvent.type, () => post({ type: 'stop_map' }))
+    this.addEventListener(CleanupStoppedEvent.type, () => post({ type: 'stop_cleanup' }))
+    this.addEventListener(SpecRepairRequestedEvent.type, () => post({ type: 'repair_spec' }))
     this.addEventListener(ImplementRequestedEvent.type, () => post({ type: 'implement_spec' }))
     this.addEventListener(VerifyRequestedEvent.type, () => post({ type: 'verify_spec' }))
     this.addEventListener(IntentUpdateRequestedEvent.type, () => post({ type: 'update_intent' }))
@@ -70,6 +75,9 @@ export class ChatApp extends HTMLElement {
     this.addEventListener(InterruptRequestedEvent.type, () => post({ type: 'interrupt' }))
     this.addEventListener(PermissionDecidedEvent.type, (e) =>
       post({ type: 'permission', requestId: e.requestId, decision: e.decision }),
+    )
+    this.addEventListener(QuestionAnsweredEvent.type, (e) =>
+      post({ type: 'question', requestId: e.requestId, outcome: e.outcome }),
     )
     this.addEventListener(AllowWritesToggledEvent.type, (e) => post({ type: 'set_allow_writes', enabled: e.enabled }))
     this.addEventListener(SessionSelectedEvent.type, (e) => {
@@ -134,6 +142,8 @@ export class ChatApp extends HTMLElement {
       case 'assistant_message':
       case 'tool_call':
       case 'permission_request':
+      // A question waits on the person, so the conversation it was asked in is what they are shown.
+      case 'question_request':
       case 'error':
         this.show('chat')
         break

@@ -1,6 +1,8 @@
 import type { PermissionDecision, SessionEvent } from '../agent/session/code-session'
+import type { QuestionOutcome } from '../agent/session/user-question'
 import type { PlanItem, Review } from '../agent/phases/plan-review'
 import type { PlanStage } from '../agent/phases/plan-stage'
+import type { Spec } from '../agent/phases/spec-model'
 import type { Task, VerificationRecord } from '../agent/phases/tasks-file'
 import type { SessionMode } from '../agent/session/session-manager'
 import type { SessionStatus } from '../agent/session/session-status'
@@ -27,7 +29,13 @@ export type PlanState = {
   status: 'missing' | 'draft' | 'approved'
   /** Spec markdown without its front matter; absent while no spec is written. */
   body?: string
-  /** Mapping can be started from here: a plan session with a draft spec, no review in flight and no run live. */
+  /** The spec as the contract reads it; absent while no spec is written. */
+  spec?: Spec
+  /** The board predates the spec as it stands; it is re-mapped when the plan session's turn ends. */
+  stale: boolean
+  /** The spec is off contract and can be repaired: a plan session is active to do it. */
+  repairable: boolean
+  /** Mapping can be started from here: a plan session with a draft spec nobody has commented on, and no run live. */
   mappable: boolean
   /** The mapping run under this plan session: what it is doing, or how the last one ended. Absent before the first. */
   mapping?: RunState
@@ -37,6 +45,8 @@ export type PlanState = {
   verifiable: boolean
   /** The test run: what it is doing, or how the last one in this window ended. Absent before the first. */
   verification?: RunState
+  /** The cleanup run after the tests passed: what it is splitting, or how it ended. Absent before the first and once a new test run starts. */
+  cleanup?: RunState
   /** The newest record in the tasks file, the outcome that stands. */
   lastVerification?: VerificationRecord
   /** The task board; empty until the spec is mapped. */
@@ -88,8 +98,11 @@ export type ToWebview =
   | { type: 'show_new_session' }
   | { type: 'event'; sessionId: string; event: SessionEvent }
 
-/** The user's answer to a permission prompt; `allow_project` also writes `rules` into the workspace's allow list. */
-export type UserPermissionDecision = PermissionDecision | { kind: 'allow_project'; rules: string[] }
+/** The user's answer to a permission prompt, with the rules its lines were allowed by that later calls should pass on. */
+export type UserPermissionDecision = PermissionDecision & { remember?: RememberedRules }
+
+/** `session` rules hold for the coding session; `project` rules are written into the workspace's allow list. */
+export type RememberedRules = { session: string[]; project: string[] }
 
 /** What the human does while reviewing a draft plan. */
 export type ReviewAction =
@@ -108,6 +121,8 @@ export type FromWebview =
   | { type: 'ready' }
   | { type: 'send'; text: string }
   | { type: 'permission'; requestId: string; decision: UserPermissionDecision }
+  /** The card's answers to a question the model asked, or that the user left it unanswered. */
+  | { type: 'question'; requestId: string; outcome: QuestionOutcome }
   | { type: 'interrupt' }
   /** File writes in the active session go through without a prompt while on. */
   | { type: 'set_allow_writes'; enabled: boolean }
@@ -124,6 +139,10 @@ export type FromWebview =
   | { type: 'map_spec' }
   /** Stops the mapping running under the active plan session. */
   | { type: 'stop_map' }
+  /** Stops the cleanup running on the active feature. */
+  | { type: 'stop_cleanup' }
+  /** Migrates the active feature's plan files to the contract: mechanically where possible, through the planner for the rest. */
+  | { type: 'repair_spec' }
   /** Starts an implement session on the approved spec and switches to it; refused on a draft. */
   | { type: 'implement_spec' }
   /** Runs the test commands over the tasks' files again, whatever the last record says. */

@@ -1,4 +1,5 @@
 import type { SessionMode } from '../../agent/session/session-manager'
+import type { QuestionOutcome } from '../../agent/session/user-question'
 import type { ReviewAction, UserPermissionDecision } from '../protocol'
 
 export class PromptSubmittedEvent extends Event {
@@ -22,6 +23,17 @@ export class PermissionDecidedEvent extends Event {
     public readonly decision: UserPermissionDecision,
   ) {
     super(PermissionDecidedEvent.type, { bubbles: true })
+  }
+}
+
+/** One question card's Submit: every question of that request, answered at once. */
+export class QuestionAnsweredEvent extends Event {
+  static readonly type = 'question-answered'
+  constructor(
+    public readonly requestId: string,
+    public readonly outcome: QuestionOutcome,
+  ) {
+    super(QuestionAnsweredEvent.type, { bubbles: true })
   }
 }
 
@@ -72,6 +84,22 @@ export class SpecMapStoppedEvent extends Event {
   static readonly type = 'spec-map-stopped'
   constructor() {
     super(SpecMapStoppedEvent.type, { bubbles: true })
+  }
+}
+
+/** The plan bar's stop on a running cleanup. */
+export class CleanupStoppedEvent extends Event {
+  static readonly type = 'cleanup-stopped'
+  constructor() {
+    super(CleanupStoppedEvent.type, { bubbles: true })
+  }
+}
+
+/** The plan bar's "Repair": bring the plan files to the contract, by rule and through the planner. */
+export class SpecRepairRequestedEvent extends Event {
+  static readonly type = 'spec-repair-requested'
+  constructor() {
+    super(SpecRepairRequestedEvent.type, { bubbles: true })
   }
 }
 
@@ -150,6 +178,7 @@ declare global {
     [PromptSubmittedEvent.type]: PromptSubmittedEvent
     [InterruptRequestedEvent.type]: InterruptRequestedEvent
     [PermissionDecidedEvent.type]: PermissionDecidedEvent
+    [QuestionAnsweredEvent.type]: QuestionAnsweredEvent
     [NewSessionRequestedEvent.type]: NewSessionRequestedEvent
     [NewSessionViewRequestedEvent.type]: NewSessionViewRequestedEvent
     [PlanResumeRequestedEvent.type]: PlanResumeRequestedEvent
@@ -158,6 +187,8 @@ declare global {
     [SpecApprovedEvent.type]: SpecApprovedEvent
     [SpecMapRequestedEvent.type]: SpecMapRequestedEvent
     [SpecMapStoppedEvent.type]: SpecMapStoppedEvent
+    [CleanupStoppedEvent.type]: CleanupStoppedEvent
+    [SpecRepairRequestedEvent.type]: SpecRepairRequestedEvent
     [VerifyRequestedEvent.type]: VerifyRequestedEvent
     [ImplementRequestedEvent.type]: ImplementRequestedEvent
     [IntentUpdateRequestedEvent.type]: IntentUpdateRequestedEvent

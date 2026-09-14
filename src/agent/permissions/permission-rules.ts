@@ -1,4 +1,4 @@
-import { isReadOnlySegment } from './read-only-commands'
+import { isReadOnlySegment, type ReadOnlyContext } from './read-only-commands'
 import { splitShellCommand } from './shell-split'
 
 /**
@@ -34,27 +34,44 @@ export function commandPrefix(tokens: string[]): string[] {
   return [name]
 }
 
-/** The rules "Allow for project" writes for this call; none for a file write, which is never remembered. */
-export function projectRulesFor(toolName: string, input: unknown): string[] {
-  if (WRITE_TOOLS.has(toolName)) return []
-  if (toolName !== 'Bash') return [toolName]
-  const command = (input as { command?: unknown })?.command
-  if (typeof command !== 'string') return [toolName]
-  const rules = new Set<string>()
-  for (const segment of splitShellCommand(command).segments) {
-    if (isReadOnlySegment(segment)) continue
-    const prefix = commandPrefix(segment.tokens)
-    if (prefix.length) rules.add(formatRule({ tool: 'Bash', pattern: `${prefix.join(' ')}:*` }))
-  }
-  return rules.size ? [...rules] : [toolName]
+/** The rule "Allow for project" writes for a call that is not a shell command; none for a file write, which is never remembered. */
+export function projectRuleFor(toolName: string): string | undefined {
+  return WRITE_TOOLS.has(toolName) ? undefined : toolName
 }
 
-/** What the button says it will allow: `npm run, npx vitest`, or the tool name. */
-export function ruleLabel(rules: string[]): string {
-  return rules
-    .map(parseRule)
-    .map((r) => (r.pattern === undefined ? r.tool : r.pattern.replace(/:\*$/, '')))
-    .join(', ')
+/** One simple command of a shell call, as the permission prompt lists it. */
+export type CommandLine = {
+  /** The command as written. */
+  text: string
+  /** What already lets it through: `read-only`, or the rule that covers it. Absent when this line is part of why the call is asked about. */
+  passes?: string
+  /** The rule that would cover it, for "Allow for session" and "Allow for project". Absent when it passes, or when no rule can stand for it. */
+  rule?: string
+}
+
+/**
+ * A shell call line by line, against the allow rules in force. A substitution
+ * runs a command no line shows, so then nothing passes and no rule is offered:
+ * such a call is allowed per call or not at all.
+ */
+export function commandLines(command: string, allow: string[], context: ReadOnlyContext = {}): CommandLine[] {
+  const parsed = splitShellCommand(command)
+  const patterns = allow.map(parseRule).filter((r) => r.tool === 'Bash' && r.pattern !== undefined)
+  return parsed.segments.map((segment) => {
+    const { text } = segment
+    if (parsed.substitutes) return { text }
+    if (isReadOnlySegment(segment, context)) return { text, passes: 'read-only' }
+    const covering = patterns.find((r) => bashPatternMatches(r.pattern!, segment.tokens))
+    if (covering) return { text, passes: formatRule(covering) }
+    const prefix = commandPrefix(segment.tokens)
+    return prefix.length ? { text, rule: formatRule({ tool: 'Bash', pattern: `${prefix.join(' ')}:*` }) } : { text }
+  })
+}
+
+/** What a button says it will allow: `npm run` for `Bash(npm run:*)`, or the tool name. */
+export function ruleLabel(rule: string): string {
+  const parsed = parseRule(rule)
+  return parsed.pattern === undefined ? parsed.tool : parsed.pattern.replace(/:\*$/, '')
 }
 
 /** Does a Bash rule pattern cover this segment? */

@@ -2,13 +2,15 @@ import * as vscode from 'vscode'
 import type { SessionManager, SessionMode, SessionRecord } from '../agent/session/session-manager'
 import type { SessionStatus } from '../agent/session/session-status'
 
-const MODE_LABEL: Record<SessionMode, string> = { chat: 'Chat', plan: 'Plan', reconcile: 'Map against code', implement: 'Implement' }
+const MODE_LABEL: Record<SessionMode, string> = { chat: 'Chat', plan: 'Plan', reconcile: 'Map against code', implement: 'Implement', cleanup: 'Cleanup' }
 
 const STATUS_ICON: Record<SessionStatus, { icon: string; color?: string }> = {
   idle: { icon: 'circle-outline' },
   planning: { icon: 'checklist', color: 'charts.blue' },
   implementing: { icon: 'tools', color: 'charts.blue' },
   needs_human: { icon: 'person', color: 'charts.orange' },
+  // A question waiting on the user is its own signal: the session is blocked on an answer, not merely done.
+  needs_answer: { icon: 'question', color: 'charts.purple' },
   error: { icon: 'error', color: 'charts.red' },
 }
 

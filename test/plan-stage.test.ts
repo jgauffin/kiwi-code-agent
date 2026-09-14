@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { isApprovable, isMappable, planStage } from '../src/agent/phases/plan-stage'
+import { isApprovable, isMappable, planStage, tasksStale } from '../src/agent/phases/plan-stage'
 import { parseReview } from '../src/agent/phases/plan-review'
 import type { SpecState } from '../src/agent/phases/spec-file'
-import { parseTasks, type TasksState } from '../src/agent/phases/tasks-file'
+import { parseSpec, specFingerprint } from '../src/agent/phases/spec-model'
+import { parseTasks, withSpecFingerprint, type TasksState } from '../src/agent/phases/tasks-file'
 
-const body = '# Order cancellation\n\n## Behaviour\n- B1: an order can be cancelled\n- B2: a cancelled order is gone [removed]\n'
+const body = '# Order cancellation\n\n## Goal\nOrders can be cancelled.\n\n## Cancelling\n- B1: an order can be cancelled\n- B2: a cancelled order is gone [removed]\n'
 const draft: SpecState = { exists: true, status: 'draft', body }
 const approved: SpecState = { exists: true, status: 'approved', body }
 
@@ -66,18 +67,33 @@ describe('plan stage', () => {
     expect(planStage(approved, noReview, passed)).toBe('verified')
   })
 
-  it('approval_is_offered_on_a_mapped_draft_only', () => {
-    expect(isApprovable('mapped', draft)).toBe(true)
-    expect(isApprovable('mapped', approved)).toBe(false)
-    expect(isApprovable('created', draft)).toBe(false)
-    expect(isApprovable('final_draft', draft)).toBe(false)
+  it('a_board_is_stale_once_the_spec_changed_under_it', () => {
+    const fresh: TasksState = { exists: true, ...parseTasks(withSpecFingerprint('- T1: a', specFingerprint(parseSpec(body)))) }
+    expect(tasksStale(draft, fresh)).toBe(false)
+    const revised: SpecState = { ...draft, body: body.replace('can be cancelled', 'can be cancelled until shipped') }
+    expect(tasksStale(revised, fresh)).toBe(true)
+    // A proposal written into the Findings table is not a change to the plan.
+    const withFindings: SpecState = { ...draft, body: `${body}\n## Findings\n| Finding | Proposed solution |\n|---|---|\n| F1 (naive, B1): x | y |\n` }
+    expect(tasksStale(withFindings, fresh)).toBe(false)
+    expect(tasksStale(draft, noTasks)).toBe(false)
+    expect(tasksStale(draft, tasks('- T1: a'))).toBe(false)
   })
 
-  it('mapping_is_offered_on_a_draft_with_no_review_in_flight', () => {
+  it('approval_is_offered_on_a_mapped_draft_whose_board_is_current', () => {
+    const fresh: TasksState = { exists: true, ...parseTasks(withSpecFingerprint('- T1: a', specFingerprint(parseSpec(body)))) }
+    const stale: TasksState = { exists: true, ...parseTasks(withSpecFingerprint('- T1: a', 'ffff0000')) }
+    expect(isApprovable('mapped', draft, fresh)).toBe(true)
+    expect(isApprovable('mapped', draft, stale)).toBe(false)
+    expect(isApprovable('mapped', approved, fresh)).toBe(false)
+    expect(isApprovable('created', draft, noTasks)).toBe(false)
+    expect(isApprovable('final_draft', draft, fresh)).toBe(false)
+  })
+
+  it('mapping_is_offered_on_a_created_draft_only_and_runs_by_itself_after_that', () => {
     expect(isMappable('created', draft)).toBe(true)
-    expect(isMappable('final_draft', draft)).toBe(true)
-    expect(isMappable('mapped', draft)).toBe(true)
+    expect(isMappable('final_draft', draft)).toBe(false)
+    expect(isMappable('mapped', draft)).toBe(false)
     expect(isMappable('under_review', draft)).toBe(false)
-    expect(isMappable('mapped', approved)).toBe(false)
+    expect(isMappable('created', approved)).toBe(false)
   })
 })

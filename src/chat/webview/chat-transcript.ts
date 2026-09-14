@@ -1,8 +1,11 @@
 import type { SessionEvent } from '../../agent/session/code-session'
+import { splitShellCommand } from '../../agent/permissions/shell-split'
+import { renderAnsi } from './ansi'
 import { editDiffView, fileLink } from './edit-diff'
 import { formatUsage } from './format-usage'
 import { renderMarkdown } from './markdown'
 import { PermissionCard } from './permission-card'
+import { isQuestionTool, QuestionCard } from './question-card'
 
 type AssistantBubble = { element: HTMLElement; text: HTMLElement; thinking: HTMLElement; streamed: string; finalParts: string[] }
 
@@ -15,6 +18,9 @@ export class ChatTranscript extends HTMLElement {
   private readonly bubbles = new Map<string, AssistantBubble>()
   private readonly tools = new Map<string, HTMLDetailsElement>()
   private readonly permissions = new Map<string, PermissionCard>()
+  private readonly questions = new Map<string, QuestionCard>()
+  /** Tool calls of the question tool: the card says what they ask, so their own rows say nothing. */
+  private readonly questionCalls = new Set<string>()
   private statusLine!: HTMLElement
   private busy = false
   private working: { element: HTMLElement; stop: () => void } | undefined
@@ -32,6 +38,8 @@ export class ChatTranscript extends HTMLElement {
     this.bubbles.clear()
     this.tools.clear()
     this.permissions.clear()
+    this.questions.clear()
+    this.questionCalls.clear()
     this.working?.stop()
     this.working = undefined
     this.busy = false
@@ -51,7 +59,8 @@ export class ChatTranscript extends HTMLElement {
         this.setStatus(`${event.model} · Claude Code ${event.engineVersion ?? ''}`.trim())
         break
       case 'user_message':
-        this.insert(block('user', event.text))
+        // A test-run handoff quotes the command's output, colours and all.
+        this.insert(block('user', event.text, renderAnsi))
         this.busy = true
         break
       case 'assistant_text': {
@@ -73,13 +82,19 @@ export class ChatTranscript extends HTMLElement {
         break
       }
       case 'tool_call':
+        // The question is put as a card, so its call and its result are not shown as a tool step.
+        if (isQuestionTool(event.name)) {
+          this.questionCalls.add(event.toolUseId)
+          break
+        }
         this.insert(this.toolCall(event), event.parentToolUseId)
         break
       case 'tool_result': {
+        if (this.questionCalls.has(event.toolUseId)) break
         const details = this.tools.get(event.toolUseId)
         const result = document.createElement('pre')
         result.className = event.isError ? 'result error' : 'result'
-        result.textContent = event.text
+        renderAnsi(event.text, result)
         if (details) {
           if (event.edit) showEdit(details, event.edit)
           details.appendChild(result)
@@ -101,6 +116,20 @@ export class ChatTranscript extends HTMLElement {
       }
       case 'permission_resolved':
         this.permissions.get(event.requestId)?.resolve(event.decision)
+        this.busy = true
+        break
+      case 'question_request': {
+        const card = new QuestionCard()
+        card.className = 'question-card'
+        this.insert(card)
+        card.show(event)
+        this.questions.set(event.requestId, card)
+        // The card is waiting on the user, not the model; a ticking clock would say otherwise.
+        this.busy = false
+        break
+      }
+      case 'question_resolved':
+        this.questions.get(event.requestId)?.resolve(event.outcome)
         this.busy = true
         break
       case 'status':
@@ -178,10 +207,17 @@ export class ChatTranscript extends HTMLElement {
     const details = document.createElement('details')
     details.className = 'tool'
     const summary = document.createElement('summary')
-    summary.textContent = `${event.name} ${summarizeInput(event.input)}`
     const input = document.createElement('pre')
     input.className = 'input'
-    input.textContent = JSON.stringify(event.input, null, 2)
+    const shell = event.name === 'Bash' ? shellCall(event.input) : undefined
+    if (shell) {
+      // A shell step is named by what it is for; its body is the commands it runs, one per line.
+      summary.textContent = shell.description ?? summarizeInput(event.input)
+      input.textContent = shell.lines.join('\n')
+    } else {
+      summary.textContent = `${event.name} ${summarizeInput(event.input)}`
+      input.textContent = JSON.stringify(event.input, null, 2)
+    }
     details.append(summary, input)
     this.tools.set(event.toolUseId, details)
     return details
@@ -228,11 +264,24 @@ function showEdit(details: HTMLDetailsElement, change: Parameters<typeof editDif
   details.appendChild(editDiffView(change))
 }
 
-function block(className: string, text: string): HTMLElement {
+function block(className: string, text: string, render: (text: string, into: HTMLElement) => void = plainText): HTMLElement {
   const element = document.createElement('article')
   element.className = className
-  element.textContent = text
+  render(text, element)
   return element
+}
+
+function plainText(text: string, into: HTMLElement): void {
+  into.textContent = text
+}
+
+/** A shell call's description and its commands, one per line; nothing when the input holds no command. */
+function shellCall(input: unknown): { description?: string; lines: string[] } | undefined {
+  const record = (input ?? {}) as Record<string, unknown>
+  if (typeof record['command'] !== 'string') return undefined
+  const description = typeof record['description'] === 'string' && record['description'].trim() ? record['description'] : undefined
+  const lines = splitShellCommand(record['command']).segments.map((s) => s.text)
+  return { ...(description ? { description } : {}), lines: lines.length ? lines : [record['command']] }
 }
 
 function summarizeInput(input: unknown): string {

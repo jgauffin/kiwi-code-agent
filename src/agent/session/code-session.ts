@@ -1,7 +1,9 @@
 import type { ModelProfile } from './model-profile'
 import type { FileEditChange } from '../edits/file-edit-diff'
+import type { CommandLine } from '../permissions/permission-rules'
+import type { QuestionOutcome, UserQuestionRequest } from './user-question'
 
-export type { FileEditChange }
+export type { CommandLine, FileEditChange }
 
 /** Token accounting for one assistant turn, as far as the engine reports it. */
 export type TurnUsage = {
@@ -40,8 +42,14 @@ export type SessionEvent =
       description?: string
       /** The change the call proposes, shown in place of the raw arguments. */
       edit?: FileEditChange
+      /** A shell call as its commands, each with what already lets it through or the rule that would; shown in place of the raw arguments. */
+      commands?: CommandLine[]
     }
   | { type: 'permission_resolved'; requestId: string; decision: PermissionDecision['kind'] }
+  /** The model asks the user; the session makes no further progress until the request is resolved. */
+  | { type: 'question_request'; requestId: string; request: UserQuestionRequest }
+  /** How the request ended: the answers the user gave, or that it went unanswered. Exactly one per request. */
+  | { type: 'question_resolved'; requestId: string; outcome: QuestionOutcome }
   | { type: 'status'; status: 'requesting' | 'compacting' | 'idle' }
   | { type: 'turn_done'; usage?: TurnUsage; durationMs?: number; isError: boolean; errors: string[] }
   | { type: 'error'; message: string; fatal: boolean }
@@ -62,6 +70,13 @@ export interface CodeSession {
   /** Single consumer. Ends after the `ended` event. */
   events(): AsyncIterable<SessionEvent>
   respondToPermission(requestId: string, decision: PermissionDecision): void
+  /**
+   * Answer a question the model asked, or tell it the question went
+   * unanswered; resolved at most once. False when this engine no longer holds
+   * the request — it was resolved already, or the turn that asked is gone —
+   * so the host can deliver the answer another way.
+   */
+  respondToQuestion(requestId: string, outcome: QuestionOutcome): boolean
   /** Stop the current turn; the session stays usable. */
   interrupt(): Promise<void>
   /** Terminate the engine and release resources. */

@@ -2,12 +2,14 @@ import { compileTemplate } from '@relax.js/core/html'
 import type { PlanState } from '../protocol'
 import type { PlanStage } from '../../agent/phases/plan-stage'
 import {
+  CleanupStoppedEvent,
   ImplementRequestedEvent,
   IntentUpdateRequestedEvent,
   PlanViewSelectedEvent,
   SpecApprovedEvent,
   SpecMapRequestedEvent,
   SpecMapStoppedEvent,
+  SpecRepairRequestedEvent,
   VerifyRequestedEvent,
   type PlanView,
 } from './events'
@@ -31,8 +33,10 @@ export class PlanBar extends HTMLElement {
     <span class="status {{stage}}" unless="running">{{label}}</span>
     <span class="status running" if="running" title="{{runText}}">{{runText}}</span>
     <button type="button" class="stop" if="mapping" title="Stop the mapping." r-click="stopMap()">Stop</button>
+    <button type="button" class="stop" if="cleaning" title="Stop the cleanup." r-click="stopCleanup()">Stop</button>
     <span class="ran" if="ran" title="{{ranText}}">{{ranText}}</span>
-    <button type="button" class="map" if="mappable" title="Read the code and write what contradicts or breaks under this spec into its Findings table, and the tasks with the files they touch into the tasks file." r-click="map()">Map against code</button>
+    <button type="button" class="repair" if="repairable" title="{{repairHint}}" r-click="repair()">Repair{{problemMark}}</button>
+    <button type="button" class="map" if="mappable" title="Read the code and write what contradicts or breaks under this spec into its Findings table, and the tasks with the files they touch into the tasks file. After this it runs by itself when the plan changes." r-click="map()">Map against code</button>
     <button type="button" class="approve" if="isDraft" disabled="{{blocked}}" title="{{approveHint}}" r-click="approve()">Approve</button>
     <button type="button" class="implement" if="implementable" title="Start a fresh session that builds the tasks one by one." r-click="implement()">Implement</button>
     <button type="button" class="verify" if="verifiable" title="Run the test commands over the files the tasks name." r-click="verify()">{{verifyLabel}}</button>
@@ -49,8 +53,11 @@ export class PlanBar extends HTMLElement {
     const open = openCount(plan)
     const mapping = plan.mapping?.live === true
     const verifying = plan.verification?.live === true
+    const cleaning = plan.cleanup?.live === true
+    const running = mapping || verifying || cleaning
     // The last run's outcome shows beside the stage until the stage moves on; the file's record is the one that stands.
-    const ran = mapping || verifying ? undefined : (plan.mapping?.text ?? plan.verification?.text)
+    // A cleanup outcome carries its test run's, so it comes first; a new test run clears it.
+    const ran = running ? undefined : (plan.mapping?.text ?? plan.cleanup?.text ?? plan.verification?.text)
     this.template.render(
       {
         planHint: plan.commentable
@@ -61,9 +68,15 @@ export class PlanBar extends HTMLElement {
         exists: plan.status !== 'missing',
         isDraft: plan.stage === 'mapped' && plan.status === 'draft',
         mappable: plan.mappable,
+        repairable: plan.repairable,
+        problemMark: plan.spec && plan.spec.problems.length > 0 ? ` (${plan.spec.problems.length})` : '',
+        repairHint: plan.spec
+          ? `The spec is off contract:\n${plan.spec.problems.join('\n')}\n\nRepair moves a task section into the tasks file by rule and hands the rest to the planner, which rearranges the spec without changing its rules.`
+          : '',
         mapping,
-        running: mapping || verifying,
-        runText: mapping ? plan.mapping!.text : verifying ? plan.verification!.text : '',
+        cleaning,
+        running,
+        runText: mapping ? plan.mapping!.text : verifying ? plan.verification!.text : cleaning ? plan.cleanup!.text : '',
         ran: ran !== undefined && ran.length > 0,
         ranText: ran ?? '',
         implementable: plan.implementable,
@@ -86,7 +99,9 @@ export class PlanBar extends HTMLElement {
         show: (next: PlanView) => this.dispatchEvent(new PlanViewSelectedEvent(next)),
         approve: () => this.dispatchEvent(new SpecApprovedEvent()),
         map: () => this.dispatchEvent(new SpecMapRequestedEvent()),
+        repair: () => this.dispatchEvent(new SpecRepairRequestedEvent()),
         stopMap: () => this.dispatchEvent(new SpecMapStoppedEvent()),
+        stopCleanup: () => this.dispatchEvent(new CleanupStoppedEvent()),
         implement: () => this.dispatchEvent(new ImplementRequestedEvent()),
         verify: () => this.dispatchEvent(new VerifyRequestedEvent()),
         updateIntent: () => this.dispatchEvent(new IntentUpdateRequestedEvent()),
@@ -100,6 +115,7 @@ function stageLabel(plan: PlanState): string {
   const base = STAGE[plan.stage]
   switch (plan.stage) {
     case 'mapped':
+      if (plan.stale) return `${base}, tasks out of date`
       return plan.status === 'approved' ? `${base}, approved` : base
     case 'under_development': {
       const live = plan.tasks.filter((t) => !t.removed)

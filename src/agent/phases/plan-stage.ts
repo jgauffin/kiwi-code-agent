@@ -1,7 +1,8 @@
 import { struckItems, type Review } from './plan-review'
 import { standingStrikes } from './review-handoff'
 import type { SpecState } from './spec-file'
-import { started, tasksDone, type TasksState } from './tasks-file'
+import { parseSpec, specFingerprint } from './spec-model'
+import { started, tasksDone, tasksFresh, type TasksState } from './tasks-file'
 
 /**
  * Where a feature stands, derived from its files under `plan/` and held
@@ -37,10 +38,19 @@ export function planStage(spec: SpecState, review: Review, tasks: TasksState): P
   return tasks.verification?.ok ? 'verified' : 'verification'
 }
 
-/** The spec may be approved: it is mapped, and every comment on it is closed. */
-export const isApprovable = (stage: PlanStage, spec: SpecState): boolean =>
-  stage === 'mapped' && spec.exists && spec.status === 'draft'
+/** The board predates the spec as it stands: a ruling or a revision changed the plan after the tasks were mapped. */
+export function tasksStale(spec: SpecState, tasks: TasksState): boolean {
+  if (!spec.exists || !tasks.exists) return false
+  return !tasksFresh(tasks, specFingerprint(parseSpec(spec.body)))
+}
 
-/** Mapping may run: the spec is a draft with no review in flight. A re-run on a mapped spec rewrites its tasks. */
-export const isMappable = (stage: PlanStage, spec: SpecState): boolean =>
-  spec.exists && spec.status === 'draft' && (stage === 'created' || stage === 'final_draft' || stage === 'mapped')
+/** The spec may be approved: it is mapped from the spec as it stands, and every comment on it is closed. */
+export const isApprovable = (stage: PlanStage, spec: SpecState, tasks: TasksState): boolean =>
+  stage === 'mapped' && spec.exists && spec.status === 'draft' && !tasksStale(spec, tasks)
+
+/**
+ * Mapping is offered on a spec nobody has commented on. After that it runs
+ * by itself: when the last comment is accepted, and when a plan turn leaves
+ * the board stale.
+ */
+export const isMappable = (stage: PlanStage, spec: SpecState): boolean => spec.exists && spec.status === 'draft' && stage === 'created'

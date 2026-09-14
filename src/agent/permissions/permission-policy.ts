@@ -1,13 +1,18 @@
 import { isAbsolute, matchesGlob, relative, resolve } from 'node:path'
 import type { PreToolUseOutcome, SessionHooks, ToolUse } from '../session/hooks'
+import type { SessionEvent } from '../session/code-session'
 import { isReadOnlyCommand, isReadOnlySegment, type ReadOnlyContext } from './read-only-commands'
-import { bashPatternMatches, parseRule, type PermissionRule } from './permission-rules'
+import { bashPatternMatches, commandLines, parseRule, type PermissionRule } from './permission-rules'
 import { splitShellCommand, type ShellSegment } from './shell-split'
 
 export type PermissionRules = { allow: string[]; deny: string[] }
 
-/** Tools that only look; their calls never prompt unless a deny rule names them. */
-const READ_ONLY_TOOLS = new Set(['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'LS', 'NotebookRead', 'TodoRead', 'TodoWrite'])
+/**
+ * Tools that only look; their calls never prompt unless a deny rule names them.
+ * `AskUser` changes nothing either: the person answers the question itself
+ * rather than first being asked whether it may be put to them.
+ */
+const READ_ONLY_TOOLS = new Set(['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'LS', 'NotebookRead', 'TodoRead', 'TodoWrite', 'AskUser'])
 
 const FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'NotebookRead', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'LS'])
 
@@ -15,7 +20,7 @@ const FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit'
  * Decides tool calls before any permission prompt, on every engine: a deny
  * rule blocks, a read-only call or one covered by the project's allow rules
  * goes through, everything else is asked. Rules are read on each call so a
- * rule written by "Allow for project" applies to the next call.
+ * rule allowed for the session or the project applies to the next call.
  */
 export class PermissionPolicy implements SessionHooks {
   private readonly readOnlyContext: ReadOnlyContext
@@ -34,6 +39,12 @@ export class PermissionPolicy implements SessionHooks {
     if (this.isReadOnly(tool)) return { allow: true }
     if (allow.some((rule) => this.matches(parseRule(rule), tool, 'all'))) return { allow: true }
     return undefined
+  }
+
+  /** A prompt for a shell call is asked line by line: each command with what the rules in force make of it. */
+  decorate(event: SessionEvent): SessionEvent {
+    if (event.type !== 'permission_request' || event.toolName !== 'Bash') return event
+    return { ...event, commands: commandLines(this.command(event), this.rules().allow, this.readOnlyContext) }
   }
 
   private isReadOnly(tool: ToolUse): boolean {
@@ -62,7 +73,7 @@ export class PermissionPolicy implements SessionHooks {
     return false
   }
 
-  private command(tool: ToolUse): string {
+  private command(tool: { input: unknown }): string {
     const command = (tool.input as { command?: unknown })?.command
     return typeof command === 'string' ? command : ''
   }

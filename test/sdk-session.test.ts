@@ -3,6 +3,8 @@ import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk'
 import { SdkSession } from '../src/agent/sdk-session/sdk-session'
 import { TOOL_SERVER_NAME } from '../src/agent/sdk-session/tool-server'
 import { jsonQueryTool } from '../src/agent/openai-session/tools/json'
+import { askUserTool } from '../src/agent/openai-session/tools/ask-user'
+import type { Tool } from '../src/agent/openai-session/tools/tool'
 import type { SessionEvent } from '../src/agent/session/code-session'
 import { fakeQuery, initMessage, resultMessage } from './fake-query'
 
@@ -247,5 +249,62 @@ describe('SdkSession', () => {
     expect(hooks.Stop).toBeUndefined()
     expect(seen).toEqual(['pre:Bash', 'pre:Write', 'post:Edit:ok'])
     await session.dispose()
+  })
+
+  describe('asking the user', () => {
+    const card = {
+      questions: [
+        { header: 'Scope', question: 'How far?', options: [{ label: 'Small' }, { label: 'Large' }] },
+        { header: 'Name', question: 'What is it called?' },
+      ],
+    }
+
+    function askingSession(fake: ReturnType<typeof fakeQuery>) {
+      return new SdkSession({
+        id: 'sess-1',
+        profile,
+        cwd: '/w',
+        cliPath: '/ext/dist/cli.js',
+        runtime: { command: 'node', args: [], env: {} },
+        query: fake.query,
+        ownTools: [askUserTool as Tool],
+      })
+    }
+
+    it('the_same_tool_on_this_engine_asks_through_the_session_and_waits_without_a_deadline', async () => {
+      const fake = fakeQuery()
+      const session = askingSession(fake)
+      expect(Object.keys(fake.options!.mcpServers!)).toEqual([TOOL_SERVER_NAME])
+      // The engine runs the own tool in process, with the context the session built for it.
+      const running = askUserTool.execute(card, session.toolContext)
+      const [request] = await take(session, 1)
+      expect(request).toMatchObject({ type: 'question_request', request: card })
+      let settled = false
+      void running.then(() => (settled = true))
+      await new Promise((r) => setTimeout(r, 30))
+      expect(settled).toBe(false)
+      session.respondToQuestion((request as { requestId: string }).requestId, {
+        kind: 'answered',
+        answers: [{ chosen: ['Large'] }, { chosen: [], other: 'AskUser' }],
+      })
+      const output = await running
+      expect(output.isError).toBe(false)
+      expect(output.text).toContain('Chose: Large')
+      expect(output.text).toContain('AskUser')
+      const [resolved] = await take(session, 1)
+      expect(resolved).toMatchObject({ type: 'question_resolved', outcome: { kind: 'answered' } })
+      await session.dispose()
+    })
+
+    it('a_question_still_open_when_the_engine_goes_away_ends_unanswered', async () => {
+      const fake = fakeQuery()
+      const session = askingSession(fake)
+      const running = askUserTool.execute(card, session.toolContext)
+      const [request] = await take(session, 1)
+      expect(request?.type).toBe('question_request')
+      await session.dispose()
+      const output = await running
+      expect(output.text).toContain('did not answer')
+    })
   })
 })

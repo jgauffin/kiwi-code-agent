@@ -100,27 +100,33 @@ Rules:
 - Name the code by path and symbol so the finding can be verified; do not paste code.
 - Touch nothing outside the ${FINDINGS_SECTION} section; the spec's items are the planner's and the user's.
 
-Your second output: the task board, \`${tasks}\`, written with Write. One task per unit of work small enough to finish in one sitting, in build order, each naming the spec items it delivers and the files it touches. Structure:
+Your second output: the task board, \`${tasks}\`, written with Write. Start from one task per scenario of the spec, in build order, each naming the spec items it delivers and the files it touches. Structure:
 
 \`\`\`markdown
 # Tasks for ${feature}
 
-- T1 (B1, E2): what to do, in one line
+- T1 (B1, E1, B2): the scenario, as work: what to do, in one line
   - files: src/orders/cancel.ts, src/orders/cancel.test.ts (new)
+  - context: src/orders/order.ts, src/orders/ship.test.ts, docs/intent/orders.md
 - T2 (B3): ...
   - files: src/orders/reservation.ts
+  - context: src/orders/order.ts, src/billing/invoice.ts
 \`\`\`
 
 Rules:
+- One task per scenario is the default; depart from it only for a reason you name in the task text: a scenario too big for one sitting is split in build order, a foundation every scenario needs (a contract module, a schema) is one task shared by all, delivering the items it serves in each.
+- Every behaviour and edge case of the spec is delivered by some task. An item no task delivers is a gap the user sees.
 - The files are workspace-relative paths that exist, or paths to create marked \`(new)\`, placed where the code around them says such a file belongs. The tests that prove a task's items are files of that task.
-- Task ids are stable: never renumber. On a re-run, keep a task that still holds and update its text and files, append \` [removed]\` to one that no longer applies, add new ones with new ids. Never touch a marker the implementer left on a task (\`[in progress]\`, \`[done]\`, \`[tested]\`, \`[blocked: ...]\`).
+- The context is what you read to arrive at the task and the implementer would otherwise have to find again: the modules the task's files lean on, the test that shows the pattern to follow, the place the term already lives. Existing paths only, the few that matter; a task starts from its files and its context and searches beyond them only when those do not answer.
+- Task ids are stable: never renumber. On a re-run, keep a task that still holds and update its text, files and context, append \` [removed]\` to one that no longer applies, add new ones with new ids. Never touch a marker or a \`proves:\` line the implementer left on a task (\`[in progress]\`, \`[done]\`, \`[tested]\`, \`[blocked: ...]\`).
 - No task for what a finding puts in question: the user rules on the finding first. Say in the finding what the task would be.
-- A \`## Verification\` section at the end of the file is the extension's; leave it alone.
+- The file's front matter and a \`## Verification\` section at its end are the extension's; leave them alone.
+- A \`## Tasks\` section left in the spec from before the board existed is yours to delete once the board holds its content; the spec's items are otherwise not yours.
 - When both files are written, stop. Say nothing more: findings and tasks are read from the files.`
 }
 
-/** What a check is doing right now, as the plan bar shows it; undefined when the event says nothing worth showing. */
-export function progressLine(event: SessionEvent): string | undefined {
+/** What a run under a session is doing right now, as the plan bar shows it; undefined when the event says nothing worth showing. */
+export function progressLine(event: SessionEvent, label = 'Check'): string | undefined {
   switch (event.type) {
     case 'tool_call':
       return toolLine(event.name, event.input)
@@ -129,7 +135,7 @@ export function progressLine(event: SessionEvent): string | undefined {
       return first ? clip(first) : undefined
     }
     case 'error':
-      return `Check failed: ${clip(event.message)}`
+      return `${label} failed: ${clip(event.message)}`
     default:
       return undefined
   }

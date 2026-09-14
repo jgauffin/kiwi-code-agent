@@ -4,12 +4,17 @@ import type { ModelProfile } from '../agent/session/model-profile'
 import type { SessionEvent } from '../agent/session/code-session'
 import { nextStatus, type SessionStatus } from '../agent/session/session-status'
 import { readSpecState, setSpecStatus, type SpecState } from '../agent/phases/spec-file'
-import { PLAN_DIR, featureSlug, findingsHandoffPrompt, resumePlanPrompt, specPath } from '../agent/phases/blind-plan'
+import { PLAN_DIR, featureSlug, findingsHandoffPrompt, migrateSpecPrompt, resumePlanPrompt, specPath } from '../agent/phases/blind-plan'
 import { listPlans } from '../agent/phases/plan-list'
 import { RECONCILE_KICKOFF, openFindings, progressLine } from '../agent/phases/reconcile'
 import { IMPLEMENT_KICKOFF, assertImplementable } from '../agent/phases/implement'
-import { isApprovable, isMappable, planStage } from '../agent/phases/plan-stage'
-import { liveTasks, readTasks, tasksDone, tasksPath, type TasksState } from '../agent/phases/tasks-file'
+import { cleanupKickoff } from '../agent/phases/cleanup'
+import { anyLimit, oversizedFiles, sizeReport, type Thresholds } from '../agent/cleanup/oversized'
+import { editedFiles } from '../agent/edits/edited-files'
+import { isApprovable, isMappable, planStage, tasksStale } from '../agent/phases/plan-stage'
+import { parseSpec, specFingerprint } from '../agent/phases/spec-model'
+import { migratePlan, type MigrationReport } from '../agent/phases/migrate-plan'
+import { liveTasks, readTasks, stampSpecFingerprint, tasksDone, tasksPath, type TasksState } from '../agent/phases/tasks-file'
 import {
   describeCommand,
   runVerification,
@@ -57,9 +62,17 @@ export interface Verifier {
   failureBudget(): number
 }
 
-/** Where "Allow for project" writes its rules: the workspace's permission allow list. */
+/** The cleanup after a feature's tests pass: its size limits and what never gets measured, from settings, read when the run starts. */
+export interface SizeLimits {
+  thresholds(): Thresholds
+  /** Globs, workspace-relative, of files the measure passes over: tests, generated code. */
+  ignore(): string[]
+}
+
+/** Where a prompt's allowances go: the workspace's permission allow list, or the session's own, which lasts as long as the extension host. */
 export interface PermissionStore {
   allowForProject(rules: string[]): Promise<void>
+  allowForSession(sessionId: string, rules: string[]): void
 }
 
 /** The editor panel's view type; a serializer registered under it brings the panel back after a reload. */
@@ -81,6 +94,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private readonly verifyFailures = new Map<string, number>()
   /** Whether each feature's board was all tested the last time an implementer touched a file: the run starts on the edge. */
   private readonly boardDone = new Map<string, boolean>()
+  /** The cleanup run per feature: what it is doing, or how the last one ended. */
+  private readonly cleanups = new Map<string, RunState>()
+  /** Features whose sizes were measured once their tests passed; the run does not repeat on the pass that proves its own split. */
+  private readonly cleaned = new Set<string>()
+  /** Features whose planner was handed the contract problems; its next finished turn completes the migration. */
+  private readonly repairing = new Set<string>()
   private readonly changed = new vscode.EventEmitter<void>()
   /** Fires when the active session, a status or the session list changed. */
   readonly onDidChange = this.changed.event
@@ -91,6 +110,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     private readonly sessions: SessionManager,
     private readonly profileFor: (mode: SessionMode) => ModelProfile,
     private readonly verifier: Verifier,
+    private readonly sizeLimits: SizeLimits,
     private readonly allowWrites: SessionSwitch,
     private readonly permissions: PermissionStore,
     private readonly workspaceRoot: string,
@@ -206,7 +226,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       }
     }
     if (record?.parentId) {
-      this.followMapping(record, event)
+      if (record.mode === 'cleanup') this.followCleanup(record, event)
+      else this.followMapping(record, event)
       return
     }
     if (sessionId === this.activeSessionId) this.broadcast({ type: 'event', sessionId, event })
@@ -219,6 +240,26 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       if (sessionId === this.activeSessionId) void this.sendState()
       if (record.mode === 'implement') void this.followBoard(record.feature)
     }
+    if (event.type === 'turn_done' && !event.isError && record?.mode === 'plan' && record.feature) void this.followPlan(record)
+  }
+
+  /**
+   * A plan turn ended: a repair the planner was asked for is finished
+   * mechanically, and a board the turn left behind the spec is re-mapped.
+   */
+  private async followPlan(record: SessionRecord): Promise<void> {
+    const feature = record.feature!
+    if (this.repairing.delete(feature)) {
+      const report = await migratePlan(this.workspaceRoot, feature)
+      this.reportMigration(report, false)
+      await this.sendState()
+      if (report.problems.length > 0) return
+    }
+    const spec = await readSpecState(specPath(this.workspaceRoot, feature))
+    const tasks = await readTasks(tasksPath(this.workspaceRoot, feature))
+    const review = await readReview(reviewPath(this.workspaceRoot, feature)).catch(() => emptyReview())
+    // With a review in flight the accept of its last comment maps; here it is a ruling or a repair that moved the spec.
+    if (planStage(spec, review, tasks) === 'mapped' && tasksStale(spec, tasks)) await this.startMapping(record)
   }
 
   /** A mapping run has no transcript in the UI: its events become the one line the plan bar shows. */
@@ -268,6 +309,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       const feature = child.feature!
       const state = await readSpecState(specPath(this.workspaceRoot, feature))
       const tasks = await readTasks(tasksPath(this.workspaceRoot, feature))
+      // The board is stamped with the spec it was built from; a later change to the plan makes it stale.
+      if (state.exists && tasks.exists) await stampSpecFingerprint(tasksPath(this.workspaceRoot, feature), specFingerprint(parseSpec(state.body)))
       const open = state.exists ? openFindings(state.body) : []
       const count = tasks.exists ? liveTasks(tasks.tasks).length : 0
       text = `Mapped: ${count} task${count === 1 ? '' : 's'}, ${open.length === 0 ? 'the code is clear' : `${open.length} finding${open.length === 1 ? '' : 's'}`}`
@@ -303,9 +346,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private async verify(feature: string, manual: boolean): Promise<void> {
     if (this.verifications.get(feature)?.live) return
     if (manual) this.verifyFailures.delete(feature)
+    // A new run makes the last cleanup's outcome old news; one still running folds this run into its own.
+    if (!this.cleanups.get(feature)?.live) this.cleanups.delete(feature)
     this.verifications.set(feature, { live: true, text: 'Running the tests…' })
     await this.sendState()
     let text: string
+    let passed = false
     try {
       const outcome = await runVerification({
         cwd: this.workspaceRoot,
@@ -320,6 +366,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       if (outcome.record.ok) {
         this.verifyFailures.delete(feature)
         text = `Tests passed: ${outcome.record.text}`
+        passed = true
       } else {
         const failures = (this.verifyFailures.get(feature) ?? 0) + 1
         this.verifyFailures.set(feature, failures)
@@ -334,6 +381,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.verifications.set(feature, { live: false, text })
     await this.sendState()
     this.changed.fire()
+    if (passed) await this.startCleanup(feature)
   }
 
   /** The latest live implement session on the feature gets the prompt; without one, a fresh session starts on it. */
@@ -341,6 +389,134 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const live = this.sessions.list().find((r) => r.mode === 'implement' && r.feature === feature && this.sessions.isLive(r.id))
     if (live) await this.sessions.send(live.id, prompt)
     else await this.newSession('implement', feature, prompt)
+  }
+
+  /**
+   * The tests passed: the files the feature's implementers edited are
+   * measured, and what is over a limit goes to a cleanup run under the
+   * latest implement session. Once per feature while the window lives: the
+   * pass that proves the split must not start another.
+   */
+  private async startCleanup(feature: string): Promise<void> {
+    if (this.cleaned.has(feature) || this.cleanups.get(feature)?.live) return
+    const thresholds = this.sizeLimits.thresholds()
+    if (!anyLimit(thresholds)) return
+    const implementers = this.sessions.list().filter((r) => r.mode === 'implement' && r.feature === feature)
+    const parent = implementers[0]
+    if (!parent || this.sessions.liveChildOf(parent.id)) return
+    this.cleaned.add(feature)
+    const files: string[] = []
+    for (const record of implementers) {
+      for (const file of editedFiles(await this.sessions.transcript(record.id))) if (!files.includes(file)) files.push(file)
+    }
+    const flagged = await oversizedFiles(this.workspaceRoot, files, thresholds, this.sizeLimits.ignore())
+    if (flagged.length === 0) {
+      this.cleanups.set(feature, { live: false, text: 'Sizes checked: nothing to split' })
+      await this.sendState()
+      this.changed.fire()
+      return
+    }
+    const relativeTo = (file: string) => relative(this.workspaceRoot, file).split('\\').join('/')
+    const paths = [...new Set(flagged.map((u) => relativeTo(u.path)))]
+    const child = await this.sessions.create(this.profileFor('cleanup'), 'cleanup', feature, parent.id, paths)
+    this.cleanups.set(feature, { live: true, text: 'Splitting oversized units…' })
+    await this.sendState()
+    await this.sessions.send(child.id, cleanupKickoff(sizeReport(this.workspaceRoot, flagged)))
+  }
+
+  /** A cleanup run has no transcript in the UI either: its events become the one line the plan bar shows. */
+  private followCleanup(child: SessionRecord, event: SessionEvent): void {
+    const feature = child.feature!
+    const cleanup = this.cleanups.get(feature)
+    if (!cleanup?.live) return
+    if (event.type === 'turn_done') {
+      void this.finishCleanup(child, event.isError ? (event.errors.length > 0 ? event.errors : ['the run ended with an error']) : [])
+      return
+    }
+    if (event.type === 'error' && event.fatal) {
+      void this.finishCleanup(child, [event.message])
+      return
+    }
+    const line = progressLine(event, 'Cleanup')
+    if (line === undefined || line === cleanup.text) return
+    this.cleanups.set(feature, { live: true, text: line })
+    void this.sendState()
+  }
+
+  /**
+   * The run is over: stop its engine, measure its files again, and run the
+   * tests once more, since the run had no shell to prove its split with. The
+   * line holds both outcomes.
+   */
+  private async finishCleanup(child: SessionRecord, errors: string[]): Promise<void> {
+    const feature = child.feature!
+    // Marked over before the first await, so a late event from the dying engine cannot finish it twice.
+    this.cleanups.set(feature, { live: false, text: this.cleanups.get(feature)?.text ?? '' })
+    await this.sessions.close(child.id)
+    if (errors.length > 0) {
+      this.cleanups.set(feature, { live: false, text: `Cleanup failed: ${errors.join('; ')}` })
+      await this.sendState()
+      this.changed.fire()
+      return
+    }
+    const files = (child.files ?? []).map((f) => join(this.workspaceRoot, f))
+    const left = await oversizedFiles(this.workspaceRoot, files, this.sizeLimits.thresholds(), [])
+    const split = left.length === 0 ? 'Cleaned: every unit is within its limit' : `Cleanup left ${left.length} unit${left.length === 1 ? '' : 's'} over the limit`
+    this.cleanups.set(feature, { live: true, text: `${split}; running the tests…` })
+    await this.verify(feature, false)
+    this.cleanups.set(feature, { live: false, text: `${split}; ${this.verifications.get(feature)?.text ?? 'tests not run'}` })
+    await this.sendState()
+    this.changed.fire()
+  }
+
+  /**
+   * Brings one feature's plan files to the contract: the mechanical part now,
+   * the rest through its planner, whose finished turn runs the mechanical
+   * part again. Returns what was done and what is left.
+   */
+  async repairPlan(feature: string): Promise<MigrationReport> {
+    const report = await migratePlan(this.workspaceRoot, feature)
+    if (report.problems.length > 0) {
+      const prompt = migrateSpecPrompt(feature, report.problems)
+      const live = this.sessions.list().find((r) => r.mode === 'plan' && r.feature === feature && this.sessions.isLive(r.id))
+      this.repairing.add(feature)
+      if (live) await this.sessions.send(live.id, prompt)
+      else await this.newSession('plan', feature, prompt)
+    }
+    await this.sendState()
+    return report
+  }
+
+  /** Every plan under `plan/`, the command's entry point; one summary at the end. */
+  async migratePlans(): Promise<void> {
+    const plans = await listPlans(this.workspaceRoot)
+    if (plans.length === 0) {
+      void vscode.window.showInformationMessage('KiwiAgent: no plans to migrate.')
+      return
+    }
+    const reports: MigrationReport[] = []
+    for (const plan of plans) reports.push(await this.repairPlan(plan.feature))
+    const handed = reports.filter((r) => r.problems.length > 0).map((r) => r.feature)
+    const clean = reports.filter((r) => r.problems.length === 0).map((r) => r.feature)
+    const parts = [
+      clean.length > 0 ? `on contract: ${clean.join(', ')}` : '',
+      handed.length > 0 ? `handed to the planner: ${handed.join(', ')}` : '',
+    ].filter((p) => p.length > 0)
+    void vscode.window.showInformationMessage(`KiwiAgent: migrated ${plans.length} plan${plans.length === 1 ? '' : 's'}; ${parts.join('; ')}.`)
+  }
+
+  /** `handed` says the planner has the remaining problems now; otherwise its turn is over and they are the user's to look at. */
+  private reportMigration(report: MigrationReport, handed: boolean): void {
+    const left = report.problems.length
+    if (left === 0) {
+      const done = report.steps.length > 0 ? `: ${report.steps.join(' ')}` : '.'
+      void vscode.window.showInformationMessage(`KiwiAgent: "${report.feature}" is on contract${done}`)
+      return
+    }
+    const problems = `${left} contract problem${left === 1 ? '' : 's'}`
+    void vscode.window.showWarningMessage(
+      `KiwiAgent: "${report.feature}" has ${problems}; ${handed ? 'the planner is rearranging the spec' : 'see the plan bar'}.`,
+    )
   }
 
   private attach(webview: vscode.Webview): void {
@@ -367,12 +543,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         return
       case 'permission': {
         if (!this.activeSessionId) return
-        // The rule is written before the call runs, so a second identical call in the same turn already passes.
-        if (message.decision.kind === 'allow_project') await this.permissions.allowForProject(message.decision.rules)
-        const decision = message.decision.kind === 'allow_project' ? { kind: 'allow' as const } : message.decision
+        // The rules are in place before the call runs, so a second call they cover in the same turn already passes.
+        const { remember, ...decision } = message.decision
+        if (remember?.project.length) await this.permissions.allowForProject(remember.project)
+        if (remember?.session.length) this.permissions.allowForSession(this.activeSessionId, remember.session)
         await this.sessions.respondToPermission(this.activeSessionId, message.requestId, decision)
         return
       }
+      case 'question':
+        if (!this.activeSessionId) return
+        await this.sessions.respondToQuestion(this.activeSessionId, message.requestId, message.outcome)
+        return
       case 'interrupt':
         if (this.activeSessionId) await this.sessions.interrupt(this.activeSessionId)
         return
@@ -400,8 +581,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         const review = await readReview(reviewPath(this.workspaceRoot, feature))
         assertApprovable(review)
         const spec = await readSpecState(path)
-        const stage = planStage(spec, review, await readTasks(tasksPath(this.workspaceRoot, feature)))
-        if (!isApprovable(stage, spec)) throw new Error('Map the spec against the code first: approval covers the tasks too.')
+        const tasks = await readTasks(tasksPath(this.workspaceRoot, feature))
+        const stage = planStage(spec, review, tasks)
+        if (tasksStale(spec, tasks)) throw new Error('The tasks predate the last change to the spec; they are re-mapped when the plan session’s turn ends.')
+        if (!isApprovable(stage, spec, tasks)) throw new Error('Map the spec against the code first: approval covers the tasks too.')
         await setSpecStatus(path, 'approved')
         await this.sendState()
         return
@@ -461,6 +644,24 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         await this.sessions.close(child.id)
         await this.sendState()
         this.changed.fire()
+        return
+      }
+      case 'stop_cleanup': {
+        // The run shows on every tab of the feature, so it is found by the feature, not the active tab.
+        const feature = this.activeRecord()?.feature
+        const child = feature
+          ? this.sessions.list().find((r) => r.mode === 'cleanup' && r.feature === feature && this.sessions.isLive(r.id))
+          : undefined
+        if (!feature || !child) return
+        this.cleanups.set(feature, { live: false, text: 'Cleanup stopped' })
+        await this.sessions.close(child.id)
+        await this.sendState()
+        this.changed.fire()
+        return
+      }
+      case 'repair_spec': {
+        const feature = this.activeRecord()?.feature
+        if (feature) this.reportMigration(await this.repairPlan(feature), true)
         return
       }
       case 'implement_spec': {
@@ -577,11 +778,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const fromPlan = record.mode === 'plan' && state.exists
     const mapping = this.mappings.get(record.id)
     const verification = this.verifications.get(feature)
+    const cleanup = this.cleanups.get(feature)
     const review = await readReview(reviewPath(this.workspaceRoot, feature)).catch(() => emptyReview())
     const tasks: TasksState = await readTasks(tasksPath(this.workspaceRoot, feature))
     const amendments = await readAmendments(intentPath(this.workspaceRoot, feature)).catch(() => [])
     const waiting = pending(amendments).length
     const stage = planStage(state, review, tasks)
+    const spec = state.exists ? parseSpec(state.body) : undefined
     const relativeTo = (file: string) => relative(this.workspaceRoot, file).split('\\').join('/')
     return {
       specPath: relativeTo(path),
@@ -589,18 +792,22 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       stage,
       status: state.exists ? state.status : 'missing',
       ...(state.exists ? { body: state.body } : {}),
+      ...(spec ? { spec } : {}),
+      stale: tasksStale(state, tasks),
+      repairable: fromPlan && (spec?.problems.length ?? 0) > 0,
       mappable: fromPlan && isMappable(stage, state) && mapping?.live !== true,
       ...(mapping ? { mapping } : {}),
       implementable: fromPlan && stage === 'mapped' && state.status === 'approved',
       // Offered while the board is tested and the last record did not pass; a re-run after a pass is a manual choice too.
       verifiable: (stage === 'verification' || stage === 'verified') && verification?.live !== true,
       ...(verification ? { verification } : {}),
+      ...(cleanup ? { cleanup } : {}),
       ...(tasks.exists && tasks.verification ? { lastVerification: tasks.verification } : {}),
       tasks: tasks.exists ? tasks.tasks : [],
       items: state.exists ? planItems(state.body) : [],
       review,
       commentable: isCommentable(state),
-      approvable: isApprovable(stage, state),
+      approvable: isApprovable(stage, state, tasks),
       ...(amendments.length > 0
         ? {
             intent: {

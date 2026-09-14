@@ -15,7 +15,8 @@ import { SdkEventMapper } from './sdk-event-mapper'
 import { spawnWithRuntime, type NodeRuntime } from './node-runtime'
 import { bareToolName, toolServer } from './tool-server'
 import { ReadTracker } from '../openai-session/tools/read-tracker'
-import type { Tool } from '../openai-session/tools/tool'
+import type { Tool, ToolContext } from '../openai-session/tools/tool'
+import type { QuestionOutcome, UserQuestionRequest } from '../session/user-question'
 
 type QueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>; options?: Options }) => Query
 
@@ -58,16 +59,26 @@ export class SdkSession implements CodeSession {
   private readonly input = new AsyncQueue<SDKUserMessage>()
   private readonly output = new AsyncQueue<SessionEvent>()
   private readonly pending = new Map<string, PendingPermission>()
+  /** Questions this session's tools put to the user, by request id. */
+  private readonly questions = new Map<string, (outcome: QuestionOutcome) => void>()
   private readonly mapper = new SdkEventMapper()
   private readonly abort = new AbortController()
   private readonly query: Query
   private readonly pumping: Promise<void>
   private engineSessionId: string | undefined
+  /** What the tools this extension owns run with; a test drives one through it as the engine would. */
+  readonly toolContext: ToolContext
 
   constructor(private readonly options: SdkSessionOptions) {
     this.id = options.id
     this.profile = options.profile
     this.engineSessionId = options.resumeEngineSessionId
+    this.toolContext = {
+      cwd: options.cwd,
+      signal: this.abort.signal,
+      files: new ReadTracker(),
+      ask: (request) => this.askUser(request),
+    }
     this.query = options.query({ prompt: this.input, options: this.buildOptions() })
     this.pumping = this.pump()
   }
@@ -98,12 +109,25 @@ export class SdkSession implements CodeSession {
     pending.resolve(toPermissionResult(decision, pending.input))
   }
 
+  respondToQuestion(requestId: string, outcome: QuestionOutcome): boolean {
+    const resolve = this.questions.get(requestId)
+    if (!resolve) return false
+    this.questions.delete(requestId)
+    this.output.push({ type: 'question_resolved', requestId, outcome })
+    resolve(outcome)
+    return true
+  }
+
   async interrupt(): Promise<void> {
+    // The turn is torn down around the card, so the question goes unanswered:
+    // stopping a session never answers it, and the model is told so.
+    this.cancelQuestions('Interrupted')
     await this.query.interrupt()
   }
 
   async dispose(): Promise<void> {
     this.denyAllPending('Session closed')
+    this.cancelQuestions('Session closed')
     this.input.end()
     this.abort.abort()
     this.query.close()
@@ -136,8 +160,7 @@ export class SdkSession implements CodeSession {
     if (this.options.systemPrompt !== undefined) options.systemPrompt = this.options.systemPrompt
     if (this.options.tools) options.tools = this.options.tools
     if (this.options.ownTools?.length) {
-      const ctx = { cwd: this.options.cwd, signal: this.abort.signal, files: new ReadTracker() }
-      const server = toolServer(this.options.ownTools, ctx)
+      const server = toolServer(this.options.ownTools, this.toolContext)
       options.mcpServers = { [server.name]: server }
     }
     return options
@@ -209,6 +232,30 @@ export class SdkSession implements CodeSession {
     })
   }
 
+  /**
+   * A question from one of this session's own tools. The wait has no deadline:
+   * the card decides when it settles. Should the engine give up on the tool
+   * call before then — its request timeout is its own — the card stays
+   * answerable, and the answer reaches the session as its next prompt.
+   */
+  private askUser(request: UserQuestionRequest): Promise<QuestionOutcome> {
+    return new Promise((resolve) => {
+      const requestId = crypto.randomUUID()
+      this.questions.set(requestId, resolve)
+      this.output.push({ type: 'question_request', requestId, request })
+    })
+  }
+
+  /** Nothing is left waiting: every open question ends unanswered, never with a choice the user did not make. */
+  private cancelQuestions(reason: string): void {
+    for (const [id, resolve] of this.questions) {
+      this.questions.delete(id)
+      const outcome: QuestionOutcome = { kind: 'unanswered', reason }
+      if (!this.output.isEnded) this.output.push({ type: 'question_resolved', requestId: id, outcome })
+      resolve(outcome)
+    }
+  }
+
   private denyAllPending(message: string): void {
     for (const [id, pending] of this.pending) {
       this.pending.delete(id)
@@ -231,6 +278,7 @@ export class SdkSession implements CodeSession {
       }
     } finally {
       this.denyAllPending('Session ended')
+      this.cancelQuestions('Session ended')
       this.finish()
     }
   }

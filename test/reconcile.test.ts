@@ -78,6 +78,16 @@ describe('reconcile prompt', () => {
     // A task under an unruled finding would pre-empt the ruling.
     expect(prompt).toContain('No task for what a finding puts in question')
   })
+
+  it('starts_from_one_task_per_scenario_and_covers_every_item', () => {
+    expect(prompt).toContain('One task per scenario is the default')
+    expect(prompt).toContain('Every behaviour and edge case of the spec is delivered by some task')
+    expect(prompt).toContain('proves:')
+    expect(prompt).toContain('`## Tasks` section left in the spec')
+    // The reading the run did is handed on, so the implementer does not do it again.
+    expect(prompt).toContain('- context:')
+    expect(prompt).toContain('would otherwise have to find again')
+  })
 })
 
 const spec = `# Order cancellation

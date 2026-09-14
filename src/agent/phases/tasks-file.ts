@@ -1,6 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { PLAN_DIR, featureSlug } from './blind-plan'
+import { bodyOf, frontMatterValue, withFrontMatterValue } from './spec-file'
 
 /**
  * The feature's task board, `plan/<slug>.tasks.md`: what to build and where,
@@ -12,6 +13,9 @@ import { PLAN_DIR, featureSlug } from './blind-plan'
 /** `blocked` is unfinished work with a reason; only `tested` is a finish. */
 export type TaskState = 'open' | 'in_progress' | 'done' | 'tested' | 'blocked'
 
+/** The test that proves one delivered item: the evidence shown on the spec. */
+export type Proof = { item: string; file: string; test: string }
+
 export type Task = {
   id: string
   /** The line's text after the id, markers included, as written. */
@@ -20,6 +24,10 @@ export type Task = {
   delivers: string[]
   /** Workspace-relative paths the task touches; what verification runs over. */
   files: string[]
+  /** Paths the mapping run read to reach the task: what the implementer starts from and does not have to find again. */
+  context: string[]
+  /** What the implementer proved, item by item. */
+  proves: Proof[]
   state: TaskState
   /** The mapping run says the task is gone. */
   removed: boolean
@@ -28,9 +36,18 @@ export type Task = {
 /** One run of the test commands, newest first in the file. */
 export type VerificationRecord = { at: string; ok: boolean; text: string }
 
-export type TasksState = { exists: false } | { exists: true; tasks: Task[]; verification: VerificationRecord | undefined }
+export type TasksState =
+  | { exists: false }
+  | {
+      exists: true
+      tasks: Task[]
+      verification: VerificationRecord | undefined
+      /** Fingerprint of the spec the board was mapped from; absent on a board written before the stamp existed. */
+      spec: string | undefined
+    }
 
 export const VERIFICATION_SECTION = 'Verification'
+const SPEC_KEY = 'spec'
 
 export function tasksPath(cwd: string, feature: string): string {
   return join(cwd, PLAN_DIR, `${featureSlug(feature)}.tasks.md`)
@@ -43,6 +60,9 @@ export function tasksFile(feature: string): string {
 
 const TASK = /^-\s+(T\d+)\b\s*(?:\(([^)]*)\))?\s*:\s*(.*)$/
 const FILES = /^\s+-\s+files\s*:\s*(.*)$/i
+const CONTEXT = /^\s+-\s+context\s*:\s*(.*)$/i
+const PROVES = /^\s+-\s+proves\s*:\s*(.*)$/i
+const PROOF = /^([A-Z]{1,3}\d+)\s+(\S+)\s+(.+)$/
 const HEADING = /^#{1,6}\s+(.*)$/
 const RECORD = /^-\s+(\S+)\s*:\s*(passed|failed)\b\s*,?\s*(.*)$/i
 const REMOVED = /\[removed\]/i
@@ -69,12 +89,20 @@ const list = (text: string): string[] =>
 /** `src/a.ts (new)` names a file the task creates; the path is what matters downstream. */
 const pathOf = (entry: string): string => entry.replace(/\s*\(new\)\s*$/i, '').trim()
 
-export function parseTasks(text: string): { tasks: Task[]; verification: VerificationRecord | undefined } {
+/** `B1 test/a.test.ts a_rule_holds`; an entry that does not parse is kept out, not guessed at. */
+function proofs(text: string): Proof[] {
+  return list(text).flatMap((entry) => {
+    const match = PROOF.exec(entry)
+    return match ? [{ item: match[1]!, file: match[2]!, test: match[3]!.trim() }] : []
+  })
+}
+
+export function parseTasks(text: string): { tasks: Task[]; verification: VerificationRecord | undefined; spec: string | undefined } {
   const tasks: Task[] = []
   let task: Task | undefined
   let inVerification = false
   let verification: VerificationRecord | undefined
-  for (const raw of text.split(/\r?\n/)) {
+  for (const raw of bodyOf(text).split(/\r?\n/)) {
     const line = raw.trimEnd()
     const heading = HEADING.exec(line.trim())
     if (heading) {
@@ -95,6 +123,16 @@ export function parseTasks(text: string): { tasks: Task[]; verification: Verific
       task.files = list(files[1]!).map(pathOf)
       continue
     }
+    const context = CONTEXT.exec(line)
+    if (context && task) {
+      task.context = list(context[1]!)
+      continue
+    }
+    const proves = PROVES.exec(line)
+    if (proves && task) {
+      task.proves = proofs(proves[1]!)
+      continue
+    }
     const match = TASK.exec(line.trim())
     if (!match) continue
     const body = match[3]!.trim()
@@ -103,12 +141,14 @@ export function parseTasks(text: string): { tasks: Task[]; verification: Verific
       text: body,
       delivers: list(match[2] ?? ''),
       files: [],
+      context: [],
+      proves: [],
       state: stateOf(body),
       removed: REMOVED.test(body),
     }
     tasks.push(task)
   }
-  return { tasks, verification }
+  return { tasks, verification, spec: frontMatterValue(text, SPEC_KEY) }
 }
 
 export async function readTasks(path: string): Promise<TasksState> {
@@ -138,6 +178,40 @@ export function tasksDone(tasks: Task[]): boolean {
 /** Every file the live tasks name, once each, in file order. */
 export function taskFiles(tasks: Task[]): string[] {
   return [...new Set(liveTasks(tasks).flatMap((t) => t.files))]
+}
+
+/** The live task that delivers an item, first in file order. */
+export function deliveredBy(tasks: Task[], item: string): Task | undefined {
+  return liveTasks(tasks).find((t) => t.delivers.includes(item))
+}
+
+/** The proof a live task recorded for an item. */
+export function provenBy(tasks: Task[], item: string): Proof | undefined {
+  return liveTasks(tasks).flatMap((t) => t.proves).find((p) => p.item === item)
+}
+
+/** Items a task marked tested without naming a test for: a finish the evidence does not back. */
+export function unprovenItems(tasks: Task[]): string[] {
+  return liveTasks(tasks)
+    .filter((t) => t.state === 'tested')
+    .flatMap((t) => t.delivers.filter((item) => !t.proves.some((p) => p.item === item)))
+}
+
+/** Of the given item ids, those no live task delivers. */
+export function undeliveredItems(tasks: Task[], items: string[]): string[] {
+  return items.filter((item) => deliveredBy(tasks, item) === undefined)
+}
+
+/** The board was mapped from the spec as it stands now. A board without a stamp is taken as fresh: it predates the stamp. */
+export function tasksFresh(tasks: Extract<TasksState, { exists: true }>, fingerprint: string): boolean {
+  return tasks.spec === undefined || tasks.spec === fingerprint
+}
+
+export const withSpecFingerprint = (text: string, fingerprint: string): string => withFrontMatterValue(text, SPEC_KEY, fingerprint)
+
+export async function stampSpecFingerprint(path: string, fingerprint: string): Promise<void> {
+  const text = await readFile(path, 'utf8')
+  await writeFile(path, withSpecFingerprint(text, fingerprint), 'utf8')
 }
 
 export function renderRecord(record: VerificationRecord): string {

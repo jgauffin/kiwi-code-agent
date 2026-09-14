@@ -9,6 +9,7 @@ import { editTool } from '../src/agent/openai-session/tools/edit'
 import { globTool } from '../src/agent/openai-session/tools/glob'
 import { grepTool } from '../src/agent/openai-session/tools/grep'
 import { bashTool } from '../src/agent/openai-session/tools/bash'
+import { askUserSchema, askUserTool } from '../src/agent/openai-session/tools/ask-user'
 import { toDefinition, type ToolContext } from '../src/agent/openai-session/tools/tool'
 
 let dir: string
@@ -161,5 +162,62 @@ describe('tool definitions', () => {
     expect(def.name).toBe('Edit')
     expect(def.parameters).not.toHaveProperty('$schema')
     expect(def.parameters['required']).toEqual(['file_path', 'old_string', 'new_string'])
+  })
+})
+
+describe('AskUser', () => {
+  const card = {
+    questions: [
+      { header: 'Scope', question: 'How far does this go?', options: [{ label: 'This feature', explanation: 'Nothing else changes.' }, { label: 'Everywhere' }] },
+      { header: 'Engines', question: 'Which engines?', options: [{ label: 'Claude' }, { label: 'GLM' }], multiSelect: true },
+      { header: 'Name', question: 'What should it be called?' },
+    ],
+  }
+
+  it('one_tool_of_one_name_and_one_request_shape_serves_every_engine', () => {
+    expect(askUserTool.name).toBe('AskUser')
+    const def = toDefinition(askUserTool)
+    // Both engines are handed this same definition: the SDK one from the schema's shape, the own loop from the JSON schema.
+    expect(def.parameters['required']).toEqual(['questions'])
+    expect(Object.keys(askUserSchema.shape)).toEqual(['questions'])
+    expect(askUserSchema.safeParse(card).success).toBe(true)
+    expect(askUserSchema.safeParse({ questions: [] }).success).toBe(false)
+  })
+
+  it('a_question_carries_a_header_text_options_with_explanations_and_a_single_or_multi_flag', () => {
+    const parsed = askUserSchema.parse(card)
+    expect(parsed.questions[0]).toEqual({
+      header: 'Scope',
+      question: 'How far does this go?',
+      options: [{ label: 'This feature', explanation: 'Nothing else changes.' }, { label: 'Everywhere' }],
+    })
+    expect(parsed.questions[1]!.multiSelect).toBe(true)
+    expect(parsed.questions[2]!.options).toBeUndefined()
+    expect(askUserSchema.safeParse({ questions: [{ header: 'x' }] }).success).toBe(false)
+  })
+
+  it('the_tool_waits_for_the_card_and_returns_the_chosen_options_and_free_text_as_its_result', async () => {
+    let asked: unknown
+    const answered = await askUserTool.execute(card, {
+      ...ctx,
+      ask: async (request) => {
+        asked = request
+        return { kind: 'answered', answers: [{ chosen: ['Everywhere'] }, { chosen: ['Claude', 'GLM'] }, { chosen: [], other: 'AskUser' }] }
+      },
+    })
+    expect(asked).toEqual(card)
+    expect(answered.isError).toBe(false)
+    expect(answered.text).toContain('Chose: Everywhere')
+    expect(answered.text).toContain('Chose: Claude, GLM')
+    expect(answered.text).toContain("Other (the user's own words): AskUser")
+  })
+
+  it('an_unanswered_question_comes_back_as_no_answer_and_a_session_without_a_user_is_told_so', async () => {
+    const declined = await askUserTool.execute(card, { ...ctx, ask: async () => ({ kind: 'unanswered' }) })
+    expect(declined.text).toContain('did not answer')
+    expect(declined.text).toContain('none may be assumed')
+    const nobody = await askUserTool.execute(card, ctx)
+    expect(nobody.isError).toBe(true)
+    expect(nobody.text).toContain('nobody to ask')
   })
 })

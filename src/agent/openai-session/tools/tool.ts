@@ -1,11 +1,21 @@
 import { z } from 'zod'
 import type { ToolDefinition } from '../chat-messages'
 import type { ReadTracker } from './read-tracker'
+import type { QuestionOutcome, UserQuestionRequest } from '../../session/user-question'
+
+/**
+ * How a tool reaches the person running the session. The engine supplies it;
+ * the wait is open-ended, so the promise settles only when the request is
+ * answered or goes unanswered. A session with no user to reach has no asker.
+ */
+export type QuestionAsker = (request: UserQuestionRequest) => Promise<QuestionOutcome>
 
 export type ToolContext = {
   cwd: string
   signal: AbortSignal
   files: ReadTracker
+  /** Absent in a session whose user never sees its transcript; the question tool then has nobody to ask. */
+  ask?: QuestionAsker
 }
 
 export type ToolOutput = { text: string; isError: boolean }

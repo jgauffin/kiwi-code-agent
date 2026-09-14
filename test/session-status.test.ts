@@ -29,6 +29,10 @@ describe('session status', () => {
     expect(run('implement', [{ type: 'user_message', text: 'x' }, turnDone()])).toEqual(['implementing', 'needs_human'])
   })
 
+  it('a_cleanup_run_is_implementing_and_its_stop_waits_for_the_host_like_the_human', () => {
+    expect(run('cleanup', [{ type: 'user_message', text: 'x' }, turnDone()])).toEqual(['implementing', 'needs_human'])
+  })
+
   it('a_pending_permission_needs_the_human_until_it_is_answered', () => {
     const request: SessionEvent = { type: 'permission_request', requestId: 'r', toolName: 'Edit', input: {} }
     expect(run('chat', [{ type: 'user_message', text: 'x' }, request, { type: 'status', status: 'requesting' }])).toEqual([
@@ -53,6 +57,25 @@ describe('session status', () => {
     for (const mode of ['plan', 'reconcile'] as const) {
       expect(run(mode, [{ type: 'user_message', text: 'review round 1' }, turnDone()])).toEqual(['planning', 'needs_human'])
     }
+  })
+
+  it('a_pending_question_is_its_own_status_apart_from_a_turn_that_merely_ended', () => {
+    const request: SessionEvent = { type: 'question_request', requestId: 'q1', request: { questions: [{ header: 'H', question: 'Which?' }] } }
+    expect(run('plan', [{ type: 'user_message', text: 'x' }, request, { type: 'status', status: 'requesting' }])).toEqual([
+      'planning',
+      'needs_answer',
+      'needs_answer',
+    ])
+    // A turn torn down around the card, and the engine stopping, leave the card waiting on the user.
+    expect(run('plan', [request, turnDone(), { type: 'ended' }], 'planning')).toEqual(['needs_answer', 'needs_answer', 'needs_answer'])
+    expect(nextStatus('needs_human', 'plan', turnDone())).toBe('needs_human')
+  })
+
+  it('answering_or_cancelling_a_question_puts_the_session_back_to_work', () => {
+    const answered: SessionEvent = { type: 'question_resolved', requestId: 'q1', outcome: { kind: 'answered', answers: [{ chosen: ['a'] }] } }
+    const unanswered: SessionEvent = { type: 'question_resolved', requestId: 'q1', outcome: { kind: 'unanswered' } }
+    expect(nextStatus('needs_answer', 'plan', answered)).toBe('planning')
+    expect(nextStatus('needs_answer', 'implement', unanswered)).toBe('implementing')
   })
 
   it('a_finished_chat_turn_is_idle_but_a_finished_plan_turn_needs_the_human', () => {

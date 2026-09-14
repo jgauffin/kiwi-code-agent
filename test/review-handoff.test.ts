@@ -28,12 +28,13 @@ status: draft
 
 # Order cancellation
 
-## Behaviour
+## Goal
+Orders can be cancelled.
+
+## Cancelling
 - B1: an order can be cancelled
 - B2: a cancelled order is refunded
-
-## Tasks
-- T1: cancellation (B1, B2)
+  - E1: a partial refund on a shipped order
 `
 
 const body = spec.split('---\n')[2]!.replace(/^\s+/, '')
@@ -294,16 +295,16 @@ describe('the revision the agent is asked for', () => {
   })
 
   it('a_plan_whose_every_item_is_struck_is_reported_as_emptied', () => {
-    expect(emptied(body, ['B1', 'B2', 'T1'])).toBe(true)
+    expect(emptied(body, ['B1', 'B2', 'E1'])).toBe(true)
     expect(emptied(body, ['B1', 'B2'])).toBe(false)
     expect(emptied('# Nothing here', [])).toBe(false)
 
     const all = (() => {
       const r = emptyReview()
-      for (const id of ['B1', 'B2', 'T1']) strikeItem(r, id)
+      for (const id of ['B1', 'B2', 'E1']) strikeItem(r, id)
       return submitRound(r, '2026-01-01T00:00:00.000Z')
     })()
-    const text = reviewPrompt({ feature: 'Order cancellation', round: all, body, struck: ['B1', 'B2', 'T1'] })
+    const text = reviewPrompt({ feature: 'Order cancellation', round: all, body, struck: ['B1', 'B2', 'E1'] })
     expect(text).toContain('Every item in the plan is now struck: nothing remains.')
     expect(text).toContain('report that nothing remains and stop')
   })

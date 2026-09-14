@@ -17,6 +17,7 @@ import { editTool } from './agent/openai-session/tools/edit'
 import { globTool } from './agent/openai-session/tools/glob'
 import { grepTool } from './agent/openai-session/tools/grep'
 import { bashTool } from './agent/openai-session/tools/bash'
+import { askUserTool } from './agent/openai-session/tools/ask-user'
 import { jsonQueryTool, jsonSchemaTool } from './agent/openai-session/tools/json'
 import { skillTool } from './agent/openai-session/tools/skill'
 import type { Tool } from './agent/openai-session/tools/tool'
@@ -30,13 +31,27 @@ import { ScopeGuard } from './agent/phases/scope-guard'
 import { BLIND_PLAN_TOOLS, blindPlanPrompt, blindPlanScope } from './agent/phases/blind-plan'
 import { RECONCILE_TOOLS, reconcilePrompt, reconcileScope } from './agent/phases/reconcile'
 import { IMPLEMENT_TOOLS, implementPrompt } from './agent/phases/implement'
+import { CLEANUP_TOOLS, cleanupPrompt, cleanupScope } from './agent/phases/cleanup'
+import type { Thresholds } from './agent/cleanup/oversized'
+import { SpecContract } from './agent/phases/spec-model'
 import type { VerifyRule } from './agent/phases/verification'
-import { CHAT_PANEL_TYPE, ChatViewProvider, type PermissionStore, type SessionSwitch, type Verifier } from './chat/chat-view-provider'
+import {
+  CHAT_PANEL_TYPE,
+  ChatViewProvider,
+  type PermissionStore,
+  type SessionSwitch,
+  type SizeLimits,
+  type Verifier,
+} from './chat/chat-view-provider'
 import { openDraftPlanAction } from './chat/open-draft-plan'
 import { watchOwnBundle } from './dev-reload'
 
-/** Tools the extension provides to every engine, beside the engine's own file and shell tools. */
-const OWN_TOOLS: Tool[] = [jsonSchemaTool, jsonQueryTool]
+/**
+ * Tools the extension provides to every engine, beside the engine's own file
+ * and shell tools. A mode's tool set decides which of them it is offered; a
+ * chat session names none, so it gets them all.
+ */
+const OWN_TOOLS: Tool[] = [jsonSchemaTool, jsonQueryTool, askUserTool]
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('KiwiAgent')
@@ -60,6 +75,12 @@ export function activate(context: vscode.ExtensionContext): void {
     },
   }
 
+  /** The cleanup after a feature's tests pass: the `kiwiAgent.cleanup` limits, read when the sizes are measured. */
+  const sizeLimits: SizeLimits = {
+    thresholds: () => cleanupThresholds(),
+    ignore: () => vscode.workspace.getConfiguration('kiwiAgent').get<string[]>('cleanup.ignore', []),
+  }
+
   const writesAllowed = new Map<string, boolean>()
   const allowWritesControl: SessionSwitch = {
     isEnabled: (id) => writesAllowed.get(id) ?? false,
@@ -74,17 +95,30 @@ export function activate(context: vscode.ExtensionContext): void {
   /** Per session, what captures the file it is about to edit and turns it into the diff the chat shows. */
   const editRecorders = new Map<string, FileEditRecorder>()
 
+  /** Rules allowed "for session": they hold beside the project's until the extension host goes. */
+  const sessionAllowed = new Map<string, string[]>()
+  /** Per session, the rules in force: the project's plus the session's own. */
+  const policies = new Map<string, PermissionPolicy>()
+  const policyFor = (sessionId: string): PermissionPolicy => {
+    const existing = policies.get(sessionId)
+    if (existing) return existing
+    const policy = new PermissionPolicy(workspaceRoot, () => {
+      const { allow, deny } = permissionRules()
+      return { allow: [...allow, ...(sessionAllowed.get(sessionId) ?? [])], deny }
+    })
+    policies.set(sessionId, policy)
+    return policy
+  }
+
   /** What a session's mode dictates, independent of engine: hooks, prompt, tool set. */
   const setupFor = (record: SessionRecord): { hooks?: SessionHooks; systemPrompt?: string; toolNames?: string[] } => {
     const setup = modeSetup(record)
     // Last in line, so a call another hook denies is never captured: nothing changed.
     const recorder = new FileEditRecorder({ cwd: workspaceRoot, runDir: RunLog.forSession(workspaceRoot, record.id).dir })
     editRecorders.set(record.id, recorder)
-    // The project's permission rules apply to every session; a mode's own hooks may still deny.
-    return { ...setup, hooks: composeHooks(permissionPolicy, ...(setup.hooks ? [setup.hooks] : []), recorder) }
+    // The permission rules apply to every session; a mode's own hooks may still deny.
+    return { ...setup, hooks: composeHooks(policyFor(record.id), ...(setup.hooks ? [setup.hooks] : []), recorder) }
   }
-
-  const permissionPolicy = new PermissionPolicy(workspaceRoot, permissionRules)
 
   const modeSetup = (record: SessionRecord): { hooks?: SessionHooks; systemPrompt?: string; toolNames?: string[] } => {
     switch (record.mode) {
@@ -102,7 +136,8 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!record.feature) throw new Error('A plan session needs a feature name')
         const ignored = vscode.workspace.getConfiguration('kiwiAgent').get<string[]>('planIgnore', [])
         return {
-          hooks: new ScopeGuard(workspaceRoot, blindPlanScope(record.feature, ignored)),
+          // The contract answers on the write that broke it, so the planner fixes the spec in the same turn.
+          hooks: composeHooks(new ScopeGuard(workspaceRoot, blindPlanScope(record.feature, ignored)), new SpecContract(workspaceRoot)),
           systemPrompt: blindPlanPrompt(record.feature, workspaceRoot),
           toolNames: BLIND_PLAN_TOOLS,
         }
@@ -110,9 +145,17 @@ export function activate(context: vscode.ExtensionContext): void {
       case 'reconcile': {
         if (!record.feature) throw new Error('A reconcile session needs a feature name')
         return {
-          hooks: new ScopeGuard(workspaceRoot, reconcileScope(record.feature)),
+          hooks: composeHooks(new ScopeGuard(workspaceRoot, reconcileScope(record.feature)), new SpecContract(workspaceRoot)),
           systemPrompt: reconcilePrompt(record.feature, workspaceRoot),
           toolNames: RECONCILE_TOOLS,
+        }
+      }
+      case 'cleanup': {
+        if (!record.feature || !record.files) throw new Error('A cleanup session needs a feature name and the files to split')
+        return {
+          hooks: new ScopeGuard(workspaceRoot, cleanupScope(record.files)),
+          systemPrompt: cleanupPrompt(record.feature, workspaceRoot, cleanupThresholds()),
+          toolNames: CLEANUP_TOOLS,
         }
       }
     }
@@ -169,8 +212,8 @@ export function activate(context: vscode.ExtensionContext): void {
     createEngine,
     (id) => RunLog.forSession(workspaceRoot, id),
     (id, event) => chat.onSessionEvent(id, event),
-    // The edit diff is added once, before the event is logged, so a reload shows the same thing.
-    async (id, event) => (await editRecorders.get(id)?.decorate(event)) ?? event,
+    // The edit diff and the command lines are added once, before the event is logged, so a reload shows the same thing.
+    async (id, event) => policyFor(id).decorate((await editRecorders.get(id)?.decorate(event)) ?? event),
   )
   const permissionStore: PermissionStore = {
     allowForProject: async (rules) => {
@@ -179,8 +222,22 @@ export function activate(context: vscode.ExtensionContext): void {
       const merged = [...current, ...rules.filter((r) => !current.includes(r))]
       await config.update('permissions.allow', merged, vscode.ConfigurationTarget.Workspace)
     },
+    allowForSession: (sessionId, rules) => {
+      const current = sessionAllowed.get(sessionId) ?? []
+      sessionAllowed.set(sessionId, [...current, ...rules.filter((r) => !current.includes(r))])
+    },
   }
-  chat = new ChatViewProvider(context.extensionUri, sessions, profileFor, verifier, allowWritesControl, permissionStore, workspaceRoot, context.workspaceState)
+  chat = new ChatViewProvider(
+    context.extensionUri,
+    sessions,
+    profileFor,
+    verifier,
+    sizeLimits,
+    allowWritesControl,
+    permissionStore,
+    workspaceRoot,
+    context.workspaceState,
+  )
   const tree = new SessionsTree(
     sessions,
     () => chat.activeId,
@@ -200,6 +257,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('kiwiAgent.removeSession', (record: SessionRecord) => chat.remove(record.id)),
     vscode.commands.registerCommand('kiwiAgent.openChat', () => chat.openInEditor()),
     vscode.commands.registerCommand('kiwiAgent.setApiKey', () => setApiKey(context)),
+    vscode.commands.registerCommand('kiwiAgent.migratePlans', () => chat.migratePlans()),
     openDraftPlanAction(chat, sessions, workspaceRoot, output),
     watchOwnBundle(context),
     { dispose: () => void sessions.disposeAll() },
@@ -222,6 +280,15 @@ function profileFor(mode: SessionMode): ModelProfile {
     void vscode.window.showWarningMessage(`KiwiAgent: profile "${name}" not found, using "${profile.name}".`)
   }
   return profile
+}
+
+function cleanupThresholds(): Thresholds {
+  const config = vscode.workspace.getConfiguration('kiwiAgent')
+  return {
+    functionLines: config.get<number>('cleanup.functionLines', 25),
+    typeLines: config.get<number>('cleanup.typeLines', 200),
+    fileLines: config.get<number>('cleanup.fileLines', 400),
+  }
 }
 
 /** Read on every tool call, so a rule just written applies at once. */

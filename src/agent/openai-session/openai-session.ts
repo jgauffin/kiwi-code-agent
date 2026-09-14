@@ -1,4 +1,5 @@
 import type { CodeSession, PermissionDecision, SessionEvent, TurnUsage } from '../session/code-session'
+import type { QuestionOutcome, UserQuestionRequest } from '../session/user-question'
 import type { SessionHooks } from '../session/hooks'
 import type { ModelProfile } from '../session/model-profile'
 import { AsyncQueue } from '../session/async-queue'
@@ -31,6 +32,8 @@ export class OpenAiSession implements CodeSession {
   private readonly queue: string[] = []
   private readonly files = new ReadTracker()
   private readonly pending = new Map<string, (d: PermissionDecision) => void>()
+  /** Questions the model put to the user, by the id of the tool call that asked. */
+  private readonly questions = new Map<string, (outcome: QuestionOutcome) => void>()
   private readonly definitions
   private turnAbort = new AbortController()
   private running = false
@@ -42,12 +45,12 @@ export class OpenAiSession implements CodeSession {
     this.profile = options.profile
     this.messages = [{ role: 'system', content: options.systemPrompt }]
     this.definitions = options.tools.map(toDefinition)
-    this.output.push({ type: 'session_started', engineSessionId: options.id, model: options.profile.model })
+    this.emit({ type: 'session_started', engineSessionId: options.id, model: options.profile.model })
   }
 
   send(text: string): void {
     if (this.disposed) return
-    this.output.push({ type: 'user_message', text })
+    this.emit({ type: 'user_message', text })
     this.queue.push(text)
     if (!this.running) void this.drain()
   }
@@ -60,8 +63,17 @@ export class OpenAiSession implements CodeSession {
     const resolve = this.pending.get(requestId)
     if (!resolve) return
     this.pending.delete(requestId)
-    this.output.push({ type: 'permission_resolved', requestId, decision: decision.kind })
+    this.emit({ type: 'permission_resolved', requestId, decision: decision.kind })
     resolve(decision)
+  }
+
+  respondToQuestion(requestId: string, outcome: QuestionOutcome): boolean {
+    const resolve = this.questions.get(requestId)
+    if (!resolve) return false
+    this.questions.delete(requestId)
+    this.emit({ type: 'question_resolved', requestId, outcome })
+    resolve(outcome)
+    return true
   }
 
   async interrupt(): Promise<void> {
@@ -70,13 +82,14 @@ export class OpenAiSession implements CodeSession {
       this.pending.delete(id)
       resolve({ kind: 'deny', message: 'Interrupted' })
     }
+    this.cancelQuestions('Interrupted')
   }
 
   async dispose(): Promise<void> {
     if (this.disposed) return
     this.disposed = true
     await this.interrupt()
-    this.output.push({ type: 'ended' })
+    this.emit({ type: 'ended' })
     this.output.end()
   }
 
@@ -106,14 +119,14 @@ export class OpenAiSession implements CodeSession {
           this.emitError(`Stopped after ${maxRounds} tool rounds in one turn`)
           return this.finishTurn(usage, started, true, ['max tool rounds'])
         }
-        this.output.push({ type: 'status', status: 'requesting' })
+        this.emit({ type: 'status', status: 'requesting' })
         const assistant = await this.complete(`${turn}.${round}`, signal, usage)
         this.messages.push(assistant)
         if (assistant.toolCalls.length === 0) return this.finishTurn(usage, started, false, [])
         for (const call of assistant.toolCalls) {
           if (signal.aborted) throw new InterruptedError()
           const result = await this.runTool(call, signal)
-          this.output.push({ type: 'tool_result', toolUseId: call.id, text: result.text, isError: result.isError })
+          this.emit({ type: 'tool_result', toolUseId: call.id, text: result.text, isError: result.isError })
           this.messages.push({ role: 'tool', toolCallId: call.id, content: result.text })
         }
         if (signal.aborted) throw new InterruptedError()
@@ -147,11 +160,11 @@ export class OpenAiSession implements CodeSession {
       switch (delta.type) {
         case 'text':
           text += delta.text
-          this.output.push({ type: 'assistant_text', messageId, delta: delta.text })
+          this.emit({ type: 'assistant_text', messageId, delta: delta.text })
           break
         case 'reasoning':
           reasoning += delta.text
-          this.output.push({ type: 'assistant_thinking', messageId, delta: delta.text })
+          this.emit({ type: 'assistant_thinking', messageId, delta: delta.text })
           break
         case 'tool_call_start':
           calls.set(delta.index, { id: delta.id, name: delta.name, arguments: '' })
@@ -166,10 +179,10 @@ export class OpenAiSession implements CodeSession {
           break
       }
     }
-    if (text) this.output.push({ type: 'assistant_message', messageId, text })
+    if (text) this.emit({ type: 'assistant_message', messageId, text })
     const toolCalls = [...calls.entries()].sort((a, b) => a[0] - b[0]).map(([, c]) => c)
     for (const call of toolCalls) {
-      this.output.push({
+      this.emit({
         type: 'tool_call',
         toolUseId: call.id,
         name: call.name,
@@ -198,7 +211,12 @@ export class OpenAiSession implements CodeSession {
     }
     let output: ToolOutput
     try {
-      output = await tool.execute(parsed.data, { cwd: this.options.cwd, signal, files: this.files })
+      output = await tool.execute(parsed.data, {
+        cwd: this.options.cwd,
+        signal,
+        files: this.files,
+        ask: (request) => this.askUser(call.id, request),
+      })
     } catch (error) {
       output = { text: `${tool.name} failed: ${error instanceof Error ? error.message : String(error)}`, isError: true }
     }
@@ -213,8 +231,32 @@ export class OpenAiSession implements CodeSession {
       signal.addEventListener('abort', () => {
         if (this.pending.delete(requestId)) resolve({ kind: 'deny', message: 'Interrupted' })
       })
-      this.output.push({ type: 'permission_request', requestId, toolName, input })
+      this.emit({ type: 'permission_request', requestId, toolName, input })
     })
+  }
+
+  /**
+   * The model's question to the user. The card decides when this settles, so
+   * there is no deadline: the loop holds the tool call open, and the session
+   * makes no further progress until the request is resolved one way or the
+   * other. The tool call's id is the request's, so the answer comes back as
+   * that call's own result.
+   */
+  private askUser(requestId: string, request: UserQuestionRequest): Promise<QuestionOutcome> {
+    return new Promise((resolve) => {
+      this.questions.set(requestId, resolve)
+      this.emit({ type: 'question_request', requestId, request })
+    })
+  }
+
+  /** Every question still on screen goes unanswered; the model is never handed a choice the user did not make. */
+  private cancelQuestions(reason: string): void {
+    for (const [id, resolve] of this.questions) {
+      this.questions.delete(id)
+      const outcome: QuestionOutcome = { kind: 'unanswered', reason }
+      this.emit({ type: 'question_resolved', requestId: id, outcome })
+      resolve(outcome)
+    }
   }
 
   /**
@@ -237,12 +279,22 @@ export class OpenAiSession implements CodeSession {
   }
 
   private finishTurn(usage: TurnUsage, started: number, isError: boolean, errors: string[]): void {
-    this.output.push({ type: 'status', status: 'idle' })
-    this.output.push({ type: 'turn_done', usage, durationMs: Date.now() - started, isError, errors })
+    this.emit({ type: 'status', status: 'idle' })
+    this.emit({ type: 'turn_done', usage, durationMs: Date.now() - started, isError, errors })
   }
 
   private emitError(message: string): void {
-    this.output.push({ type: 'error', message, fatal: false })
+    this.emit({ type: 'error', message, fatal: false })
+  }
+
+  /**
+   * The one way out. A disposed session's stream is closed, and the turn it
+   * was in the middle of still unwinds — a question released as unanswered,
+   * a tool giving up — so what it has left to say is dropped, not thrown.
+   */
+  private emit(event: SessionEvent): void {
+    if (this.output.isEnded) return
+    this.output.push(event)
   }
 }
 

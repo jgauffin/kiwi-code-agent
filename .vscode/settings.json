@@ -8,6 +8,8 @@
   "kiwiAgent.permissions.allow": [
     "Write",
     "Bash(npx vitest:*)",
-    "Bash(npx tsc:*)"
+    "Bash(npx tsc:*)",
+    "Bash(npm run:*)",
+    "Bash(npm test:*)"
   ]
 }

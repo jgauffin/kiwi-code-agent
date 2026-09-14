@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { SessionManager, type SessionRecord, type SessionStore } from '../src/agent/session/session-manager'
+import type { QuestionOutcome, UserQuestionRequest } from '../src/agent/session/user-question'
 import type { CodeSession, PermissionDecision, SessionEvent } from '../src/agent/session/code-session'
 import { AsyncQueue } from '../src/agent/session/async-queue'
 import { RunLog } from '../src/agent/runs/run-log'
@@ -14,6 +15,8 @@ class FakeSession implements CodeSession {
   readonly out = new AsyncQueue<SessionEvent>()
   readonly sent: string[] = []
   readonly answered: { requestId: string; decision: PermissionDecision }[] = []
+  readonly answers: { requestId: string; outcome: QuestionOutcome }[] = []
+  private readonly holding = new Set<string>()
   disposed = false
   constructor(
     readonly id: string,
@@ -28,6 +31,18 @@ class FakeSession implements CodeSession {
   }
   respondToPermission(requestId: string, decision: PermissionDecision) {
     this.answered.push({ requestId, decision })
+  }
+  /** Stands in for an engine holding a question: it holds the ones it was told about, and resolves each once. */
+  respondToQuestion(requestId: string, outcome: QuestionOutcome): boolean {
+    if (!this.holding.delete(requestId)) return false
+    this.answers.push({ requestId, outcome })
+    this.out.push({ type: 'question_resolved', requestId, outcome })
+    return true
+  }
+  /** Ask as an engine would: the request goes out and the engine holds it until it is resolved. */
+  ask(requestId: string, request: UserQuestionRequest) {
+    this.holding.add(requestId)
+    this.out.push({ type: 'question_request', requestId, request })
   }
   async interrupt() {}
   async dispose() {
@@ -385,5 +400,109 @@ describe('SessionManager', () => {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+
+  it('a_cleanup_run_carries_the_files_it_may_split_and_a_cleanup_title', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+    try {
+      const store = memoryStore()
+      const manager = new SessionManager(store, async (r) => new FakeSession(r.id, r.profile), (id) => RunLog.forSession(dir, id), () => {})
+      const implementer = await manager.create(profile, 'implement', 'Orders')
+      const cleanup = await manager.create(profile, 'cleanup', 'Orders', implementer.id, ['src/orders/cancel.ts'])
+      expect(cleanup).toMatchObject({ title: 'Cleanup: Orders', parentId: implementer.id, files: ['src/orders/cancel.ts'] })
+      expect(store.saved[store.saved.length - 1]![0]).toMatchObject({ files: ['src/orders/cancel.ts'] })
+      expect(implementer.files).toBeUndefined()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  describe('answering a question', () => {
+    const card: UserQuestionRequest = {
+      questions: [{ header: 'Scope', question: 'How far?', options: [{ label: 'Small' }, { label: 'Large' }] }],
+    }
+    const answered: QuestionOutcome = { kind: 'answered', answers: [{ chosen: ['Large'] }] }
+
+    function setup(dir: string) {
+      const engines: FakeSession[] = []
+      const seen: SessionEvent[] = []
+      const manager = new SessionManager(
+        memoryStore(),
+        async (r) => {
+          const s = new FakeSession(r.id, r.profile, r.engineSessionId)
+          engines.push(s)
+          return s
+        },
+        (id) => RunLog.forSession(dir, id),
+        (_, e) => seen.push(e),
+      )
+      return { manager, engines, seen }
+    }
+
+    it('an_answer_reaches_the_engine_that_asked_and_the_question_and_its_answers_are_logged_in_order', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+      try {
+        const { manager, engines, seen } = setup(dir)
+        const record = await manager.create(profile, 'plan', 'Orders')
+        await manager.send(record.id, 'plan it')
+        engines[0]!.ask('q-1', card)
+        await tick()
+        await manager.respondToQuestion(record.id, 'q-1', answered)
+        await tick()
+        expect(engines[0]!.answers).toEqual([{ requestId: 'q-1', outcome: answered }])
+        // No new prompt was needed: the live engine resumes on its own tool result.
+        expect(engines[0]!.sent).toEqual(['plan it'])
+        expect(seen.map((e) => e.type)).toEqual(['question_request', 'question_resolved'])
+        const transcript = await manager.transcript(record.id)
+        expect(transcript.map((e) => e.type)).toEqual(['question_request', 'question_resolved'])
+        expect(transcript[0]).toMatchObject({ requestId: 'q-1', request: card })
+        expect(transcript[1]).toMatchObject({ requestId: 'q-1', outcome: answered })
+        await manager.disposeAll()
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
+
+    it('an_answer_given_after_the_engine_let_go_of_the_question_resumes_the_session_as_its_next_prompt', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+      try {
+        const { manager, engines, seen } = setup(dir)
+        const record = await manager.create(profile, 'plan', 'Orders')
+        await manager.send(record.id, 'plan it')
+        engines[0]!.out.push({ type: 'session_started', engineSessionId: 'eng-1', model: 'opus' })
+        engines[0]!.ask('q-1', card)
+        await tick()
+        await manager.close(record.id)
+
+        await manager.respondToQuestion(record.id, 'q-1', answered)
+        expect(engines).toHaveLength(2)
+        expect(engines[1]!.resumedFrom).toBe('eng-1')
+        expect(engines[1]!.sent[0]).toContain('How far?')
+        expect(engines[1]!.sent[0]).toContain('Chose: Large')
+        expect(seen.find((e) => e.type === 'question_resolved')).toMatchObject({ requestId: 'q-1', outcome: answered })
+        await manager.disposeAll()
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
+
+    it('a_question_resolved_once_is_answered_no_further', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+      try {
+        const { manager, engines } = setup(dir)
+        const record = await manager.create(profile, 'plan', 'Orders')
+        await manager.send(record.id, 'plan it')
+        engines[0]!.ask('q-1', card)
+        await tick()
+        await manager.respondToQuestion(record.id, 'q-1', answered)
+        await tick()
+        await manager.close(record.id)
+        await expect(manager.respondToQuestion(record.id, 'q-1', { kind: 'unanswered' })).rejects.toThrow(/q-1/)
+        expect(engines).toHaveLength(1)
+        await manager.disposeAll()
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
   })
 })
