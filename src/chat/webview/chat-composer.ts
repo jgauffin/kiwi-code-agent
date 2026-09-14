@@ -1,5 +1,5 @@
 import { compileTemplate } from '@relax.js/core/html'
-import { InterruptRequestedEvent, PromptSubmittedEvent } from './events'
+import { InterruptRequestedEvent, PromptSubmittedEvent, VerifyToggledEvent } from './events'
 
 /** Prompt input. Enter sends, Shift+Enter breaks the line. */
 export class ChatComposer extends HTMLElement {
@@ -7,17 +7,35 @@ export class ChatComposer extends HTMLElement {
     <form r-submit="submit(event)">
       <textarea name="prompt" rows="3" placeholder="Ask for a change..." r-keydown="keydown(event)"></textarea>
       <div class="actions">
+        <label class="verify" if="verifyAvailable" title="Run the configured build/test commands when the model stops after editing. Leave off while still discussing the plan.">
+          <input type="checkbox" name="verify" checked="{{verify}}" r-change="toggleVerify(event)"> Verify on stop
+        </label>
         <button type="button" class="stop" r-click="stop()">Stop</button>
         <button type="submit" class="send">Send</button>
       </div>
     </form>
   `)
+  private verifyState: { verifyAvailable: boolean; verify: boolean } = { verifyAvailable: false, verify: false }
 
   connectedCallback(): void {
     if (this.childElementCount > 0) return
     this.appendChild(this.template.content)
+    this.render()
+  }
+
+  /** `undefined` hides the toggle (no verification rules configured). */
+  setVerify(enabled: boolean | undefined): void {
+    this.verifyState = { verifyAvailable: enabled !== undefined, verify: enabled ?? false }
+    this.render()
+  }
+
+  focusInput(): void {
+    this.textarea.focus()
+  }
+
+  private render(): void {
     this.template.render(
-      {},
+      { ...this.verifyState },
       {
         submit: (event: SubmitEvent) => {
           event.preventDefault()
@@ -30,12 +48,11 @@ export class ChatComposer extends HTMLElement {
           }
         },
         stop: () => this.dispatchEvent(new InterruptRequestedEvent()),
+        toggleVerify: (event: Event) => {
+          this.dispatchEvent(new VerifyToggledEvent((event.target as HTMLInputElement).checked))
+        },
       },
     )
-  }
-
-  focusInput(): void {
-    this.textarea.focus()
   }
 
   private get textarea(): HTMLTextAreaElement {

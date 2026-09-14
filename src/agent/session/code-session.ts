@@ -40,7 +40,9 @@ export type SessionEvent =
       canAllowAlways: boolean
     }
   | { type: 'permission_resolved'; requestId: string; decision: PermissionDecision['kind'] }
-  | { type: 'status'; status: 'requesting' | 'compacting' | 'idle' }
+  | { type: 'status'; status: 'requesting' | 'compacting' | 'verifying' | 'idle' }
+  | { type: 'verification_started'; command: string; cwd: string }
+  | { type: 'verification'; command: string; cwd: string; ok: boolean; output: string }
   | { type: 'turn_done'; usage?: TurnUsage; durationMs?: number; isError: boolean; errors: string[] }
   | { type: 'error'; message: string; fatal: boolean }
   | { type: 'ended' }

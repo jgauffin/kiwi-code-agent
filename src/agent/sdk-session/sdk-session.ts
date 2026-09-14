@@ -1,5 +1,14 @@
-import type { Options, PermissionResult, PermissionUpdate, Query, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import type {
+  HookCallback,
+  HookJSONOutput,
+  Options,
+  PermissionResult,
+  PermissionUpdate,
+  Query,
+  SDKUserMessage,
+} from '@anthropic-ai/claude-agent-sdk'
 import type { CodeSession, PermissionDecision, SessionEvent } from '../session/code-session'
+import type { SessionHooks } from '../session/hooks'
 import type { ModelProfile } from '../session/model-profile'
 import { AsyncQueue } from '../session/async-queue'
 import { SdkEventMapper } from './sdk-event-mapper'
@@ -18,6 +27,7 @@ export type SdkSessionOptions = {
   resumeEngineSessionId?: string
   /** Extra environment for the engine process, on top of the host's. */
   env?: Record<string, string>
+  hooks?: SessionHooks
   query: QueryFn
   onStderr?: (chunk: string) => void
 }
@@ -112,7 +122,60 @@ export class SdkSession implements CodeSession {
     }
     if (profile.effort) options.effort = profile.effort
     if (this.options.resumeEngineSessionId) options.resume = this.options.resumeEngineSessionId
+    if (this.options.hooks) options.hooks = this.sdkHooks(this.options.hooks)
     return options
+  }
+
+  /** Maps the engine-agnostic hooks onto the SDK's hook protocol. */
+  private sdkHooks(hooks: SessionHooks): NonNullable<Options['hooks']> {
+    const registered: NonNullable<Options['hooks']> = {}
+    if (hooks.preToolUse) {
+      const pre = hooks.preToolUse.bind(hooks)
+      const callback: HookCallback = async (input): Promise<HookJSONOutput> => {
+        if (input.hook_event_name !== 'PreToolUse') return {}
+        const outcome = await pre({ toolName: input.tool_name, input: input.tool_input, toolUseId: input.tool_use_id })
+        if (outcome && 'deny' in outcome) {
+          return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: outcome.deny } }
+        }
+        if (outcome?.additionalContext) {
+          return { hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: outcome.additionalContext } }
+        }
+        return {}
+      }
+      registered.PreToolUse = [{ hooks: [callback] }]
+    }
+    if (hooks.postToolUse) {
+      const post = hooks.postToolUse.bind(hooks)
+      const callback: HookCallback = async (input): Promise<HookJSONOutput> => {
+        if (input.hook_event_name !== 'PostToolUse') return {}
+        const output = typeof input.tool_response === 'string' ? input.tool_response : JSON.stringify(input.tool_response)
+        const outcome = await post({
+          toolName: input.tool_name,
+          input: input.tool_input,
+          toolUseId: input.tool_use_id,
+          output,
+          isError: false,
+        })
+        if (outcome?.additionalContext) {
+          return { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: outcome.additionalContext } }
+        }
+        return {}
+      }
+      registered.PostToolUse = [{ hooks: [callback] }]
+    }
+    if (hooks.stop) {
+      const stop = hooks.stop.bind(hooks)
+      const callback: HookCallback = async (input): Promise<HookJSONOutput> => {
+        if (input.hook_event_name !== 'Stop') return {}
+        this.output.push({ type: 'status', status: 'verifying' })
+        const outcome = await stop((started) => this.output.push({ type: 'verification_started', ...started }))
+        for (const v of outcome?.verifications ?? []) this.output.push({ type: 'verification', ...v })
+        return outcome?.block ? { decision: 'block', reason: outcome.block } : {}
+      }
+      // Builds can take a while; the SDK's default hook timeout would cut them off.
+      registered.Stop = [{ hooks: [callback], timeout: 900 }]
+    }
+    return registered
   }
 
   private requestPermission(

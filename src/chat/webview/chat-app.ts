@@ -10,6 +10,7 @@ import {
   PromptSubmittedEvent,
   SessionRemovedEvent,
   SessionSelectedEvent,
+  VerifyToggledEvent,
 } from './events'
 
 /** Root of the chat UI. Talks to the extension host; children talk to it through events. */
@@ -34,6 +35,7 @@ export class ChatApp extends HTMLElement {
     this.addEventListener(NewSessionRequestedEvent.type, (e) => post({ type: 'new_session', profileName: e.profileName }))
     this.addEventListener(SessionSelectedEvent.type, (e) => post({ type: 'switch_session', sessionId: e.sessionId }))
     this.addEventListener(SessionRemovedEvent.type, (e) => post({ type: 'remove_session', sessionId: e.sessionId }))
+    this.addEventListener(VerifyToggledEvent.type, (e) => post({ type: 'set_verify', enabled: e.enabled }))
 
     onMessage((message) => this.receive(message))
     post({ type: 'ready' })
@@ -44,6 +46,7 @@ export class ChatApp extends HTMLElement {
       case 'state':
         this.activeSessionId = message.activeSessionId
         this.sessions.update(message.sessions, message.activeSessionId, message.profiles)
+        this.composer.setVerify(message.verify)
         break
       case 'transcript':
         if (message.sessionId !== this.activeSessionId) return

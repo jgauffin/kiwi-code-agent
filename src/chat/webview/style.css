@@ -116,8 +116,80 @@ chat-app {
       }
 
       & .text {
-        white-space: pre-wrap;
         line-height: 1.45;
+
+        & > :first-child {
+          margin-top: 0;
+        }
+
+        & > :last-child {
+          margin-bottom: 0;
+        }
+
+        & p,
+        & ul,
+        & ol {
+          margin: 0.4rem 0;
+        }
+
+        & code {
+          font-family: var(--vscode-editor-font-family);
+          font-size: 0.9em;
+          background: var(--vscode-textCodeBlock-background);
+          padding: 0 0.2em;
+          border-radius: 3px;
+        }
+
+        & pre {
+          background: var(--vscode-textCodeBlock-background);
+          padding: 0.5rem;
+          border-radius: 4px;
+          overflow-x: auto;
+
+          & code {
+            background: none;
+            padding: 0;
+          }
+        }
+
+        & pre.mermaid {
+          background: none;
+          text-align: center;
+
+          & svg {
+            max-width: 100%;
+            height: auto;
+          }
+
+          &.failed {
+            border-left: 2px solid var(--vscode-errorForeground);
+            text-align: left;
+            font-family: var(--vscode-editor-font-family);
+            white-space: pre-wrap;
+          }
+        }
+
+        & table {
+          border-collapse: collapse;
+          margin: 0.4rem 0;
+
+          & th,
+          & td {
+            border: 1px solid var(--vscode-panel-border);
+            padding: 0.2rem 0.5rem;
+          }
+        }
+
+        & blockquote {
+          margin: 0.4rem 0;
+          padding-left: 0.6rem;
+          border-left: 2px solid var(--vscode-panel-border);
+          opacity: 0.85;
+        }
+
+        & a {
+          color: var(--vscode-textLink-foreground);
+        }
       }
     }
 
@@ -148,6 +220,37 @@ chat-app {
 
       & .result.error {
         color: var(--vscode-errorForeground);
+      }
+    }
+
+    & .verification {
+      border-left: 2px solid var(--vscode-testing-iconPassed);
+      padding-left: 0.5rem;
+      font-size: 0.9em;
+
+      &.failed {
+        border-left-color: var(--vscode-errorForeground);
+      }
+
+      &.running {
+        margin: 0;
+        border-left-color: var(--vscode-progressBar-background);
+        font-family: var(--vscode-editor-font-family);
+        animation: pulse 1.2s ease-in-out infinite;
+      }
+
+      & summary {
+        cursor: pointer;
+        font-family: var(--vscode-editor-font-family);
+      }
+
+      & .result {
+        margin: 0.3rem 0;
+        font-family: var(--vscode-editor-font-family);
+        font-size: 0.9em;
+        white-space: pre-wrap;
+        max-height: 20rem;
+        overflow: auto;
       }
     }
 
@@ -201,7 +304,7 @@ chat-app {
       font-style: italic;
     }
 
-    &.busy::after {
+    &.busy:not(.verifying)::after {
       content: '…';
       opacity: 0.6;
     }
@@ -232,7 +335,15 @@ chat-app {
     & .actions {
       display: flex;
       justify-content: flex-end;
+      align-items: center;
       gap: 0.4rem;
+
+      & .verify {
+        margin-right: auto;
+        font-size: 0.85em;
+        opacity: 0.85;
+        cursor: pointer;
+      }
     }
   }
 }
@@ -262,4 +373,14 @@ select {
   border: 1px solid var(--vscode-dropdown-border);
   border-radius: 3px;
   padding: 0.2rem;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
 }

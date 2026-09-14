@@ -38,6 +38,13 @@ export class SessionSelectedEvent extends Event {
   }
 }
 
+export class VerifyToggledEvent extends Event {
+  static readonly type = 'verify-toggled'
+  constructor(public readonly enabled: boolean) {
+    super(VerifyToggledEvent.type, { bubbles: true })
+  }
+}
+
 export class SessionRemovedEvent extends Event {
   static readonly type = 'session-removed'
   constructor(public readonly sessionId: string) {
@@ -53,5 +60,6 @@ declare global {
     [NewSessionRequestedEvent.type]: NewSessionRequestedEvent
     [SessionSelectedEvent.type]: SessionSelectedEvent
     [SessionRemovedEvent.type]: SessionRemovedEvent
+    [VerifyToggledEvent.type]: VerifyToggledEvent
   }
 }

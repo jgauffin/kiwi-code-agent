@@ -24,8 +24,10 @@ docs/intent/**  +  work item  →  spec.md  →  plan.md  →  code
 
 ## Phase 1: Blind plan
 
-Sees: feature description, domain brief (ubiquitous language, stack, constraints), `docs/intent/**`, one work item closure.
+Sees: feature description, domain brief (ubiquitous language, stack, constraints), `docs/intent/**`, one work item closure when ADO is connected.
 Never sees: source, descriptive docs, PRs, build output.
+
+Until ADO is connected the feature description is typed by the user or picked from `docs/intent/**`. The agent plans the user story itself; the spec's task list is the source for the ADO tasks created under the story once ADO is connected (write-back, not read-only).
 
 Tools: Read/Glob scoped to `docs/intent/**`, `get_work_item(id)`, AskUserQuestion, optionally WebSearch. Bash denied by bare name (allow-lists only auto-approve; a bare-name deny removes the tool from context).
 

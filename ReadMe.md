@@ -30,6 +30,7 @@ Requires Node in the environment only if `kiwiAgent.nodePath` is set; otherwise 
 
 - `kiwiAgent.profiles`: engine, model, effort per selectable profile.
 - `kiwiAgent.nodePath`: Node executable for the Claude engine; empty uses VS Code's executable.
+- `kiwiAgent.verify`: commands run when the model wants to stop after editing matching files, in the directory of the nearest `project` file. Failures go back to the model and it keeps working, up to `kiwiAgent.verifyFailureBudget` consecutive failures. Default: `dotnet build` of the `.csproj` owning any edited `.cs` file. Applies to every engine.
 - Command *KiwiAgent: Set API Key for Profile* stores keys for profiles that declare `apiKeySecret`.
 
 Session events are logged to `.agent/runs/<session id>/events.jsonl` in the workspace; add `.agent/` to the workspace's `.gitignore`.

@@ -31,9 +31,13 @@ const extensionHost = {
   logLevel: 'info',
 }
 
+// Split so mermaid's diagram definitions load on demand instead of sitting
+// in the initial bundle; the chunks are plain ESM imports next to webview.js.
 const webview = {
-  entryPoints: ['src/chat/webview/main.ts'],
-  outfile: 'dist/webview.js',
+  entryPoints: { webview: 'src/chat/webview/main.ts' },
+  outdir: 'dist',
+  chunkNames: 'chunks/[name]-[hash]',
+  splitting: true,
   bundle: true,
   platform: 'browser',
   format: 'esm',

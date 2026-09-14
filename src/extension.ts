@@ -16,7 +16,9 @@ import { editTool } from './agent/openai-session/tools/edit'
 import { globTool } from './agent/openai-session/tools/glob'
 import { grepTool } from './agent/openai-session/tools/grep'
 import { bashTool } from './agent/openai-session/tools/bash'
-import { ChatViewProvider } from './chat/chat-view-provider'
+import { runShell } from './agent/shell/run-shell'
+import { TurnVerifier, type VerifyRule } from './agent/verify/turn-verifier'
+import { ChatViewProvider, type VerifyControl } from './chat/chat-view-provider'
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('KiwiAgent')
@@ -30,8 +32,26 @@ export function activate(context: vscode.ExtensionContext): void {
     save: (records) => Promise.resolve(context.workspaceState.update('sessions', records)),
   }
 
+  const verifiers = new Map<string, TurnVerifier>()
+  const verifyWanted = new Map<string, boolean>()
+  const verifyControl: VerifyControl = {
+    available: verifyRules().length > 0,
+    isEnabled: (id) => verifiers.get(id)?.enabled ?? verifyWanted.get(id) ?? false,
+    setEnabled: (id, enabled) => {
+      verifyWanted.set(id, enabled)
+      const v = verifiers.get(id)
+      if (v) v.enabled = enabled
+    },
+  }
+
   const createEngine = async (record: SessionRecord): Promise<CodeSession> => {
     const { profile } = record
+    const hooks = verifier(workspaceRoot)
+    if (hooks) {
+      hooks.enabled = verifyWanted.get(record.id) ?? false
+      verifiers.set(record.id, hooks)
+    }
+    const withHooks = hooks ? { hooks } : {}
     switch (profile.engine) {
       case 'claude-sdk':
         return new SdkSession({
@@ -42,6 +62,7 @@ export function activate(context: vscode.ExtensionContext): void {
           runtime: nodeRuntime(),
           ...(record.engineSessionId ? { resumeEngineSessionId: record.engineSessionId } : {}),
           env: { CLAUDE_AGENT_SDK_CLIENT_APP: 'kiwi-agent-vscode/0.0.1' },
+          ...withHooks,
           query,
           onStderr: (chunk) => output.append(chunk),
         })
@@ -57,6 +78,7 @@ export function activate(context: vscode.ExtensionContext): void {
           client: new OpenAiClient({ baseUrl: profile.baseUrl, apiKey }),
           tools: [readTool, writeTool, editTool, globTool, grepTool, bashTool()],
           systemPrompt: await buildSystemPrompt(workspaceRoot, profile.systemPromptFile),
+          ...withHooks,
         })
       }
     }
@@ -69,7 +91,7 @@ export function activate(context: vscode.ExtensionContext): void {
     (id) => RunLog.forSession(workspaceRoot, id),
     (id, event) => chat.onSessionEvent(id, event),
   )
-  chat = new ChatViewProvider(context.extensionUri, sessions, profiles)
+  chat = new ChatViewProvider(context.extensionUri, sessions, profiles, verifyControl)
 
   context.subscriptions.push(
     output,
@@ -82,6 +104,25 @@ export function activate(context: vscode.ExtensionContext): void {
 
 function profiles(): ModelProfile[] {
   return vscode.workspace.getConfiguration('kiwiAgent').get<ModelProfile[]>('profiles', [])
+}
+
+function verifyRules(): VerifyRule[] {
+  return vscode.workspace.getConfiguration('kiwiAgent').get<VerifyRule[]>('verify', [])
+}
+
+/** Turn-boundary build/test verification from the `kiwiAgent.verify` rules; none configured means no hook. */
+function verifier(cwd: string): TurnVerifier | undefined {
+  const rules = verifyRules()
+  if (rules.length === 0) return undefined
+  return new TurnVerifier({
+    cwd,
+    rules,
+    failureBudget: vscode.workspace.getConfiguration('kiwiAgent').get<number>('verifyFailureBudget', 3),
+    run: async (command, dir) => {
+      const result = await runShell(command, { cwd: dir, timeoutMs: 600_000 })
+      return { ok: result.ended === 'exit' && result.exitCode === 0, output: result.output }
+    },
+  })
 }
 
 /**

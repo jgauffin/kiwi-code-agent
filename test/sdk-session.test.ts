@@ -143,4 +143,61 @@ describe('SdkSession', () => {
       settingSources: ['project', 'local'],
     })
   })
+
+  it('hooks_are_mapped_onto_the_sdk_hook_protocol', async () => {
+    const fake = fakeQuery()
+    const seen: string[] = []
+    const session = new SdkSession({
+      id: 'sess-1',
+      profile,
+      cwd: '/w',
+      cliPath: '/ext/dist/cli.js',
+      runtime: { command: 'node', args: [], env: {} },
+      query: fake.query,
+      hooks: {
+        async preToolUse(tool) {
+          seen.push(`pre:${tool.toolName}`)
+          return tool.toolName === 'Bash' ? { deny: 'no shell' } : undefined
+        },
+        async postToolUse(tool) {
+          seen.push(`post:${tool.toolName}:${tool.output}`)
+          return { additionalContext: 'noted' }
+        },
+        async stop() {
+          seen.push('stop')
+          return { verifications: [{ command: 'build', cwd: '/w', ok: false, output: 'CS1002' }], block: 'fix it' }
+        },
+      },
+    })
+    const hooks = fake.options!.hooks!
+    const base = { session_id: 's', transcript_path: '', cwd: '/w' }
+    const ctx = { signal: new AbortController().signal }
+
+    const denied = await hooks.PreToolUse![0]!.hooks[0]!(
+      { ...base, hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'ls' }, tool_use_id: 't1' },
+      't1',
+      ctx,
+    )
+    expect(denied).toEqual({
+      hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'no shell' },
+    })
+
+    const post = await hooks.PostToolUse![0]!.hooks[0]!(
+      { ...base, hook_event_name: 'PostToolUse', tool_name: 'Edit', tool_input: {}, tool_response: 'ok', tool_use_id: 't2' },
+      't2',
+      ctx,
+    )
+    expect(post).toEqual({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: 'noted' } })
+
+    const stop = await hooks.Stop![0]!.hooks[0]!({ ...base, hook_event_name: 'Stop', stop_hook_active: false }, undefined, ctx)
+    expect(stop).toEqual({ decision: 'block', reason: 'fix it' })
+    expect(seen).toEqual(['pre:Bash', 'post:Edit:ok', 'stop'])
+
+    const events = await take(session, 2)
+    expect(events).toEqual([
+      { type: 'status', status: 'verifying' },
+      { type: 'verification', command: 'build', cwd: '/w', ok: false, output: 'CS1002' },
+    ])
+    await session.dispose()
+  })
 })

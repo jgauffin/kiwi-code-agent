@@ -1,4 +1,5 @@
 import type { CodeSession, PermissionDecision, SessionEvent, TurnUsage } from '../session/code-session'
+import type { SessionHooks } from '../session/hooks'
 import type { ModelProfile } from '../session/model-profile'
 import { AsyncQueue } from '../session/async-queue'
 import type { ChatCompletionClient, ChatMessage, ToolCall, Usage } from './chat-messages'
@@ -12,6 +13,7 @@ export type OpenAiSessionOptions = {
   client: ChatCompletionClient
   tools: Tool[]
   systemPrompt: string
+  hooks?: SessionHooks
   /** Tool rounds per user turn before the engine gives up; a runaway loop costs money. */
   maxRoundsPerTurn?: number
 }
@@ -108,7 +110,12 @@ export class OpenAiSession implements CodeSession {
         this.output.push({ type: 'status', status: 'requesting' })
         const assistant = await this.complete(`${turn}.${round}`, signal, usage)
         this.messages.push(assistant)
-        if (assistant.toolCalls.length === 0) return this.finishTurn(usage, started, false, [])
+        if (assistant.toolCalls.length === 0) {
+          const block = await this.verifyBeforeStop()
+          if (block === undefined) return this.finishTurn(usage, started, false, [])
+          this.messages.push({ role: 'user', content: block })
+          continue
+        }
         for (const call of assistant.toolCalls) {
           if (signal.aborted) throw new InterruptedError()
           const result = await this.runTool(call, signal)
@@ -188,16 +195,33 @@ export class OpenAiSession implements CodeSession {
       const issues = parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ')
       return { text: `Invalid arguments for ${tool.name}: ${issues}`, isError: true }
     }
+    const use = { toolName: tool.name, input: parsed.data, toolUseId: call.id }
+    const pre = await this.options.hooks?.preToolUse?.(use)
+    if (pre && 'deny' in pre) return { text: `Blocked: ${pre.deny}`, isError: true }
     if (!tool.readOnly && !this.alwaysAllowed.has(tool.name)) {
       const decision = await this.askPermission(call.id, tool.name, parsed.data, signal)
       if (decision.kind === 'deny') return { text: `Denied by user${decision.message ? `: ${decision.message}` : ''}`, isError: true }
       if (decision.kind === 'allow_always') this.alwaysAllowed.add(tool.name)
     }
+    let output: ToolOutput
     try {
-      return await tool.execute(parsed.data, { cwd: this.options.cwd, signal, files: this.files })
+      output = await tool.execute(parsed.data, { cwd: this.options.cwd, signal, files: this.files })
     } catch (error) {
-      return { text: `${tool.name} failed: ${error instanceof Error ? error.message : String(error)}`, isError: true }
+      output = { text: `${tool.name} failed: ${error instanceof Error ? error.message : String(error)}`, isError: true }
     }
+    const post = await this.options.hooks?.postToolUse?.({ ...use, output: output.text, isError: output.isError })
+    const context = [pre?.additionalContext, post?.additionalContext].filter((c): c is string => !!c)
+    return context.length ? { ...output, text: `${output.text}\n\n${context.join('\n\n')}` } : output
+  }
+
+  /** Runs the stop hook; returns the text to continue with, or undefined when the turn may end. */
+  private async verifyBeforeStop(): Promise<string | undefined> {
+    const stop = this.options.hooks?.stop
+    if (!stop) return undefined
+    this.output.push({ type: 'status', status: 'verifying' })
+    const outcome = await stop((started) => this.output.push({ type: 'verification_started', ...started }))
+    for (const v of outcome?.verifications ?? []) this.output.push({ type: 'verification', ...v })
+    return outcome?.block
   }
 
   private askPermission(requestId: string, toolName: string, input: unknown, signal: AbortSignal): Promise<PermissionDecision> {

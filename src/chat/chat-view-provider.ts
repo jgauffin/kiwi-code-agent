@@ -8,6 +8,13 @@ import type { FromWebview, SessionSummary, ToWebview } from './protocol'
  * Hosts the chat UI, in the sidebar view and in editor panels. Every attached
  * webview shows the same active session; the provider fans events out.
  */
+/** Per-session verify-on-stop switch; `available` is false when no rules are configured. */
+export interface VerifyControl {
+  readonly available: boolean
+  isEnabled(sessionId: string): boolean
+  setEnabled(sessionId: string, enabled: boolean): void
+}
+
 export class ChatViewProvider implements vscode.WebviewViewProvider {
   private readonly webviews = new Set<vscode.Webview>()
   private activeSessionId: string | undefined
@@ -16,6 +23,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     private readonly extensionUri: vscode.Uri,
     private readonly sessions: SessionManager,
     private readonly profiles: () => ModelProfile[],
+    private readonly verify: VerifyControl,
   ) {}
 
   resolveWebviewView(view: vscode.WebviewView): void {
@@ -85,6 +93,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         if (this.activeSessionId === message.sessionId) this.activeSessionId = undefined
         await this.sendState()
         return
+      case 'set_verify':
+        if (this.activeSessionId) this.verify.setEnabled(this.activeSessionId, message.enabled)
+        await this.sendState()
+        return
     }
   }
 
@@ -103,11 +115,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       engine: r.profile.engine,
       live: this.sessions.isLive(r.id),
     }))
+    const active = this.activeSessionId
     this.broadcast({
       type: 'state',
       sessions,
-      ...(this.activeSessionId ? { activeSessionId: this.activeSessionId } : {}),
+      ...(active ? { activeSessionId: active } : {}),
       profiles: this.profiles().map((p) => p.name),
+      ...(active && this.verify.available ? { verify: this.verify.isEnabled(active) } : {}),
     })
   }
 
@@ -128,7 +142,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}'; img-src ${webview.cspSource} data:;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}' ${webview.cspSource}; img-src ${webview.cspSource} data:; font-src ${webview.cspSource} data:;">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="stylesheet" href="${style}">
 <title>KiwiAgent</title>

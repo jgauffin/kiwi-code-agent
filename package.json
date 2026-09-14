@@ -53,6 +53,42 @@
           "default": "",
           "description": "Node executable used to run the Claude engine. Empty: VS Code's own executable in Node mode."
         },
+        "kiwiAgent.verify": {
+          "type": "array",
+          "description": "Commands run when the model wants to stop after editing matching files. {project} is the nearest file matching 'project' above the edited file, {projectDir} its directory. Errors are sent back to the model and the stop is blocked, up to the failure budget.",
+          "default": [
+            {
+              "match": "**/*.cs",
+              "project": "*.csproj",
+              "command": "dotnet build \"{project}\" --nologo -clp:ErrorsOnly;NoSummary"
+            }
+          ],
+          "items": {
+            "type": "object",
+            "required": [
+              "match",
+              "command"
+            ],
+            "properties": {
+              "match": {
+                "type": "string",
+                "description": "Glob on the workspace-relative path of the edited file."
+              },
+              "project": {
+                "type": "string",
+                "description": "Glob for the project file to look for upwards from the edited file, e.g. *.csproj."
+              },
+              "command": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "kiwiAgent.verifyFailureBudget": {
+          "type": "integer",
+          "default": 3,
+          "description": "Consecutive failed verifications before the model may stop anyway."
+        },
         "kiwiAgent.profiles": {
           "type": "array",
           "description": "Model profiles selectable per session.",
@@ -135,6 +171,9 @@
     "@anthropic-ai/claude-agent-sdk": "0.2.112",
     "@anthropic-ai/sdk": "^0.81.0",
     "@relax.js/core": "^1.8.0",
+    "dompurify": "^3.4.15",
+    "marked": "^18.0.13",
+    "mermaid": "^12.0.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {

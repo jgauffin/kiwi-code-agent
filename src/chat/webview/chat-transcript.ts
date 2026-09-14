@@ -1,4 +1,5 @@
 import type { SessionEvent } from '../../agent/session/code-session'
+import { renderMarkdown } from './markdown'
 import { PermissionCard } from './permission-card'
 
 type AssistantBubble = { element: HTMLElement; text: HTMLElement; thinking: HTMLElement; streamed: string; finalParts: string[] }
@@ -12,6 +13,7 @@ export class ChatTranscript extends HTMLElement {
   private readonly bubbles = new Map<string, AssistantBubble>()
   private readonly tools = new Map<string, HTMLDetailsElement>()
   private readonly permissions = new Map<string, PermissionCard>()
+  private readonly runningVerifications = new Map<string, { element: HTMLElement; stop: () => void }>()
   private statusLine!: HTMLElement
 
   connectedCallback(): void {
@@ -27,12 +29,18 @@ export class ChatTranscript extends HTMLElement {
     this.bubbles.clear()
     this.tools.clear()
     this.permissions.clear()
+    for (const running of this.runningVerifications.values()) running.stop()
+    this.runningVerifications.clear()
     this.setStatus('')
     for (const event of events) this.apply(event, false)
+    // Streamed text is rendered once at the end of a replay, not per delta.
+    for (const bubble of this.bubbles.values()) {
+      if (bubble.finalParts.length === 0) renderMarkdown(bubble.streamed, bubble.text, true)
+    }
     this.scrollToEnd()
   }
 
-  apply(event: SessionEvent, scroll = true): void {
+  apply(event: SessionEvent, live = true): void {
     switch (event.type) {
       case 'session_started':
         this.setStatus(`${event.model} · Claude Code ${event.engineVersion ?? ''}`.trim())
@@ -43,7 +51,7 @@ export class ChatTranscript extends HTMLElement {
       case 'assistant_text': {
         const bubble = this.bubble(event.messageId, event.parentToolUseId)
         bubble.streamed += event.delta
-        if (bubble.finalParts.length === 0) bubble.text.textContent = bubble.streamed
+        if (live && bubble.finalParts.length === 0) renderMarkdown(bubble.streamed, bubble.text, false)
         break
       }
       case 'assistant_thinking': {
@@ -55,7 +63,7 @@ export class ChatTranscript extends HTMLElement {
       case 'assistant_message': {
         const bubble = this.bubble(event.messageId, event.parentToolUseId)
         bubble.finalParts.push(event.text)
-        bubble.text.textContent = bubble.finalParts.join('')
+        renderMarkdown(bubble.finalParts.join(''), bubble.text, true)
         break
       }
       case 'tool_call':
@@ -87,7 +95,46 @@ export class ChatTranscript extends HTMLElement {
         break
       case 'status':
         this.classList.toggle('busy', event.status !== 'idle')
+        this.classList.toggle('verifying', event.status === 'verifying')
         break
+      case 'verification_started': {
+        const row = document.createElement('p')
+        row.className = 'verification running'
+        const key = `${event.cwd}::${event.command}`
+        const startedAt = Date.now()
+        row.textContent = `Running: ${event.command}`
+        const timer = live
+          ? window.setInterval(() => {
+              row.textContent = `Running: ${event.command} (${Math.round((Date.now() - startedAt) / 1000)}s)`
+            }, 1000)
+          : undefined
+        this.runningVerifications.get(key)?.element.remove()
+        this.runningVerifications.set(key, {
+          element: row,
+          stop: () => {
+            if (timer !== undefined) window.clearInterval(timer)
+          },
+        })
+        this.insert(row)
+        break
+      }
+      case 'verification': {
+        const key = `${event.cwd}::${event.command}`
+        const running = this.runningVerifications.get(key)
+        this.runningVerifications.delete(key)
+        running?.stop()
+        const details = document.createElement('details')
+        details.className = event.ok ? 'verification ok' : 'verification failed'
+        const summary = document.createElement('summary')
+        summary.textContent = `${event.ok ? 'Verified' : 'Verification failed'}: ${event.command}`
+        const out = document.createElement('pre')
+        out.className = 'result'
+        out.textContent = event.output || '(no output)'
+        details.append(summary, out)
+        if (running) running.element.replaceWith(details)
+        else this.insert(details)
+        break
+      }
       case 'turn_done': {
         this.classList.remove('busy')
         const line = document.createElement('p')
@@ -110,7 +157,7 @@ export class ChatTranscript extends HTMLElement {
         this.insert(block('ended', 'Engine stopped. The next prompt resumes the conversation.'))
         break
     }
-    if (scroll) this.scrollToEnd()
+    if (live) this.scrollToEnd()
   }
 
   private bubble(messageId: string, parentToolUseId: string | undefined): AssistantBubble {

@@ -10,3 +10,4 @@ tsconfig.json
 vitest.config.mts
 .gitignore
 *.vsix
+.env
