@@ -31,7 +31,7 @@ export function nextStatus(current: SessionStatus, mode: SessionMode, event: Ses
     case 'question_resolved':
       return working(mode)
     case 'turn_done':
-      // A phase session that stops has a spec to approve, findings to rule on, questions, or work done or blocked.
+      // A phase session that stops has a spec to approve, decisions to rule on, questions, or work done or blocked.
       if (event.isError) return 'error'
       // A card still on screen outlives the turn that asked: it is answered, late, on the session's next turn.
       if (current === 'needs_answer') return current

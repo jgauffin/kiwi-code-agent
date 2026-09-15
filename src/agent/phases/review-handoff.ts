@@ -21,10 +21,10 @@ export interface ReviewCourier {
   start(feature: string, prompt: string): Promise<void>
 }
 
-/** The plan session that wrote the spec; findings in it are ruled on there too, the check is a run, not an owner. */
+/** The plan session that wrote the spec; decisions in it are ruled on there too, the check is a run, not an owner. */
 export type ReviewOwner = { sessionId: string }
 
-/** A comment as the agent gets it: the item it names, or the text it was written against when that id is gone (E5). */
+/** A comment as the agent gets it: the item it names, or the text it was written against when that name is gone. */
 type CarriedComment = { comment: ReviewComment; itemText: string | undefined; orphaned: boolean }
 
 function carry(round: ReviewRound, body: string): CarriedComment[] {
@@ -40,30 +40,32 @@ function carry(round: ReviewRound, body: string): CarriedComment[] {
 }
 
 function commentLine({ comment, itemText, orphaned }: CarriedComment): string {
-  if (comment.target === PLAN_TARGET) return `- ${comment.id}, on the plan as a whole: ${comment.text}`
-  if (!orphaned) return `- ${comment.id}, on ${comment.target}: ${comment.text}`
+  if (comment.target === PLAN_TARGET) return `- On the plan as a whole: ${comment.text}`
+  if (!orphaned) return `- On "${comment.target}": ${comment.text}`
   const was = itemText ? ` It was written against: "${itemText}".` : ''
-  return `- ${comment.id}, on ${comment.target}, which is no longer in the plan:${was} ${comment.text}`
+  return `- On "${comment.target}", which is no longer in the plan:${was} ${comment.text}`
 }
 
-/** Struck items the artifact still presents as live: a strike the plan has not honoured yet (B5, B9). */
+const same = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase()
+
+/** Struck items the artifact still presents as live: a strike the plan has not honoured yet. */
 export function standingStrikes(body: string, struck: string[]): string[] {
-  return struck.filter((id) => {
-    const item = findItem(body, id)
+  return struck.filter((name) => {
+    const item = findItem(body, name)
     return item !== undefined && !item.removed
   })
 }
 
-/** Nothing is left to build: every item the artifact has is struck or already removed (E3). */
+/** Nothing is left to build: every item the artifact has is struck or already removed. */
 export function emptied(body: string, struck: string[]): boolean {
   const items = planItems(body)
-  return items.length > 0 && items.every((i) => i.removed || struck.includes(i.id))
+  return items.length > 0 && items.every((i) => i.removed || struck.some((s) => same(s, i.name)))
 }
 
 /**
  * The message a review is handed over as. It stands on its own: the session
  * reads the plan and the review from disk, so a fresh plan session can revise
- * exactly as the session that wrote the plan would (B4).
+ * exactly as the session that wrote the plan would.
  */
 export function reviewPrompt(options: {
   feature: string
@@ -101,7 +103,7 @@ export function reviewPrompt(options: {
   lines.push(
     '',
     `In the plan, \`${spec}\`:`,
-    '- Mark every struck item removed by appending ` [removed]` to its line. Do not delete the line and do not renumber anything: an id belongs to the item it was given to, for good.',
+    '- Mark every struck item removed by appending ` [removed]` to its line. Do not delete the line and do not rename anything: a name belongs to the rule it was given to, for good, and a comment is never answered by renaming its rule.',
     '- Repair the items that referred to a removed item, so the plan still holds together without it.',
     '- Never reintroduce a struck item, in this round or a later one. Only a new comment from the human can bring one back.',
     '- If every item is now struck, change nothing further: report that nothing remains and stop. Do not invent a replacement plan.',
@@ -110,7 +112,7 @@ export function reviewPrompt(options: {
     '- Answer every comment of this round. Under its line, indented two spaces, add exactly one of:',
     '  - `  - addressed: what you changed` when you did what it asks;',
     '  - `  - disagreed: why you will not` when you will not, with the reason stated.',
-    '- Never leave a comment unanswered and never remove one. The comments, their ids and the struck list are the human\u2019s; touch nothing else in that file.',
+    '- Never leave a comment unanswered and never remove one. The comments and the remove list are the human\u2019s; touch nothing else in that file.',
     '',
     'Then, in chat: what changed in the plan since the review was submitted, and each comment with its resolution. Then stop; the human decides what happens next.',
   )
@@ -120,7 +122,7 @@ export function reviewPrompt(options: {
 /**
  * Submits the pending round: marks it submitted on disk and hands plan and
  * review to the session that owns the artifact, or to a fresh plan session
- * when that session is gone (B4). An empty review is refused (E2).
+ * when that session is gone. An empty review is refused.
  */
 export async function submitReview(options: {
   courier: ReviewCourier

@@ -5,7 +5,8 @@ import type { SpecState } from '../src/agent/phases/spec-file'
 import { parseSpec, specFingerprint } from '../src/agent/phases/spec-model'
 import { parseTasks, withSpecFingerprint, type TasksState } from '../src/agent/phases/tasks-file'
 
-const body = '# Order cancellation\n\n## Goal\nOrders can be cancelled.\n\n## Cancelling\n- B1: an order can be cancelled\n- B2: a cancelled order is gone [removed]\n'
+const body =
+  '# Order cancellation\n\n## Goal\nOrders can be cancelled.\n\n## Cancelling\n- **Cancel command**: an order can be cancelled\n- **Gone**: a cancelled order is gone [removed]\n'
 const draft: SpecState = { exists: true, status: 'draft', body }
 const approved: SpecState = { exists: true, status: 'approved', body }
 
@@ -13,6 +14,7 @@ const review = (text: string) => parseReview(`# Review\n\n${text}`)
 const noReview = review('')
 const noTasks: TasksState = { exists: false }
 const tasks = (...lines: string[]): TasksState => ({ exists: true, ...parseTasks(lines.join('\n')) })
+const decided = (section: string): SpecState => ({ ...draft, body: `${body}\n## Decisions\n${section}\n` })
 
 describe('plan stage', () => {
   it('is_missing_without_a_spec', () => {
@@ -24,84 +26,84 @@ describe('plan stage', () => {
   })
 
   it('is_under_review_while_a_round_is_written_or_unanswered', () => {
-    expect(planStage(draft, review('## Round 1 — pending\n- C1 (B1): too vague'), noTasks)).toBe('under_review')
-    expect(planStage(draft, review('## Round 1 — submitted 2026-09-14T10:00:00Z\n- C1 (B1): too vague'), noTasks)).toBe(
+    expect(planStage(draft, review('## Round 1, pending\n- on Cancel command: too vague'), noTasks)).toBe('under_review')
+    expect(planStage(draft, review('## Round 1, submitted 2026-09-14T10:00:00Z\n- on Cancel command: too vague'), noTasks)).toBe(
       'under_review',
     )
   })
 
   it('is_under_review_while_a_struck_item_still_stands_in_the_spec', () => {
-    const struck = review('## Round 1 — submitted 2026-09-14T10:00:00Z\n- struck: B1')
+    const struck = review('## Round 1, submitted 2026-09-14T10:00:00Z\n- remove: Cancel command')
     expect(planStage(draft, struck, noTasks)).toBe('under_review')
-    const honoured = review('## Round 1 — submitted 2026-09-14T10:00:00Z\n- struck: B2')
+    const honoured = review('## Round 1, submitted 2026-09-14T10:00:00Z\n- remove: Gone')
     expect(planStage(draft, honoured, noTasks)).toBe('created')
   })
 
-  it('is_a_final_draft_once_every_comment_is_answered_and_one_is_not_yet_accepted', () => {
-    const answered = review('## Round 1 — submitted 2026-09-14T10:00:00Z\n- C1 (B1): too vague\n  - addressed: split it')
+  it('is_a_final_draft_once_every_comment_is_answered_and_one_is_not_yet_resolved', () => {
+    const answered = review('## Round 1, submitted 2026-09-14T10:00:00Z\n- on Cancel command: too vague\n  - addressed: split it')
     expect(planStage(draft, answered, noTasks)).toBe('final_draft')
-    const accepted = review('## Round 1 — submitted 2026-09-14T10:00:00Z\n- C1 (B1): too vague\n  - addressed: split it\n  - accepted')
-    expect(planStage(draft, accepted, noTasks)).toBe('created')
+    const resolved = review('## Round 1, submitted 2026-09-14T10:00:00Z\n- on Cancel command: too vague\n  - addressed: split it\n  - resolved')
+    expect(planStage(draft, resolved, noTasks)).toBe('created')
   })
 
   it('is_mapped_once_tasks_exist_until_work_starts', () => {
-    expect(planStage(draft, noReview, tasks('- T1: a', '- T2: b'))).toBe('mapped')
-    expect(planStage(approved, noReview, tasks('- T1: a', '- T2: b'))).toBe('mapped')
+    expect(planStage(draft, noReview, tasks('- **A**: a', '- **B**: b'))).toBe('mapped')
+    expect(planStage(approved, noReview, tasks('- **A**: a', '- **B**: b'))).toBe('mapped')
   })
 
   it('a_review_after_mapping_goes_back_to_under_review', () => {
-    expect(planStage(draft, review('## Round 1 — pending\n- C1 (B1): no'), tasks('- T1: a'))).toBe('under_review')
+    expect(planStage(draft, review('## Round 1, pending\n- on Cancel command: no'), tasks('- **A**: a'))).toBe('under_review')
   })
 
   it('is_under_development_from_the_first_marker_until_every_task_is_tested', () => {
-    expect(planStage(approved, noReview, tasks('- T1: a [in progress]', '- T2: b'))).toBe('under_development')
-    expect(planStage(approved, noReview, tasks('- T1: a [tested]', '- T2: b [done]'))).toBe('under_development')
-    expect(planStage(approved, noReview, tasks('- T1: a [tested]', '- T2: b [blocked: no API]'))).toBe('under_development')
+    expect(planStage(approved, noReview, tasks('- **A**: a [in progress]', '- **B**: b'))).toBe('under_development')
+    expect(planStage(approved, noReview, tasks('- **A**: a [tested]', '- **B**: b [done]'))).toBe('under_development')
+    expect(planStage(approved, noReview, tasks('- **A**: a [tested]', '- **B**: b [blocked: no API]'))).toBe('under_development')
   })
 
   it('is_in_verification_when_every_task_is_tested_until_the_test_commands_pass', () => {
-    expect(planStage(approved, noReview, tasks('- T1: a [tested]'))).toBe('verification')
-    const failed = tasks('- T1: a [tested]', '', '## Verification', '- 2026-09-14T10:00:00Z: failed, `npm test` in .')
+    expect(planStage(approved, noReview, tasks('- **A**: a [tested]'))).toBe('verification')
+    const failed = tasks('- **A**: a [tested]', '', '## Verification', '- 2026-09-14T10:00:00Z: failed, `npm test` in .')
     expect(planStage(approved, noReview, failed)).toBe('verification')
-    const passed = tasks('- T1: a [tested]', '', '## Verification', '- 2026-09-14T10:00:00Z: passed')
+    const passed = tasks('- **A**: a [tested]', '', '## Verification', '- 2026-09-14T10:00:00Z: passed')
     expect(planStage(approved, noReview, passed)).toBe('verified')
   })
 
   it('a_board_is_stale_once_the_spec_changed_under_it', () => {
-    const fresh: TasksState = { exists: true, ...parseTasks(withSpecFingerprint('- T1: a', specFingerprint(parseSpec(body)))) }
+    const fresh: TasksState = { exists: true, ...parseTasks(withSpecFingerprint('- **A**: a', specFingerprint(parseSpec(body)))) }
     expect(tasksStale(draft, fresh)).toBe(false)
     const revised: SpecState = { ...draft, body: body.replace('can be cancelled', 'can be cancelled until shipped') }
     expect(tasksStale(revised, fresh)).toBe(true)
-    // A proposal written into the Findings table is not a change to the plan.
-    const withFindings: SpecState = { ...draft, body: `${body}\n## Findings\n| Finding | Proposed solution |\n|---|---|\n| F1 (naive, B1): x | y |\n` }
-    expect(tasksStale(withFindings, fresh)).toBe(false)
+    // A proposal or a ruling written into the Decisions section is not a change to the plan.
+    const withDecisions = decided('### X\n- on: Cancel command\n- finding: x\n- proposed: y\n- ruling: accepted')
+    expect(tasksStale(withDecisions, fresh)).toBe(false)
     expect(tasksStale(draft, noTasks)).toBe(false)
-    expect(tasksStale(draft, tasks('- T1: a'))).toBe(false)
+    expect(tasksStale(draft, tasks('- **A**: a'))).toBe(false)
   })
 
-  it('a_stale_board_is_not_remapped_while_a_finding_is_open', () => {
-    const stale: TasksState = { exists: true, ...parseTasks(withSpecFingerprint('- T1: a', 'ffff0000')) }
-    const findings = (rows: string) => `${body}\n## Findings\n| Finding | Proposed solution |\n|---|---|\n${rows}\n`
-    const open: SpecState = { ...draft, body: findings('| F1 (naive, B1): x | change B1 |\n| F2 (breakage, B1): y | |') }
+  it('a_stale_board_is_not_remapped_while_a_ruling_awaits_the_planner', () => {
+    const stale: TasksState = { exists: true, ...parseTasks(withSpecFingerprint('- **A**: a', 'ffff0000')) }
+    const open = decided('### X\n- on: Cancel command\n- finding: x\n- proposed: change it\n\n### Y\n- on: Cancel command\n- finding: y')
     expect(remapDue(open, noReview, stale)).toBe(false)
+    const ruled = decided('### X\n- on: Cancel command\n- finding: x\n- proposed: change it\n- ruling: accepted')
+    expect(remapDue(ruled, noReview, stale)).toBe(false)
   })
 
-  it('ruling_the_last_finding_makes_the_remap_due', () => {
-    const stale: TasksState = { exists: true, ...parseTasks(withSpecFingerprint('- T1: a', 'ffff0000')) }
-    const findings = (rows: string) => `${body}\n## Findings\n| Finding | Proposed solution |\n|---|---|\n${rows}\n`
-    const ruled: SpecState = { ...draft, body: findings('| F1 (naive, B1): x [resolved] | change B1 |') }
-    expect(remapDue(ruled, noReview, stale)).toBe(true)
+  it('applying_the_last_ruling_makes_the_remap_due', () => {
+    const stale: TasksState = { exists: true, ...parseTasks(withSpecFingerprint('- **A**: a', 'ffff0000')) }
+    const applied = decided('### X [applied]\n- on: Cancel command\n- finding: x\n- proposed: change it\n- ruling: accepted\n\n### Y [withdrawn]\n- finding: y')
+    expect(remapDue(applied, noReview, stale)).toBe(true)
     expect(remapDue(draft, noReview, stale)).toBe(true)
     // A current board, an unmapped spec or a review in flight is not a re-map.
-    const fresh: TasksState = { exists: true, ...parseTasks(withSpecFingerprint('- T1: a', specFingerprint(parseSpec(body)))) }
+    const fresh: TasksState = { exists: true, ...parseTasks(withSpecFingerprint('- **A**: a', specFingerprint(parseSpec(body)))) }
     expect(remapDue(draft, noReview, fresh)).toBe(false)
     expect(remapDue(draft, noReview, noTasks)).toBe(false)
-    expect(remapDue(draft, review('## Round 1 — pending\n- C1 (B1): no'), stale)).toBe(false)
+    expect(remapDue(draft, review('## Round 1, pending\n- on Cancel command: no'), stale)).toBe(false)
   })
 
   it('approval_is_offered_on_a_mapped_draft_whose_board_is_current', () => {
-    const fresh: TasksState = { exists: true, ...parseTasks(withSpecFingerprint('- T1: a', specFingerprint(parseSpec(body)))) }
-    const stale: TasksState = { exists: true, ...parseTasks(withSpecFingerprint('- T1: a', 'ffff0000')) }
+    const fresh: TasksState = { exists: true, ...parseTasks(withSpecFingerprint('- **A**: a', specFingerprint(parseSpec(body)))) }
+    const stale: TasksState = { exists: true, ...parseTasks(withSpecFingerprint('- **A**: a', 'ffff0000')) }
     expect(isApprovable('mapped', draft, fresh)).toBe(true)
     expect(isApprovable('mapped', draft, stale)).toBe(false)
     expect(isApprovable('mapped', approved, fresh)).toBe(false)

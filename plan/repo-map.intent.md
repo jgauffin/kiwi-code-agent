@@ -1,4 +1,4 @@
-## A1 (replace) docs/features/repo-map.md#Repo map
+## docs/features/repo-map.md#Repo map (replace)
 - from: ruled in the plan session, when the cost of injecting a public type index was weighed
 - why: intent bounded the map by capping the types it lists, which still puts the whole public surface of a large repo into every session's context and hides what was cut. Splitting it — a small injected summary, the type index on disk and read on demand — keeps the context small without losing the surface.
 
@@ -16,37 +16,37 @@ A generated overview of the workspace that reconcile and implement sessions get 
 
 Not included: call graphs, cross-project dependency analysis, watching for changes during a session.
 
-## A2 (append) docs/intent/agent.md#Phase 2: Map against code
+## docs/intent/agent.md#Phase 2: Map against code (append)
 - from: F1 (naive)
 - why: intent says the mapping run sees the repo, but the agent's own generated folder is not part of the repo as its file scope understands it, so generated context it is meant to use is out of reach.
 
 The mapping run reads the agent's own generated files as well as the workspace: what a build wrote for it to use is part of what it may read.
 
-## A3 (append) docs/intent/agent.md#Shape [applied]
+## docs/intent/agent.md#Shape (append) [applied]
 - from: F2 (naive)
 - why: intent treats a session as set up once, but a session whose engine stopped is set up again from scratch when the next prompt arrives, with the instructions and context of a session starting now.
 
 A session that is picked up after its engine stopped is set up afresh: it carries the conversation it had, and the instructions and generated context a session starting now would get.
 
-## A4 (append) docs/features/repo-map.md#Repo map
+## docs/features/repo-map.md#Repo map (append)
 - from: F3 (naive)
 - why: intent says the type index comes from the language service "when available", and availability cannot be asked: a language service that is missing, still loading or failing all answer the same way, with nothing.
 
 The type index is the agent's own, produced by scanning the source. A language service is not consulted, because it cannot be asked whether it is there: one that is absent, one still loading and one that failed all answer alike.
 
-## A5 (append) docs/features/repo-map.md#Repo map
+## docs/features/repo-map.md#Repo map (append)
 - from: F4 (naive)
 - why: intent speaks of generated and ignored locations without saying which, and the product has only one notion of where it does not look.
 
 The build looks where the agent's own search looks: it passes over dependency folders, build output and the agent's own generated folder. Where the workspace states what it ignores, that is passed over too; where it does not, the agent's own list stands on its own.
 
-## A6 (append) docs/intent/agent.md#Phase 3: Implement
+## docs/intent/agent.md#Phase 3: Implement (append)
 - from: F5 (naive)
 - why: intent says both that no session edits the generated map and that the implement phase has no scope guard; nothing refuses such an edit.
 
 An implement session may write anywhere the user allows, generated files included. What protects generated output is that the next build rewrites it wholesale: an edit into it is lost, not refused.
 
-## A7 (replace) docs/intent/agent.md#Phase 1: Blind plan
+## docs/intent/agent.md#Phase 1: Blind plan (replace)
 - from: F6 (contradiction), ruled for the code
 - why: blind planning is no longer confined to `docs/intent/**`; it reads the whole of `docs/**` and the workspace README. Only the section's opening paragraphs are meant here, down to the first subsection.
 
@@ -59,19 +59,19 @@ Tools: Read/Glob scoped to `docs/**`, the workspace README and the feature's own
 
 First a direction in chat (the decisions that shape the feature, the questions that would change them); nothing is written until the user says go. Then `plan/<feature>.spec.md`, to the contract below. An item derived from intent cites its section (`B2 (docs/intent/orders.md#Cancellation)`); an uncited item is the planner's default. To the point, not complete: an item earns its place by changing what gets built or how it is tested. No code paths. If `docs/**` has nothing on the feature, ask and stop.
 
-## A8 (replace) docs/intent/agent.md#Docs split
+## docs/intent/agent.md#Docs split (replace)
 - from: F6 (contradiction), ruled for the code
 - why: the split that kept descriptive docs from phase 1 is gone; what phase 1 must not see is the code and what travels with it, not a class of document.
 
 The whole of `docs/**` is phase 1 scope. What phase 1 is kept from is the code and what travels with it — source, PRs, build output, generated context — because those drift with the code in the same direction and arrive labelled as authority.
 
-## A9 (append) docs/features/repo-map.md#Repo map
+## docs/features/repo-map.md#Repo map (append)
 - from: F8 (naive)
 - why: intent has the type indexes read through tools, but a session's search passes over what the workspace says to ignore, and generated output is exactly that; such a file is found only when something hands the session its path.
 
 A session opens a type index by the path the summary gives it. Generated output lies where the workspace tells search to pass over, so it is reached by being named, never by being searched for.
 
-## A10 (append) docs/features/retrieval-subsession.md#Retrieval sub-session
+## docs/features/retrieval-subsession.md#Retrieval sub-session (append)
 - from: F7 (naive), ruled for the spec
 - why: the repo map's type indexes are worth reading for retrieval, but the sub-session does not exist yet, so the rule waits with the feature that will hold it.
 

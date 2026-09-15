@@ -8,7 +8,8 @@ import { parseSpec, specItems } from './spec-model'
  * A review of a draft plan artifact: the human's comments and strikes, the
  * agent's resolutions. It lives next to the spec as markdown so it survives a
  * reload, stays readable after approval, and can be written to by the agent
- * with the same tools it uses on the spec.
+ * with the same tools it uses on the spec. Nothing in the file is synthetic:
+ * a comment names the rule it is on, a strike names the rule to remove.
  */
 
 export type ResolutionKind = 'addressed' | 'disagreed'
@@ -18,17 +19,18 @@ export type Resolution = { kind: ResolutionKind; text: string }
 /** Target of a comment on the artifact as a whole rather than on an item. */
 export const PLAN_TARGET = 'plan'
 
+/** How the file names the artifact as a whole. */
+const PLAN_WORDS = 'the plan'
+
 export type ReviewComment = {
-  /** C1, C2, ... stable once the round is submitted. */
-  id: string
-  /** An item id (B3, T1, F2) or `plan` for the artifact as a whole. */
+  /** A rule's name or `plan` for the artifact as a whole. */
   target: string
   text: string
-  /** The item's text when the comment was written; carried to the agent when the id is gone (E5). */
+  /** The item's text when the comment was written; carried to the agent when the name is gone. */
   item?: string
-  /** Written by the agent when it revises; every comment gets one (B6). */
+  /** Written by the agent when it revises; every comment gets one. */
   resolution?: Resolution
-  /** The human accepted the resolution. An unaccepted comment is open and blocks approval (B8, B10). */
+  /** The human resolved the comment. An unresolved comment is open and blocks approval. */
   closed?: boolean
 }
 
@@ -37,20 +39,23 @@ export type ReviewRound = {
   /** ISO timestamp of submission; absent while the round is still being written. */
   submittedAt?: string
   comments: ReviewComment[]
-  /** Ids of items the human wants gone (B2). */
+  /** Names of the items the human wants gone. */
   strikes: string[]
 }
 
 export type Review = { rounds: ReviewRound[] }
 
-/** One item of the artifact, addressed by its id. */
+/** A comment's place in the review: the round it was written in and its position there, in file order. */
+export type CommentRef = { round: number; index: number }
+
+/** One item of the artifact, addressed by its name. */
 export type PlanItem = {
-  id: string
-  /** The line's text after the id, as written. */
+  name: string
+  /** The line's text after the name, as written, the citation after it. */
   text: string
-  /** The scenario the item sits in, or `Open questions` / `Findings`. */
+  /** The scenario the item sits in, or `Open questions`. */
   section: string
-  /** The artifact says the item is gone (B5). */
+  /** The artifact says the item is gone. */
   removed: boolean
 }
 
@@ -65,16 +70,18 @@ export function reviewFile(feature: string): string {
   return `${PLAN_DIR}/${featureSlug(feature)}.review.md`
 }
 
+const same = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase()
+
 /** The artifact's items, in file order, with the scenario or section they sit under. */
 export function planItems(body: string): PlanItem[] {
   return specItems(parseSpec(body))
 }
 
-export function findItem(body: string, id: string): PlanItem | undefined {
-  return planItems(body).find((i) => i.id === id)
+export function findItem(body: string, name: string): PlanItem | undefined {
+  return planItems(body).find((i) => same(i.name, name))
 }
 
-/** Commenting is offered on a draft only; an approved plan is reopened or superseded (B12). */
+/** Commenting is offered on a draft only; an approved plan is reopened or superseded. */
 export function isCommentable(state: SpecState): boolean {
   return state.exists && state.status === 'draft'
 }
@@ -88,12 +95,12 @@ export function assertCommentable(state: SpecState): void {
 
 const ROUND = /^##\s+Round\s+(\d+)\b(.*)$/
 const SUBMITTED = /submitted\s+(\S+)/i
-const COMMENT = /^-\s+(C\d+)\s*\(([^)]*)\)\s*:\s*(.*)$/
-const STRUCK = /^-\s+struck\s*:\s*(.*)$/i
+const COMMENT = /^-\s+on\s+(.+?)\s*:\s*(.*)$/i
+const STRUCK = /^-\s+remove\s*:\s*(.*)$/i
 const CHILD = /^\s+-\s+(.*)$/
 const RESOLUTION = /^(?:resolution\s*)?\(?(addressed|disagreed)\)?\s*:\s*(.*)$/i
 const ITEM_TEXT = /^item\s*:\s*(.*)$/i
-const ACCEPTED = /^accepted\b/i
+const RESOLVED = /^resolved\b/i
 
 export function parseReview(text: string): Review {
   const review: Review = { rounds: [] }
@@ -128,7 +135,7 @@ export function parseReview(text: string): Review {
         comment.item = item[1]!.trim()
         continue
       }
-      if (ACCEPTED.test(body)) comment.closed = true
+      if (RESOLVED.test(body)) comment.closed = true
       continue
     }
     const trimmed = line.trim()
@@ -143,7 +150,8 @@ export function parseReview(text: string): Review {
     }
     const commentMatch = COMMENT.exec(trimmed)
     if (commentMatch) {
-      comment = { id: commentMatch[1]!, target: commentMatch[2]!.trim(), text: commentMatch[3]!.trim() }
+      const target = commentMatch[1]!.trim()
+      comment = { target: same(target, PLAN_WORDS) ? PLAN_TARGET : target, text: commentMatch[2]!.trim() }
       round.comments.push(comment)
       continue
     }
@@ -156,17 +164,17 @@ export function renderReview(review: Review, title: string): string {
   const lines = [
     `# Review of ${title}`,
     '',
-    'Comments and strikes are the human\u2019s; resolutions are the agent\u2019s. A submitted comment keeps its id.',
+    'Comments and strikes are the human’s; resolutions are the agent’s. A comment names the rule it is on.',
   ]
   for (const round of review.rounds) {
-    lines.push('', `## Round ${round.number}${round.submittedAt ? ` — submitted ${round.submittedAt}` : ' — pending'}`)
+    lines.push('', `## Round ${round.number}, ${round.submittedAt ? `submitted ${round.submittedAt}` : 'pending'}`)
     for (const comment of round.comments) {
-      lines.push(`- ${comment.id} (${comment.target}): ${comment.text}`)
+      lines.push(`- on ${comment.target === PLAN_TARGET ? PLAN_WORDS : comment.target}: ${comment.text}`)
       if (comment.item) lines.push(`  - item: ${comment.item}`)
       if (comment.resolution) lines.push(`  - ${comment.resolution.kind}: ${comment.resolution.text}`)
-      if (comment.closed) lines.push('  - accepted')
+      if (comment.closed) lines.push('  - resolved')
     }
-    if (round.strikes.length > 0) lines.push(`- struck: ${round.strikes.join(', ')}`)
+    if (round.strikes.length > 0) lines.push(`- remove: ${round.strikes.join(', ')}`)
   }
   return lines.join('\n') + '\n'
 }
@@ -204,11 +212,12 @@ function allComments(review: Review): ReviewComment[] {
   return review.rounds.flatMap((r) => r.comments)
 }
 
-/** Past the highest id in the file, so a submitted comment's id is never handed out twice. */
-function nextCommentId(review: Review): string {
-  const highest = allComments(review).reduce((max, c) => Math.max(max, Number(c.id.slice(1)) || 0), 0)
-  return `C${highest + 1}`
+export function commentAt(review: Review, ref: CommentRef): ReviewComment | undefined {
+  return review.rounds.find((r) => r.number === ref.round)?.comments[ref.index]
 }
+
+/** How a comment is named to the human: where it sits, since it has no id. */
+export const describeComment = (comment: ReviewComment): string => `on ${comment.target === PLAN_TARGET ? PLAN_WORDS : comment.target}`
 
 /** Comments are one line in the file; a pasted paragraph keeps its words, not its line breaks. */
 const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim()
@@ -217,7 +226,6 @@ export function addComment(review: Review, target: string, text: string, itemTex
   const body = oneLine(text)
   if (!body) throw new Error('A comment needs text.')
   const comment: ReviewComment = {
-    id: nextCommentId(review),
     target,
     text: body,
     ...(itemText ? { item: oneLine(itemText) } : {}),
@@ -226,22 +234,23 @@ export function addComment(review: Review, target: string, text: string, itemTex
   return comment
 }
 
-function requirePending(review: Review, id: string): { round: ReviewRound; index: number } {
-  const round = pendingRound(review)
-  const index = round?.comments.findIndex((c) => c.id === id) ?? -1
-  if (!round || index === -1) throw new Error(`Comment ${id} is submitted and cannot be changed.`)
-  return { round, index }
+function requirePending(review: Review, ref: CommentRef): { round: ReviewRound; index: number } {
+  const round = review.rounds.find((r) => r.number === ref.round)
+  const comment = round?.comments[ref.index]
+  if (!round || !comment) throw new Error(`Round ${ref.round} has no such comment.`)
+  if (round.submittedAt !== undefined) throw new Error(`The comment ${describeComment(comment)} is submitted and cannot be changed.`)
+  return { round, index: ref.index }
 }
 
-export function editComment(review: Review, id: string, text: string): void {
+export function editComment(review: Review, ref: CommentRef, text: string): void {
   const body = oneLine(text)
   if (!body) throw new Error('A comment needs text.')
-  const { round, index } = requirePending(review, id)
+  const { round, index } = requirePending(review, ref)
   round.comments[index]!.text = body
 }
 
-export function removeComment(review: Review, id: string): void {
-  const { round, index } = requirePending(review, id)
+export function removeComment(review: Review, ref: CommentRef): void {
+  const { round, index } = requirePending(review, ref)
   round.comments.splice(index, 1)
   prune(review)
 }
@@ -252,16 +261,16 @@ function prune(review: Review): void {
   if (round && round.comments.length === 0 && round.strikes.length === 0) review.rounds.pop()
 }
 
-export function strikeItem(review: Review, itemId: string): void {
-  if (struckItems(review).includes(itemId)) return
-  openRound(review).strikes.push(itemId)
+export function strikeItem(review: Review, name: string): void {
+  if (struckItems(review).some((s) => same(s, name))) return
+  openRound(review).strikes.push(name)
 }
 
-/** Only an unsubmitted strike can be taken back; a struck item stays removed (B2, B9). */
-export function unstrikeItem(review: Review, itemId: string): void {
+/** Only an unsubmitted strike can be taken back; a struck item stays removed. */
+export function unstrikeItem(review: Review, name: string): void {
   const round = pendingRound(review)
-  if (!round?.strikes.includes(itemId)) throw new Error(`${itemId} is already struck in a submitted round.`)
-  round.strikes = round.strikes.filter((s) => s !== itemId)
+  if (!round?.strikes.some((s) => same(s, name))) throw new Error(`${name} is already struck in a submitted round.`)
+  round.strikes = round.strikes.filter((s) => !same(s, name))
   prune(review)
 }
 
@@ -271,10 +280,10 @@ export function struckItems(review: Review): string[] {
 }
 
 export function commentsFor(review: Review, target: string): ReviewComment[] {
-  return allComments(review).filter((c) => c.target === target)
+  return allComments(review).filter((c) => same(c.target, target))
 }
 
-/** A review with nothing in it is refused rather than sent; no turn is spent on it (E2). */
+/** A review with nothing in it is refused rather than sent; no turn is spent on it. */
 export function submitRound(review: Review, at: string = new Date().toISOString()): ReviewRound {
   const round = pendingRound(review)
   if (!round || (round.comments.length === 0 && round.strikes.length === 0)) {
@@ -284,22 +293,22 @@ export function submitRound(review: Review, at: string = new Date().toISOString(
   return round
 }
 
-/** Accepting is an explicit act, including when the agent disagreed (B8). */
-export function acceptResolution(review: Review, commentId: string): void {
-  const comment = allComments(review).find((c) => c.id === commentId)
-  if (!comment) throw new Error(`Unknown comment ${commentId}.`)
-  if (!comment.resolution) throw new Error(`Comment ${commentId} has no resolution yet.`)
+/** Resolving is an explicit act, including when the agent disagreed. */
+export function resolveComment(review: Review, ref: CommentRef): void {
+  const comment = commentAt(review, ref)
+  if (!comment) throw new Error(`Round ${ref.round} has no such comment.`)
+  if (!comment.resolution) throw new Error(`The comment ${describeComment(comment)} has no resolution yet.`)
   comment.closed = true
 }
 
-/** Every comment the human has not closed, submitted or still being written. */
+/** Every comment the human has not resolved, submitted or still being written. */
 export function openComments(review: Review): ReviewComment[] {
   return allComments(review).filter((c) => !c.closed)
 }
 
-/** A plan cannot be approved while any comment is open (B10). */
+/** A plan cannot be approved while any comment is open. */
 export function assertApprovable(review: Review): void {
   const open = openComments(review)
   if (open.length === 0) return
-  throw new Error(`The review is not closed: ${open.map((c) => c.id).join(', ')} still open.`)
+  throw new Error(`The review is not closed: ${open.length === 1 ? 'a comment' : `${open.length} comments`} still open, ${open.map(describeComment).join('; ')}.`)
 }

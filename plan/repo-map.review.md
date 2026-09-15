@@ -1,29 +1,29 @@
 # Review of plan/repo-map.spec.md
 
-Comments and strikes are the human’s; resolutions are the agent’s. A submitted comment keeps its id.
+Comments and strikes are the human’s; resolutions are the agent’s. A comment names the rule it is on.
 
-## Round 1 — submitted 2026-09-15T06:18:30.732Z
-- C1 (F1): I dont understand your proposition
+## Round 1, submitted 2026-09-15T06:18:30.732Z
+- on F1: I dont understand your proposition
   - item: F1: (naive, B11): a reconcile run cannot read anything under `.agent/`. `ScopeGuard.check` (src/agent/phases/scope-guard.ts) matches the workspace-relative path against the scope's globs, and `reconcileScope` (src/agent/phases/reconcile.ts) gives `readable: ['**']`; `**` does not match a path whose segment starts with a dot, so Read and Grep of `.agent/...` are denied with "this phase is limited to **". The spec should say the index files are reachable only where the phase's scope names their root, so the map's root is added to the reconcile scope (the task, once ruled).
   - addressed: rewrote F1's Proposed solution in plain words — a phase is given a list of paths its tools may open, the map's folder is not on the reconcile run's list, so every read of it is refused; B11 should say the map lives where each phase that needs it is permitted to read. No item changed; F1 stays open for your ruling.
-  - accepted
-- C2 (F2): Yes, must have a map snapshot and should also be stated so since multiple sessions can change the real mpa under it
+  - resolved
+- on F2: Yes, must have a map snapshot and should also be stated so since multiple sessions can change the real mpa under it
   - item: F2: (naive, E6): a session's context is not fixed at its start. `SessionManager.ensureLive` (src/agent/session/session-manager.ts) recreates the engine on the next prompt whenever it stopped — window reload, close, a turn that ended the engine — and `setupFor`/`modeSetup` (src/extension.ts) rebuild the system prompt then, so a resumed reconcile or implement session would be given the map as it stands at that moment and would run the staleness check again. The spec should say what a resumed session gets.
   - addressed: E6 now says a session works from the map as it stood at its start and keeps that snapshot for its life — another session's build or the command rewriting the map underneath changes nothing it holds — and that a session set up afresh after its engine stopped counts as a start and takes a new snapshot. The snapshot rule is also in the amended repo-map intent (A1); F2 marked resolved.
-  - accepted
-- C3 (F3): Ok with the proposition
+  - resolved
+- on F3: Ok with the proposition
   - item: F3: (naive, B3): no language service is reachable from the code as it stands. Nothing under src/agent imports `vscode` (only src/extension.ts and src/chat/*), and `typescript` is a devDependency of a bundled extension (`vsce package --no-dependencies`). The only in-process route is `vscode.executeDocumentSymbolProvider` from the extension layer, which yields an empty result both when no provider is registered and while one is still loading, so "available" cannot be asked. The spec should say an empty or failed answer counts as unavailable and the project falls back, and the user rules whether the TypeScript index is worth bundling `typescript`; the task for the language-service route waits on that ruling.
   - addressed: B3 is now the scan alone, C# and TypeScript alike, with no language service consulted; E2 became the scan's own fallback — a file it cannot parse is left out, named as skipped, and does not fail the build. Intent amendments A1 and A4 were rewritten to match; F3 marked resolved.
-  - accepted
-- C4 (F4): yes, but also ensure that there are fallbacks for detected patterns if .gitignore doesnt exist.
+  - resolved
+- on F4: yes, but also ensure that there are fallbacks for detected patterns if .gitignore doesnt exist.
   - item: F4: (naive, B2): nothing in the code reads what the workspace ignores. The only shared notion of skipped locations is `IGNORED_DIRS` in src/agent/openai-session/tools/glob.ts (node_modules, .git, bin, obj, dist, out, .vs, .idea), used by glob.ts and grep.ts; no `.gitignore` is parsed anywhere, and `.agent` is not in the set. The spec should say the build skips the same locations the agent's search tools skip, plus `.agent/`, or accept a gitignore reader as new work with no library for it.
   - addressed: B2 now skips what the agent's own search skips, plus the agent's generated folder, and honours `.gitignore` where the workspace has one; new edge E7 says a workspace with no `.gitignore`, or one that cannot be read, builds normally on the built-in list alone. Intent amendment A5 carries the fallback too; F4 marked resolved.
-  - accepted
-- C5 (F5): ok
+  - resolved
+- on F5: ok
   - item: F5: (naive, B13): nothing stops a session writing into the map. `modeSetup` (src/extension.ts) gives implement and chat sessions no `ScopeGuard`, and the Allow-writes switch (src/agent/permissions/write-allowance.ts) lets a write through without a prompt; docs/intent/agent.md#Phase 3: Implement says implement has "no scope guard". B13 as written is a property of the build, not a rule the code holds. The spec should say so, or a deny rule on the map's path becomes the task.
   - addressed: B13 now states the property rather than a prohibition — a write into the map is not refused, it is lost, because the next build rewrites the files wholesale. No deny rule; F5 marked resolved.
-  - accepted
-- C6 (F6): yes, that was an old rule. it can now read entire docs.
+  - resolved
+- on F6: yes, that was an old rule. it can now read entire docs.
   - item: F6: (contradiction, E4): `blindPlanScope` (src/agent/phases/blind-plan.ts) lets a plan session read `docs/**`, the root README and its own three plan files — not `docs/intent/**` as E4 says, citing docs/intent/agent.md#Phase 1: Blind plan ("Tools: Read/Glob scoped to `docs/intent/**`"), while the same document's Intent write-back section says "Phase 1 is blind: it reads `docs/**` and nothing else". The map stays out of reach on either wording; a test written to E4's wording fails.
   - addressed: E4 now says only what this feature owns — the map's root is in no plan session's read scope, so its tools deny it — with the `docs/intent/**` wording gone. Because the old rule outlives this feature, amendments A7 and A8 rewrite `docs/intent/agent.md` so blind planning reads the whole of `docs/**` and the README, and the docs split becomes "the code and what travels with it" rather than descriptive docs; F6 marked resolved.
-  - accepted
+  - resolved

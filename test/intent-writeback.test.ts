@@ -8,6 +8,7 @@ import {
   findSection,
   intentFile,
   intentPath,
+  label,
   markApplied,
   parseAmendments,
   pending,
@@ -18,18 +19,18 @@ import {
 
 const file = `# Intent amendments from plan/order-cancellation.spec.md
 
-## A1 (append) docs/intent/orders.md#Cancellation
-- from: F3 (naive)
+## docs/intent/orders.md#Cancellation (append)
+- from: Reservations are released by a job
 - why: intent does not say what happens to the reservation.
 
 Cancelling an order releases its reservation immediately.
 
-## A2 (replace) docs/intent/orders.md#Refunds [applied]
-- from: F4, ruled for the spec
+## docs/intent/orders.md#Refunds (replace) [applied]
+- from: Refunds are asynchronous, ruled for the spec
 
 A refund is issued to the original payment method.
 
-## A3 (new) docs/intent/reservations.md#Expiry
+## docs/intent/reservations.md#Expiry (new)
 
 A reservation that is not confirmed within an hour expires.
 `
@@ -55,7 +56,6 @@ type Override = Partial<Omit<Amendment, 'heading'>> & { heading?: string }
 const amend = (over: Override = {}): Amendment => {
   const { heading = 'Cancellation', ...rest } = over
   return {
-    id: 'A1',
     mode: 'append',
     doc: 'docs/intent/orders.md',
     text: 'Cancelling an order releases its reservation.',
@@ -67,33 +67,37 @@ const amend = (over: Override = {}): Amendment => {
 }
 
 describe('intent amendments', () => {
-  it('parses_id_mode_target_and_prose', () => {
+  it('an_amendment_is_keyed_by_heading_and_mode_and_the_heading_may_contain_spaces', () => {
     const amendments = parseAmendments(file)
-    expect(amendments.map((a) => a.id)).toEqual(['A1', 'A2', 'A3'])
+    expect(amendments.map((a) => a.heading)).toEqual(['Cancellation', 'Refunds', 'Expiry'])
     expect(amendments[0]).toMatchObject({
       mode: 'append',
       doc: 'docs/intent/orders.md',
       heading: 'Cancellation',
-      from: 'F3 (naive)',
+      from: 'Reservations are released by a job',
       why: 'intent does not say what happens to the reservation.',
       text: 'Cancelling an order releases its reservation immediately.',
       applied: false,
+      line: 2,
     })
     expect(amendments[1]).toMatchObject({ mode: 'replace', heading: 'Refunds', applied: true })
     expect(amendments[2]).toMatchObject({ mode: 'new', doc: 'docs/intent/reservations.md', heading: 'Expiry' })
+    const spaced = parseAmendments('## docs/intent/agent.md#Phase 1: Blind plan (replace)\n\ntext\n')
+    expect(spaced[0]).toMatchObject({ doc: 'docs/intent/agent.md', heading: 'Phase 1: Blind plan', mode: 'replace', text: 'text' })
+    expect(parseAmendments('## docs/intent/agent.md (append)\n\ntext\n')[0]?.heading).toBeUndefined()
   })
 
   it('leaves_out_an_amendment_whose_mode_is_not_one_of_the_three', () => {
-    const amendments = parseAmendments('## A1 (rewrite) docs/intent/orders.md#Cancellation\n\ntext\n')
+    const amendments = parseAmendments('## docs/intent/orders.md#Cancellation (rewrite)\n\ntext\n')
     expect(amendments).toEqual([])
   })
 
   it('counts_only_the_unapplied_ones_as_pending', () => {
-    expect(pending(parseAmendments(file)).map((a) => a.id)).toEqual(['A1', 'A3'])
+    expect(pending(parseAmendments(file)).map((a) => a.heading)).toEqual(['Cancellation', 'Expiry'])
   })
 
   it('takes_a_why_line_inside_the_prose_as_prose', () => {
-    const [amendment] = parseAmendments('## A1 (append) docs/intent/x.md#H\n\nA rule.\n- why: it is not metadata here.\n')
+    const [amendment] = parseAmendments('## docs/intent/x.md#H (append)\n\nA rule.\n- why: it is not metadata here.\n')
     expect(amendment!.why).toBeUndefined()
     expect(amendment!.text).toBe('A rule.\n- why: it is not metadata here.')
   })
@@ -139,11 +143,18 @@ describe('intent amendments', () => {
   })
 
   it('marks_applied_without_touching_the_prose', () => {
-    const marked = markApplied(file, ['A1'])
-    expect(marked).toContain('## A1 (append) docs/intent/orders.md#Cancellation [applied]')
-    expect(marked).toContain('## A3 (new) docs/intent/reservations.md#Expiry\n')
+    const marked = markApplied(file, [parseAmendments(file)[0]!])
+    expect(marked).toContain('## docs/intent/orders.md#Cancellation (append) [applied]')
+    expect(marked).toContain('## docs/intent/reservations.md#Expiry (new)\n')
     expect(marked).toContain('Cancelling an order releases its reservation immediately.')
-    expect(parseAmendments(marked).filter((a) => a.applied).map((a) => a.id)).toEqual(['A1', 'A2'])
+    expect(parseAmendments(marked).filter((a) => a.applied).map((a) => a.heading)).toEqual(['Cancellation', 'Refunds'])
+  })
+
+  it('two_amendments_on_one_section_are_marked_applied_one_by_one', () => {
+    const twice = '## docs/intent/x.md#H (append)\n\none\n\n## docs/intent/x.md#H (append)\n\ntwo\n'
+    const [, second] = parseAmendments(twice)
+    const marked = markApplied(twice, [second!])
+    expect(marked).toBe('## docs/intent/x.md#H (append)\n\none\n\n## docs/intent/x.md#H (append) [applied]\n\ntwo\n')
   })
 
   it('amends_intent_from_a_settled_plan_only', () => {
@@ -175,7 +186,7 @@ describe('intent amendments', () => {
         await writeFile(intentPath(dir, 'Order cancellation'), file, 'utf8')
         const result = await writeBackIntent({ cwd: dir, feature: 'Order cancellation' })
 
-        expect(result.applied.map((a) => a.id)).toEqual(['A1', 'A3'])
+        expect(result.applied.map((a) => a.heading)).toEqual(['Cancellation', 'Expiry'])
         expect(result.failed).toEqual([])
         expect(result.docs).toEqual(['docs/intent/orders.md', 'docs/intent/reservations.md'])
 
@@ -193,23 +204,23 @@ describe('intent amendments', () => {
       })
     })
 
-    it('reports_the_one_that_failed_and_still_writes_the_rest', async () => {
+    it('a_failed_amendment_is_named_by_its_heading_and_the_rest_are_still_written', async () => {
       await inWorkspace(async (dir) => {
-        const text = `## A1 (append) docs/intent/orders.md#Returns\n\nReturns are free.\n\n## A2 (append) docs/intent/orders.md#Cancellation\n\nA cancelled order is final.\n`
+        const text = `## docs/intent/orders.md#Returns (append)\n\nReturns are free.\n\n## docs/intent/orders.md#Cancellation (append)\n\nA cancelled order is final.\n`
         await writeFile(intentPath(dir, 'Order cancellation'), text, 'utf8')
         const result = await writeBackIntent({ cwd: dir, feature: 'Order cancellation' })
 
-        expect(result.applied.map((a) => a.id)).toEqual(['A2'])
-        expect(result.failed[0]!.amendment.id).toBe('A1')
+        expect(result.applied.map((a) => a.heading)).toEqual(['Cancellation'])
+        expect(label(result.failed[0]!.amendment)).toBe('docs/intent/orders.md#Returns (append)')
         expect(result.failed[0]!.reason).toMatch(/no heading "Returns"/)
         // The failed one stays pending so it can be fixed and applied later.
-        expect(pending(await readAmendments(intentPath(dir, 'Order cancellation'))).map((a) => a.id)).toEqual(['A1'])
+        expect(pending(await readAmendments(intentPath(dir, 'Order cancellation'))).map((a) => a.heading)).toEqual(['Returns'])
       })
     })
 
     it('refuses_to_write_outside_the_docs_tree', async () => {
       await inWorkspace(async (dir) => {
-        const text = `## A1 (append) src/agent/rules.md#Rules\n\nno.\n\n## A2 (new) ../escape.md\n\nno.\n`
+        const text = `## src/agent/rules.md#Rules (append)\n\nno.\n\n## ../escape.md (new)\n\nno.\n`
         await writeFile(intentPath(dir, 'Order cancellation'), text, 'utf8')
         const result = await writeBackIntent({ cwd: dir, feature: 'Order cancellation' })
 

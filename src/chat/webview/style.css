@@ -208,7 +208,7 @@ chat-app {
     /* One scenario after another, set apart by space and a heading, not by boxes. */
     & .scenario,
     & .questions,
-    & .findings {
+    & .decisions {
       margin: 1.6rem 0 0;
 
       & .intro {
@@ -226,7 +226,7 @@ chat-app {
 
     /* Edges sit under their rule, indented and a shade quieter; the indent is the relation. */
     & .edges {
-      margin: 0.35rem 0 0 2.6em;
+      margin: 0.35rem 0 0 1.2em;
     }
 
     & .item {
@@ -239,10 +239,9 @@ chat-app {
         opacity: 0.9;
       }
 
-      & > .line > .id {
-        opacity: 0.6;
-        font-size: 0.8em;
-        padding-top: 0.2em;
+      /* The name is the lead-in, as it is in the file; the text follows it. */
+      & .name {
+        font-weight: 600;
       }
 
       /* Only the item's own text is struck; its comments and controls stay legible. */
@@ -251,14 +250,15 @@ chat-app {
         opacity: 0.6;
       }
 
-      &.resolved > .line > .text {
+      &.applied > .line > .text,
+      &.withdrawn > .line > .text {
         opacity: 0.7;
       }
 
-      /* id | text | what the reader needs at a glance, aligned right. */
+      /* text | what the reader needs at a glance, aligned right. */
       & > .line {
         display: grid;
-        grid-template-columns: 2.6em minmax(0, 1fr) auto;
+        grid-template-columns: minmax(0, 1fr) auto;
         align-items: start;
         gap: 0 0.5rem;
 
@@ -300,10 +300,13 @@ chat-app {
       cursor: pointer;
     }
 
-    & .proposal {
+    /* A decision reads top down: the finding, the proposal, the ruling; the label says whose line it is. */
+    & .finding,
+    & .proposal,
+    & .ruling {
       display: flex;
       gap: 0.4rem;
-      margin: 0.15rem 0 0.15rem 2.6em;
+      margin: 0.15rem 0 0.15rem 1rem;
       opacity: 0.9;
 
       & .kind {
@@ -311,6 +314,34 @@ chat-app {
         text-transform: uppercase;
         letter-spacing: 0.03em;
         opacity: 0.8;
+        padding-top: 0.2em;
+        white-space: nowrap;
+      }
+
+      & .text {
+        flex: 1;
+      }
+    }
+
+    & .ruling .kind {
+      color: var(--vscode-testing-iconPassed);
+      opacity: 1;
+    }
+
+    & .decision .chip.rule {
+      opacity: 0.7;
+    }
+
+    & .rulings {
+      display: flex;
+      gap: 0.4rem;
+      margin: 0.3rem 0 0.2rem 1rem;
+
+      & button {
+        background: var(--vscode-button-secondaryBackground);
+        color: var(--vscode-button-secondaryForeground);
+        font-size: 0.85em;
+        padding: 0.1rem 0.4rem;
       }
     }
 
@@ -379,7 +410,8 @@ chat-app {
         border-color: var(--vscode-editorWarning-foreground);
       }
 
-      &.state.resolved {
+      &.state.applied,
+      &.state.ruled {
         color: var(--vscode-testing-iconPassed);
         border-color: var(--vscode-testing-iconPassed);
       }
@@ -417,11 +449,6 @@ chat-app {
       &.closed {
         border-left-color: var(--vscode-testing-iconPassed);
         opacity: 0.8;
-      }
-
-      & .id {
-        opacity: 0.7;
-        font-size: 0.85em;
       }
     }
 
@@ -497,9 +524,8 @@ chat-app {
         padding: 0.25rem 0;
         border-bottom: 1px solid var(--vscode-panel-border);
 
-        & .id {
-          opacity: 0.7;
-          font-size: 0.85em;
+        & .name {
+          font-weight: 600;
         }
 
         & .delivers {

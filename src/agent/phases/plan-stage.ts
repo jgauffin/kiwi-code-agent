@@ -1,5 +1,5 @@
+import { pendingDecisions } from './decisions'
 import { struckItems, type Review } from './plan-review'
-import { openFindings } from './reconcile'
 import { standingStrikes } from './review-handoff'
 import type { SpecState } from './spec-file'
 import { parseSpec, specFingerprint } from './spec-model'
@@ -46,13 +46,14 @@ export function tasksStale(spec: SpecState, tasks: TasksState): boolean {
 }
 
 /**
- * The board is behind the spec and the rulings are in: a board mapped while a
- * finding is still open carries no task for what that finding questions, and
- * the next ruling would leave it stale again, so the re-map waits for the last one.
+ * The board is behind the spec and every decision is applied: a board mapped
+ * while a decision is pending carries no task for what it questions, and the
+ * planner's revision of the rules would leave it stale again, so the re-map
+ * waits for the last one.
  */
 export function remapDue(spec: SpecState, review: Review, tasks: TasksState): boolean {
   if (!spec.exists) return false
-  return planStage(spec, review, tasks) === 'mapped' && tasksStale(spec, tasks) && openFindings(spec.body).length === 0
+  return planStage(spec, review, tasks) === 'mapped' && tasksStale(spec, tasks) && pendingDecisions(spec.body).length === 0
 }
 
 /** The spec may be approved: it is mapped from the spec as it stands, and every comment on it is closed. */

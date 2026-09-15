@@ -15,12 +15,14 @@ The extension only sees `CodeSession`: send a prompt, stream events, answer perm
 
 ## Shape
 
-Three phases, each a session with its own system prompt and tool set. The state is files on disk: a phase can always start from them. Blindness is the boundary: nothing that has seen the code reaches the plan session as conversation. Below it a phase continues the conversation of the phase before it where the engine resumes, so what was read is not read again: a re-map continues the last mapping run, the first implement session continues the mapping run that wrote the board, a later implement prompt continues the last implement session, and the cleanup run continues the implement session that wrote the files. Planning produces the spec, approved once; mapping is part of planning and writes its findings into the spec and the tasks into a file of their own.
+Three phases, each a session with its own system prompt and tool set. The state is files on disk: a phase can always start from them. Blindness is the boundary: nothing that has seen the code reaches the plan session as conversation. Below it a phase continues the conversation of the phase before it where the engine resumes, so what was read is not read again: a re-map continues the last mapping run, the first implement session continues the mapping run that wrote the board, a later implement prompt continues the last implement session, and the cleanup run continues the implement session that wrote the files. Planning produces the spec, approved once; mapping is part of planning and writes its decisions into the spec and the tasks into a file of their own.
 
 ```
-docs/intent/**  +  work item  →  spec.md  →  spec.md + findings, tasks.md  →  approved spec  →  code  →  tests pass
-                    (blind)                  (map against code)                              (implement)  (verification)
+docs/intent/**  +  work item  →  spec.md  →  spec.md + decisions, tasks.md  →  approved spec  →  code  →  tests pass
+                    (blind)                  (map against code)                               (implement)  (verification)
 ```
+
+Nothing in the plan files is a synthetic id. A rule, a task and a decision are named, the way a test or a function is named, and the name is the anchor everything else refers to: a comment names the rule it is on, a task names the rules it delivers, a proof names the rule a test proves, a decision names the rules it concerns. Names are stable; a rename carries a `(was Old name)` note the extension follows through every file.
 
 ### Stages
 
@@ -36,52 +38,9 @@ Where a feature stands is derived from its files under `plan/` and held nowhere 
 | verification | every task `[tested]`; the test commands have yet to pass |
 | verified | every task `[tested]` and the last recorded run passed |
 
-Accepting the last open comment maps the spec against the code by itself; a spec nobody commented on is mapped from the plan bar.
+Resolving the last open comment maps the spec against the code by itself; a spec nobody commented on is mapped from the plan bar.
 
 A session that is picked up after its engine stopped is set up afresh: it carries the conversation it had, and the instructions and generated context a session starting now would get.
-
-## A4 (append) docs/features/repo-map.md#Repo map
-- from: F3 (naive)
-- why: intent says the type index comes from the language service "when available", and availability cannot be asked: a language service that is missing, still loading or failing all answer the same way, with nothing.
-
-The type index is the agent's own, produced by scanning the source. A language service is not consulted, because it cannot be asked whether it is there: one that is absent, one still loading and one that failed all answer alike.
-
-## A5 (append) docs/features/repo-map.md#Repo map
-- from: F4 (naive)
-- why: intent speaks of generated and ignored locations without saying which, and the product has only one notion of where it does not look.
-
-The build looks where the agent's own search looks: it passes over dependency folders, build output and the agent's own generated folder. Where the workspace states what it ignores, that is passed over too; where it does not, the agent's own list stands on its own.
-
-## A6 (append) docs/intent/agent.md#Phase 3: Implement
-- from: F5 (naive)
-- why: intent says both that no session edits the generated map and that the implement phase has no scope guard; nothing refuses such an edit.
-
-An implement session may write anywhere the user allows, generated files included. What protects generated output is that the next build rewrites it wholesale: an edit into it is lost, not refused.
-
-## A7 (replace) docs/intent/agent.md#Phase 1: Blind plan
-- from: F6 (contradiction), ruled for the code
-- why: blind planning is no longer confined to `docs/intent/**`; it reads the whole of `docs/**` and the workspace README. Only the section's opening paragraphs are meant here, down to the first subsection.
-
-Sees: feature description, domain brief (ubiquitous language, stack, constraints), `docs/**`, the workspace README, one work item closure when ADO is connected.
-Never sees: source, PRs, build output, generated context such as the repo map.
-
-Until ADO is connected the feature description is typed by the user or picked from `docs/**`. The agent plans the user story itself; the tasks file is the source for the ADO tasks created under the story once ADO is connected (write-back, not read-only).
-
-Tools: Read/Glob scoped to `docs/**`, the workspace README and the feature's own plan files, `get_work_item(id)`, AskUserQuestion, optionally WebSearch. Bash denied by bare name (allow-lists only auto-approve; a bare-name deny removes the tool from context).
-
-First a direction in chat (the decisions that shape the feature, the questions that would change them); nothing is written until the user says go. Then `plan/<feature>.spec.md`, to the contract below. An item derived from intent cites its section (`B2 (docs/intent/orders.md#Cancellation)`); an uncited item is the planner's default. To the point, not complete: an item earns its place by changing what gets built or how it is tested. No code paths. If `docs/**` has nothing on the feature, ask and stop.
-
-## A8 (replace) docs/intent/agent.md#Docs split
-- from: F6 (contradiction), ruled for the code
-- why: the split that kept descriptive docs from phase 1 is gone; what phase 1 must not see is the code and what travels with it, not a class of document.
-
-The whole of `docs/**` is phase 1 scope. What phase 1 is kept from is the code and what travels with it — source, PRs, build output, generated context — because those drift with the code in the same direction and arrive labelled as authority.
-
-## A9 (append) docs/features/repo-map.md#Repo map
-- from: F8 (naive)
-- why: intent has the type indexes read through tools, but a session's search passes over what the workspace says to ignore, and generated output is exactly that; such a file is found only when something hands the session its path.
-
-A session opens a type index by the path the summary gives it. Generated output lies where the workspace tells search to pass over, so it is reached by being named, never by being searched for.
 
 ## Phase 1: Blind plan
 
@@ -92,7 +51,7 @@ Until ADO is connected the feature description is typed by the user or picked fr
 
 Tools: Read/Glob scoped to `docs/intent/**`, `get_work_item(id)`, AskUserQuestion, optionally WebSearch. Bash denied by bare name (allow-lists only auto-approve; a bare-name deny removes the tool from context).
 
-First a direction in chat (the decisions that shape the feature, the questions that would change them); nothing is written until the user says go. Then `plan/<feature>.spec.md`, to the contract below. An item derived from intent cites its section (`B2 (docs/intent/orders.md#Cancellation)`); an uncited item is the planner's default. To the point, not complete: an item earns its place by changing what gets built or how it is tested. No code paths. If `docs/intent/**` has nothing on the feature, ask and stop.
+First a direction in chat (the decisions that shape the feature, the questions that would change them); nothing is written until the user says go. Then `plan/<feature>.spec.md`, to the contract below. A rule derived from intent ends with a citation of its section (`(docs/intent/orders.md#Cancellation)`); an uncited rule is the planner's default. To the point, not complete: a rule earns its place by changing what gets built or how it is tested. No code paths. If `docs/intent/**` has nothing on the feature, ask and stop.
 
 ### The spec contract
 
@@ -101,18 +60,22 @@ First a direction in chat (the decisions that shape the feature, the questions t
 Prose.
 
 ## Cancelling an order            ← a scenario: a situation from the user's side
-- B1: a rule, written so a test can prove it
-  - E1: situation → outcome, an edge of B1
-- B2: another rule
+- **Cancel command**: a rule, written so a test can prove it (docs/intent/orders.md#Cancellation)
+  - **Shipped order**: situation → outcome, an edge of the rule above
+- **Refund on cancel**: another rule
 
 ## Open questions
-- Q1: what only the user can settle
+- **Partial refunds**: what only the user can settle
 
-## Findings
-| Finding | Proposed solution |
+## Decisions
+### Shipped orders cannot be cancelled
+- on: Cancel command
+- finding: what the code does, where, and what the spec says
+- proposed: how the rules should change, or why they stand
+- ruling: accepted
 ```
 
-`Goal`, `Open questions` and `Findings` are reserved; every other `##` is a scenario, and a small feature has one. Behaviours (`B`) sit directly under a scenario; an edge case (`E`) is nested under the behaviour it qualifies, one level, no deeper. There are no invariants, acceptance criteria or task sections: an invariant is a behaviour, an acceptance criterion restates one, and the evidence that an item holds is the test the implementer names for it. Ids are global and stable. The extension parses the spec into this model on every write and hands what does not fit back to the model on the same tool result; the plan view shows the problems and offers Repair, which runs the migration (below) for that plan.
+`Goal`, `Open questions` and `Decisions` are reserved; every other `##` is a scenario, and a small feature has one. Rules sit directly under a scenario; an edge case is nested under the rule it qualifies, one level, no deeper. Every rule, edge case and question is named by the bold lead-in of its line, unique in the spec; the name never changes once written, a rename carries `(was Old name)` after the new one. There are no invariants, acceptance criteria or task sections: an invariant is a rule, an acceptance criterion restates one, and the evidence that a rule holds is the test the implementer names for it. The extension parses the spec into this model on every write and hands what does not fit back to the model on the same tool result; the plan view shows the problems and offers Repair, which runs the migration (below) for that plan.
 
 ### get_work_item
 
@@ -130,55 +93,50 @@ Hand-coded, read-only, Azure DevOps. Server-side filtering is the enforcement.
 
 ## Phase 2: Map against code
 
-Tools: Read, Glob, Grep, JsonSchema, JsonQuery, Skill; Edit and Write on the spec, its tasks file and its intent amendments only. Bash denied by bare name.
-Input: spec + context + repo. Not the phase 1 transcript, and not `docs/**`: the spec is the intent for this feature, and the citations on its items are what the check opens when it needs intent's exact words.
+Tools: Read, Glob, Grep, JsonSchema, JsonQuery, Skill; Edit and Write on the spec and its tasks file only. Bash denied by bare name.
+Input: spec + context + repo. Not the phase 1 transcript, and not `docs/**`: the spec is the intent for this feature, and the citations on its rules are what the check opens when it needs intent's exact words.
 
 A run, not a session: started from the plan bar, it runs under the plan session's tab with no tab or transcript of its own, only a one-line progress indicator in the plan bar and a stop. It ends when its turn ends; a re-check is a new run. Its full transcript is in the run log for inspection.
 
-The job is to find what stands in the feature's way before implementation starts, not to grade the spec. Only findings are reported; a spec item the code accommodates without incident is not mentioned. An empty list is a valid result.
+The job is to find what stands in the feature's way before implementation starts, not to grade the spec. Only disagreements are reported, each as a decision for the user; a rule the code accommodates without incident is not mentioned. An empty list is a valid result. What the run looks for: a business rule in the code that says otherwise (the human decides which side is right), existing behaviour the feature would change or break that the spec does not mention, and something the spec assumes that the code shows to be wrong.
 
-A finding is one of:
+Output, two files. A `Decisions` section in the spec, one `###` per decision titled by the disagreement, with an `on` line naming the rules it concerns and a `finding` line naming the code it rests on, short enough to read in one sitting. The run writes titles, `on` and `finding` only. When the run ends with decisions that have no proposal, the plan session is handed their titles and adds a `proposed` line under each: how the rules should change, or why they stand, with the reason.
 
-| finding | meaning |
-|---|---|
-| contradiction | a business rule in the code says otherwise; human decides which side is right |
-| breakage | existing behaviour the feature would change or break, that the spec does not mention |
-| naive | the spec assumes something the code shows to be wrong; amend the spec, reason required |
+The user rules in place, on the plan view: Accept proposal writes `ruling: accepted`, Rule otherwise writes the user's own words; nothing is sent. Approve with decisions pending rules every remaining proposal accepted and hands all rulings to the plan session, which revises the rules per each ruling, marks the decision `[applied]` and records intent amendments where a ruling settles what intent does not say. Approval waits for that revision: the user approves what the planner wrote, not what it proposed. A decision the mapper finds no longer holds on a re-run is marked `[withdrawn]`.
 
-Output, two files. A `Findings` table in the spec with the columns Finding and Proposed solution, each finding naming the spec item and the code it rests on, short enough to read in one sitting. The run fills the Finding column only. When the run ends with findings that have no proposal, the plan session is handed their ids and fills in Proposed solution for each: how the spec should change, or why it should stand, with the reason. The user rules on findings as on any other plan item, in the plan session, which revises the spec per ruling and marks the finding `[resolved]`; the spec is approved once.
-
-And `plan/<feature>.tasks.md`: one task per scenario by default, departing only for a reason the task names (a scenario too big for one sitting is split in build order; a foundation every scenario needs is one task shared by all). Each task lists the spec items it delivers in parentheses and the files it touches on an indented `files:` line (existing paths; `(new)` for ones to create); every behaviour and edge case is delivered by some task, and an item no task delivers shows as a gap. Task ids are stable across re-runs: a re-run keeps, updates or marks `[removed]`, never renumbers. No task is written under a finding the user has not ruled on. A legacy `## Tasks` section in the spec is deleted once the board holds it.
+And `plan/<feature>.tasks.md`: one task per scenario by default under a `##` heading with the scenario's title, departing only for a reason the task names (a scenario too big for one sitting is split in build order; a foundation every scenario needs is one task under `## Foundation`, first). Each task is a named bold lead-in listing the rules it delivers in parentheses and the files it touches on an indented `files:` line (existing paths; `(new)` for ones to create); every rule and edge case is delivered by some task, and a rule no task delivers shows as a gap. Task names are stable across re-runs: a re-run keeps, updates or marks `[removed]`, never renames. No task is written under a decision still pending. A legacy `## Tasks` section in the spec is deleted once the board holds it.
 
 ```markdown
 ---
 spec: 3f9a1c2e
 ---
-- T1 (B1, E2): add the cancel command
+## Cancelling an order
+- **Cancel command** (Cancel command, Shipped order): add the cancel command
   - files: src/orders/cancel.ts, src/orders/cancel.test.ts (new)
   - context: src/orders/order.ts, src/orders/ship.test.ts
 ```
 
 `context:` is what the run read to arrive at the task (the modules the files lean on, the test showing the pattern, where the term already lives), so an implementer that does not have the mapper's conversation starts from `files:` and `context:` and searches only for what they do not answer.
 
-The front matter records the fingerprint of the spec the board was mapped from (goal, scenarios and questions; not findings, so a proposal does not count). A plan turn that changes the spec under a mapped board makes it stale: the plan bar says so, approval is refused, and the board is re-mapped when a plan turn ends with every finding ruled on; a board mapped under an open finding would carry no task for what it questions and go stale on the next ruling. Approval is refused while a finding is open. Mapping is offered as a button only on a spec nobody has commented on; after that it runs by itself.
+The front matter records the fingerprint of the spec the board was mapped from (goal, scenarios and questions; not decisions, so a proposal or a ruling does not count). A plan turn that changes the spec under a mapped board makes it stale: the plan bar says so, approval is refused, and the board is re-mapped when a plan turn ends with no decision pending; a board mapped under a pending decision would carry no task for what it questions and go stale on the revision. Mapping is offered as a button only on a spec nobody has commented on; after that it runs by itself.
 
-Authority order is fixed in the prompt: work item, then intent doc, then code. Amendments (`naive`) and contradictions ruled in the spec's favour are written back to `docs/intent/**` or the work item as an explicit output, so intent does not rot.
+Authority order is fixed in the prompt: work item, then intent doc, then code. What a ruling settles that intent does not say is written back to `docs/intent/**` or the work item as an explicit output, so intent does not rot.
 
 ### Intent write-back
 
 Phase 1 is blind: it reads `docs/**` and nothing else. A ruling that lives only in a spec is therefore invisible to the next feature's planner, which will re-derive the same question and may settle it the other way. So what a feature settles has to reach the docs it was planned from.
 
-The agent never edits `docs/`: intent is the user's. It proposes, in `plan/<feature>.intent.md`, one section per amendment — an id, a mode, the doc and heading it lands in, where it came from and why, then the text as intent would read it.
+The agent never edits `docs/`: intent is the user's. The plan session proposes, in `plan/<feature>.intent.md` when it applies a ruling, one section per amendment: the doc and heading it lands in and the mode as the heading, where it came from and why, then the text as intent would read it.
 
 ```markdown
-## A1 (append) docs/intent/orders.md#Cancellation
-- from: F3 (naive)
+## docs/intent/orders.md#Cancellation (append)
+- from: Reservations are released by a job, ruled for the spec
 - why: intent does not say what happens to the reservation.
 
 Cancelling an order releases its reservation immediately.
 ```
 
-The modes are `append` (add to the section), `replace` (rewrite its body) and `new` (add a section, or a document). The plan and reconcile scopes make that file writable; `docs/**` stays read-only to every phase.
+The modes are `append` (add to the section), `replace` (rewrite its body) and `new` (add a section, or a document). An amendment is identified by its heading. The plan scope makes that file writable; `docs/**` stays read-only to every phase.
 
 Applying is the human's act, from the plan bar, and mechanical: the extension writes each pending amendment into its document and appends `[applied]` to it, so nothing is written twice and what lands in `docs/` is what was proposed, reviewable as a git diff. It is offered on an approved spec only — on a draft the rulings can still change — and stays offered after the feature is built, which is when a spec that named no amendments is worth a second look. An amendment that cannot be applied (no such heading, a path outside `docs/`) is reported and stays pending; the others still go through.
 
@@ -197,15 +155,15 @@ A sub-session the planner calls with `retrieve(question, known, budget)` to keep
 
 ## Phase 3: Implement
 
-Tools: Read, Write, Edit, Glob, Grep, JsonSchema, JsonQuery, Bash. Input is the approved spec and its tasks file, started from the plan bar as a continuation of the mapping run's conversation where the engine resumes, a fresh session otherwise; refuses to start on `status: draft` or without a tasks file. Implement on a feature that already has an implement session carries that session on. Breakage findings the user chose to fix are work with the task they touch. Writes go through the ordinary permission prompt; no scope guard.
+Tools: Read, Write, Edit, Glob, Grep, JsonSchema, JsonQuery, Bash. Input is the approved spec and its tasks file, started from the plan bar as a continuation of the mapping run's conversation where the engine resumes, a fresh session otherwise; refuses to start on `status: draft` or without a tasks file. Implement on a feature that already has an implement session carries that session on. A decision whose ruling says to fix the code is work with the task it touches. Writes go through the ordinary permission prompt; no scope guard.
 
-- Task state is the tasks file: the implementer appends `[in progress]` when it starts a task, `[done]` when the code is written, `[tested]` when every item the task delivers is proven by a passing test, `[blocked: reason]` when it cannot finish, so task 4 of 7 survives a fresh session and shows in the plan view. The task's `files:` line is kept true to what was touched.
-- Coverage is the evidence: a `proves:` line on the task names, per delivered item, the test file and the test whose name states the rule (`proves: B1 test/orders/cancel.test.ts an_open_order_can_be_cancelled, E1 ...`). The plan view shows on each behaviour and edge case which task delivers it and which test proves it, or `no task` / `no test`; a task marked tested with an item it names no test for is flagged. That is what an acceptance section used to promise, made checkable.
+- Task state is the tasks file: the implementer appends `[in progress]` when it starts a task, `[done]` when the code is written, `[tested]` when every rule the task delivers is proven by a passing test, `[blocked: reason]` when it cannot finish, so task 4 of 7 survives a fresh session and shows in the plan view. The task's `files:` line is kept true to what was touched.
+- Coverage is the evidence: a `proves:` line on the task names, per delivered rule, the test file and the test whose name states the rule (`proves: Cancel command → test/orders/cancel.test.ts an_open_order_can_be_cancelled, Shipped order → ...`). The plan view shows on each rule and edge case which task delivers it and which test proves it, or `no task` / `no test`; a task marked tested with a rule it names no test for is flagged. That is what an acceptance section used to promise, made checkable.
 - Only `[tested]` is a finish. A board whose every task is tested goes to verification; the plan bar stops offering Implement, since a second session would re-read the code and decide for itself what to redo. `[blocked: reason]` is unfinished work, so it still takes a fresh session. The state is derived from the markers, not a `status` of its own: adding a task to a finished board makes it unfinished again with nothing to reset, and the two can never disagree.
 
 ## Migration
 
-`KiwiAgent: Migrate plans` brings every plan under `plan/` to the contract; Repair in the plan bar does it for one. By rule first: a legacy `## Tasks` section becomes the tasks file (delivered ids first, markers kept), the board is stamped, the intent file is parsed and a broken one reported, the review file is untouched. What remains (invariants, acceptance criteria, flat edge cases) goes to the plan session as a prompt: group into scenarios, nest edges, fold restated rules, keep every id, and mark a folded rule that survives under a new id with `(was I3)`. When that turn ends the extension follows each rename through the review targets, the tasks' delivered ids and the findings, drops the notes and stamps the board. Approval is kept on a migrated approved spec: the arrangement changed, not the rules.
+`KiwiAgent: Migrate plans` brings every plan under `plan/` to the contract; Repair in the plan bar does it for one. By rule first: a legacy `## Tasks` section becomes the tasks file (delivered rules first, markers kept), id-shaped lines in every file become the named shapes with the old id standing in as the name (a findings table becomes decisions titled by their ids), the board is stamped, the intent file is parsed and a broken one reported. What remains (invariants, acceptance criteria, flat edge cases, rules still named by an id) goes to the plan session as a prompt: group into scenarios, nest edges, fold restated rules, give each rule a real name, and mark one that survives under a new name with `(was I3)`. When that turn ends the extension follows each rename through the review targets, the tasks' delivered rules and the decisions, drops the notes and stamps the board. Approval is kept on a migrated approved spec: the arrangement changed, not the rules.
 
 ## Verification
 

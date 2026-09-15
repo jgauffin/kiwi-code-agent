@@ -10,9 +10,9 @@ const board = (...lines: string[]): TasksState => ({ exists: true, ...parseTasks
 
 describe('implement phase', () => {
   it('refuses_to_start_on_a_missing_or_draft_spec', () => {
-    expect(() => assertImplementable({ exists: false }, board('- T1: a'))).toThrow(/no spec/i)
-    expect(() => assertImplementable({ ...approved, status: 'draft' }, board('- T1: a'))).toThrow(/approved/i)
-    expect(() => assertImplementable(approved, board('- T1: a'))).not.toThrow()
+    expect(() => assertImplementable({ exists: false }, board('- **T1**: a'))).toThrow(/no spec/i)
+    expect(() => assertImplementable({ ...approved, status: 'draft' }, board('- **T1**: a'))).toThrow(/approved/i)
+    expect(() => assertImplementable(approved, board('- **T1**: a'))).not.toThrow()
   })
 
   it('refuses_to_start_before_the_spec_is_mapped_against_the_code', () => {
@@ -20,12 +20,12 @@ describe('implement phase', () => {
   })
 
   it('refuses_to_start_again_on_a_board_whose_every_task_is_tested', () => {
-    expect(() => assertImplementable(approved, board('- T1: a [tested]', '- T2: b [tested]'))).toThrow(/every task/i)
+    expect(() => assertImplementable(approved, board('- **T1**: a [tested]', '- **T2**: b [tested]'))).toThrow(/every task/i)
     // Done is not tested, and blocked is work left: a fresh session is allowed to pick either up.
-    expect(() => assertImplementable(approved, board('- T1: a [tested]', '- T2: b [done]'))).not.toThrow()
-    expect(() => assertImplementable(approved, board('- T1: a [tested]', '- T2: b [blocked: needs a decision]'))).not.toThrow()
+    expect(() => assertImplementable(approved, board('- **T1**: a [tested]', '- **T2**: b [done]'))).not.toThrow()
+    expect(() => assertImplementable(approved, board('- **T1**: a [tested]', '- **T2**: b [blocked: needs a decision]'))).not.toThrow()
     // Adding a task to a finished board makes it unfinished again, with nothing to reset.
-    expect(() => assertImplementable(approved, board('- T1: a [tested]', '- T2: b'))).not.toThrow()
+    expect(() => assertImplementable(approved, board('- **T1**: a [tested]', '- **T2**: b'))).not.toThrow()
   })
 
   it('prompt_names_the_spec_the_tasks_file_and_the_markers_that_carry_progress', () => {
@@ -34,9 +34,9 @@ describe('implement phase', () => {
     expect(prompt).toContain('plan/order-cancellation.tasks.md')
     for (const marker of ['[in progress]', '[done]', '[tested]', '[blocked:']) expect(prompt).toContain(marker)
     expect(prompt).toContain('files:')
-    // Tested is backed by evidence the user reads on the spec: a test named per delivered item.
+    // Tested is backed by evidence the user reads on the spec: a test named per delivered rule.
     expect(prompt).toContain('proves:')
-    expect(prompt).toContain('<item id> <test file> <test name>')
+    expect(prompt).toContain('<rule name> → <test file> <test name>')
     // The mapping's reading is the starting point, not a search of the code.
     expect(prompt).toContain('context:')
     expect(prompt).toContain('search the code only for what they do not answer')

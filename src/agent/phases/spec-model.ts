@@ -3,21 +3,24 @@ import { readFile } from 'node:fs/promises'
 import { isAbsolute, relative, resolve } from 'node:path'
 import type { PostToolUseOutcome, SessionHooks, ToolUse } from '../session/hooks'
 import { PLAN_DIR } from './blind-plan'
+import { DECISIONS_SECTION, parseDecisions, type Decision } from './decisions'
 import type { PlanItem } from './plan-review'
-import { FINDINGS_SECTION, findings, type Finding } from './reconcile'
 import { bodyOf } from './spec-file'
 
 /**
  * The spec as a contract: a goal, scenarios from the user's side holding the
- * behaviours with their edge cases nested under the rule they qualify, open
- * questions, and the findings a mapping run wrote. Parsed once, here; what
- * does not fit the contract is reported as a problem, never dropped, so the
- * planner is told and the view can show it.
+ * rules with their edge cases nested under the rule they qualify, open
+ * questions, and the decisions a mapping run wrote. Every rule has a name,
+ * the bold lead-in of its line, and the name is what everything else refers
+ * to: a comment, a task, a test, a decision. Parsed once, here; what does not
+ * fit the contract is reported as a problem, never dropped, so the planner is
+ * told and the view can show it.
  */
 
 export type Item = {
-  id: string
-  /** The line's text after the id, markers included, as written. */
+  /** The bold lead-in; unique in the spec, never changed once written. */
+  name: string
+  /** The line's text after the name, markers included, citation removed. */
   text: string
   /** `path#Heading` of the intent section the item came from; absent on the planner's own default. */
   citation?: string
@@ -33,19 +36,23 @@ export type Spec = {
   goal: string
   scenarios: Scenario[]
   questions: Item[]
-  findings: Finding[]
+  decisions: Decision[]
   /** Contract violations, each naming its line; empty when the spec is on contract. */
   problems: string[]
 }
 
 export const GOAL_SECTION = 'Goal'
 export const QUESTIONS_SECTION = 'Open questions'
-const RESERVED = [GOAL_SECTION, QUESTIONS_SECTION, FINDINGS_SECTION]
 
 const TITLE = /^#\s+(.*)$/
 const SECTION = /^##\s+(.*)$/
 const SUBHEADING = /^#{3,6}\s+/
-const ITEM = /^(\s*)-\s+([A-Z]{1,3}\d+)\b\s*(?:\(([^)]*)\))?\s*:\s*(.*)$/
+const BULLET = /^(\s*)-\s+(.*)$/
+/** `- **Name**: text`, tolerating the colon inside the bold and a `(was Old name)` note after it. */
+const ITEM = /^(\s*)-\s+\*\*([^*]+?)\*\*\s*(?:\(was\s+[^)]*\))?\s*:?\s*(.*)$/
+/** A trailing `(path#Heading)` before the markers; a parenthesis without a hash is prose. */
+const CITATION = /^(.*?)\s*\(([^\s()]+#[^()]*)\)((?:\s*\[[^\]]*\])*)$/
+const FORBIDDEN = /[*,:()]/
 const REMOVED = /\[removed\]/i
 
 const same = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase()
@@ -58,9 +65,10 @@ export function parseSpecText(text: string): Spec {
 }
 
 export function parseSpec(body: string, firstLine = 1): Spec {
-  const spec: Spec = { title: '', goal: '', scenarios: [], questions: [], findings: findings(body), problems: [] }
-  const ids = new Set<string>()
-  let section: 'none' | 'goal' | 'scenario' | 'questions' | 'findings' = 'none'
+  const decided = parseDecisions(body)
+  const spec: Spec = { title: '', goal: '', scenarios: [], questions: [], decisions: decided.decisions, problems: [] }
+  const names = new Set<string>()
+  let section: 'none' | 'goal' | 'scenario' | 'questions' | 'decisions' = 'none'
   let scenario: Scenario | undefined
   let behaviour: Behaviour | undefined
   let goal: string[] = []
@@ -86,7 +94,7 @@ export function parseSpec(body: string, firstLine = 1): Spec {
       behaviour = undefined
       if (same(name, GOAL_SECTION)) section = 'goal'
       else if (same(name, QUESTIONS_SECTION)) section = 'questions'
-      else if (same(name, FINDINGS_SECTION)) section = 'findings'
+      else if (same(name, DECISIONS_SECTION)) section = 'decisions'
       else {
         section = 'scenario'
         scenario = { title: name, intro: '', behaviours: [] }
@@ -95,13 +103,15 @@ export function parseSpec(body: string, firstLine = 1): Spec {
       }
       continue
     }
+    // The decisions are parsed on their own; their problems are merged below.
+    if (section === 'decisions') continue
     if (SUBHEADING.test(line)) {
       problem(number, `"${line}": sub-headings are not part of the contract; a scenario is a \`##\` heading, its rules are items.`)
       continue
     }
 
-    const item = ITEM.exec(raw)
-    if (!item) {
+    const bullet = BULLET.exec(raw)
+    if (!bullet) {
       switch (section) {
         case 'goal':
           goal.push(line)
@@ -112,10 +122,8 @@ export function parseSpec(body: string, firstLine = 1): Spec {
             scenario.intro = intro.join('\n')
           } else problem(number, `"${clip(line)}": prose after a scenario's items; a rule is an item, a remark belongs in the intro.`)
           break
-        case 'findings':
-          break
         case 'questions':
-          problem(number, `"${clip(line)}": Open questions holds \`- Q1: ...\` items only.`)
+          problem(number, `"${clip(line)}": Open questions holds \`- **Name**: question\` items only.`)
           break
         case 'none':
           problem(number, `"${clip(line)}": text before the first section; the spec starts with \`## ${GOAL_SECTION}\`.`)
@@ -124,109 +132,98 @@ export function parseSpec(body: string, firstLine = 1): Spec {
       continue
     }
 
+    const item = ITEM.exec(raw)
+    if (!item) {
+      if (section === 'questions') problem(number, `"${clip(line)}": Open questions holds \`- **Name**: question\` items only.`)
+      else problem(number, `"${clip(line)}": a rule without a name; a rule is \`- **Name**: text\`.`)
+      continue
+    }
     const indent = item[1]!.length
-    const id = item[2]!
-    const prefix = id.replace(/\d+$/, '')
-    const text = item[4]!.trim()
-    const entry: Item = { id, text, ...(item[3] ? { citation: item[3].trim() } : {}), removed: REMOVED.test(text) }
-    if (ids.has(id)) problem(number, `${id} is used twice; an id belongs to one item for good.`)
-    ids.add(id)
+    const name = item[2]!.trim().replace(/:$/, '').trim()
+    const entry = withCitation(name, item[3]!.trim())
+    if (FORBIDDEN.test(name)) problem(number, `"${name}": a name has no \`* , : ( )\` in it.`)
+    const key = name.toLowerCase()
+    if (names.has(key)) problem(number, `"${name}" is used twice; a name belongs to one rule for good.`)
+    names.add(key)
 
     switch (section) {
       case 'scenario': {
         if (!scenario) break
         if (indent === 0) {
-          if (prefix !== 'B') {
-            problem(number, `${id}: only behaviours (B) sit directly under a scenario; ${describePrefix(prefix)}.`)
-          }
           behaviour = { ...entry, edges: [] }
           scenario.behaviours.push(behaviour)
         } else if (indent <= 3) {
-          if (prefix !== 'E') problem(number, `${id}: only edge cases (E) nest under a behaviour; ${describePrefix(prefix)}.`)
-          if (!behaviour) problem(number, `${id}: nested under nothing; an edge case sits under the behaviour it qualifies.`)
+          if (!behaviour) problem(number, `${name}: nested under nothing; an edge case sits under the rule it qualifies.`)
           else behaviour.edges.push(entry)
         } else {
-          problem(number, `${id}: nested too deep; a scenario holds behaviours, a behaviour holds edge cases, and that is all.`)
+          problem(number, `${name}: nested too deep; a scenario holds rules, a rule holds edge cases, and that is all.`)
         }
         break
       }
       case 'questions':
-        if (indent > 0) problem(number, `${id}: Open questions is a flat list.`)
-        if (prefix !== 'Q') problem(number, `${id}: only questions (Q) go under Open questions; a rule belongs in a scenario.`)
-        else spec.questions.push(entry)
-        break
-      case 'findings':
-        problem(number, `${id}: Findings is a table, one row per finding.`)
+        if (indent > 0) problem(number, `${name}: Open questions is a flat list.`)
+        spec.questions.push(entry)
         break
       case 'goal':
-        problem(number, `${id}: Goal is prose; a rule belongs in a scenario.`)
+        problem(number, `${name}: Goal is prose; a rule belongs in a scenario.`)
         break
       case 'none':
-        problem(number, `${id}: an item before the first section.`)
+        problem(number, `${name}: an item before the first section.`)
         break
     }
   }
+  for (const p of decided.problems) problem(p.line + firstLine, p.text)
+  spec.problems.sort(byLine)
   spec.goal = goal.join('\n')
   if (!spec.goal) spec.problems.push(`no \`## ${GOAL_SECTION}\` section.`)
-  if (spec.scenarios.length === 0) spec.problems.push('no scenario: at least one `##` section with the behaviours.')
+  if (spec.scenarios.length === 0) spec.problems.push('no scenario: at least one `##` section with the rules.')
   for (const s of spec.scenarios) {
-    if (s.behaviours.length === 0) spec.problems.push(`scenario "${s.title}" has no behaviour.`)
+    if (s.behaviours.length === 0) spec.problems.push(`scenario "${s.title}" has no rule.`)
   }
   return spec
 }
 
-function describePrefix(prefix: string): string {
-  switch (prefix) {
-    case 'E':
-      return 'an edge case is indented under the behaviour it qualifies'
-    case 'I':
-    case 'A':
-      return 'an invariant or acceptance criterion is a behaviour, or restates one and goes'
-    case 'T':
-      return 'tasks live in the tasks file, written when the spec is mapped against the code'
-    case 'Q':
-      return 'a question goes under Open questions'
-    case 'B':
-      return 'a rule belongs in a scenario'
-    case 'F':
-      return 'a finding is a row of the Findings table'
-    default:
-      return `the contract knows B, E, Q and F`
-  }
+function withCitation(name: string, rest: string): Item {
+  const cited = CITATION.exec(rest)
+  const text = cited ? `${cited[1]}${cited[3]}`.trim() : rest
+  return { name, text, ...(cited ? { citation: cited[2]!.trim() } : {}), removed: REMOVED.test(text) }
+}
+
+/** Problems read in file order whichever parser found them. */
+function byLine(a: string, b: string): number {
+  const line = (p: string) => Number(/^line (\d+):/.exec(p)?.[1] ?? Number.MAX_SAFE_INTEGER)
+  return line(a) - line(b)
 }
 
 function clip(text: string, max = 60): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text
 }
 
-/** Every item in file order, in the shape the review addresses: E under its behaviour, section = scenario title. */
+/** Every rule and question in file order, in the shape the review addresses: an edge under its rule, section = scenario title. */
 export function specItems(spec: Spec): PlanItem[] {
   const items: PlanItem[] = []
-  const cite = (item: Item): string => (item.citation ? `(${item.citation}) ${item.text}` : item.text)
+  const cite = (item: Item): string => (item.citation ? `${item.text} (${item.citation})` : item.text)
   for (const scenario of spec.scenarios) {
     for (const behaviour of scenario.behaviours) {
-      items.push({ id: behaviour.id, text: cite(behaviour), section: scenario.title, removed: behaviour.removed })
-      for (const edge of behaviour.edges) items.push({ id: edge.id, text: cite(edge), section: scenario.title, removed: edge.removed })
+      items.push({ name: behaviour.name, text: cite(behaviour), section: scenario.title, removed: behaviour.removed })
+      for (const edge of behaviour.edges) items.push({ name: edge.name, text: cite(edge), section: scenario.title, removed: edge.removed })
     }
   }
   for (const question of spec.questions) {
-    items.push({ id: question.id, text: cite(question), section: QUESTIONS_SECTION, removed: question.removed })
-  }
-  for (const finding of spec.findings) {
-    items.push({ id: finding.id, text: finding.text, section: FINDINGS_SECTION, removed: REMOVED.test(finding.text) })
+    items.push({ name: question.name, text: cite(question), section: QUESTIONS_SECTION, removed: question.removed })
   }
   return items
 }
 
-/** The scenario an item sits in, for grouping tasks by what they deliver. */
-export function scenarioOf(spec: Spec, id: string): Scenario | undefined {
-  return spec.scenarios.find((s) => s.behaviours.some((b) => b.id === id || b.edges.some((e) => e.id === id)))
+/** The scenario a rule sits in, for grouping tasks by what they deliver. */
+export function scenarioOf(spec: Spec, name: string): Scenario | undefined {
+  return spec.scenarios.find((s) => s.behaviours.some((b) => same(b.name, name) || b.edges.some((e) => same(e.name, name))))
 }
 
 /**
  * What the tasks were mapped from: the goal, the scenarios and the questions.
- * Findings are left out on purpose, so a proposal filled into the table is
- * not a change to the plan the board was built for.
+ * Decisions are left out on purpose, so a proposal or a ruling written into
+ * the section is not a change to the plan the board was built for.
  */
 export function specFingerprint(spec: Spec): string {
   const hash = createHash('sha1')
@@ -261,6 +258,6 @@ export function contractProblems(file: string, problems: string[]): string {
     `\`${file}\` is off contract. Fix it before you stop:`,
     ...problems.map((p) => `- ${p}`),
     '',
-    `The contract: \`## ${GOAL_SECTION}\` as prose, then one \`##\` per scenario holding \`- B1: ...\` behaviours with their edge cases nested as \`  - E1: ...\`, then \`## ${QUESTIONS_SECTION}\` with \`- Q1: ...\`, then \`## ${FINDINGS_SECTION}\` as a table. Nothing else.`,
+    `The contract: \`## ${GOAL_SECTION}\` as prose, then one \`##\` per scenario holding \`- **Name**: rule\` items with their edge cases nested as \`  - **Name**: ...\`, then \`## ${QUESTIONS_SECTION}\` with \`- **Name**: question\` items, then \`## ${DECISIONS_SECTION}\` with one \`###\` per decision. Nothing else.`,
   ].join('\n')
 }

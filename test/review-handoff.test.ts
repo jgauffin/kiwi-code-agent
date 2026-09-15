@@ -3,7 +3,6 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  acceptResolution,
   addComment,
   assertApprovable,
   emptyReview,
@@ -11,6 +10,7 @@ import {
   pendingRound,
   readReview,
   removeComment,
+  resolveComment,
   reviewPath,
   strikeItem,
   submitRound,
@@ -32,9 +32,9 @@ status: draft
 Orders can be cancelled.
 
 ## Cancelling
-- B1: an order can be cancelled
-- B2: a cancelled order is refunded
-  - E1: a partial refund on a shipped order
+- **Cancel command**: an order can be cancelled
+- **Refund**: a cancelled order is refunded
+  - **Partial refund**: a partial refund on a shipped order
 `
 
 const body = spec.split('---\n')[2]!.replace(/^\s+/, '')
@@ -61,10 +61,12 @@ async function workspace(review?: Review): Promise<string> {
 
 function pending(): Review {
   const review = emptyReview()
-  addComment(review, 'B1', 'cancelling is not the same as voiding', 'B1: an order can be cancelled')
-  strikeItem(review, 'B2')
+  addComment(review, 'Cancel command', 'cancelling is not the same as voiding', 'Cancel command: an order can be cancelled')
+  strikeItem(review, 'Refund')
   return review
 }
+
+const first = { round: 1, index: 0 }
 
 describe('submitting a review', () => {
   it('goes_to_the_owning_session_when_it_is_still_alive', async () => {
@@ -81,7 +83,7 @@ describe('submitting a review', () => {
       expect(round.number).toBe(1)
       expect(post.delivered).toHaveLength(1)
       expect(post.delivered[0]).toMatchObject({ kind: 'send', sessionId: 'owner-1' })
-      expect(post.delivered[0]!.text).toContain('C1, on B1: cancelling is not the same as voiding')
+      expect(post.delivered[0]!.text).toContain('On "Cancel command": cancelling is not the same as voiding')
 
       const stored = await readReview(reviewPath(dir, 'Order cancellation'))
       expect(stored.rounds[0]!.submittedAt).toBe('2026-01-01T00:00:00.000Z')
@@ -126,7 +128,7 @@ describe('submitting a review', () => {
 
   it('a_comment_whose_item_is_gone_from_the_file_is_carried_with_the_text_it_was_written_against', async () => {
     const review = emptyReview()
-    addComment(review, 'B9', 'this promises too much', 'B9: every order is refunded within a day')
+    addComment(review, 'Same-day refund', 'this promises too much', 'Same-day refund: every order is refunded within a day')
     const dir = await workspace(review)
     try {
       const post = courier(['owner-1'])
@@ -137,8 +139,8 @@ describe('submitting a review', () => {
         owner: { sessionId: 'owner-1' },
       })
       const text = post.delivered[0]!.text
-      expect(text).toContain('C1, on B9, which is no longer in the plan')
-      expect(text).toContain('"B9: every order is refunded within a day"')
+      expect(text).toContain('On "Same-day refund", which is no longer in the plan')
+      expect(text).toContain('"Same-day refund: every order is refunded within a day"')
       expect(text).toContain('this promises too much')
     } finally {
       await rm(dir, { recursive: true, force: true })
@@ -168,8 +170,8 @@ describe('closing a round', () => {
     return text
       .split('\n')
       .flatMap((line) => {
-        const id = /^- (C\d+) \(/.exec(line)?.[1]
-        const answer = id ? resolutions[id] : undefined
+        const target = /^- on (.+?):/.exec(line)?.[1]
+        const answer = target ? resolutions[target] : undefined
         return answer ? [line, `  - ${answer}`] : [line]
       })
       .join('\n')
@@ -188,17 +190,17 @@ describe('closing a round', () => {
       })
 
       // The agent changes nothing and disagrees; the resolution still lands in the file.
-      await writeFile(file, resolve(await readFile(file, 'utf8'), { C1: 'disagreed: cancelling is the right word' }), 'utf8')
+      await writeFile(file, resolve(await readFile(file, 'utf8'), { 'Cancel command': 'disagreed: cancelling is the right word' }), 'utf8')
       const revised = await readReview(file)
       expect(revised.rounds[0]!.comments[0]!.resolution).toEqual({ kind: 'disagreed', text: 'cancelling is the right word' })
-      expect(openComments(revised).map((c) => c.id)).toEqual(['C1'])
-      expect(() => assertApprovable(revised)).toThrow(/C1/)
+      expect(openComments(revised).map((c) => c.target)).toEqual(['Cancel command'])
+      expect(() => assertApprovable(revised)).toThrow(/on Cancel command/)
 
       // The human may argue on in a second round, or accept the disagreement and close it.
-      addComment(revised, 'B1', 'I still think it is wrong, but let it stand')
+      addComment(revised, 'Cancel command', 'I still think it is wrong, but let it stand')
       expect(pendingRound(revised)?.number).toBe(2)
-      removeComment(revised, 'C2')
-      acceptResolution(revised, 'C1')
+      removeComment(revised, { round: 2, index: 0 })
+      resolveComment(revised, first)
       await writeReview(file, revised, 'plan/order-cancellation.spec.md')
 
       const closed = await readReview(file)
@@ -216,15 +218,16 @@ describe('the plan session knows what a review asks of it', () => {
   it('the_conduct_is_in_the_system_prompt_too_so_a_fresh_session_does_not_wait_for_direction', () => {
     const prompt = blindPlanPrompt('Order cancellation', '/work/repo')
     expect(prompt).toContain('plan/order-cancellation.review.md')
-    expect(prompt).toContain('without renumbering')
+    expect(prompt).toContain('without renaming')
     expect(prompt).toContain('never bring a struck')
     expect(prompt).toContain('disagreed with a reason')
   })
 
-  it('the_check_is_a_run_not_a_reviewer_so_rulings_on_findings_never_go_to_it', () => {
+  it('the_check_is_a_run_not_a_reviewer_so_rulings_on_decisions_never_go_to_it', () => {
     const prompt = reconcilePrompt('Order cancellation', '/work/repo')
     expect(prompt).not.toContain('review.md')
-    expect(blindPlanPrompt('Order cancellation', '/work/repo')).toContain('[resolved]')
+    expect(prompt).toContain('never write, change or remove either')
+    expect(blindPlanPrompt('Order cancellation', '/work/repo')).toContain('[applied]')
   })
 
   it('a_session_picking_up_a_spec_reads_the_files_reports_where_it_stands_and_leaves_an_approved_spec_alone', () => {
@@ -245,12 +248,13 @@ describe('the revision the agent is asked for', () => {
     submitRound(r, '2026-01-01T00:00:00.000Z')
     return r
   })()
-  const prompt = reviewPrompt({ feature: 'Order cancellation', round: review.rounds[0]!, body, struck: ['B2'] })
+  const prompt = reviewPrompt({ feature: 'Order cancellation', round: review.rounds[0]!, body, struck: ['Refund'] })
 
-  it('names_the_struck_items_and_forbids_renumbering_and_resurrection', () => {
-    expect(prompt).toContain('Struck in this round, to be removed: B2.')
+  it('names_the_struck_items_and_forbids_renaming_and_resurrection', () => {
+    expect(prompt).toContain('Struck in this round, to be removed: Refund.')
     expect(prompt).toContain('[removed]')
-    expect(prompt).toContain('do not renumber')
+    expect(prompt).toContain('do not rename')
+    expect(prompt).toContain('never answered by renaming its rule')
     expect(prompt).toContain('Never reintroduce a struck item')
     expect(prompt).toContain('Repair the items that referred to a removed item')
   })
@@ -274,37 +278,37 @@ describe('the revision the agent is asked for', () => {
   })
 
   it('carries_the_plan_level_comment_as_a_comment_on_the_whole', () => {
-    expect(prompt).toContain('C2, on the plan as a whole: the goal reads like a summary')
+    expect(prompt).toContain('On the plan as a whole: the goal reads like a summary')
   })
 
   it('an_item_struck_in_an_earlier_round_that_the_plan_still_presents_as_live_is_named', () => {
-    expect(standingStrikes(body, ['B2'])).toEqual(['B2'])
-    const removedB2 = body.replace('- B2: a cancelled order is refunded', '- B2: a cancelled order is refunded [removed]')
-    expect(standingStrikes(removedB2, ['B2'])).toEqual([])
-    expect(standingStrikes(body, ['B9'])).toEqual([])
+    expect(standingStrikes(body, ['Refund'])).toEqual(['Refund'])
+    const removedRefund = body.replace('- **Refund**: a cancelled order is refunded', '- **Refund**: a cancelled order is refunded [removed]')
+    expect(standingStrikes(removedRefund, ['Refund'])).toEqual([])
+    expect(standingStrikes(body, ['Same-day refund'])).toEqual([])
 
     const second = (() => {
       const r = pending()
       submitRound(r, '2026-01-01T00:00:00.000Z')
-      addComment(r, 'B1', 'and this one too')
+      addComment(r, 'Cancel command', 'and this one too')
       return submitRound(r, '2026-01-02T00:00:00.000Z')
     })()
-    const text = reviewPrompt({ feature: 'Order cancellation', round: second, body, struck: ['B2'] })
-    expect(text).toContain('Struck in earlier rounds and still gone: B2.')
-    expect(text).toContain('Struck but still standing in the plan, to be marked removed: B2.')
+    const text = reviewPrompt({ feature: 'Order cancellation', round: second, body, struck: ['Refund'] })
+    expect(text).toContain('Struck in earlier rounds and still gone: Refund.')
+    expect(text).toContain('Struck but still standing in the plan, to be marked removed: Refund.')
   })
 
   it('a_plan_whose_every_item_is_struck_is_reported_as_emptied', () => {
-    expect(emptied(body, ['B1', 'B2', 'E1'])).toBe(true)
-    expect(emptied(body, ['B1', 'B2'])).toBe(false)
+    expect(emptied(body, ['Cancel command', 'Refund', 'Partial refund'])).toBe(true)
+    expect(emptied(body, ['Cancel command', 'Refund'])).toBe(false)
     expect(emptied('# Nothing here', [])).toBe(false)
 
     const all = (() => {
       const r = emptyReview()
-      for (const id of ['B1', 'B2', 'E1']) strikeItem(r, id)
+      for (const name of ['Cancel command', 'Refund', 'Partial refund']) strikeItem(r, name)
       return submitRound(r, '2026-01-01T00:00:00.000Z')
     })()
-    const text = reviewPrompt({ feature: 'Order cancellation', round: all, body, struck: ['B1', 'B2', 'E1'] })
+    const text = reviewPrompt({ feature: 'Order cancellation', round: all, body, struck: ['Cancel command', 'Refund', 'Partial refund'] })
     expect(text).toContain('Every item in the plan is now struck: nothing remains.')
     expect(text).toContain('report that nothing remains and stop')
   })

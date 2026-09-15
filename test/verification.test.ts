@@ -69,7 +69,7 @@ describe('findUpward', () => {
 
 describe('runVerification', () => {
   it('runs_the_suites_the_tasks_files_select_and_records_a_pass_on_the_board', async () => {
-    await board('- T1: a [tested]', '  - files: src/Api/Orders/Order.cs', '- T2: b [tested]', '  - files: src/app/orders.ts (new)')
+    await board('- **T1**: a [tested]', '  - files: src/Api/Orders/Order.cs', '- **T2**: b [tested]', '  - files: src/app/orders.ts (new)')
     const result = await runVerification({ cwd: dir, feature: 'Order cancellation', rules, run, now: '2026-09-14T10:00:00Z' })
     expect(runs).toHaveLength(2)
     expect(result.failures).toEqual([])
@@ -79,14 +79,14 @@ describe('runVerification', () => {
   })
 
   it('a_removed_tasks_files_do_not_select_a_suite', async () => {
-    await board('- T1: a [tested]', '  - files: src/app/orders.ts', '- T2: gone [removed]', '  - files: src/Api/Orders/Order.cs')
+    await board('- **T1**: a [tested]', '  - files: src/app/orders.ts', '- **T2**: gone [removed]', '  - files: src/Api/Orders/Order.cs')
     await runVerification({ cwd: dir, feature: 'Order cancellation', rules, run })
     expect(runs).toEqual([{ command: 'npm test', cwd: dir }])
   })
 
   it('records_a_failure_naming_the_command_and_hands_the_output_tail_to_the_implementer', async () => {
     outcome = { ok: false, output: 'x'.repeat(100) + 'THE ERROR' }
-    await board('- T1: a [tested]', '  - files: src/app/orders.ts')
+    await board('- **T1**: a [tested]', '  - files: src/app/orders.ts')
     const result = await runVerification({ cwd: dir, feature: 'Order cancellation', rules, run, maxOutputChars: 20 })
     expect(result.record.ok).toBe(false)
     expect(result.record.text).toBe('`npm test` in .')
@@ -99,7 +99,7 @@ describe('runVerification', () => {
   })
 
   it('nothing_to_run_is_recorded_as_such_rather_than_leaving_the_board_stuck', async () => {
-    await board('- T1: a [tested]', '  - files: docs/intent/orders.md')
+    await board('- **T1**: a [tested]', '  - files: docs/intent/orders.md')
     const result = await runVerification({ cwd: dir, feature: 'Order cancellation', rules, run })
     expect(runs).toEqual([])
     expect(result.record).toMatchObject({ ok: true, text: 'nothing to run' })

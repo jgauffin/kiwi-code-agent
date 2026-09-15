@@ -1,6 +1,6 @@
 import type { PermissionDecision, SessionEvent } from '../agent/session/code-session'
 import type { QuestionOutcome } from '../agent/session/user-question'
-import type { PlanItem, Review } from '../agent/phases/plan-review'
+import type { CommentRef, Review } from '../agent/phases/plan-review'
 import type { PlanStage } from '../agent/phases/plan-stage'
 import type { Spec } from '../agent/phases/spec-model'
 import type { Task, VerificationRecord } from '../agent/phases/tasks-file'
@@ -51,14 +51,14 @@ export type PlanState = {
   lastVerification?: VerificationRecord
   /** The task board; empty until the spec is mapped. */
   tasks: Task[]
-  /** The plan's items by id, what a comment or a strike is attached to. */
-  items: PlanItem[]
   /** Comments, strikes and resolutions so far; kept after approval as the record of how the plan was reached. */
   review: Review
   /** Comments can be attached: the artifact is a draft. */
   commentable: boolean
   /** The plan is mapped and no comment is open, so it may be approved. */
   approvable: boolean
+  /** Decisions the user ruled on that the planner has not applied yet, plus the open ones Approve would rule `accepted`. */
+  pendingDecisions: number
   /** Amendments to product intent this feature settled; absent when none were proposed. */
   intent?: IntentState
 }
@@ -104,18 +104,20 @@ export type UserPermissionDecision = PermissionDecision & { remember?: Remembere
 /** `session` rules hold for the coding session; `project` rules are written into the workspace's allow list. */
 export type RememberedRules = { session: string[]; project: string[] }
 
-/** What the human does while reviewing a draft plan. */
+/** What the human does on the plan view of a draft: the review, and the rulings on its decisions. */
 export type ReviewAction =
-  /** `target` is an item id or `plan` for the artifact as a whole. */
+  /** `target` is a rule's name or `plan` for the artifact as a whole. */
   | { type: 'add_comment'; target: string; text: string }
-  | { type: 'edit_comment'; commentId: string; text: string }
-  | { type: 'remove_comment'; commentId: string }
-  | { type: 'strike_item'; itemId: string }
-  | { type: 'unstrike_item'; itemId: string }
+  | { type: 'edit_comment'; comment: CommentRef; text: string }
+  | { type: 'remove_comment'; comment: CommentRef }
+  | { type: 'strike_item'; item: string }
+  | { type: 'unstrike_item'; item: string }
   /** Hands the plan and the pending review to the session that owns the plan, or a fresh one of its phase. */
   | { type: 'submit_review' }
-  /** Closes a comment by accepting the agent's resolution. */
-  | { type: 'accept_resolution'; commentId: string }
+  /** Closes a comment: the human has read the agent's resolution, agreed with or not. */
+  | { type: 'resolve_comment'; comment: CommentRef }
+  /** Writes the ruling under the decision: `accepted`, or the user's own text. No turn is spent; Approve hands the rulings over. */
+  | { type: 'rule_decision'; decision: string; ruling: string }
 
 export type FromWebview =
   | { type: 'ready' }

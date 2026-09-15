@@ -16,9 +16,9 @@ describe('plan list', () => {
     const dir = await workspace({
       'orders.spec.md': '---\nfeature: Orders\nstatus: draft\n---\n# Orders\n',
       'billing.spec.md': '---\nfeature: Billing\nstatus: approved\n---\n# Billing\n',
-      'billing.tasks.md': '# Tasks for Billing\n\n- T1: bill [tested]\n',
+      'billing.tasks.md': '# Tasks for Billing\n\n- **Bill**: bill [tested]\n',
       'audit.spec.md': '---\nfeature: Audit\nstatus: approved\n---\n# Audit\n',
-      'audit.tasks.md': '# Tasks for Audit\n\n- T1: log [tested]\n\n## Verification\n- 2026-09-14T10:00:00Z: passed\n',
+      'audit.tasks.md': '# Tasks for Audit\n\n- **Log**: log [tested]\n\n## Verification\n- 2026-09-14T10:00:00Z: passed\n',
       'orders.review.md': '# not a spec\n',
     })
     try {

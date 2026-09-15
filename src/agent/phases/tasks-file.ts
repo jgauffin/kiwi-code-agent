@@ -13,15 +13,18 @@ import { bodyOf, frontMatterValue, withFrontMatterValue } from './spec-file'
 /** `blocked` is unfinished work with a reason; only `tested` is a finish. */
 export type TaskState = 'open' | 'in_progress' | 'done' | 'tested' | 'blocked'
 
-/** The test that proves one delivered item: the evidence shown on the spec. */
+/** The test that proves one delivered rule: the evidence shown on the spec. */
 export type Proof = { item: string; file: string; test: string }
 
 export type Task = {
-  id: string
-  /** The line's text after the id, markers included, as written. */
+  /** The bold lead-in; unique in the file, stable across re-runs. */
+  name: string
+  /** The line's text after the name, markers included, as written. */
   text: string
-  /** Spec item ids the task delivers (B1, E2). */
+  /** Names of the spec rules the task delivers. */
   delivers: string[]
+  /** The `##` heading the task sits under, the scenario it delivers; absent on a flat board. */
+  group?: string
   /** Workspace-relative paths the task touches; what verification runs over. */
   files: string[]
   /** Paths the mapping run read to reach the task: what the implementer starts from and does not have to find again. */
@@ -58,12 +61,15 @@ export function tasksFile(feature: string): string {
   return `${PLAN_DIR}/${featureSlug(feature)}.tasks.md`
 }
 
-const TASK = /^-\s+(T\d+)\b\s*(?:\(([^)]*)\))?\s*:\s*(.*)$/
+/** `- **Name** (Rule a, Rule b): text`; the delivered rules ride between the name and the colon. */
+const TASK = /^-\s+\*\*([^*]+?)\*\*\s*(?:\(([^)]*)\))?\s*:?\s*(.*)$/
 const FILES = /^\s+-\s+files\s*:\s*(.*)$/i
 const CONTEXT = /^\s+-\s+context\s*:\s*(.*)$/i
 const PROVES = /^\s+-\s+proves\s*:\s*(.*)$/i
-const PROOF = /^([A-Z]{1,3}\d+)\s+(\S+)\s+(.+)$/
+/** `Rule name → test/file.ts test_name`; the arrow keeps a name with spaces apart from the path. */
+const PROOF = /^(.+?)\s*(?:→|->)\s*(\S+)\s+(.+)$/
 const HEADING = /^#{1,6}\s+(.*)$/
+const GROUP = /^##\s+(.*)$/
 const RECORD = /^-\s+(\S+)\s*:\s*(passed|failed)\b\s*,?\s*(.*)$/i
 const REMOVED = /\[removed\]/i
 const BLOCKED = /\[blocked\b/i
@@ -89,7 +95,7 @@ const list = (text: string): string[] =>
 /** `src/a.ts (new)` names a file the task creates; the path is what matters downstream. */
 const pathOf = (entry: string): string => entry.replace(/\s*\(new\)\s*$/i, '').trim()
 
-/** `B1 test/a.test.ts a_rule_holds`; an entry that does not parse is kept out, not guessed at. */
+/** `Cancel command → test/a.test.ts a_rule_holds`; an entry that does not parse is kept out, not guessed at. */
 function proofs(text: string): Proof[] {
   return list(text).flatMap((entry) => {
     const match = PROOF.exec(entry)
@@ -100,6 +106,7 @@ function proofs(text: string): Proof[] {
 export function parseTasks(text: string): { tasks: Task[]; verification: VerificationRecord | undefined; spec: string | undefined } {
   const tasks: Task[] = []
   let task: Task | undefined
+  let group: string | undefined
   let inVerification = false
   let verification: VerificationRecord | undefined
   for (const raw of bodyOf(text).split(/\r?\n/)) {
@@ -107,6 +114,8 @@ export function parseTasks(text: string): { tasks: Task[]; verification: Verific
     const heading = HEADING.exec(line.trim())
     if (heading) {
       inVerification = heading[1]!.trim() === VERIFICATION_SECTION
+      const section = GROUP.exec(line.trim())
+      if (section && !inVerification) group = section[1]!.trim()
       task = undefined
       continue
     }
@@ -137,9 +146,10 @@ export function parseTasks(text: string): { tasks: Task[]; verification: Verific
     if (!match) continue
     const body = match[3]!.trim()
     task = {
-      id: match[1]!,
+      name: match[1]!.trim().replace(/:$/, '').trim(),
       text: body,
       delivers: list(match[2] ?? ''),
+      ...(group !== undefined ? { group } : {}),
       files: [],
       context: [],
       proves: [],
@@ -180,24 +190,27 @@ export function taskFiles(tasks: Task[]): string[] {
   return [...new Set(liveTasks(tasks).flatMap((t) => t.files))]
 }
 
-/** The live task that delivers an item, first in file order. */
+/** Names match as the planner wrote them, whatever the case. */
+export const sameName = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase()
+
+/** The live task that delivers a rule, first in file order. */
 export function deliveredBy(tasks: Task[], item: string): Task | undefined {
-  return liveTasks(tasks).find((t) => t.delivers.includes(item))
+  return liveTasks(tasks).find((t) => t.delivers.some((d) => sameName(d, item)))
 }
 
-/** The proof a live task recorded for an item. */
+/** The proof a live task recorded for a rule. */
 export function provenBy(tasks: Task[], item: string): Proof | undefined {
-  return liveTasks(tasks).flatMap((t) => t.proves).find((p) => p.item === item)
+  return liveTasks(tasks).flatMap((t) => t.proves).find((p) => sameName(p.item, item))
 }
 
-/** Items a task marked tested without naming a test for: a finish the evidence does not back. */
+/** Rules a task marked tested without naming a test for: a finish the evidence does not back. */
 export function unprovenItems(tasks: Task[]): string[] {
   return liveTasks(tasks)
     .filter((t) => t.state === 'tested')
-    .flatMap((t) => t.delivers.filter((item) => !t.proves.some((p) => p.item === item)))
+    .flatMap((t) => t.delivers.filter((item) => !t.proves.some((p) => sameName(p.item, item))))
 }
 
-/** Of the given item ids, those no live task delivers. */
+/** Of the given rule names, those no live task delivers. */
 export function undeliveredItems(tasks: Task[], items: string[]): string[] {
   return items.filter((item) => deliveredBy(tasks, item) === undefined)
 }

@@ -36,7 +36,7 @@ export class PlanBar extends HTMLElement {
     <button type="button" class="stop" if="cleaning" title="Stop the cleanup." r-click="stopCleanup()">Stop</button>
     <span class="ran" if="ran" title="{{ranText}}">{{ranText}}</span>
     <button type="button" class="repair" if="repairable" title="{{repairHint}}" r-click="repair()">Repair{{problemMark}}</button>
-    <button type="button" class="map" if="mappable" title="Read the code and write what contradicts or breaks under this spec into its Findings table, and the tasks with the files they touch into the tasks file. After this it runs by itself when the plan changes." r-click="map()">Map against code</button>
+    <button type="button" class="map" if="mappable" title="Read the code and write what contradicts or breaks under this spec as decisions for you to rule on, and the tasks with the files they touch into the tasks file. After this it runs by itself when the plan changes." r-click="map()">Map against code</button>
     <button type="button" class="approve" if="isDraft" disabled="{{blocked}}" title="{{approveHint}}" r-click="approve()">Approve</button>
     <button type="button" class="implement" if="implementable" title="Start a fresh session that builds the tasks one by one." r-click="implement()">Implement</button>
     <button type="button" class="verify" if="verifiable" title="Run the test commands over the files the tasks name." r-click="verify()">{{verifyLabel}}</button>
@@ -84,9 +84,7 @@ export class PlanBar extends HTMLElement {
         verifyLabel: plan.lastVerification ? 'Verify again' : 'Verify',
         openMark: open > 0 ? ` (${open})` : '',
         blocked: !plan.approvable,
-        approveHint: plan.approvable
-          ? 'Approve this plan: the spec and its tasks.'
-          : `Approval is blocked while ${open} comment${open === 1 ? ' is' : 's are'} open.`,
+        approveHint: approveHint(plan, open),
         amendable: plan.intent?.applicable === true,
         intentMark: plan.intent && plan.intent.pending > 0 ? ` (${plan.intent.pending})` : '',
         intentHint: plan.intent
@@ -127,6 +125,15 @@ function stageLabel(plan: PlanState): string {
     default:
       return base
   }
+}
+
+/** What Approve does from here: with decisions pending it accepts the proposals and hands the rulings over; approval itself comes after the revision. */
+function approveHint(plan: PlanState, openComments: number): string {
+  if (!plan.approvable) return `Approval is blocked while ${openComments} comment${openComments === 1 ? ' is' : 's are'} open.`
+  if (plan.pendingDecisions > 0) {
+    return `${plan.pendingDecisions} decision${plan.pendingDecisions === 1 ? '' : 's'} pending: Approve rules every proposal accepted and hands the rulings to the planner. Approve again once the revised spec is back.`
+  }
+  return 'Approve this plan: the spec and its tasks.'
 }
 
 /** Comments the human has not closed; while there is one, approval is blocked. */

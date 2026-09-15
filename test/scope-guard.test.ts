@@ -65,11 +65,12 @@ describe('blind plan helpers', () => {
     expect(specPath(cwd, 'Order cancellation')).toBe(`${cwd}${process.platform === 'win32' ? '\\' : '/'}plan${process.platform === 'win32' ? '\\' : '/'}order-cancellation.spec.md`)
   })
 
-  it('prompt_names_the_feature_the_spec_file_and_the_stable_ids', () => {
+  it('prompt_names_the_feature_the_spec_file_and_the_stable_names', () => {
     const prompt = blindPlanPrompt('Order cancellation', cwd)
     expect(prompt).toContain('plan/order-cancellation.spec.md')
     expect(prompt).toContain('status: draft')
-    expect(prompt).toContain('never renumber')
+    expect(prompt).toContain('it never changes once written')
+    expect(prompt).toContain('(was Old name)')
     expect(prompt).toContain('Write nothing until the user says go')
     expect(BLIND_PLAN_TOOLS).toEqual(['Read', 'Glob', 'JsonSchema', 'JsonQuery', 'Write', 'Edit', 'AskUser'])
   })
@@ -77,9 +78,9 @@ describe('blind plan helpers', () => {
   it('prompt_states_the_contract_scenarios_with_nested_edges_and_no_restating_sections', () => {
     const prompt = blindPlanPrompt('Order cancellation', cwd)
     expect(prompt).toContain('one `##` section per scenario')
-    expect(prompt).toContain('indented under the behaviour it qualifies')
+    expect(prompt).toContain('indented under the rule it qualifies')
     expect(prompt).toContain('no invariants, acceptance criteria or task sections')
-    expect(prompt).toContain('  - E1:')
+    expect(prompt).toContain('  - **Shipped order**:')
   })
 })
 

@@ -5,10 +5,10 @@ import type { SpecState } from './spec-file'
 
 /**
  * Phase 1 plans blind: it reads `docs/**` and nothing else. So a ruling made
- * in a spec — a `naive` finding the user upheld, a contradiction decided in
- * the spec's favour — is invisible to the next feature's planner unless it
- * reaches the intent docs. Without this, intent rots and the same question is
- * re-decided, possibly the other way.
+ * in a spec (a decision ruled for the spec, or one the code proved right) is
+ * invisible to the next feature's planner unless it reaches the intent docs.
+ * Without this, intent rots and the same question is re-decided, possibly the
+ * other way.
  *
  * The agent cannot edit `docs/` itself: intent is the user's. So it proposes,
  * in `plan/<feature>.intent.md`, and the human applies. Applying is mechanical
@@ -20,14 +20,12 @@ import type { SpecState } from './spec-file'
 export type AmendmentMode = 'append' | 'replace' | 'new'
 
 export type Amendment = {
-  /** A1, A2, ... stable once written; the agent never renumbers. */
-  id: string
   mode: AmendmentMode
   /** Workspace-relative path of the intent doc, always under `docs/`. */
   doc: string
   /** Heading the amendment lands under; absent means the end of the document. */
   heading?: string
-  /** The spec item or finding the amendment came from, for the record. */
+  /** The rule or decision the amendment came from, for the record. */
   from?: string
   /** Why intent has to change, in the agent's words. */
   why?: string
@@ -35,9 +33,12 @@ export type Amendment = {
   text: string
   /** Already written into `docs/`; it is never applied twice. */
   applied: boolean
-  /** Line index of the heading in the intent file, for marking it applied. */
+  /** Line index of the heading in the intent file: what tells two amendments on one section apart. */
   line: number
 }
+
+/** How an amendment is named in messages: the section it lands in and how. */
+export const label = (a: Amendment): string => `${a.doc}${a.heading ? `#${a.heading}` : ''} (${a.mode})`
 
 export function intentPath(cwd: string, feature: string): string {
   return join(cwd, PLAN_DIR, `${featureSlug(feature)}.intent.md`)
@@ -48,8 +49,8 @@ export function intentFile(feature: string): string {
   return `${PLAN_DIR}/${featureSlug(feature)}.intent.md`
 }
 
-// `## A1 (append) docs/intent/orders.md#Cancellation [applied]`
-const AMENDMENT = /^##\s+(A\d+)\s*\(([A-Za-z]+)\)\s+(\S+?)\s*(\[applied\])?\s*$/
+// `## docs/intent/orders.md#Cancellation (append) [applied]`; the heading may hold spaces, the mode closes it.
+const AMENDMENT = /^##\s+(.+?)\s+\(([A-Za-z]+)\)\s*(\[applied\])?\s*$/
 const META = /^-\s+(from|why)\s*:\s*(.*)$/i
 const MODES: AmendmentMode[] = ['append', 'replace', 'new']
 
@@ -72,14 +73,13 @@ export function parseAmendments(text: string): Amendment[] {
         current = undefined
         continue
       }
-      const [doc, heading] = splitTarget(match[3]!)
+      const [doc, heading] = splitTarget(match[1]!)
       current = {
-        id: match[1]!,
         mode: mode as AmendmentMode,
         doc,
         ...(heading ? { heading } : {}),
         text: '',
-        applied: match[4] !== undefined,
+        applied: match[3] !== undefined,
         line: index,
       }
       amendments.push(current)
@@ -164,12 +164,12 @@ function trimEnd(lines: string[], from: number, to: number): number {
  */
 export function applyToDoc(doc: string, amendment: Amendment): string {
   const text = amendment.text.trim()
-  if (!text) throw new Error(`${amendment.id} has no text to write.`)
+  if (!text) throw new Error(`${label(amendment)} has no text to write.`)
   const lines = doc.length > 0 ? doc.split(/\r?\n/) : []
 
   if (amendment.mode === 'new') {
     if (amendment.heading && findSection(lines, amendment.heading)) {
-      throw new Error(`${amendment.id}: "${amendment.heading}" already exists in ${amendment.doc}; use replace or append.`)
+      throw new Error(`${label(amendment)}: "${amendment.heading}" already exists in ${amendment.doc}; use replace or append.`)
     }
     const body = amendment.heading ? `## ${amendment.heading}\n\n${text}` : text
     const head = lines.slice(0, trimEnd(lines, 0, lines.length))
@@ -177,13 +177,13 @@ export function applyToDoc(doc: string, amendment: Amendment): string {
   }
 
   if (!amendment.heading) {
-    if (amendment.mode === 'replace') throw new Error(`${amendment.id}: replace needs a heading (path#heading).`)
+    if (amendment.mode === 'replace') throw new Error(`${label(amendment)}: replace needs a heading (path#heading).`)
     const head = lines.slice(0, trimEnd(lines, 0, lines.length))
     return [...head, ...(head.length > 0 ? [''] : []), ...text.split('\n'), ''].join('\n')
   }
 
   const section = findSection(lines, amendment.heading)
-  if (!section) throw new Error(`${amendment.id}: no heading "${amendment.heading}" in ${amendment.doc}.`)
+  if (!section) throw new Error(`${label(amendment)}: no heading "${amendment.heading}" in ${amendment.doc}.`)
   const bodyEnd = trimEnd(lines, section.heading + 1, section.end)
   const before = lines.slice(0, amendment.mode === 'replace' ? section.heading + 1 : bodyEnd)
   const after = lines.slice(section.end)
@@ -209,12 +209,12 @@ async function readDoc(path: string, mode: AmendmentMode): Promise<string> {
   }
 }
 
-/** Marks the applied amendments in the file without touching anything else the agent wrote. */
-export function markApplied(text: string, ids: string[]): string {
-  if (ids.length === 0) return text
+/** Marks the applied amendments in the file, by the line they were read from, without touching anything else the agent wrote. */
+export function markApplied(text: string, applied: Amendment[]): string {
+  if (applied.length === 0) return text
   const lines = text.split(/\r?\n/)
-  for (const amendment of parseAmendments(text)) {
-    if (amendment.applied || !ids.includes(amendment.id)) continue
+  for (const amendment of applied) {
+    if (amendment.applied) continue
     lines[amendment.line] = `${lines[amendment.line]!.trimEnd()} [applied]`
   }
   return lines.join('\n')
@@ -259,7 +259,7 @@ export async function writeBackIntent(options: { cwd: string; feature: string })
   }
 
   if (result.applied.length > 0) {
-    await writeFile(path, markApplied(text, result.applied.map((a) => a.id)), 'utf8')
+    await writeFile(path, markApplied(text, result.applied), 'utf8')
   }
   return result
 }

@@ -4,9 +4,10 @@ import type { ModelProfile } from '../agent/session/model-profile'
 import type { SessionEvent } from '../agent/session/code-session'
 import { nextStatus, type SessionStatus } from '../agent/session/session-status'
 import { readSpecState, setSpecStatus, type SpecState } from '../agent/phases/spec-file'
-import { PLAN_DIR, featureSlug, findingsHandoffPrompt, migrateSpecPrompt, resumePlanPrompt, specPath } from '../agent/phases/blind-plan'
+import { PLAN_DIR, decisionsHandoffPrompt, featureSlug, migrateSpecPrompt, resumePlanPrompt, rulingsHandoffPrompt, specPath } from '../agent/phases/blind-plan'
+import { acceptProposals, openDecisions, pendingDecisions, withRuling } from '../agent/phases/decisions'
 import { listPlans } from '../agent/phases/plan-list'
-import { assertFindingsRuled, openFindings, progressLine, reconcileKickoff } from '../agent/phases/reconcile'
+import { progressLine, reconcileKickoff } from '../agent/phases/reconcile'
 import { assertImplementable, implementKickoff } from '../agent/phases/implement'
 import { cleanupKickoff } from '../agent/phases/cleanup'
 import { anyLimit, oversizedFiles, sizeReport, type Thresholds } from '../agent/cleanup/oversized'
@@ -23,7 +24,6 @@ import {
   type VerifyRule,
 } from '../agent/phases/verification'
 import {
-  acceptResolution,
   addComment,
   assertApprovable,
   assertCommentable,
@@ -32,9 +32,9 @@ import {
   findItem,
   isCommentable,
   openComments,
-  planItems,
   readReview,
   removeComment,
+  resolveComment,
   reviewPath,
   strikeItem,
   unstrikeItem,
@@ -42,10 +42,10 @@ import {
   type Review,
 } from '../agent/phases/plan-review'
 import { submitReview, type ReviewCourier } from '../agent/phases/review-handoff'
-import { assertAmendable, intentPath, pending, readAmendments, writeBackIntent } from '../agent/phases/intent-writeback'
+import { assertAmendable, intentPath, label, pending, readAmendments, writeBackIntent, type Amendment } from '../agent/phases/intent-writeback'
 import { editDiffTitle, editLine, isRunSnapshot, runsRoot } from '../agent/edits/open-edit'
 import { buildRepoMap } from '../agent/repo-map/build-map'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative } from 'node:path'
 import type { FromWebview, PlanState, RunState, SessionTab, ToWebview } from './protocol'
 
@@ -239,7 +239,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this.changed.fire()
     }
     if (event.type === 'tool_result' && record?.feature) {
-      // The session just wrote the spec (a revision, findings, a task marker); the plan bar and view must follow.
+      // The session just wrote the spec (a revision, decisions, a task marker); the plan bar and view must follow.
       if (sessionId === this.activeSessionId) void this.sendState()
       if (record.mode === 'implement') void this.followBoard(record.feature)
     }
@@ -302,7 +302,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   /**
    * The run is over: stop its engine, count what it left in the spec and the
-   * tasks file and, when there are findings without a proposal, hand them to
+   * tasks file and, when there are decisions without a proposal, hand them to
    * the planner to propose on.
    */
   private async finishMapping(child: SessionRecord, errors: string[]): Promise<void> {
@@ -319,12 +319,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       const tasks = await readTasks(tasksPath(this.workspaceRoot, feature))
       // The board is stamped with the spec it was built from; a later change to the plan makes it stale.
       if (state.exists && tasks.exists) await stampSpecFingerprint(tasksPath(this.workspaceRoot, feature), specFingerprint(parseSpec(state.body)))
-      const open = state.exists ? openFindings(state.body) : []
+      const open = state.exists ? openDecisions(state.body) : []
       const count = tasks.exists ? liveTasks(tasks.tasks).length : 0
-      text = `Mapped: ${count} task${count === 1 ? '' : 's'}, ${open.length === 0 ? 'the code is clear' : `${open.length} finding${open.length === 1 ? '' : 's'}`}`
-      const unproposed = open.filter((f) => f.proposal.length === 0).map((f) => f.id)
+      text = `Mapped: ${count} task${count === 1 ? '' : 's'}, ${open.length === 0 ? 'the code is clear' : `${open.length} decision${open.length === 1 ? '' : 's'}`}`
+      const unproposed = open.filter((d) => d.proposal.length === 0).map((d) => d.title)
       if (unproposed.length > 0 && this.sessions.get(parentId)) {
-        await this.sessions.send(parentId, findingsHandoffPrompt(feature, unproposed))
+        await this.sessions.send(parentId, decisionsHandoffPrompt(feature, unproposed))
       }
     }
     this.mappings.set(parentId, { live: false, text })
@@ -605,48 +605,57 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         await this.resumePlan(message.feature)
         return
       case 'approve_spec': {
+        const record = this.activeRecord()
         const path = this.activeSpecPath()
-        const feature = this.activeRecord()?.feature
-        if (!path || !feature) return
+        const feature = record?.feature
+        if (!record || !path || !feature) return
         // Agreement is reached, not assumed: every comment has to be closed first, and the tasks have to be known.
         const review = await readReview(reviewPath(this.workspaceRoot, feature))
         assertApprovable(review)
         const spec = await readSpecState(path)
-        if (spec.exists) assertFindingsRuled(spec.body)
+        if (spec.exists && (await this.handOverRulings(record, path, spec.body))) return
         const tasks = await readTasks(tasksPath(this.workspaceRoot, feature))
         const stage = planStage(spec, review, tasks)
-        if (tasksStale(spec, tasks)) throw new Error('The tasks predate the last change to the spec; they are re-mapped when the plan session’s turn ends with every finding ruled on.')
+        if (tasksStale(spec, tasks)) throw new Error('The tasks predate the last change to the spec; they are re-mapped when the plan session’s turn ends with every decision applied.')
         if (!isApprovable(stage, spec, tasks)) throw new Error('Map the spec against the code first: approval covers the tasks too.')
         await setSpecStatus(path, 'approved')
+        await this.sendState()
+        return
+      }
+      case 'rule_decision': {
+        const path = this.activeSpecPath()
+        if (!path) return
+        assertCommentable(await readSpecState(path))
+        await writeFile(path, withRuling(await readFile(path, 'utf8'), message.decision, message.ruling), 'utf8')
         await this.sendState()
         return
       }
       case 'add_comment':
         await this.reviewing(async (review, state) => {
           const item = message.target === 'plan' ? undefined : findItem(state.exists ? state.body : '', message.target)
-          addComment(review, message.target, message.text, item ? `${item.id}: ${item.text}` : undefined)
+          addComment(review, message.target, message.text, item ? `${item.name}: ${item.text}` : undefined)
         })
         return
       case 'edit_comment':
-        await this.reviewing((review) => editComment(review, message.commentId, message.text))
+        await this.reviewing((review) => editComment(review, message.comment, message.text))
         return
       case 'remove_comment':
-        await this.reviewing((review) => removeComment(review, message.commentId))
+        await this.reviewing((review) => removeComment(review, message.comment))
         return
       case 'strike_item':
-        await this.reviewing((review) => strikeItem(review, message.itemId))
+        await this.reviewing((review) => strikeItem(review, message.item))
         return
       case 'unstrike_item':
-        await this.reviewing((review) => unstrikeItem(review, message.itemId))
+        await this.reviewing((review) => unstrikeItem(review, message.item))
         return
-      case 'accept_resolution': {
-        // Accepting a resolution, including a disagreement, is the human's own act; it needs no draft.
+      case 'resolve_comment': {
+        // Resolving a comment, including a disagreement, is the human's own act; it needs no draft.
         let closed = false
         await this.reviewing((review) => {
-          acceptResolution(review, message.commentId)
+          resolveComment(review, message.comment)
           closed = openComments(review).length === 0
         }, false)
-        // The last accept closes the review; the spec is settled and its mapping against the code starts by itself.
+        // The last resolve closes the review; the spec is settled and its mapping against the code starts by itself.
         const record = this.activeRecord()
         if (closed && record) await this.startMapping(record)
         return
@@ -750,14 +759,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** What landed in `docs/` and what did not: the user is applying these, so nothing happens silently. */
-  private async reportWriteBack(
-    docs: string[],
-    failed: { amendment: { id: string }; reason: string }[],
-  ): Promise<void> {
+  private async reportWriteBack(docs: string[], failed: { amendment: Amendment; reason: string }[]): Promise<void> {
     if (failed.length > 0) {
-      const detail = failed.map((f) => `${f.amendment.id}: ${f.reason}`).join('; ')
+      const detail = failed.map((f) => `${label(f.amendment)}: ${f.reason}`).join('; ')
       void vscode.window.showWarningMessage(
-        `KiwiAgent: ${docs.length > 0 ? `updated ${docs.join(', ')}. ` : ''}${failed.length} amendment${failed.length === 1 ? '' : 's'} could not be applied — ${detail}`,
+        `KiwiAgent: ${docs.length > 0 ? `updated ${docs.join(', ')}. ` : ''}${failed.length} amendment${failed.length === 1 ? '' : 's'} could not be applied: ${detail}`,
       )
       return
     }
@@ -798,6 +804,30 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     await mkdir(dirname(file), { recursive: true })
     await writeReview(file, review, `${PLAN_DIR}/${featureSlug(feature)}.spec.md`)
     await this.sendState()
+  }
+
+  /**
+   * Approve on a spec with decisions still pending: every open one with a
+   * proposal is ruled `accepted`, and the rulings go to the plan session to
+   * apply. Approval itself waits for the revised spec, so the user approves
+   * what the planner actually wrote, not what it proposed. True when that
+   * happened and the approval is not to proceed.
+   */
+  private async handOverRulings(record: SessionRecord, path: string, body: string): Promise<boolean> {
+    const unproposed = openDecisions(body).filter((d) => !d.proposal)
+    if (unproposed.length > 0) {
+      throw new Error(`${unproposed.length === 1 ? 'A decision awaits' : `${unproposed.length} decisions await`} the planner's proposal: ${unproposed.map((d) => d.title).join('; ')}.`)
+    }
+    if (pendingDecisions(body).length === 0) return false
+    const accepted = acceptProposals(await readFile(path, 'utf8'))
+    if (accepted.accepted.length > 0) await writeFile(path, accepted.text, 'utf8')
+    const rulings = pendingDecisions(accepted.text).map((d) => ({ title: d.title, ruling: d.ruling ?? '' }))
+    const prompt = rulingsHandoffPrompt(record.feature!, rulings)
+    const courier = this.courier()
+    if (courier.isLive(record.id)) await courier.send(record.id, prompt)
+    else await courier.start(record.feature!, prompt)
+    await this.sendState()
+    return true
   }
 
   /** A submitted review goes to the plan session that wrote the spec, or a fresh plan session when it is gone. */
@@ -846,10 +876,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       ...(cleanup ? { cleanup } : {}),
       ...(tasks.exists && tasks.verification ? { lastVerification: tasks.verification } : {}),
       tasks: tasks.exists ? tasks.tasks : [],
-      items: state.exists ? planItems(state.body) : [],
       review,
       commentable: isCommentable(state),
       approvable: isApprovable(stage, state, tasks),
+      pendingDecisions: state.exists ? pendingDecisions(state.body).length : 0,
       ...(amendments.length > 0
         ? {
             intent: {
