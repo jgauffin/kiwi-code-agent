@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { ScopeGuard } from '../src/agent/phases/scope-guard'
 import {
-  RECONCILE_KICKOFF,
   RECONCILE_TOOLS,
+  assertFindingsRuled,
   findings,
   openFindings,
   progressLine,
+  reconcileKickoff,
   reconcilePrompt,
   reconcileScope,
 } from '../src/agent/phases/reconcile'
@@ -54,7 +55,16 @@ describe('reconcile prompt', () => {
     // Intent that the code proved wrong has to reach docs/, or the next blind plan repeats the assumption.
     expect(prompt).toContain('plan/order-cancellation.intent.md')
     expect(RECONCILE_TOOLS).toEqual(['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'Edit', 'Write', 'Skill'])
-    expect(RECONCILE_KICKOFF.length).toBeGreaterThan(0)
+  })
+
+  it('a_run_continuing_the_last_mapping_is_told_the_spec_changed_and_keeps_what_it_read', () => {
+    const fresh = reconcileKickoff(false)
+    expect(fresh).toContain('Map the spec against the code')
+    const again = reconcileKickoff(true)
+    expect(again).toContain('changed since you mapped it')
+    expect(again).toContain('Read it again')
+    expect(again).toContain('unless a tool result says')
+    expect(again).not.toBe(fresh)
   })
 
   it('the_spec_stands_in_for_the_docs_so_the_check_does_not_read_them_again', () => {
@@ -126,6 +136,13 @@ describe('findings table', () => {
   it('a_spec_without_the_section_has_no_findings', () => {
     expect(findings('# Orders\n\n## Behaviour\n- B1: x\n')).toEqual([])
     expect(findings('## Tasks\n| F9 | not in the findings section |\n')).toEqual([])
+  })
+
+  it('a_spec_cannot_be_approved_while_a_finding_awaits_its_ruling', () => {
+    expect(() => assertFindingsRuled(spec)).toThrow(/F1, F3/)
+    const ruled = '## Findings\n| Finding | Proposed solution |\n|---|---|\n| F1 (naive, B1): x [resolved] | y |\n'
+    expect(() => assertFindingsRuled(ruled)).not.toThrow()
+    expect(() => assertFindingsRuled('# Orders\n\n## Behaviour\n- B1: x\n')).not.toThrow()
   })
 })
 

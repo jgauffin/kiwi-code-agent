@@ -383,7 +383,7 @@ describe('SessionManager', () => {
         () => {},
       )
       const plan = await manager.create(profile, 'plan', 'Orders')
-      const check = await manager.create(profile, 'reconcile', 'Orders', plan.id)
+      const check = await manager.create(profile, 'reconcile', 'Orders', { parentId: plan.id })
       expect(check.parentId).toBe(plan.id)
       expect(manager.liveChildOf(plan.id)).toBeUndefined()
 
@@ -413,13 +413,87 @@ describe('SessionManager', () => {
         () => {},
       )
       const implementer = await manager.create(profile, 'implement', 'Orders')
-      const cleanup = await manager.create(profile, 'cleanup', 'Orders', implementer.id, ['src/orders/cancel.ts'])
+      const cleanup = await manager.create(profile, 'cleanup', 'Orders', { parentId: implementer.id, files: ['src/orders/cancel.ts'] })
       expect(cleanup).toMatchObject({ title: 'Cleanup: Orders', parentId: implementer.id, files: ['src/orders/cancel.ts'] })
       expect(store.saved[store.saved.length - 1]![0]).toMatchObject({ files: ['src/orders/cancel.ts'] })
       expect(implementer.files).toBeUndefined()
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+
+  describe('continuing a conversation', () => {
+    const berget: ModelProfile = { name: 'GLM', engine: 'openai-compatible', model: 'glm', baseUrl: 'https://b', apiKeySecret: 'k' }
+
+    function setup(dir: string) {
+      const engines: FakeSession[] = []
+      const manager = new SessionManager(
+        memoryStore(),
+        async (r) => {
+          const s = new FakeSession(r.id, r.profile, r.engineSessionId)
+          engines.push(s)
+          return s
+        },
+        (id) => RunLog.forSession(dir, id),
+        () => {},
+      )
+      return { manager, engines }
+    }
+
+    it('a_record_continuing_a_resumable_session_carries_its_engine_session_id', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+      try {
+        const { manager, engines } = setup(dir)
+        const check = await manager.create(profile, 'reconcile', 'Orders')
+        await manager.send(check.id, 'map')
+        engines[0]!.out.push({ type: 'session_started', engineSessionId: 'eng-map', model: 'opus' })
+        await tick()
+        await manager.close(check.id)
+
+        const implementer = await manager.create(profile, 'implement', 'Orders', { continues: manager.get(check.id) })
+        expect(implementer.engineSessionId).toBe('eng-map')
+        await manager.send(implementer.id, 'implement')
+        expect(engines[1]!.resumedFrom).toBe('eng-map')
+        await manager.disposeAll()
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
+
+    it('a_record_continuing_an_own_loop_session_starts_fresh', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+      try {
+        const { manager, engines } = setup(dir)
+        const check = await manager.create(berget, 'reconcile', 'Orders')
+        await manager.send(check.id, 'map')
+        engines[0]!.out.push({ type: 'session_started', engineSessionId: check.id, model: 'glm' })
+        await tick()
+        expect((await manager.create(berget, 'implement', 'Orders', { continues: manager.get(check.id) })).engineSessionId).toBeUndefined()
+        // Nor across engines: a Claude implementer cannot pick up a Berget mapping, or the other way round.
+        expect((await manager.create(profile, 'implement', 'Orders', { continues: manager.get(check.id) })).engineSessionId).toBeUndefined()
+        const never = await manager.create(profile, 'reconcile', 'Orders')
+        expect((await manager.create(profile, 'implement', 'Orders', { continues: never })).engineSessionId).toBeUndefined()
+        await manager.disposeAll()
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
+
+    it('latest_returns_the_newest_record_of_a_mode_on_a_feature', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+      try {
+        const { manager } = setup(dir)
+        expect(manager.latest('implement', 'Orders')).toBeUndefined()
+        const first = await manager.create(profile, 'implement', 'Orders')
+        await manager.create(profile, 'implement', 'Invoices')
+        const second = await manager.create(profile, 'implement', 'Orders')
+        expect(manager.latest('implement', 'Orders')?.id).toBe(second.id)
+        expect(manager.latest('reconcile', 'Orders')).toBeUndefined()
+        expect(first.id).not.toBe(second.id)
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
   })
 
   describe('answering a question', () => {

@@ -2,7 +2,7 @@ import { isAbsolute, matchesGlob, relative, resolve } from 'node:path'
 import type { PreToolUseOutcome, SessionHooks, ToolUse } from '../session/hooks'
 import type { SessionEvent } from '../session/code-session'
 import { isReadOnlyCommand, isReadOnlySegment, type ReadOnlyContext } from './read-only-commands'
-import { bashPatternMatches, commandLines, parseRule, type PermissionRule } from './permission-rules'
+import { bashPatternMatches, commandLines, isShellTool, parseRule, type PermissionRule } from './permission-rules'
 import { splitShellCommand, type ShellSegment } from './shell-split'
 
 export type PermissionRules = { allow: string[]; deny: string[] }
@@ -43,24 +43,24 @@ export class PermissionPolicy implements SessionHooks {
 
   /** A prompt for a shell call is asked line by line: each command with what the rules in force make of it. */
   decorate(event: SessionEvent): SessionEvent {
-    if (event.type !== 'permission_request' || event.toolName !== 'Bash') return event
-    return { ...event, commands: commandLines(this.command(event), this.rules().allow, this.readOnlyContext) }
+    if (event.type !== 'permission_request' || !isShellTool(event.toolName)) return event
+    return { ...event, commands: commandLines(event.toolName, this.command(event), this.rules().allow, this.readOnlyContext) }
   }
 
   private isReadOnly(tool: ToolUse): boolean {
     if (READ_ONLY_TOOLS.has(tool.toolName)) return true
-    return tool.toolName === 'Bash' && isReadOnlyCommand(this.command(tool), this.readOnlyContext)
+    return isShellTool(tool.toolName) && isReadOnlyCommand(this.command(tool), this.readOnlyContext)
   }
 
   /**
-   * For Bash, `all` requires the rule to cover every segment (an allow), while
-   * `any` fires on one (a deny). A substitution hides a command, so no allow
-   * rule can cover it.
+   * For a shell tool, `all` requires the rule to cover every segment (an
+   * allow), while `any` fires on one (a deny). A substitution hides a command,
+   * so no allow rule can cover it.
    */
   private matches(rule: PermissionRule, tool: ToolUse, segments: 'all' | 'any'): boolean {
     if (rule.tool !== tool.toolName) return false
-    if (rule.pattern === undefined) return tool.toolName !== 'Bash' || segments === 'any' || !splitShellCommand(this.command(tool)).substitutes
-    if (tool.toolName === 'Bash') {
+    if (rule.pattern === undefined) return !isShellTool(tool.toolName) || segments === 'any' || !splitShellCommand(this.command(tool)).substitutes
+    if (isShellTool(tool.toolName)) {
       const parsed = splitShellCommand(this.command(tool))
       if (segments === 'all' && parsed.substitutes) return false
       const covered = (s: ShellSegment) => bashPatternMatches(rule.pattern!, s.tokens) || (segments === 'all' && isReadOnlySegment(s, this.readOnlyContext))

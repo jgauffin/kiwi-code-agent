@@ -23,7 +23,7 @@ export type SessionRecord = {
   parentId?: string
   /** Workspace-relative paths a cleanup run was given to split; what it may write, beside new files next to them. */
   files?: string[]
-  /** Engine-side conversation id, set once the engine reports it. Lets a closed session continue. */
+  /** Engine-side conversation id: the engine's own once it reports it, or inherited from the session this one continues. Lets a closed session continue. */
   engineSessionId?: string
   createdAt: string
 }
@@ -47,6 +47,22 @@ function titleFor(mode: SessionMode, feature: string | undefined): string {
     case 'chat':
       return 'New session'
   }
+}
+
+export type CreateOptions = {
+  parentId?: string
+  files?: string[]
+  /**
+   * The session whose conversation the new one carries on, so what it read is
+   * not read again. Honoured when the engine resumes; otherwise the session
+   * starts empty and the files on disk are its whole input.
+   */
+  continues?: SessionRecord | undefined
+}
+
+/** The Claude SDK resumes a conversation by its id; the own loop starts every session empty. */
+export function canContinue(previous: SessionRecord, profile: ModelProfile): boolean {
+  return previous.engineSessionId !== undefined && previous.profile.engine === 'claude-sdk' && profile.engine === 'claude-sdk'
 }
 
 export type EngineFactory = (record: SessionRecord) => Promise<CodeSession>
@@ -101,7 +117,14 @@ export class SessionManager {
     return this.records.find((r) => r.parentId === parentId && this.live.has(r.id))
   }
 
-  async create(profile: ModelProfile, mode: SessionMode = 'chat', feature?: string, parentId?: string, files?: string[]): Promise<SessionRecord> {
+  /** The newest record of a mode on a feature, live or not: the one that knows the feature best. */
+  latest(mode: SessionMode, feature: string): SessionRecord | undefined {
+    return this.records.find((r) => r.mode === mode && r.feature === feature)
+  }
+
+  async create(profile: ModelProfile, mode: SessionMode = 'chat', feature?: string, options: CreateOptions = {}): Promise<SessionRecord> {
+    const { parentId, files, continues } = options
+    const continued = continues && canContinue(continues, profile) ? continues.engineSessionId : undefined
     const record: SessionRecord = {
       id: crypto.randomUUID(),
       title: titleFor(mode, feature),
@@ -110,6 +133,7 @@ export class SessionManager {
       ...(feature ? { feature } : {}),
       ...(parentId ? { parentId } : {}),
       ...(files ? { files } : {}),
+      ...(continued ? { engineSessionId: continued } : {}),
       createdAt: new Date().toISOString(),
     }
     this.records.unshift(record)

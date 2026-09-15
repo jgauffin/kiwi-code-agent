@@ -3,8 +3,9 @@ import { splitShellCommand } from './shell-split'
 
 /**
  * A rule is `Tool` (every use), `Tool(pattern)` where the pattern is a glob on
- * the workspace-relative path for file tools, or for Bash a command: `npm test`
- * matches that exact command, `npm run:*` any command starting with those words.
+ * the workspace-relative path for file tools, or for a shell tool a command:
+ * `npm test` matches that exact command, `npm run:*` any command starting with
+ * those words.
  * Pure, so the webview can name the rule a button will write.
  */
 export type PermissionRule = { tool: string; pattern?: string }
@@ -21,6 +22,15 @@ export function formatRule(rule: PermissionRule): string {
 
 /** Tools that write a file. A write is answered per call or per session, never remembered for the project. */
 export const WRITE_TOOLS: ReadonlySet<string> = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
+
+/**
+ * Tools that run a command line. Both are judged, prompted and remembered
+ * command by command, each under its own tool name: a rule for one shell says
+ * nothing about the other.
+ */
+const SHELL_TOOLS: ReadonlySet<string> = new Set(['Bash', 'PowerShell'])
+
+export const isShellTool = (toolName: string): boolean => SHELL_TOOLS.has(toolName)
 
 /** Tools whose command word takes a subcommand that decides what they do. */
 const SUBCOMMAND_TOOLS = new Set(['npm', 'npx', 'pnpm', 'yarn', 'git', 'dotnet', 'cargo', 'go', 'docker', 'gh', 'az', 'kubectl'])
@@ -54,9 +64,9 @@ export type CommandLine = {
  * runs a command no line shows, so then nothing passes and no rule is offered:
  * such a call is allowed per call or not at all.
  */
-export function commandLines(command: string, allow: string[], context: ReadOnlyContext = {}): CommandLine[] {
+export function commandLines(toolName: string, command: string, allow: string[], context: ReadOnlyContext = {}): CommandLine[] {
   const parsed = splitShellCommand(command)
-  const patterns = allow.map(parseRule).filter((r) => r.tool === 'Bash' && r.pattern !== undefined)
+  const patterns = allow.map(parseRule).filter((r) => r.tool === toolName && r.pattern !== undefined)
   return parsed.segments.map((segment) => {
     const { text } = segment
     if (parsed.substitutes) return { text }
@@ -64,7 +74,7 @@ export function commandLines(command: string, allow: string[], context: ReadOnly
     const covering = patterns.find((r) => bashPatternMatches(r.pattern!, segment.tokens))
     if (covering) return { text, passes: formatRule(covering) }
     const prefix = commandPrefix(segment.tokens)
-    return prefix.length ? { text, rule: formatRule({ tool: 'Bash', pattern: `${prefix.join(' ')}:*` }) } : { text }
+    return prefix.length ? { text, rule: formatRule({ tool: toolName, pattern: `${prefix.join(' ')}:*` }) } : { text }
   })
 }
 

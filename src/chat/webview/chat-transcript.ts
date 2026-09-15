@@ -1,4 +1,5 @@
 import type { SessionEvent } from '../../agent/session/code-session'
+import { isShellTool } from '../../agent/permissions/permission-rules'
 import { splitShellCommand } from '../../agent/permissions/shell-split'
 import { renderAnsi } from './ansi'
 import { editDiffView, fileLink } from './edit-diff'
@@ -209,7 +210,7 @@ export class ChatTranscript extends HTMLElement {
     const summary = document.createElement('summary')
     const input = document.createElement('pre')
     input.className = 'input'
-    const shell = event.name === 'Bash' ? shellCall(event.input) : undefined
+    const shell = isShellTool(event.name) ? shellCall(event.input) : undefined
     if (shell) {
       // A shell step is named by what it is for; its body is the commands it runs, one per line.
       summary.textContent = shell.description ?? summarizeInput(event.input)

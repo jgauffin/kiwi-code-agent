@@ -83,7 +83,7 @@ export class PlanView extends HTMLElement {
         note('This plan is approved. Its review is kept as the record of how it was reached; reopen or supersede the plan to comment again.'),
       )
     }
-    if (plan.stale) this.append(note('The tasks predate the last change to the spec; they are re-mapped when the plan session’s turn ends.'))
+    if (plan.stale) this.append(note(staleNote(spec.findings.filter((f) => !f.resolved).map((f) => f.id))))
     const round = pendingRound(plan.review)
     if (round) this.append(this.pendingSection(plan, round))
     this.append(this.wholePlanRow(plan), this.goalSection(spec))
@@ -424,6 +424,12 @@ function el(tag: string, className: string, text?: string): HTMLElement {
 
 function note(text: string): HTMLElement {
   return el('p', 'note', text)
+}
+
+/** The re-map waits for the rulings: a board mapped under an open finding would go stale on the next one. */
+function staleNote(openFindings: string[]): string {
+  if (openFindings.length === 0) return 'The tasks predate the last change to the spec; they are re-mapped when the plan session’s turn ends.'
+  return `The tasks predate the last change to the spec; they are re-mapped once ${openFindings.join(', ')} ${openFindings.length === 1 ? 'is' : 'are'} ruled on.`
 }
 
 /** `[blocked: reason]` as written; the reason is what the badge should say. */

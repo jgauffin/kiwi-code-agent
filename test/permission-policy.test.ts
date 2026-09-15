@@ -17,6 +17,13 @@ describe('isReadOnlyCommand', () => {
       expect(isReadOnlyCommand(c), c).toBe(true)
   })
 
+  it('shell_structure_and_builtins_that_touch_only_shell_state_are_read_only_where_their_commands_are', () => {
+    for (const c of ['if [ -f x ]; then cat x; fi', 'for f in *.ts; do wc -l $f; done', 'CI=1 git status', 'X=1', '[[ -d src ]] && ls src', 'set -e; export A=1; ls', 'cat <<EOF\nrm -rf /\nEOF'])
+      expect(isReadOnlyCommand(c), c).toBe(true)
+    for (const c of ['if [ -f x ]; then rm x; fi', 'for f in *.ts; do rm $f; done', 'eval "$x"', 'source ./env.sh', 'f() { rm x; }'])
+      expect(isReadOnlyCommand(c), c).toBe(false)
+  })
+
   it('anything_that_writes_runs_code_or_mutates_git_is_not', () => {
     for (const c of ['rm x', 'npm test', 'git commit -m x', 'git branch -D x', 'echo hi > f', 'find . -delete', 'find . -exec rm {} \\;', 'sed -i s/a/b/ f', 'ls; rm x', 'cat $(ls)', 'bash -c ls', 'xargs rm', 'node -e 1'])
       expect(isReadOnlyCommand(c), c).toBe(false)
@@ -25,24 +32,32 @@ describe('isReadOnlyCommand', () => {
 
 describe('commandLines', () => {
   it('each_mutating_command_is_offered_the_rule_of_its_command_and_subcommand_and_a_read_only_one_passes', () => {
-    expect(commandLines('npm run build && npx vitest run && ls -la', [])).toEqual([
+    expect(commandLines('Bash', 'npm run build && npx vitest run && ls -la', [])).toEqual([
       { text: 'npm run build', rule: 'Bash(npm run:*)' },
       { text: 'npx vitest run', rule: 'Bash(npx vitest:*)' },
       { text: 'ls -la', passes: 'read-only' },
     ])
-    expect(commandLines('git commit -m "x && y"', [])).toEqual([{ text: 'git commit -m "x && y"', rule: 'Bash(git commit:*)' }])
-    expect(commandLines('rm -rf dist', [])).toEqual([{ text: 'rm -rf dist', rule: 'Bash(rm:*)' }])
+    expect(commandLines('Bash', 'git commit -m "x && y"', [])).toEqual([{ text: 'git commit -m "x && y"', rule: 'Bash(git commit:*)' }])
+    expect(commandLines('Bash', 'rm -rf dist', [])).toEqual([{ text: 'rm -rf dist', rule: 'Bash(rm:*)' }])
   })
 
   it('a_command_an_allow_rule_covers_passes_by_that_rule', () => {
-    expect(commandLines('npm run build && rm x', ['Bash(npm run:*)', 'Edit(src/**)'])).toEqual([
+    expect(commandLines('Bash', 'npm run build && rm x', ['Bash(npm run:*)', 'Edit(src/**)'])).toEqual([
       { text: 'npm run build', passes: 'Bash(npm run:*)' },
       { text: 'rm x', rule: 'Bash(rm:*)' },
     ])
   })
 
+  it('powershell_is_judged_like_bash_under_rules_of_its_own_name', () => {
+    expect(commandLines('PowerShell', 'npm run build; git status', ['Bash(npm run:*)'])).toEqual([
+      { text: 'npm run build', rule: 'PowerShell(npm run:*)' },
+      { text: 'git status', passes: 'read-only' },
+    ])
+    expect(commandLines('PowerShell', 'npm run build', ['PowerShell(npm run:*)'])).toEqual([{ text: 'npm run build', passes: 'PowerShell(npm run:*)' }])
+  })
+
   it('a_substitution_hides_a_command_so_no_line_passes_and_none_can_be_remembered', () => {
-    expect(commandLines('ls && echo $(rm x)', ['Bash(ls:*)'])).toEqual([{ text: 'ls' }, { text: 'echo $(rm x)' }])
+    expect(commandLines('Bash', 'ls && echo $(rm x)', ['Bash(ls:*)'])).toEqual([{ text: 'ls' }, { text: 'echo $(rm x)' }])
   })
 
   it('other_tools_are_remembered_by_tool_and_a_file_write_never_for_the_project', () => {
@@ -65,6 +80,10 @@ describe('PermissionPolicy', () => {
     expect(await use(p, 'Read', { file_path: 'src/a.ts' })).toEqual({ allow: true })
     expect(await use(p, 'Grep', { pattern: 'x' })).toEqual({ allow: true })
     expect(await use(p, 'Bash', { command: 'git status && ls' })).toEqual({ allow: true })
+    expect(await use(p, 'PowerShell', { command: 'git status; ls' })).toEqual({ allow: true })
+    expect(await use(p, 'PowerShell', { command: 'npm test' })).toBeUndefined()
+    expect(await use(policy({ allow: ['Bash(npm test)'] }), 'PowerShell', { command: 'npm test' })).toBeUndefined()
+    expect(await use(policy({ allow: ['PowerShell(npm test)'] }), 'PowerShell', { command: 'npm test' })).toEqual({ allow: true })
   })
 
   it('cd_inside_the_project_is_read_only_and_cd_elsewhere_prompts', async () => {
@@ -73,7 +92,7 @@ describe('PermissionPolicy', () => {
     expect(await use(p, 'Bash', { command: 'cd src && ls' })).toEqual({ allow: true })
     expect(await use(p, 'Bash', { command: 'cd .. && ls' })).toBeUndefined()
     expect(await use(p, 'Bash', { command: 'cd && ls' })).toBeUndefined()
-    expect(commandLines('cd .. && ls', [])).toEqual([{ text: 'cd ..', rule: 'Bash(cd:*)' }, { text: 'ls', passes: 'read-only' }])
+    expect(commandLines('Bash', 'cd .. && ls', [])).toEqual([{ text: 'cd ..', rule: 'Bash(cd:*)' }, { text: 'ls', passes: 'read-only' }])
   })
 
   it('a_shell_prompt_is_decorated_with_its_lines_under_the_rules_in_force_and_nothing_else_is_touched', () => {

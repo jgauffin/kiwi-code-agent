@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isApprovable, isMappable, planStage, tasksStale } from '../src/agent/phases/plan-stage'
+import { isApprovable, isMappable, planStage, remapDue, tasksStale } from '../src/agent/phases/plan-stage'
 import { parseReview } from '../src/agent/phases/plan-review'
 import type { SpecState } from '../src/agent/phases/spec-file'
 import { parseSpec, specFingerprint } from '../src/agent/phases/spec-model'
@@ -77,6 +77,26 @@ describe('plan stage', () => {
     expect(tasksStale(withFindings, fresh)).toBe(false)
     expect(tasksStale(draft, noTasks)).toBe(false)
     expect(tasksStale(draft, tasks('- T1: a'))).toBe(false)
+  })
+
+  it('a_stale_board_is_not_remapped_while_a_finding_is_open', () => {
+    const stale: TasksState = { exists: true, ...parseTasks(withSpecFingerprint('- T1: a', 'ffff0000')) }
+    const findings = (rows: string) => `${body}\n## Findings\n| Finding | Proposed solution |\n|---|---|\n${rows}\n`
+    const open: SpecState = { ...draft, body: findings('| F1 (naive, B1): x | change B1 |\n| F2 (breakage, B1): y | |') }
+    expect(remapDue(open, noReview, stale)).toBe(false)
+  })
+
+  it('ruling_the_last_finding_makes_the_remap_due', () => {
+    const stale: TasksState = { exists: true, ...parseTasks(withSpecFingerprint('- T1: a', 'ffff0000')) }
+    const findings = (rows: string) => `${body}\n## Findings\n| Finding | Proposed solution |\n|---|---|\n${rows}\n`
+    const ruled: SpecState = { ...draft, body: findings('| F1 (naive, B1): x [resolved] | change B1 |') }
+    expect(remapDue(ruled, noReview, stale)).toBe(true)
+    expect(remapDue(draft, noReview, stale)).toBe(true)
+    // A current board, an unmapped spec or a review in flight is not a re-map.
+    const fresh: TasksState = { exists: true, ...parseTasks(withSpecFingerprint('- T1: a', specFingerprint(parseSpec(body)))) }
+    expect(remapDue(draft, noReview, fresh)).toBe(false)
+    expect(remapDue(draft, noReview, noTasks)).toBe(false)
+    expect(remapDue(draft, review('## Round 1 — pending\n- C1 (B1): no'), stale)).toBe(false)
   })
 
   it('approval_is_offered_on_a_mapped_draft_whose_board_is_current', () => {

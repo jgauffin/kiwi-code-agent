@@ -6,12 +6,12 @@ import { nextStatus, type SessionStatus } from '../agent/session/session-status'
 import { readSpecState, setSpecStatus, type SpecState } from '../agent/phases/spec-file'
 import { PLAN_DIR, featureSlug, findingsHandoffPrompt, migrateSpecPrompt, resumePlanPrompt, specPath } from '../agent/phases/blind-plan'
 import { listPlans } from '../agent/phases/plan-list'
-import { RECONCILE_KICKOFF, openFindings, progressLine } from '../agent/phases/reconcile'
-import { IMPLEMENT_KICKOFF, assertImplementable } from '../agent/phases/implement'
+import { assertFindingsRuled, openFindings, progressLine, reconcileKickoff } from '../agent/phases/reconcile'
+import { assertImplementable, implementKickoff } from '../agent/phases/implement'
 import { cleanupKickoff } from '../agent/phases/cleanup'
 import { anyLimit, oversizedFiles, sizeReport, type Thresholds } from '../agent/cleanup/oversized'
 import { editedFiles } from '../agent/edits/edited-files'
-import { isApprovable, isMappable, planStage, tasksStale } from '../agent/phases/plan-stage'
+import { isApprovable, isMappable, planStage, remapDue, tasksStale } from '../agent/phases/plan-stage'
 import { parseSpec, specFingerprint } from '../agent/phases/spec-model'
 import { migratePlan, type MigrationReport } from '../agent/phases/migrate-plan'
 import { liveTasks, readTasks, stampSpecFingerprint, tasksDone, tasksPath, type TasksState } from '../agent/phases/tasks-file'
@@ -44,6 +44,7 @@ import {
 import { submitReview, type ReviewCourier } from '../agent/phases/review-handoff'
 import { assertAmendable, intentPath, pending, readAmendments, writeBackIntent } from '../agent/phases/intent-writeback'
 import { editDiffTitle, editLine, isRunSnapshot, runsRoot } from '../agent/edits/open-edit'
+import { buildRepoMap } from '../agent/repo-map/build-map'
 import { mkdir } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative } from 'node:path'
 import type { FromWebview, PlanState, RunState, SessionTab, ToWebview } from './protocol'
@@ -153,14 +154,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     panel.onDidDispose(() => this.webviews.delete(panel.webview))
   }
 
-  async newSession(mode: SessionMode, feature?: string, prompt?: string): Promise<void> {
+  /** `continues` names the session whose conversation the new one carries on, where the engine resumes. */
+  async newSession(mode: SessionMode, feature?: string, prompt?: string, continues?: SessionRecord): Promise<SessionRecord> {
     if (mode !== 'chat' && !feature) throw new Error(`A ${mode} session needs a feature name`)
-    const record = await this.sessions.create(this.profileFor(mode), mode, feature)
+    const record = await this.sessions.create(this.profileFor(mode), mode, feature, { continues })
     this.setActive(record.id)
     await this.sendState()
     this.broadcast({ type: 'transcript', sessionId: record.id, events: [] })
     this.changed.fire()
     if (prompt) await this.sessions.send(record.id, prompt)
+    return record
   }
 
   showNewSession(): void {
@@ -259,7 +262,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const tasks = await readTasks(tasksPath(this.workspaceRoot, feature))
     const review = await readReview(reviewPath(this.workspaceRoot, feature)).catch(() => emptyReview())
     // With a review in flight the accept of its last comment maps; here it is a ruling or a repair that moved the spec.
-    if (planStage(spec, review, tasks) === 'mapped' && tasksStale(spec, tasks)) await this.startMapping(record)
+    if (remapDue(spec, review, tasks)) await this.startMapping(record)
   }
 
   /** A mapping run has no transcript in the UI: its events become the one line the plan bar shows. */
@@ -281,15 +284,20 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     void this.sendState()
   }
 
-  /** Maps the plan session's draft spec against the code as a run under it; nothing happens while one is live. */
+  /**
+   * Maps the plan session's draft spec against the code as a run under it;
+   * nothing happens while one is live. A re-map continues the last mapping's
+   * conversation where the engine resumes, so the code it read is not read again.
+   */
   private async startMapping(record: SessionRecord): Promise<void> {
     if (record.mode !== 'plan' || !record.feature || this.sessions.liveChildOf(record.id)) return
     const spec = await readSpecState(specPath(this.workspaceRoot, record.feature))
     if (!spec.exists || spec.status !== 'draft') return
-    const child = await this.sessions.create(this.profileFor('reconcile'), 'reconcile', record.feature, record.id)
+    const previous = this.sessions.latest('reconcile', record.feature)
+    const child = await this.sessions.create(this.profileFor('reconcile'), 'reconcile', record.feature, { parentId: record.id, continues: previous })
     this.mappings.set(record.id, { live: true, text: 'Mapping the spec against the code…' })
     await this.sendState()
-    await this.sessions.send(child.id, RECONCILE_KICKOFF)
+    await this.sessions.send(child.id, reconcileKickoff(child.engineSessionId !== undefined))
   }
 
   /**
@@ -384,11 +392,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     if (passed) await this.startCleanup(feature)
   }
 
-  /** The latest live implement session on the feature gets the prompt; without one, a fresh session starts on it. */
+  /**
+   * The latest implement session on the feature gets the prompt, resumed if
+   * its engine had stopped: it knows what it changed. Without one, a fresh
+   * session continues the mapping that wrote the board.
+   */
   private async handToImplementer(feature: string, prompt: string): Promise<void> {
-    const live = this.sessions.list().find((r) => r.mode === 'implement' && r.feature === feature && this.sessions.isLive(r.id))
-    if (live) await this.sessions.send(live.id, prompt)
-    else await this.newSession('implement', feature, prompt)
+    const latest = this.sessions.latest('implement', feature)
+    if (latest) await this.sessions.send(latest.id, prompt)
+    else await this.newSession('implement', feature, prompt, this.sessions.latest('reconcile', feature))
   }
 
   /**
@@ -418,10 +430,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
     const relativeTo = (file: string) => relative(this.workspaceRoot, file).split('\\').join('/')
     const paths = [...new Set(flagged.map((u) => relativeTo(u.path)))]
-    const child = await this.sessions.create(this.profileFor('cleanup'), 'cleanup', feature, parent.id, paths)
+    // The run carries the implementer's memory of the files under the cleanup's own prompt, tools and write scope.
+    const child = await this.sessions.create(this.profileFor('cleanup'), 'cleanup', feature, { parentId: parent.id, files: paths, continues: parent })
     this.cleanups.set(feature, { live: true, text: 'Splitting oversized units…' })
     await this.sendState()
-    await this.sessions.send(child.id, cleanupKickoff(sizeReport(this.workspaceRoot, flagged)))
+    await this.sessions.send(child.id, cleanupKickoff(sizeReport(this.workspaceRoot, flagged), child.engineSessionId !== undefined))
   }
 
   /** A cleanup run has no transcript in the UI either: its events become the one line the plan bar shows. */
@@ -485,6 +498,24 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
     await this.sendState()
     return report
+  }
+
+  /**
+   * The `KiwiAgent: Build Repo Map` command. The build is mechanical and runs
+   * in the extension host: no engine is started, so nothing is spent and
+   * nothing is asked of the user while it runs.
+   */
+  async buildRepoMap(): Promise<void> {
+    try {
+      const result = await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: 'KiwiAgent: building the repo map' },
+        (progress) => buildRepoMap(this.workspaceRoot, (line) => progress.report({ message: line })),
+      )
+      const count = result.projects.length
+      void vscode.window.showInformationMessage(`KiwiAgent: repo map built — ${count} project${count === 1 ? '' : 's'}.`)
+    } catch (error) {
+      void vscode.window.showWarningMessage(`KiwiAgent: the repo map could not be built: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
 
   /** Every plan under `plan/`, the command's entry point; one summary at the end. */
@@ -581,9 +612,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         const review = await readReview(reviewPath(this.workspaceRoot, feature))
         assertApprovable(review)
         const spec = await readSpecState(path)
+        if (spec.exists) assertFindingsRuled(spec.body)
         const tasks = await readTasks(tasksPath(this.workspaceRoot, feature))
         const stage = planStage(spec, review, tasks)
-        if (tasksStale(spec, tasks)) throw new Error('The tasks predate the last change to the spec; they are re-mapped when the plan session’s turn ends.')
+        if (tasksStale(spec, tasks)) throw new Error('The tasks predate the last change to the spec; they are re-mapped when the plan session’s turn ends with every finding ruled on.')
         if (!isApprovable(stage, spec, tasks)) throw new Error('Map the spec against the code first: approval covers the tasks too.')
         await setSpecStatus(path, 'approved')
         await this.sendState()
@@ -669,7 +701,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         const path = this.activeSpecPath()
         if (record?.mode !== 'plan' || !record.feature || !path) return
         assertImplementable(await readSpecState(path), await readTasks(tasksPath(this.workspaceRoot, record.feature)))
-        await this.newSession('implement', record.feature, IMPLEMENT_KICKOFF)
+        // The implementer that already has the board carries on; the first one continues the mapping that wrote it.
+        const latest = this.sessions.latest('implement', record.feature)
+        if (latest) {
+          await this.open(latest.id)
+          await this.sessions.send(latest.id, implementKickoff('implement'))
+          return
+        }
+        const implementer = await this.newSession('implement', record.feature, undefined, this.sessions.latest('reconcile', record.feature))
+        await this.sessions.send(implementer.id, implementKickoff(implementer.engineSessionId ? 'mapping' : undefined))
         return
       }
       case 'verify_spec': {
@@ -765,7 +805,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     return {
       isLive: (sessionId) => this.sessions.isLive(sessionId),
       send: (sessionId, text) => this.sessions.send(sessionId, text),
-      start: (feature, prompt) => this.newSession('plan', feature, prompt),
+      start: async (feature, prompt) => {
+        await this.newSession('plan', feature, prompt)
+      },
     }
   }
 

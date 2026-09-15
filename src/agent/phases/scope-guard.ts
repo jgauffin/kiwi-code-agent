@@ -37,7 +37,8 @@ export class ScopeGuard implements SessionHooks {
       case 'NotebookEdit':
         return this.check(input['notebook_path'], this.scope.writable, 'write') ?? { allow: true }
       case 'Bash':
-        return { deny: 'Bash is not available in this phase.' }
+      case 'PowerShell':
+        return { deny: `${tool.toolName} is not available in this phase.` }
       default:
         return undefined
     }

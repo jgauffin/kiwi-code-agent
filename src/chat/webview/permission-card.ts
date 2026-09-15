@@ -1,5 +1,5 @@
 import type { CommandLine, PermissionDecision, SessionEvent } from '../../agent/session/code-session'
-import { projectRuleFor, ruleLabel } from '../../agent/permissions/permission-rules'
+import { isShellTool, projectRuleFor, ruleLabel } from '../../agent/permissions/permission-rules'
 import type { RememberedRules } from '../protocol'
 import { editDiffView } from './edit-diff'
 import { PermissionDecidedEvent } from './events'
@@ -46,7 +46,7 @@ export class PermissionCard extends HTMLElement {
     const title = document.createElement('strong')
     title.textContent = this.heading(r)
     prompt.appendChild(title)
-    if (r.description && r.toolName !== 'Bash') {
+    if (r.description && !isShellTool(r.toolName)) {
       const description = document.createElement('p')
       description.className = 'description'
       description.textContent = r.description
@@ -62,13 +62,13 @@ export class PermissionCard extends HTMLElement {
 
   /** A shell call is named by what it is for, as the model described it; another call by its tool. */
   private heading(r: PermissionRequest): string {
-    if (r.toolName !== 'Bash') return r.title ?? r.toolName
+    if (!isShellTool(r.toolName)) return r.title ?? r.toolName
     const described = (r.input as { description?: unknown })?.description
     return typeof described === 'string' && described.trim() ? described : (r.description ?? 'Run a command')
   }
 
   private body(r: PermissionRequest): HTMLElement {
-    if (r.toolName === 'Bash' && this.lines.length) return this.commandList()
+    if (isShellTool(r.toolName) && this.lines.length) return this.commandList()
     // A file edit is asked about as the change it would make; a denied one shows only the outcome, nothing changed.
     const change = this.decision === 'deny' ? undefined : r.edit
     if (change) {

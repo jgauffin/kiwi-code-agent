@@ -6,8 +6,27 @@ import { tasksDone, tasksFile, type TasksState } from './tasks-file'
 /** AskUser is here so a fork the plan does not settle is ruled on by the user instead of blocking the task. */
 export const IMPLEMENT_TOOLS = ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'Bash', 'Skill', ASK_USER_TOOL]
 
-/** The first prompt of an implement session; the system prompt carries the instructions. */
-export const IMPLEMENT_KICKOFF = 'Implement the spec, task by task.'
+/** Whose conversation the implement session carries on, if any: the mapping run that wrote the board, or an earlier implementer. */
+export type Continued = 'mapping' | 'implement' | undefined
+
+/**
+ * The first prompt of an implement session; the system prompt carries the
+ * instructions. A session continuing the mapping has the code it read to
+ * write the board in context, so it starts on the tasks rather than on the reading.
+ */
+export function implementKickoff(continued: Continued): string {
+  switch (continued) {
+    case 'mapping':
+      return [
+        'The spec you mapped is approved and its findings are ruled; the board you wrote is the work. Read the spec again for the rulings, then implement it task by task.',
+        'The files and context you read hold unless a tool result says a file changed; do not read them again to be sure.',
+      ].join(' ')
+    case 'implement':
+      return 'Carry on with the board from where it stands: read the tasks file for the markers, then the next open task.'
+    case undefined:
+      return 'Implement the spec, task by task.'
+  }
+}
 
 /**
  * Approval is the human's act; an implementer never starts on anything less,
@@ -56,6 +75,7 @@ Rules:
 - In the tasks file, only the markers, the files line, the proves line and a one-line note under a task are yours. The spec is not yours to change at all.
 - Never edit \`${DOCS_DIR}/\`: intent is the user's.
 - Read a file before editing it; read it again when a tool result says it changed underneath you. Do not re-explore what the context line already names.
+- A task marked tested is finished: its files are not read unless a later task names them, and a context file read for an earlier task is not read again unless a tool result says it changed.
 - Shell commands already run in ${cwd}; do not cd there.
 - Tested means the tests for the task's items pass, not that you stopped. When every task is tested or blocked, summarise in a few sentences and stop; the whole test suite is run for you once the board is all tested.`
 }

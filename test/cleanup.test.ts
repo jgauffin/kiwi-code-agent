@@ -46,7 +46,15 @@ describe('cleanup prompt', () => {
   })
 
   it('the_kickoff_carries_the_report', () => {
-    expect(cleanupKickoff('src/a.ts:1 a (function, 30 lines, limit 25)')).toContain('src/a.ts:1 a (function, 30 lines, limit 25)')
+    expect(cleanupKickoff('src/a.ts:1 a (function, 30 lines, limit 25)', false)).toContain('src/a.ts:1 a (function, 30 lines, limit 25)')
+  })
+
+  it('a_run_continuing_the_implementer_is_told_it_wrote_the_files', () => {
+    const report = 'src/a.ts:1 a (function, 30 lines, limit 25)'
+    const continued = cleanupKickoff(report, true)
+    expect(continued).toContain(report)
+    expect(continued).toContain('you wrote')
+    expect(cleanupKickoff(report, false)).not.toContain('you wrote')
   })
 
   it('a_failure_line_is_labelled_for_the_run_it_belongs_to', () => {

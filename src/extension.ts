@@ -34,6 +34,7 @@ import { IMPLEMENT_TOOLS, implementPrompt } from './agent/phases/implement'
 import { CLEANUP_TOOLS, cleanupPrompt, cleanupScope } from './agent/phases/cleanup'
 import type { Thresholds } from './agent/cleanup/oversized'
 import { SpecContract } from './agent/phases/spec-model'
+import { withRepoMap, workspaceRepoMap } from './agent/repo-map/session-context'
 import type { VerifyRule } from './agent/phases/verification'
 import {
   CHAT_PANEL_TYPE,
@@ -110,9 +111,20 @@ export function activate(context: vscode.ExtensionContext): void {
     return policy
   }
 
+  /**
+   * The repo map as the session's system prompt carries it: built first when it
+   * is behind, with the progress of the build visible while the start waits.
+   * Taken here, at engine creation, so the map a session works from is fixed
+   * for the life of that engine.
+   */
+  const withMap = async (record: SessionRecord, systemPrompt: string): Promise<string> =>
+    await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'KiwiAgent: repo map' }, (progress) =>
+      withRepoMap(record.mode, systemPrompt, workspaceRepoMap(workspaceRoot), { onProgress: (line) => progress.report({ message: line }) }),
+    )
+
   /** What a session's mode dictates, independent of engine: hooks, prompt, tool set. */
-  const setupFor = (record: SessionRecord): { hooks?: SessionHooks; systemPrompt?: string; toolNames?: string[] } => {
-    const setup = modeSetup(record)
+  const setupFor = async (record: SessionRecord): Promise<{ hooks?: SessionHooks; systemPrompt?: string; toolNames?: string[] }> => {
+    const setup = await modeSetup(record)
     // Last in line, so a call another hook denies is never captured: nothing changed.
     const recorder = new FileEditRecorder({ cwd: workspaceRoot, runDir: RunLog.forSession(workspaceRoot, record.id).dir })
     editRecorders.set(record.id, recorder)
@@ -120,7 +132,7 @@ export function activate(context: vscode.ExtensionContext): void {
     return { ...setup, hooks: composeHooks(policyFor(record.id), ...(setup.hooks ? [setup.hooks] : []), recorder) }
   }
 
-  const modeSetup = (record: SessionRecord): { hooks?: SessionHooks; systemPrompt?: string; toolNames?: string[] } => {
+  const modeSetup = async (record: SessionRecord): Promise<{ hooks?: SessionHooks; systemPrompt?: string; toolNames?: string[] }> => {
     switch (record.mode) {
       case 'chat':
         return switchableHooks(record)
@@ -128,7 +140,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!record.feature) throw new Error('An implement session needs a feature name')
         return {
           ...switchableHooks(record),
-          systemPrompt: implementPrompt(record.feature, workspaceRoot),
+          systemPrompt: await withMap(record, implementPrompt(record.feature, workspaceRoot)),
           toolNames: IMPLEMENT_TOOLS,
         }
       }
@@ -146,7 +158,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!record.feature) throw new Error('A reconcile session needs a feature name')
         return {
           hooks: composeHooks(new ScopeGuard(workspaceRoot, reconcileScope(record.feature)), new SpecContract(workspaceRoot)),
-          systemPrompt: reconcilePrompt(record.feature, workspaceRoot),
+          systemPrompt: await withMap(record, reconcilePrompt(record.feature, workspaceRoot)),
           toolNames: RECONCILE_TOOLS,
         }
       }
@@ -163,7 +175,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const createEngine = async (record: SessionRecord): Promise<CodeSession> => {
     const { profile } = record
-    const setup = setupFor(record)
+    const setup = await setupFor(record)
     const allowed = (tools: Tool[]) => (setup.toolNames ? tools.filter((t) => setup.toolNames!.includes(t.name)) : tools)
     switch (profile.engine) {
       case 'claude-sdk':
@@ -258,6 +270,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('kiwiAgent.openChat', () => chat.openInEditor()),
     vscode.commands.registerCommand('kiwiAgent.setApiKey', () => setApiKey(context)),
     vscode.commands.registerCommand('kiwiAgent.migratePlans', () => chat.migratePlans()),
+    vscode.commands.registerCommand('kiwiAgent.buildRepoMap', () => chat.buildRepoMap()),
     openDraftPlanAction(chat, sessions, workspaceRoot, output),
     watchOwnBundle(context),
     { dispose: () => void sessions.disposeAll() },

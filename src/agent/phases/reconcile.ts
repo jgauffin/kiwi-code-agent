@@ -1,21 +1,35 @@
 import { DOCS_DIR, PLAN_DIR, featureSlug } from './blind-plan'
 import type { Scope } from './scope-guard'
 import { tasksFile } from './tasks-file'
+import { MAP_ROOT } from '../repo-map/map-files'
 import type { SessionEvent } from '../session/code-session'
 
 /** The mapping run sees everything and may change nothing but the spec, its tasks and its intent amendments. */
 export function reconcileScope(feature: string): Scope {
   const slug = featureSlug(feature)
   return {
-    readable: ['**'],
+    // `**` does not match a dot-prefixed segment, so the map's root is named:
+    // the run is given the type indexes the summary points it at.
+    readable: ['**', `${MAP_ROOT}/**`],
     writable: [`${PLAN_DIR}/${slug}.spec.md`, tasksFile(feature), `${PLAN_DIR}/${slug}.intent.md`],
   }
 }
 
 export const RECONCILE_TOOLS = ['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'Edit', 'Write', 'Skill']
 
-/** The first prompt of a mapping run; the system prompt carries the instructions. */
-export const RECONCILE_KICKOFF = 'Map the spec against the code: write your findings, then the tasks.'
+/**
+ * The first prompt of a mapping run; the system prompt carries the
+ * instructions. A run that continues the last mapping's conversation has the
+ * code it read and the spec it mapped in context, so it re-reads the spec and
+ * touches only what the change reaches.
+ */
+export function reconcileKickoff(continued: boolean): string {
+  if (!continued) return 'Map the spec against the code: write your findings, then the tasks.'
+  return [
+    'The spec changed since you mapped it. Read it again and map the change: update the findings and the tasks it touches, leave the rest as they are, and write what is still missing.',
+    'What you read of the code holds unless a tool result says a file changed; do not read it again to be sure.',
+  ].join(' ')
+}
 
 export const FINDINGS_SECTION = 'Findings'
 
@@ -46,6 +60,13 @@ export function findings(body: string): Finding[] {
 
 /** Findings the user has yet to rule on. */
 export const openFindings = (body: string): Finding[] => findings(body).filter((f) => !f.resolved)
+
+/** Approval covers the rulings: a finding without one is a question the spec still leaves open. */
+export function assertFindingsRuled(body: string): void {
+  const open = openFindings(body)
+  if (open.length === 0) return
+  throw new Error(`Rule on the findings first: ${open.map((f) => f.id).join(', ')} still open.`)
+}
 
 /**
  * Reconcile system prompt. The job is to find what stands in the feature's

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { IMPLEMENT_KICKOFF, IMPLEMENT_TOOLS, assertImplementable, implementPrompt } from '../src/agent/phases/implement'
+import { IMPLEMENT_TOOLS, assertImplementable, implementKickoff, implementPrompt } from '../src/agent/phases/implement'
 import type { SpecState } from '../src/agent/phases/spec-file'
 import { parseTasks, type TasksState } from '../src/agent/phases/tasks-file'
 
@@ -42,6 +42,22 @@ describe('implement phase', () => {
     expect(prompt).toContain('search the code only for what they do not answer')
     expect(prompt).toContain('docs/')
     expect(IMPLEMENT_TOOLS).toEqual(['Read', 'Write', 'Edit', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'Bash', 'Skill', 'AskUser'])
-    expect(IMPLEMENT_KICKOFF.length).toBeGreaterThan(0)
+  })
+
+  it('a_finished_task_is_not_read_again', () => {
+    const prompt = implementPrompt('Order cancellation', cwd)
+    expect(prompt).toContain('A task marked tested is finished')
+    expect(prompt).toContain('not read again')
+  })
+
+  it('a_session_continuing_the_mapping_is_told_the_board_it_wrote_is_the_work', () => {
+    const fresh = implementKickoff(undefined)
+    expect(fresh).toContain('Implement the spec')
+    const mapped = implementKickoff('mapping')
+    expect(mapped).toContain('you mapped')
+    expect(mapped).toContain('approved')
+    expect(mapped).toContain('unless a tool result says')
+    expect(mapped).not.toBe(fresh)
+    expect(implementKickoff('implement')).toContain('Carry on')
   })
 })

@@ -15,7 +15,7 @@ The extension only sees `CodeSession`: send a prompt, stream events, answer perm
 
 ## Shape
 
-Three phases, each a separate session with its own system prompt and tool set. Handoff is files on disk, never conversation context. Planning produces the spec, approved once; mapping is part of planning and writes its findings into the spec and the tasks into a file of their own.
+Three phases, each a session with its own system prompt and tool set. The state is files on disk: a phase can always start from them. Blindness is the boundary: nothing that has seen the code reaches the plan session as conversation. Below it a phase continues the conversation of the phase before it where the engine resumes, so what was read is not read again: a re-map continues the last mapping run, the first implement session continues the mapping run that wrote the board, a later implement prompt continues the last implement session, and the cleanup run continues the implement session that wrote the files. Planning produces the spec, approved once; mapping is part of planning and writes its findings into the spec and the tasks into a file of their own.
 
 ```
 docs/intent/**  +  work item  →  spec.md  →  spec.md + findings, tasks.md  →  approved spec  →  code  →  tests pass
@@ -37,6 +37,51 @@ Where a feature stands is derived from its files under `plan/` and held nowhere 
 | verified | every task `[tested]` and the last recorded run passed |
 
 Accepting the last open comment maps the spec against the code by itself; a spec nobody commented on is mapped from the plan bar.
+
+A session that is picked up after its engine stopped is set up afresh: it carries the conversation it had, and the instructions and generated context a session starting now would get.
+
+## A4 (append) docs/features/repo-map.md#Repo map
+- from: F3 (naive)
+- why: intent says the type index comes from the language service "when available", and availability cannot be asked: a language service that is missing, still loading or failing all answer the same way, with nothing.
+
+The type index is the agent's own, produced by scanning the source. A language service is not consulted, because it cannot be asked whether it is there: one that is absent, one still loading and one that failed all answer alike.
+
+## A5 (append) docs/features/repo-map.md#Repo map
+- from: F4 (naive)
+- why: intent speaks of generated and ignored locations without saying which, and the product has only one notion of where it does not look.
+
+The build looks where the agent's own search looks: it passes over dependency folders, build output and the agent's own generated folder. Where the workspace states what it ignores, that is passed over too; where it does not, the agent's own list stands on its own.
+
+## A6 (append) docs/intent/agent.md#Phase 3: Implement
+- from: F5 (naive)
+- why: intent says both that no session edits the generated map and that the implement phase has no scope guard; nothing refuses such an edit.
+
+An implement session may write anywhere the user allows, generated files included. What protects generated output is that the next build rewrites it wholesale: an edit into it is lost, not refused.
+
+## A7 (replace) docs/intent/agent.md#Phase 1: Blind plan
+- from: F6 (contradiction), ruled for the code
+- why: blind planning is no longer confined to `docs/intent/**`; it reads the whole of `docs/**` and the workspace README. Only the section's opening paragraphs are meant here, down to the first subsection.
+
+Sees: feature description, domain brief (ubiquitous language, stack, constraints), `docs/**`, the workspace README, one work item closure when ADO is connected.
+Never sees: source, PRs, build output, generated context such as the repo map.
+
+Until ADO is connected the feature description is typed by the user or picked from `docs/**`. The agent plans the user story itself; the tasks file is the source for the ADO tasks created under the story once ADO is connected (write-back, not read-only).
+
+Tools: Read/Glob scoped to `docs/**`, the workspace README and the feature's own plan files, `get_work_item(id)`, AskUserQuestion, optionally WebSearch. Bash denied by bare name (allow-lists only auto-approve; a bare-name deny removes the tool from context).
+
+First a direction in chat (the decisions that shape the feature, the questions that would change them); nothing is written until the user says go. Then `plan/<feature>.spec.md`, to the contract below. An item derived from intent cites its section (`B2 (docs/intent/orders.md#Cancellation)`); an uncited item is the planner's default. To the point, not complete: an item earns its place by changing what gets built or how it is tested. No code paths. If `docs/**` has nothing on the feature, ask and stop.
+
+## A8 (replace) docs/intent/agent.md#Docs split
+- from: F6 (contradiction), ruled for the code
+- why: the split that kept descriptive docs from phase 1 is gone; what phase 1 must not see is the code and what travels with it, not a class of document.
+
+The whole of `docs/**` is phase 1 scope. What phase 1 is kept from is the code and what travels with it — source, PRs, build output, generated context — because those drift with the code in the same direction and arrive labelled as authority.
+
+## A9 (append) docs/features/repo-map.md#Repo map
+- from: F8 (naive)
+- why: intent has the type indexes read through tools, but a session's search passes over what the workspace says to ignore, and generated output is exactly that; such a file is found only when something hands the session its path.
+
+A session opens a type index by the path the summary gives it. Generated output lies where the workspace tells search to pass over, so it is reached by being named, never by being searched for.
 
 ## Phase 1: Blind plan
 
@@ -113,9 +158,9 @@ spec: 3f9a1c2e
   - context: src/orders/order.ts, src/orders/ship.test.ts
 ```
 
-`context:` is what the run read to arrive at the task (the modules the files lean on, the test showing the pattern, where the term already lives), so the implementer starts from `files:` and `context:` and searches only for what they do not answer. Handoff stays files on disk: the mapper's conversation is stale by the time implementing starts, bound to its engine and profile, and one session's context cannot serve the several implement sessions a feature may take.
+`context:` is what the run read to arrive at the task (the modules the files lean on, the test showing the pattern, where the term already lives), so an implementer that does not have the mapper's conversation starts from `files:` and `context:` and searches only for what they do not answer.
 
-The front matter records the fingerprint of the spec the board was mapped from (goal, scenarios and questions; not findings, so a proposal does not count). A plan turn that changes the spec under a mapped board makes it stale: the plan bar says so, approval is refused, and the board is re-mapped when that turn ends. Mapping is offered as a button only on a spec nobody has commented on; after that it runs by itself.
+The front matter records the fingerprint of the spec the board was mapped from (goal, scenarios and questions; not findings, so a proposal does not count). A plan turn that changes the spec under a mapped board makes it stale: the plan bar says so, approval is refused, and the board is re-mapped when a plan turn ends with every finding ruled on; a board mapped under an open finding would carry no task for what it questions and go stale on the next ruling. Approval is refused while a finding is open. Mapping is offered as a button only on a spec nobody has commented on; after that it runs by itself.
 
 Authority order is fixed in the prompt: work item, then intent doc, then code. Amendments (`naive`) and contradictions ruled in the spec's favour are written back to `docs/intent/**` or the work item as an explicit output, so intent does not rot.
 
@@ -152,7 +197,7 @@ A sub-session the planner calls with `retrieve(question, known, budget)` to keep
 
 ## Phase 3: Implement
 
-Tools: Read, Write, Edit, Glob, Grep, JsonSchema, JsonQuery, Bash. Input is the approved spec and its tasks file, fresh session started from the plan bar; refuses to start on `status: draft` or without a tasks file. Breakage findings the user chose to fix are work with the task they touch. Writes go through the ordinary permission prompt; no scope guard.
+Tools: Read, Write, Edit, Glob, Grep, JsonSchema, JsonQuery, Bash. Input is the approved spec and its tasks file, started from the plan bar as a continuation of the mapping run's conversation where the engine resumes, a fresh session otherwise; refuses to start on `status: draft` or without a tasks file. Implement on a feature that already has an implement session carries that session on. Breakage findings the user chose to fix are work with the task they touch. Writes go through the ordinary permission prompt; no scope guard.
 
 - Task state is the tasks file: the implementer appends `[in progress]` when it starts a task, `[done]` when the code is written, `[tested]` when every item the task delivers is proven by a passing test, `[blocked: reason]` when it cannot finish, so task 4 of 7 survives a fresh session and shows in the plan view. The task's `files:` line is kept true to what was touched.
 - Coverage is the evidence: a `proves:` line on the task names, per delivered item, the test file and the test whose name states the rule (`proves: B1 test/orders/cancel.test.ts an_open_order_can_be_cancelled, E1 ...`). The plan view shows on each behaviour and edge case which task delivers it and which test proves it, or `no task` / `no test`; a task marked tested with an item it names no test for is flagged. That is what an acceptance section used to promise, made checkable.

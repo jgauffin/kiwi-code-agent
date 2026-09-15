@@ -72,6 +72,10 @@
       {
         "command": "kiwiAgent.migratePlans",
         "title": "KiwiAgent: Migrate plans to the spec contract"
+      },
+      {
+        "command": "kiwiAgent.buildRepoMap",
+        "title": "KiwiAgent: Build Repo Map"
       }
     ],
     "menus": {
@@ -137,7 +141,7 @@
           },
           "default": [],
           "scope": "resource",
-          "description": "Tool calls that run without a prompt, on every engine. A rule is a tool name (Edit), a tool with a glob on the workspace-relative path (Edit(src/**)), or Bash with a command: Bash(npm test) for that exact command, Bash(npm run:*) for any command starting with those words. Every segment of a chained command must be covered or read-only. \"Allow for project\" on a prompt writes here; \"Allow for session\" keeps the rule in memory for that session instead. Read-only tools and commands (Read, Grep, ls, git status, ...) never prompt."
+          "description": "Tool calls that run without a prompt, on every engine. A rule is a tool name (Edit), a tool with a glob on the workspace-relative path (Edit(src/**)), or Bash or PowerShell with a command: Bash(npm test) for that exact command, PowerShell(npm run:*) for any command starting with those words; a rule for one shell says nothing about the other. Every segment of a chained command must be covered or read-only. \"Allow for project\" on a prompt writes here; \"Allow for session\" keeps the rule in memory for that session instead. Read-only tools and commands (Read, Grep, ls, git status, ...) never prompt."
         },
         "kiwiAgent.permissions.deny": {
           "type": "array",

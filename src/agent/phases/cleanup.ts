@@ -20,9 +20,14 @@ export function cleanupScope(files: string[]): Scope {
   return { readable: ['**'], writable: [...writable] }
 }
 
-/** The first prompt of a cleanup run: the report is the whole assignment. */
-export function cleanupKickoff(report: string): string {
-  return `These units exceed the size limits:\n\n${report}\n\nSplit them.`
+/**
+ * The first prompt of a cleanup run: the report is the whole assignment. A run
+ * continuing the implementer's conversation has the files, their callers and
+ * their tests in context already.
+ */
+export function cleanupKickoff(report: string, continued: boolean): string {
+  const wrote = continued ? ' in files you wrote; what you read of them and their callers holds unless a tool result says a file changed' : ''
+  return `These units exceed the size limits${wrote}:\n\n${report}\n\nSplit them.`
 }
 
 export function cleanupPrompt(feature: string, cwd: string, thresholds: Thresholds): string {

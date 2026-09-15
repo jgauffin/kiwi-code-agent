@@ -12,6 +12,8 @@ const READ_ONLY = new Set([
   'cd', 'pwd', 'echo', 'printf', 'true', 'false', 'test', '[', 'which', 'type', 'where', 'whoami', 'hostname', 'date', 'uname',
   'env', 'printenv', 'stat', 'file', 'du', 'df', 'tree', 'basename', 'dirname', 'realpath', 'readlink',
   'md5sum', 'sha1sum', 'sha256sum', 'tasklist', 'ps', 'uptime',
+  // Shell builtins that touch only the shell's own state. `eval`, `exec`, `source`, `.` and `trap` run code and are not here.
+  ':', '[[', 'read', 'export', 'unset', 'set', 'shift', 'local', 'declare', 'typeset', 'readonly', 'break', 'continue', 'return', 'exit', 'wait', 'sleep',
 ])
 
 /** `git` and friends are read-only only for some of their subcommands. */
