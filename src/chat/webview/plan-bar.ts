@@ -5,7 +5,10 @@ import {
   CleanupStoppedEvent,
   ImplementRequestedEvent,
   IntentUpdateRequestedEvent,
+  PlanFocusRequestedEvent,
   PlanViewSelectedEvent,
+  ReviewSubmittedEvent,
+  RulingsSentEvent,
   SpecApprovedEvent,
   SpecMapRequestedEvent,
   SpecMapStoppedEvent,
@@ -13,6 +16,7 @@ import {
   VerifyRequestedEvent,
   type PlanView,
 } from './events'
+import { planStep, type NextAction } from './plan-step'
 
 const STAGE: Record<PlanStage, string> = {
   missing: 'no spec written yet',
@@ -25,7 +29,13 @@ const STAGE: Record<PlanStage, string> = {
   verified: 'verified',
 }
 
-/** The feature session's header: Plan / Chat switch, the stage, and the next step (map, approve, implement, verify). */
+/**
+ * The feature session's action row: Plan / Chat switch, the stage, and the
+ * one next step. The step is a button when it moves the plan on, a link into
+ * the plan view when the act is on a row there, and a line of text while
+ * someone else is at work. Repair rides beside it while the spec is off
+ * contract.
+ */
 export class PlanBar extends HTMLElement {
   private readonly template = compileTemplate(`
     <button type="button" class="view {{planState}}" if="exists" title="{{planHint}}" r-click="show('plan')">Plan{{openMark}}</button>
@@ -36,11 +46,10 @@ export class PlanBar extends HTMLElement {
     <button type="button" class="stop" if="cleaning" title="Stop the cleanup." r-click="stopCleanup()">Stop</button>
     <span class="ran" if="ran" title="{{ranText}}">{{ranText}}</span>
     <button type="button" class="repair" if="repairable" title="{{repairHint}}" r-click="repair()">Repair{{problemMark}}</button>
-    <button type="button" class="map" if="mappable" title="Read the code and write what contradicts or breaks under this spec as decisions for you to rule on, and the tasks with the files they touch into the tasks file. After this it runs by itself when the plan changes." r-click="map()">Map against code</button>
-    <button type="button" class="approve" if="isDraft" disabled="{{blocked}}" title="{{approveHint}}" r-click="approve()">Approve</button>
-    <button type="button" class="implement" if="implementable" title="Start a fresh session that builds the tasks one by one." r-click="implement()">Implement</button>
-    <button type="button" class="verify" if="verifiable" title="Run the test commands over the files the tasks name." r-click="verify()">{{verifyLabel}}</button>
-    <button type="button" class="intent" if="amendable" title="{{intentHint}}" r-click="updateIntent()">Update intent{{intentMark}}</button>
+    <button type="button" class="next goto" if="goto" title="{{gotoHint}}" r-click="focus()">{{gotoLabel}} ↓</button>
+    <button type="button" class="next {{action}}" if="action" title="{{actionHint}}" r-click="act()">{{actionLabel}}</button>
+    <span class="next waiting" if="waiting" title="{{waitingText}}">{{waitingText}}</span>
+    <span class="next done" if="done">{{doneText}}</span>
   `)
 
   connectedCallback(): void {
@@ -58,6 +67,11 @@ export class PlanBar extends HTMLElement {
     // The last run's outcome shows beside the stage until the stage moves on; the file's record is the one that stands.
     // A cleanup outcome carries its test run's, so it comes first; a new test run clears it.
     const ran = running ? undefined : (plan.mapping?.text ?? plan.cleanup?.text ?? plan.verification?.text)
+    const step = planStep(plan)
+    const next = step.next
+    // The next step's link and its own waiting text say what a run line already says; the slot stays quiet while one runs.
+    const goto = next.kind === 'goto' ? { tab: next.tab, label: next.label, hint: next.hint } : step.goto ? { ...step.goto, hint: 'Rule on each decision in place.' } : undefined
+    const action: NextAction | undefined = next.kind === 'action' ? next.action : undefined
     this.template.render(
       {
         planHint: plan.commentable
@@ -66,8 +80,6 @@ export class PlanBar extends HTMLElement {
         stage: plan.stage,
         label: stageLabel(plan),
         exists: plan.status !== 'missing',
-        isDraft: plan.stage === 'mapped' && plan.status === 'draft',
-        mappable: plan.mappable,
         repairable: plan.repairable,
         problemMark: plan.spec && plan.spec.problems.length > 0 ? ` (${plan.spec.problems.length})` : '',
         repairHint: plan.spec
@@ -79,61 +91,67 @@ export class PlanBar extends HTMLElement {
         runText: mapping ? plan.mapping!.text : verifying ? plan.verification!.text : cleaning ? plan.cleanup!.text : '',
         ran: ran !== undefined && ran.length > 0,
         ranText: ran ?? '',
-        implementable: plan.implementable,
-        verifiable: plan.verifiable,
-        verifyLabel: plan.lastVerification ? 'Verify again' : 'Verify',
         openMark: open > 0 ? ` (${open})` : '',
-        blocked: !plan.approvable,
-        approveHint: approveHint(plan, open),
-        amendable: plan.intent?.applicable === true,
-        intentMark: plan.intent && plan.intent.pending > 0 ? ` (${plan.intent.pending})` : '',
-        intentHint: plan.intent
-          ? `Write the ${plan.intent.pending} amendment${plan.intent.pending === 1 ? '' : 's'} in ${plan.intent.path} into the intent docs, so the next feature is planned from what this one settled.`
-          : '',
+        goto: goto !== undefined,
+        gotoLabel: goto?.label ?? '',
+        gotoHint: goto?.hint ?? '',
+        action: action ?? '',
+        actionLabel: next.kind === 'action' ? next.label : '',
+        actionHint: next.kind === 'action' ? next.hint : '',
+        waiting: next.kind === 'waiting' && !running,
+        waitingText: next.kind === 'waiting' ? next.text : '',
+        done: next.kind === 'done',
+        doneText: next.kind === 'done' ? next.text : '',
         planState: view === 'plan' ? 'active' : '',
         chatState: view === 'chat' ? 'active' : '',
       },
       {
         show: (next: PlanView) => this.dispatchEvent(new PlanViewSelectedEvent(next)),
-        approve: () => this.dispatchEvent(new SpecApprovedEvent()),
-        map: () => this.dispatchEvent(new SpecMapRequestedEvent()),
         repair: () => this.dispatchEvent(new SpecRepairRequestedEvent()),
         stopMap: () => this.dispatchEvent(new SpecMapStoppedEvent()),
         stopCleanup: () => this.dispatchEvent(new CleanupStoppedEvent()),
-        implement: () => this.dispatchEvent(new ImplementRequestedEvent()),
-        verify: () => this.dispatchEvent(new VerifyRequestedEvent()),
-        updateIntent: () => this.dispatchEvent(new IntentUpdateRequestedEvent()),
+        focus: () => {
+          if (goto) this.dispatchEvent(new PlanFocusRequestedEvent(goto.tab))
+        },
+        act: () => {
+          if (action) this.dispatchEvent(eventFor(action))
+        },
       },
     )
   }
 }
 
-/** The stage in words, with what the stage alone does not say: approval on a mapped plan, progress on a board. */
+function eventFor(action: NextAction): Event {
+  switch (action) {
+    case 'map':
+      return new SpecMapRequestedEvent()
+    case 'submit_review':
+      return new ReviewSubmittedEvent()
+    case 'send_rulings':
+      return new RulingsSentEvent()
+    case 'approve':
+      return new SpecApprovedEvent()
+    case 'implement':
+      return new ImplementRequestedEvent()
+    case 'verify':
+      return new VerifyRequestedEvent()
+    case 'update_intent':
+      return new IntentUpdateRequestedEvent()
+  }
+}
+
+/** The stage in words, with what the stage alone does not say: approval on a mapped plan, the outcome of the tests. Progress on the board is the next step's line. */
 function stageLabel(plan: PlanState): string {
   const base = STAGE[plan.stage]
   switch (plan.stage) {
     case 'mapped':
       if (plan.stale) return `${base}, tasks out of date`
       return plan.status === 'approved' ? `${base}, approved` : base
-    case 'under_development': {
-      const live = plan.tasks.filter((t) => !t.removed)
-      const tested = live.filter((t) => t.state === 'tested').length
-      return `${base}: ${tested} of ${live.length} tested`
-    }
     case 'verification':
       return plan.lastVerification ? `${base}: tests failed` : `${base}: tests not run yet`
     default:
       return base
   }
-}
-
-/** What Approve does from here: with decisions pending it accepts the proposals and hands the rulings over; approval itself comes after the revision. */
-function approveHint(plan: PlanState, openComments: number): string {
-  if (!plan.approvable) return `Approval is blocked while ${openComments} comment${openComments === 1 ? ' is' : 's are'} open.`
-  if (plan.pendingDecisions > 0) {
-    return `${plan.pendingDecisions} decision${plan.pendingDecisions === 1 ? '' : 's'} pending: Approve rules every proposal accepted and hands the rulings to the planner. Approve again once the revised spec is back.`
-  }
-  return 'Approve this plan: the spec and its tasks.'
 }
 
 /** Comments the human has not closed; while there is one, approval is blocked. */

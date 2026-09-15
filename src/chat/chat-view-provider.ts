@@ -5,7 +5,7 @@ import type { SessionEvent } from '../agent/session/code-session'
 import { nextStatus, type SessionStatus } from '../agent/session/session-status'
 import { readSpecState, setSpecStatus, type SpecState } from '../agent/phases/spec-file'
 import { PLAN_DIR, decisionsHandoffPrompt, featureSlug, migrateSpecPrompt, resumePlanPrompt, rulingsHandoffPrompt, specPath } from '../agent/phases/blind-plan'
-import { acceptProposals, openDecisions, pendingDecisions, withRuling } from '../agent/phases/decisions'
+import { acceptProposals, assertRulingsSent, openDecisions, pendingDecisions, withRuling } from '../agent/phases/decisions'
 import { listPlans } from '../agent/phases/plan-list'
 import { progressLine, reconcileKickoff } from '../agent/phases/reconcile'
 import { assertImplementable, implementKickoff } from '../agent/phases/implement'
@@ -101,6 +101,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private readonly cleaned = new Set<string>()
   /** Features whose planner was handed the contract problems; its next finished turn completes the migration. */
   private readonly repairing = new Set<string>()
+  /** Features whose rulings were handed to the planner; Approve waits for that turn to end rather than sending them twice. */
+  private readonly applying = new Set<string>()
   private readonly changed = new vscode.EventEmitter<void>()
   /** Fires when the active session, a status or the session list changed. */
   readonly onDidChange = this.changed.event
@@ -243,7 +245,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       if (sessionId === this.activeSessionId) void this.sendState()
       if (record.mode === 'implement') void this.followBoard(record.feature)
     }
-    if (event.type === 'turn_done' && !event.isError && record?.mode === 'plan' && record.feature) void this.followPlan(record)
+    if (event.type === 'turn_done' && record?.mode === 'plan' && record.feature) {
+      // However the turn ended, the rulings are no longer in flight: Approve is the user's again, on the spec as it stands.
+      if (this.applying.delete(record.feature)) void this.sendState()
+      if (!event.isError) void this.followPlan(record)
+    }
   }
 
   /**
@@ -613,13 +619,21 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         const review = await readReview(reviewPath(this.workspaceRoot, feature))
         assertApprovable(review)
         const spec = await readSpecState(path)
-        if (spec.exists && (await this.handOverRulings(record, path, spec.body))) return
+        if (spec.exists) assertRulingsSent(spec.body)
         const tasks = await readTasks(tasksPath(this.workspaceRoot, feature))
         const stage = planStage(spec, review, tasks)
         if (tasksStale(spec, tasks)) throw new Error('The tasks predate the last change to the spec; they are re-mapped when the plan session’s turn ends with every decision applied.')
         if (!isApprovable(stage, spec, tasks)) throw new Error('Map the spec against the code first: approval covers the tasks too.')
         await setSpecStatus(path, 'approved')
         await this.sendState()
+        return
+      }
+      case 'send_rulings': {
+        const record = this.activeRecord()
+        const path = this.activeSpecPath()
+        if (!record || !path || !record.feature) return
+        const spec = await readSpecState(path)
+        if (!spec.exists || !(await this.handOverRulings(record, path, spec.body))) throw new Error('No decision is pending; there is nothing to send.')
         return
       }
       case 'rule_decision': {
@@ -807,11 +821,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Approve on a spec with decisions still pending: every open one with a
-   * proposal is ruled `accepted`, and the rulings go to the plan session to
-   * apply. Approval itself waits for the revised spec, so the user approves
-   * what the planner actually wrote, not what it proposed. True when that
-   * happened and the approval is not to proceed.
+   * Send rulings: every open decision with a proposal is ruled `accepted`,
+   * and the rulings go to the plan session to apply. Approval waits for the
+   * revised spec, so the user approves what the planner actually wrote, not
+   * what it proposed. False when nothing was pending.
    */
   private async handOverRulings(record: SessionRecord, path: string, body: string): Promise<boolean> {
     const unproposed = openDecisions(body).filter((d) => !d.proposal)
@@ -823,6 +836,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     if (accepted.accepted.length > 0) await writeFile(path, accepted.text, 'utf8')
     const rulings = pendingDecisions(accepted.text).map((d) => ({ title: d.title, ruling: d.ruling ?? '' }))
     const prompt = rulingsHandoffPrompt(record.feature!, rulings)
+    this.applying.add(record.feature!)
     const courier = this.courier()
     if (courier.isLive(record.id)) await courier.send(record.id, prompt)
     else await courier.start(record.feature!, prompt)
@@ -878,8 +892,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       tasks: tasks.exists ? tasks.tasks : [],
       review,
       commentable: isCommentable(state),
-      approvable: isApprovable(stage, state, tasks),
+      approvable: isApprovable(stage, state, tasks) && !this.applying.has(feature),
       pendingDecisions: state.exists ? pendingDecisions(state.body).length : 0,
+      applyingRulings: this.applying.has(feature),
       ...(amendments.length > 0
         ? {
             intent: {
@@ -888,6 +903,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
               applied: amendments.length - waiting,
               // Offered after approval, and still offered once the feature is built: intent owes the same debt either way.
               applicable: state.exists && state.status === 'approved' && waiting > 0,
+              amendments,
             },
           }
         : {}),

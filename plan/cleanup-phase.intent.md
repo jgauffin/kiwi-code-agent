@@ -1,4 +1,4 @@
-## docs/features/cleanup-phase.md#Cleanup phase (replace)
+## docs/features/cleanup-phase.md#Cleanup phase (replace) [applied]
 - from: ruled in the direction for this spec
 - why: intent measures a function by its line count, but size is a poor proxy for what makes a function unreadable, and the product already detects branches in every language; intent is also silent on what happens when a unit is still oversized after the split, or when the user stops the run.
 
@@ -15,14 +15,26 @@ A run after a feature's tests pass that measures the files its implementation ed
 
 Not included: a manual re-run, test runs from inside the cleanup, regex literals and heredocs in the measure, edits the implement session makes while the cleanup runs.
 
-## docs/features/cleanup-phase.md#Cleanup phase (append)
+## docs/features/cleanup-phase.md#Cleanup phase (append) [applied]
 - from: F1 (naive)
 - why: intent says branches are counted the same way in every language, while the measure knows a fixed list of languages and finds functions without a parser.
 
 The measure knows a fixed list of languages and finds the functions of a file without parsing it. Branch points are the branching keywords and operators of the language the file is written in. A file in a language the measure does not know is measured as a file only.
 
-## docs/features/cleanup-phase.md#Cleanup phase (append)
+## docs/features/cleanup-phase.md#Cleanup phase (append) [applied]
 - from: F3 (naive)
 - why: intent does not say which files the second measure covers, and a split lands in new files that are then never measured.
 
 The measure after the run covers the files the run wrote, the new ones it created beside them included, under the same ignore globs as the first.
+
+## docs/features/cleanup-phase.md#Cleanup phase (append) [applied]
+- from: F2, ruled for the spec
+- why: intent has held a type to a line limit of its own, which a complexity limit per function already covers.
+
+Functions and files are the only units measured. A type has no limit of its own and no unit of that kind is flagged; `kiwiAgent.cleanup.typeLines` goes with the measure.
+
+## docs/features/cleanup-phase.md#Cleanup phase (append) [applied]
+- from: F4, ruled for the spec
+- why: intent says the test run after the cleanup repeats until the board is green, while a verify failure is bounded by the failure budget everywhere else.
+
+A test run that fails after the cleanup is an ordinary verify failure: it goes to the implement session with its output and counts against the verify failure budget, and when the budget is spent the failed record stays for the user.

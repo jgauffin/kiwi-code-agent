@@ -120,6 +120,12 @@ export const openDecisions = (text: string): Decision[] => decisions(text).filte
 /** Decisions not yet applied to the rules: ruled or still open. The board is not re-mapped over one. */
 export const pendingDecisions = (text: string): Decision[] => decisions(text).filter((d) => d.state === 'open' || d.state === 'ruled')
 
+/** Approval covers the rules as revised from the rulings, so a pending decision refuses it; Send rulings is the way past. */
+export function assertRulingsSent(text: string): void {
+  const pending = pendingDecisions(text).length
+  if (pending > 0) throw new Error(`Send the rulings first: ${pending === 1 ? 'a decision is' : `${pending} decisions are`} pending.`)
+}
+
 /** Rulings are one line; a pasted paragraph keeps its words, not its line breaks. */
 const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim()
 

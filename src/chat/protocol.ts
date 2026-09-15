@@ -1,5 +1,6 @@
 import type { PermissionDecision, SessionEvent } from '../agent/session/code-session'
 import type { QuestionOutcome } from '../agent/session/user-question'
+import type { Amendment } from '../agent/phases/intent-writeback'
 import type { CommentRef, Review } from '../agent/phases/plan-review'
 import type { PlanStage } from '../agent/phases/plan-stage'
 import type { Spec } from '../agent/phases/spec-model'
@@ -59,6 +60,8 @@ export type PlanState = {
   approvable: boolean
   /** Decisions the user ruled on that the planner has not applied yet, plus the open ones Approve would rule `accepted`. */
   pendingDecisions: number
+  /** The rulings are with the planner; Approve is offered again once that turn ends. */
+  applyingRulings: boolean
   /** Amendments to product intent this feature settled; absent when none were proposed. */
   intent?: IntentState
 }
@@ -76,6 +79,8 @@ export type IntentState = {
   applied: number
   /** The write-back can be run from here: the spec is approved and something is pending. */
   applicable: boolean
+  /** What the planner proposed, in file order, for the Intent tab. */
+  amendments: Amendment[]
 }
 
 /** A plan on disk the new-session screen offers to pick up; verified ones are finished and not offered. */
@@ -116,7 +121,7 @@ export type ReviewAction =
   | { type: 'submit_review' }
   /** Closes a comment: the human has read the agent's resolution, agreed with or not. */
   | { type: 'resolve_comment'; comment: CommentRef }
-  /** Writes the ruling under the decision: `accepted`, or the user's own text. No turn is spent; Approve hands the rulings over. */
+  /** Writes the ruling under the decision: `accepted`, or the user's own text. No turn is spent; Send rulings hands them over. */
   | { type: 'rule_decision'; decision: string; ruling: string }
 
 export type FromWebview =
@@ -135,7 +140,10 @@ export type FromWebview =
   | { type: 'new_session'; mode: SessionMode; feature?: string; prompt?: string }
   /** Opens the plan session behind a spec on disk, or starts one on it when none remains; what it offers follows the spec's status. */
   | { type: 'resume_plan'; feature: string }
+  /** Approves the mapped draft; refused while a decision is pending or a comment open. */
   | { type: 'approve_spec' }
+  /** Rules every open proposal accepted and hands all pending rulings to the plan session to apply. */
+  | { type: 'send_rulings' }
   | ReviewAction
   /** Maps the active plan session's spec against the code as a run under it; the plan bar shows its progress. */
   | { type: 'map_spec' }

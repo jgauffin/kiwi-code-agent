@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { acceptProposals, decisions, openDecisions, pendingDecisions, withRuling } from '../src/agent/phases/decisions'
+import { acceptProposals, assertRulingsSent, decisions, openDecisions, pendingDecisions, withRuling } from '../src/agent/phases/decisions'
 
 const spec = `---
 status: draft
@@ -43,6 +43,14 @@ describe('decisions', () => {
     const ruled = withRuling(spec, 'Refunds are asynchronous', 'keep the rule, queue the refund')
     expect(openDecisions(ruled).map((d) => d.title)).toEqual(['Shipped orders cannot be cancelled'])
     expect(pendingDecisions(ruled).map((d) => d.title)).toEqual(['Shipped orders cannot be cancelled', 'Refunds are asynchronous'])
+  })
+
+  it('approval_is_refused_while_a_decision_is_pending_and_names_how_many', () => {
+    expect(() => assertRulingsSent(spec)).toThrow('Send the rulings first: 2 decisions are pending.')
+    // A ruled decision is still pending: the planner has yet to apply it.
+    const oneRuled = '## Decisions\n### Refunds are asynchronous\n- on: Refund\n- finding: queued\n- ruling: queue it\n'
+    expect(() => assertRulingsSent(oneRuled)).toThrow('Send the rulings first: a decision is pending.')
+    expect(() => assertRulingsSent('# Orders\n\n## Cancelling\n- **A**: x\n')).not.toThrow()
   })
 
   it('a_spec_without_the_section_has_no_decisions', () => {

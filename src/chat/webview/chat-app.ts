@@ -5,7 +5,9 @@ import { ChatComposer } from './chat-composer'
 import { ChatTranscript } from './chat-transcript'
 import { NewSessionView } from './new-session-view'
 import { PlanBar } from './plan-bar'
+import { PlanStepper } from './plan-stepper'
 import { PlanView } from './plan-view'
+import { tabFor, type Tab } from './plan-step'
 import { SessionTabs } from './session-tabs'
 import {
   AllowWritesToggledEvent,
@@ -16,11 +18,15 @@ import {
   NewSessionRequestedEvent,
   NewSessionViewRequestedEvent,
   PermissionDecidedEvent,
+  PlanFocusRequestedEvent,
   PlanResumeRequestedEvent,
+  PlanStepSelectedEvent,
   PlanViewSelectedEvent,
   PromptSubmittedEvent,
   QuestionAnsweredEvent,
   ReviewActionEvent,
+  ReviewSubmittedEvent,
+  RulingsSentEvent,
   SessionClosedEvent,
   SessionSelectedEvent,
   SpecApprovedEvent,
@@ -38,6 +44,7 @@ import {
  */
 export class ChatApp extends HTMLElement {
   private readonly tabs = new SessionTabs()
+  private readonly stepper = new PlanStepper()
   private readonly planBar = new PlanBar()
   private readonly planView = new PlanView()
   private readonly newSession = new NewSessionView()
@@ -51,6 +58,8 @@ export class ChatApp extends HTMLElement {
   connectedCallback(): void {
     if (this.childElementCount > 0) return
     this.tabs.className = 'tabs'
+    this.stepper.className = 'plan-stepper'
+    this.stepper.hidden = true
     this.planBar.className = 'plan-bar'
     this.planBar.hidden = true
     this.planView.className = 'plan-view'
@@ -58,10 +67,16 @@ export class ChatApp extends HTMLElement {
     this.newSession.className = 'new-session'
     this.transcript.className = 'transcript'
     this.composer.className = 'composer'
-    this.append(this.tabs, this.planBar, this.newSession, this.planView, this.transcript, this.composer)
+    this.append(this.tabs, this.stepper, this.planBar, this.newSession, this.planView, this.transcript, this.composer)
 
     this.addEventListener(SpecApprovedEvent.type, () => post({ type: 'approve_spec' }))
+    this.addEventListener(RulingsSentEvent.type, () => post({ type: 'send_rulings' }))
+    this.addEventListener(ReviewSubmittedEvent.type, () => post({ type: 'submit_review' }))
     this.addEventListener(ReviewActionEvent.type, (e) => post(e.action))
+    this.addEventListener(PlanStepSelectedEvent.type, (e) => {
+      if (this.plan) this.focusPlan(tabFor(e.step, this.plan))
+    })
+    this.addEventListener(PlanFocusRequestedEvent.type, (e) => this.focusPlan(e.tab, true))
     this.addEventListener(SpecMapRequestedEvent.type, () => post({ type: 'map_spec' }))
     this.addEventListener(SpecMapStoppedEvent.type, () => post({ type: 'stop_map' }))
     this.addEventListener(CleanupStoppedEvent.type, () => post({ type: 'stop_cleanup' }))
@@ -161,11 +176,18 @@ export class ChatApp extends HTMLElement {
     this.layout()
   }
 
+  /** A step or the bar's next-step link opens the plan view on a tab; the link also lands on the first row to act on. */
+  private focusPlan(tab: Tab, scroll = false): void {
+    this.show('plan')
+    this.planView.open(tab, { scroll })
+  }
+
   private layout(): void {
     const plan = this.creating ? undefined : this.plan
     const planShown = this.view === 'plan' && plan?.body !== undefined
     this.planView.hidden = !planShown
     this.transcript.hidden = this.creating || planShown
+    this.stepper.update(plan)
     this.planBar.update(plan, planShown ? 'plan' : 'chat')
   }
 

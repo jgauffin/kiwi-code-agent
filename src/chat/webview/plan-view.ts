@@ -1,10 +1,12 @@
-import type { PlanState } from '../protocol'
+import type { IntentState, PlanState } from '../protocol'
 import type { Decision } from '../../agent/phases/decisions'
+import type { Amendment } from '../../agent/phases/intent-writeback'
 import type { CommentRef, Review, ReviewComment, ReviewRound } from '../../agent/phases/plan-review'
 import type { Item, Scenario, Spec } from '../../agent/phases/spec-model'
 import type { Task, TaskState } from '../../agent/phases/tasks-file'
 import { ReviewActionEvent } from './events'
 import { renderMarkdown } from './markdown'
+import { planStep, tabFor, type Step, type Tab } from './plan-step'
 import { post } from './vscode-api'
 
 const PLAN_TARGET = 'plan'
@@ -25,20 +27,25 @@ const DECISION_STATE: Record<Decision['state'], string> = {
   withdrawn: 'withdrawn',
 }
 
+const TAB_ORDER: Tab[] = ['spec', 'review', 'decisions', 'tasks', 'intent']
+
 /** A comment box on a rule or the plan, an edit of a pending comment, or a ruling being written on a decision. */
 type Editor = { kind: 'comment'; target: string; comment?: CommentRef; text: string } | { kind: 'ruling'; target: string; text: string }
 
 /** A comment with its place in the review, which is how the host addresses it. */
 type PlacedComment = { ref: CommentRef; comment: ReviewComment; pending: boolean }
 
+/** Where to land: a tab, and on it the first row that needs an act, or the item named. */
+export type Focus = { scroll?: boolean; item?: string }
+
 const same = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase()
 
 /**
- * The plan, built from the spec as the contract reads it: the goal, one card
- * per scenario with its rules and their edge cases, the open questions, the
- * decisions, and the task board grouped as the board groups it. What the
- * stage adds rides on the rows: the review controls on a draft, the task that
- * delivers a rule once mapped, the test that proves it once work has started.
+ * The plan as tabs: the spec as the contract reads it (goal, scenarios,
+ * questions, with the review written on its rows), the review as a batch,
+ * the decisions, the task board and the intent amendments. A tab is there
+ * once there is something to show on it; the tab the current step works in
+ * opens when the step changes, and the reader's own choice holds otherwise.
  * Built by hand rather than from a template so an open comment box keeps its
  * text and caret while the plan around it is re-rendered.
  */
@@ -46,6 +53,8 @@ export class PlanView extends HTMLElement {
   private plan: PlanState | undefined
   private editor: Editor | undefined
   private signature = ''
+  private tab: Tab = 'spec'
+  private step: Step | undefined
 
   update(plan: PlanState | undefined): void {
     const signature = JSON.stringify(
@@ -59,13 +68,48 @@ export class PlanView extends HTMLElement {
             tasks: plan.tasks,
             stale: plan.stale,
             lastVerification: plan.lastVerification,
+            pendingDecisions: plan.pendingDecisions,
+            applyingRulings: plan.applyingRulings,
+            intent: plan.intent,
+            // What the step is read from beyond the files: a run in flight (not its progress line, which ticks), an implement session to start.
+            mapping: plan.mapping?.live,
+            verification: plan.verification?.live,
+            cleanup: plan.cleanup?.live,
+            implementable: plan.implementable,
           }
         : null,
     )
     const changed = signature !== this.signature
     this.signature = signature
     this.plan = plan
+    if (!plan) {
+      this.step = undefined
+      if (changed) this.draw()
+      return
+    }
+    const step = planStep(plan).current
+    if (step !== this.step) {
+      this.step = step
+      this.tab = tabFor(step, plan)
+    }
     if (changed) this.draw()
+  }
+
+  /** The tab shown; what a test or the app asks after a focus. */
+  get activeTab(): Tab {
+    return this.tab
+  }
+
+  /** Open a tab and, when asked, scroll to the first row needing an act, or to the item named. */
+  open(tab: Tab, where: Focus = {}): void {
+    this.tab = tab
+    this.draw()
+    const target = where.item
+      ? [...this.querySelectorAll<HTMLElement>('[data-item]')].find((n) => same(n.dataset.item ?? '', where.item!))
+      : where.scroll
+        ? this.querySelector<HTMLElement>('.attention')
+        : undefined
+    target?.scrollIntoView?.({ block: 'center' })
   }
 
   private act(action: ConstructorParameters<typeof ReviewActionEvent>[0]): void {
@@ -91,19 +135,36 @@ export class PlanView extends HTMLElement {
       this.append(raw)
       return
     }
-    if (!plan.commentable && plan.review.rounds.length > 0) {
-      this.append(
-        note('This plan is approved. Its review is kept as the record of how it was reached; reopen or supersede the plan to comment again.'),
-      )
+    const tabs = presentTabs(plan)
+    if (!tabs.includes(this.tab)) this.tab = 'spec'
+    this.append(this.tabStrip(plan, tabs))
+    switch (this.tab) {
+      case 'spec':
+        this.append(...this.specTab(plan, spec))
+        break
+      case 'review':
+        this.append(this.reviewTab(plan))
+        break
+      case 'decisions':
+        this.append(this.decisionsSection(spec, plan))
+        break
+      case 'tasks':
+        this.append(this.tasksSection(plan))
+        break
+      case 'intent':
+        if (plan.intent) this.append(this.intentTab(plan.intent))
+        break
     }
-    if (plan.stale) this.append(note(staleNote(spec.decisions.filter((d) => d.state === 'open' || d.state === 'ruled').map((d) => d.title))))
-    const round = pendingRound(plan.review)
-    if (round) this.append(this.pendingSection(plan, round))
-    this.append(this.wholePlanRow(plan), this.goalSection(spec))
-    for (const scenario of spec.scenarios) this.append(this.scenarioCard(scenario, plan))
-    if (spec.questions.length > 0) this.append(this.questionsSection(spec, plan))
-    if (spec.decisions.length > 0) this.append(this.decisionsSection(spec, plan))
-    if (plan.tasks.length > 0) this.append(this.tasksSection(plan))
+  }
+
+  private tabStrip(plan: PlanState, tabs: Tab[]): HTMLElement {
+    const strip = el('nav', 'view-tabs')
+    for (const tab of tabs) {
+      const node = button(tabLabel(tab, plan), () => this.open(tab))
+      node.className = `tab${tab === this.tab ? ' active' : ''}`
+      strip.append(node)
+    }
+    return strip
   }
 
   private problemsBox(problems: string[]): HTMLElement {
@@ -115,30 +176,23 @@ export class PlanView extends HTMLElement {
     return box
   }
 
-  // --- the pending batch ------------------------------------------------------
+  // --- the spec tab -------------------------------------------------------------
 
-  private pendingSection(plan: PlanState, round: ReviewRound): HTMLElement {
-    const section = el('section', 'pending')
-    section.append(el('h3', 'heading', `Pending review, round ${round.number}`))
-    const list = el('ul', 'comments')
-    round.comments.forEach((comment, index) => list.append(this.commentRow({ ref: { round: round.number, index }, comment, pending: true }, plan)))
-    if (round.strikes.length > 0) {
-      const struck = el('li', 'strikes')
-      struck.append(el('span', 'label', `remove: ${round.strikes.join(', ')}`))
-      section.append(list, struck)
-    } else section.append(list)
-    const submit = button('Submit review', () => this.act({ type: 'submit_review' }))
-    submit.className = 'submit'
-    submit.title = 'Hand the plan and this review to the session that owns it.'
-    submit.disabled = !plan.commentable
-    section.append(submit)
-    return section
+  private specTab(plan: PlanState, spec: Spec): HTMLElement[] {
+    const nodes: HTMLElement[] = []
+    if (!plan.commentable && plan.review.rounds.length > 0) {
+      nodes.push(note('This plan is approved. Its review is kept as the record of how it was reached; reopen or supersede the plan to comment again.'))
+    }
+    if (plan.stale) nodes.push(note(staleNote(spec.decisions.filter((d) => d.state === 'open' || d.state === 'ruled').map((d) => d.title))))
+    nodes.push(this.wholePlanRow(plan), this.goalSection(spec))
+    for (const scenario of spec.scenarios) nodes.push(this.scenarioCard(scenario, plan))
+    if (spec.questions.length > 0) nodes.push(this.questionsSection(spec, plan))
+    return nodes
   }
-
-  // --- the spec, section by section -------------------------------------------
 
   private wholePlanRow(plan: PlanState): HTMLElement {
     const row = el('div', 'item whole')
+    row.dataset.item = PLAN_TARGET
     const line = el('div', 'line')
     line.append(el('span', 'text', 'The plan as a whole'))
     if (plan.commentable) line.append(button('Comment', () => this.openEditor({ kind: 'comment', target: PLAN_TARGET, text: '' })))
@@ -187,15 +241,6 @@ export class PlanView extends HTMLElement {
     return section
   }
 
-  private decisionsSection(spec: Spec, plan: PlanState): HTMLElement {
-    const section = el('section', 'decisions')
-    section.append(el('h2', 'heading', 'Decisions'))
-    const list = el('ul', 'rules')
-    for (const decision of spec.decisions) list.append(this.decisionRow(decision, plan))
-    section.append(list)
-    return section
-  }
-
   /**
    * A rule, edge case or question: its name as the lead-in, its text, and to
    * the right what the reader needs at a glance: a gap in coverage, a strike,
@@ -205,6 +250,7 @@ export class PlanView extends HTMLElement {
   private itemRow(item: Item, plan: PlanState, kind: 'behaviour' | 'edge' | 'question'): HTMLElement {
     const struck = struckItems(plan.review).some((s) => same(s, item.name))
     const row = el('li', `item ${kind}${struck || item.removed ? ' struck' : ''}`)
+    row.dataset.item = item.name
     const line = el('div', 'line')
     const aside = el('span', 'aside')
     if (item.citation) {
@@ -220,46 +266,6 @@ export class PlanView extends HTMLElement {
     line.append(named(item.name, item.text.replace(MARKER, '').trim()), aside)
     row.append(line, ...this.attachments(plan, item.name))
     return row
-  }
-
-  /** A decision: what the code and the spec disagree on, what is proposed, and the ruling, with the buttons that make one. */
-  private decisionRow(decision: Decision, plan: PlanState): HTMLElement {
-    const row = el('li', `item decision ${decision.state}`)
-    const line = el('div', 'line')
-    const aside = el('span', 'aside')
-    for (const name of decision.on) {
-      const chip = el('span', 'chip rule', name)
-      chip.title = `Concerns the rule "${name}"`
-      aside.append(chip)
-    }
-    aside.append(el('span', `badge state ${decision.state}`, DECISION_STATE[decision.state]))
-    line.append(el('span', 'text', decision.title), aside)
-    row.append(line, labelled('finding', 'finding', decision.finding))
-    if (decision.proposal) row.append(labelled('proposal', 'proposed', decision.proposal))
-    else if (decision.state === 'open') row.append(el('div', 'awaiting', 'waiting for the planner to propose'))
-    if (decision.ruling) row.append(labelled('ruling', 'ruling', decision.ruling))
-    const rulable = plan.commentable && (decision.state === 'open' || decision.state === 'ruled')
-    if (rulable && this.editor?.kind === 'ruling' && same(this.editor.target, decision.title)) row.append(this.editorBox(this.editor))
-    else if (rulable) row.append(this.rulingControls(decision))
-    return row
-  }
-
-  private rulingControls(decision: Decision): HTMLElement {
-    const wrap = el('div', 'rulings')
-    if (decision.state === 'open' && decision.proposal) {
-      wrap.append(
-        button('Accept proposal', () => this.act({ type: 'rule_decision', decision: decision.title, ruling: 'accepted' }), {
-          title: 'Rule as proposed. Approve hands the rulings to the planner; nothing is sent now.',
-        }),
-      )
-    }
-    const own = decision.state === 'ruled' ? 'Change ruling' : decision.proposal ? 'Rule otherwise' : 'Rule'
-    wrap.append(
-      button(own, () => this.openEditor({ kind: 'ruling', target: decision.title, text: decision.ruling === 'accepted' ? '' : (decision.ruling ?? '') }), {
-        title: 'Write your own ruling. Approve hands the rulings to the planner; nothing is sent now.',
-      }),
-    )
-    return wrap
   }
 
   /** What builds the rule and what proves it, once there is a board to say so: a gap is a badge, what is in order a quiet mark. */
@@ -297,6 +303,98 @@ export class PlanView extends HTMLElement {
     const wrap = el('span', 'controls')
     wrap.append(...controls)
     return [wrap]
+  }
+
+  // --- the review tab -----------------------------------------------------------
+
+  /** The rounds newest first: the one being written with its edits, the submitted ones with the planner's answers and Resolve. */
+  private reviewTab(plan: PlanState): HTMLElement {
+    const section = el('section', 'review')
+    for (const round of [...plan.review.rounds].reverse()) section.append(this.roundSection(plan, round))
+    return section
+  }
+
+  private roundSection(plan: PlanState, round: ReviewRound): HTMLElement {
+    const pending = round.submittedAt === undefined
+    const section = el('section', `round${pending ? ' pending' : ''}`)
+    section.append(el('h2', 'heading', pending ? `Round ${round.number}, not submitted` : `Round ${round.number}`))
+    if (round.comments.length === 0 && round.strikes.length === 0) section.append(note('Nothing in this round yet: comment on a rule on the Spec tab.'))
+    const list = el('ul', 'comments')
+    round.comments.forEach((comment, index) => list.append(this.commentRow({ ref: { round: round.number, index }, comment, pending }, plan, true)))
+    if (round.comments.length > 0) section.append(list)
+    if (round.strikes.length > 0) {
+      const strikes = el('ul', 'strikes')
+      for (const name of round.strikes) {
+        const row = el('li', 'strike')
+        row.append(el('span', 'label', 'remove: '), this.itemLink(name))
+        if (pending && plan.commentable) row.append(button('Unstrike', () => this.act({ type: 'unstrike_item', item: name })))
+        strikes.append(row)
+      }
+      section.append(strikes)
+    }
+    if (pending) section.append(note('Submit the review from the plan bar when it is complete.'))
+    return section
+  }
+
+  /** The rule a comment or strike is on, as a link to its row on the Spec tab. */
+  private itemLink(name: string): HTMLElement {
+    const link = button(name === PLAN_TARGET ? 'the plan as a whole' : name, () => this.open('spec', { item: name }))
+    link.className = 'link item'
+    link.title = 'Show the rule on the Spec tab.'
+    return link
+  }
+
+  // --- decisions ----------------------------------------------------------------
+
+  private decisionsSection(spec: Spec, plan: PlanState): HTMLElement {
+    const section = el('section', 'decisions')
+    section.append(el('h2', 'heading', 'Decisions'))
+    const list = el('ul', 'rules')
+    for (const decision of spec.decisions) list.append(this.decisionRow(decision, plan))
+    section.append(list)
+    return section
+  }
+
+  /** A decision: what the code and the spec disagree on, what is proposed, and the ruling, with the buttons that make one. */
+  private decisionRow(decision: Decision, plan: PlanState): HTMLElement {
+    const rulable = plan.commentable && (decision.state === 'open' || decision.state === 'ruled')
+    const row = el('li', `item decision ${decision.state}${rulable && decision.state === 'open' && decision.proposal ? ' attention' : ''}`)
+    const line = el('div', 'line')
+    const aside = el('span', 'aside')
+    for (const name of decision.on) {
+      const chip = this.itemLink(name)
+      chip.classList.add('chip', 'rule')
+      chip.title = `Concerns the rule "${name}"; opens it on the Spec tab.`
+      aside.append(chip)
+    }
+    aside.append(el('span', `badge state ${decision.state}`, DECISION_STATE[decision.state]))
+    line.append(el('span', 'text', decision.title), aside)
+    row.append(line, labelled('finding', 'finding', decision.finding))
+    if (decision.proposal) row.append(labelled('proposal', 'proposed', decision.proposal))
+    else if (decision.state === 'open') row.append(el('div', 'awaiting', 'waiting for the planner to propose'))
+    if (decision.ruling) row.append(labelled('ruling', 'ruling', decision.ruling))
+    if (rulable && this.editor?.kind === 'ruling' && same(this.editor.target, decision.title)) row.append(this.editorBox(this.editor))
+    else if (rulable) row.append(this.rulingControls(decision))
+    return row
+  }
+
+  private rulingControls(decision: Decision): HTMLElement {
+    const wrap = el('div', 'rulings')
+    if (decision.state === 'open' && decision.proposal) {
+      wrap.append(
+        button('Accept proposal', () => this.act({ type: 'rule_decision', decision: decision.title, ruling: 'accepted' }), {
+          title: 'Rule as proposed. Send rulings from the plan bar hands them to the planner; nothing is sent now.',
+        }),
+      )
+    }
+    const own = decision.state === 'ruled' ? 'Change ruling' : decision.proposal ? 'Rule otherwise' : 'Rule'
+    const otherwise = button(own, () => this.openEditor({ kind: 'ruling', target: decision.title, text: decision.ruling === 'accepted' ? '' : (decision.ruling ?? '') }), {
+      title: 'Write your own ruling. Send rulings from the plan bar hands them to the planner; nothing is sent now.',
+    })
+    // Secondary beside an accept; the only choice on a decision without a proposal, so primary there.
+    if (decision.state === 'open' && decision.proposal) otherwise.className = 'otherwise'
+    wrap.append(otherwise)
+    return wrap
   }
 
   // --- the task board ---------------------------------------------------------
@@ -338,7 +436,14 @@ export class PlanView extends HTMLElement {
     const row = el('li', `task ${task.state}${task.removed ? ' removed' : ''}`)
     const line = el('div', 'line')
     line.append(named(task.name, task.text.replace(MARKER, '').trim()))
-    if (task.delivers.length > 0) line.append(el('span', 'delivers', task.delivers.join(', ')))
+    if (task.delivers.length > 0) {
+      const delivers = el('span', 'delivers')
+      task.delivers.forEach((name, index) => {
+        if (index > 0) delivers.append(', ')
+        delivers.append(this.itemLink(name))
+      })
+      line.append(delivers)
+    }
     if (task.removed) line.append(el('span', 'badge removed', 'removed'))
     else if (started) {
       line.append(el('span', `badge state ${task.state}`, blockedReason(task) ?? TASK_STATE[task.state]))
@@ -361,6 +466,36 @@ export class PlanView extends HTMLElement {
     return row
   }
 
+  // --- intent -------------------------------------------------------------------
+
+  /** What this feature owes the intent docs: each amendment as it would land, marked once it has. */
+  private intentTab(intent: IntentState): HTMLElement {
+    const section = el('section', 'intent')
+    const heading = el('h2', 'heading', 'Intent amendments')
+    heading.title = intent.path
+    section.append(heading)
+    if (intent.amendments.length === 0) section.append(note('The planner proposed no amendment.'))
+    const list = el('ul', 'amendments')
+    for (const amendment of intent.amendments) list.append(this.amendmentRow(amendment))
+    section.append(list)
+    return section
+  }
+
+  private amendmentRow(a: Amendment): HTMLElement {
+    const row = el('li', `amendment ${a.applied ? 'applied' : 'pending'}`)
+    const line = el('div', 'line')
+    const target = fileLink(a.doc, `${a.doc}${a.heading ? `#${a.heading}` : ''}`)
+    target.classList.add('name')
+    line.append(target, el('span', 'chip mode', a.mode), el('span', `badge state ${a.applied ? 'applied' : 'open'}`, a.applied ? 'applied' : 'pending'))
+    row.append(line)
+    if (a.from) row.append(labelled('from', 'from', a.from))
+    if (a.why) row.append(labelled('why', 'why', a.why))
+    const text = el('div', 'prose text')
+    renderMarkdown(a.text, text, true)
+    row.append(text)
+    return row
+  }
+
   // --- comments ---------------------------------------------------------------
 
   /** The comments on a target and, when one is being written for it, the editor. */
@@ -369,7 +504,7 @@ export class PlanView extends HTMLElement {
     const comments = commentsOn(plan.review, target)
     if (comments.length > 0) {
       const list = el('ul', 'comments')
-      for (const placed of comments) list.append(this.commentRow(placed, plan))
+      for (const placed of comments) list.append(this.commentRow(placed, plan, false))
       nodes.push(list)
     }
     const editor = this.editor
@@ -377,20 +512,29 @@ export class PlanView extends HTMLElement {
     return nodes
   }
 
-  private commentRow({ ref, comment, pending }: PlacedComment, plan: PlanState): HTMLElement {
-    const row = el('li', `comment${comment.closed ? ' closed' : ' open'}`)
+  /** A comment as written, its answer beneath it; `linked` names the rule it is on, for the review tab where the rule is not in sight. */
+  private commentRow({ ref, comment, pending }: PlacedComment, plan: PlanState, linked: boolean): HTMLElement {
+    const awaitsReader = comment.resolution !== undefined && !comment.closed
+    const row = el('li', `comment${comment.closed ? ' closed' : ' open'}${awaitsReader ? ' attention' : ''}`)
     const editor = this.editor
     if (editor?.kind === 'comment' && editor.comment && sameRef(editor.comment, ref)) {
       row.append(this.editorBox(editor))
       return row
     }
+    if (linked) {
+      const on = el('div', 'on')
+      on.append(el('span', 'label', 'on '), this.itemLink(comment.target))
+      row.append(on)
+    }
     const head = el('div', 'line')
     head.append(el('span', 'text', comment.text))
     if (pending && plan.commentable) {
-      head.append(
+      const controls = el('span', 'controls')
+      controls.append(
         button('Edit', () => this.openEditor({ kind: 'comment', target: comment.target, comment: ref, text: comment.text })),
         button('Remove', () => this.act({ type: 'remove_comment', comment: ref })),
       )
+      head.append(controls)
     }
     row.append(head)
     if (comment.resolution) {
@@ -434,6 +578,47 @@ export class PlanView extends HTMLElement {
   }
 }
 
+/** The tabs with something on them, in fixed order; the spec is always there. */
+function presentTabs(plan: PlanState): Tab[] {
+  return TAB_ORDER.filter((tab) => {
+    switch (tab) {
+      case 'spec':
+        return true
+      case 'review':
+        return plan.review.rounds.length > 0
+      case 'decisions':
+        return (plan.spec?.decisions.length ?? 0) > 0
+      case 'tasks':
+        return plan.tasks.length > 0
+      case 'intent':
+        return plan.intent !== undefined
+    }
+  })
+}
+
+/** The tab's name with the count that says whether it needs the reader. */
+function tabLabel(tab: Tab, plan: PlanState): string {
+  switch (tab) {
+    case 'spec':
+      return 'Spec'
+    case 'review': {
+      const open = plan.review.rounds.flatMap((r) => r.comments).filter((c) => !c.closed).length
+      return counted('Review', open)
+    }
+    case 'decisions':
+      return counted('Decisions', (plan.spec?.decisions ?? []).filter((d) => d.state === 'open' && d.proposal).length)
+    case 'tasks': {
+      const live = plan.tasks.filter((t) => !t.removed)
+      if (!live.some((t) => t.state !== 'open')) return `Tasks (${live.length})`
+      return `Tasks (${live.filter((t) => t.state === 'tested').length} of ${live.length})`
+    }
+    case 'intent':
+      return counted('Intent', plan.intent?.pending ?? 0)
+  }
+}
+
+const counted = (label: string, n: number): string => (n > 0 ? `${label} (${n})` : label)
+
 function pendingRound(review: Review) {
   const last = review.rounds.at(-1)
   return last && last.submittedAt === undefined ? last : undefined
@@ -470,7 +655,7 @@ function named(name: string, text: string): HTMLElement {
   return span
 }
 
-/** A labelled line of a decision: what the mapper found, what the planner proposed, what the user ruled. */
+/** A labelled line: what the mapper found, what the planner proposed, what the user ruled, where an amendment came from. */
 function labelled(className: string, kind: string, text: string): HTMLElement {
   const line = el('div', className)
   line.append(el('span', 'kind', kind), el('span', 'text', text))

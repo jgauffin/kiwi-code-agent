@@ -1,6 +1,7 @@
 import type { SessionMode } from '../../agent/session/session-manager'
 import type { QuestionOutcome } from '../../agent/session/user-question'
 import type { ReviewAction, UserPermissionDecision } from '../protocol'
+import type { Step, Tab } from './plan-step'
 
 export class PromptSubmittedEvent extends Event {
   static readonly type = 'prompt-submitted'
@@ -68,6 +69,38 @@ export class SpecApprovedEvent extends Event {
   static readonly type = 'spec-approved'
   constructor() {
     super(SpecApprovedEvent.type, { bubbles: true })
+  }
+}
+
+/** The plan bar's "Send rulings": hand every pending ruling to the planner. */
+export class RulingsSentEvent extends Event {
+  static readonly type = 'rulings-sent'
+  constructor() {
+    super(RulingsSentEvent.type, { bubbles: true })
+  }
+}
+
+/** The plan bar's "Submit review": hand the pending round to the planner. */
+export class ReviewSubmittedEvent extends Event {
+  static readonly type = 'review-submitted'
+  constructor() {
+    super(ReviewSubmittedEvent.type, { bubbles: true })
+  }
+}
+
+/** A reached step clicked on the stepper: open the tab it works in. */
+export class PlanStepSelectedEvent extends Event {
+  static readonly type = 'plan-step-selected'
+  constructor(public readonly step: Step) {
+    super(PlanStepSelectedEvent.type, { bubbles: true })
+  }
+}
+
+/** The bar's next-step link: open a tab of the plan view and scroll to the first row that needs an act. */
+export class PlanFocusRequestedEvent extends Event {
+  static readonly type = 'plan-focus-requested'
+  constructor(public readonly tab: Tab) {
+    super(PlanFocusRequestedEvent.type, { bubbles: true })
   }
 }
 
@@ -185,6 +218,10 @@ declare global {
     [SessionSelectedEvent.type]: SessionSelectedEvent
     [SessionClosedEvent.type]: SessionClosedEvent
     [SpecApprovedEvent.type]: SpecApprovedEvent
+    [RulingsSentEvent.type]: RulingsSentEvent
+    [ReviewSubmittedEvent.type]: ReviewSubmittedEvent
+    [PlanStepSelectedEvent.type]: PlanStepSelectedEvent
+    [PlanFocusRequestedEvent.type]: PlanFocusRequestedEvent
     [SpecMapRequestedEvent.type]: SpecMapRequestedEvent
     [SpecMapStoppedEvent.type]: SpecMapStoppedEvent
     [CleanupStoppedEvent.type]: CleanupStoppedEvent
