@@ -42,11 +42,14 @@ export const isShellTool = (toolName: string): boolean => SHELL_TOOLS.has(toolNa
 /** Tools whose command word takes a subcommand that decides what they do. */
 const SUBCOMMAND_TOOLS = new Set(['npm', 'npx', 'pnpm', 'yarn', 'git', 'dotnet', 'cargo', 'go', 'docker', 'gh', 'az', 'kubectl'])
 
+/** A command is named without its path, so `./build.cmd` and `build.cmd` are the same command. */
+const commandName = (command: string): string => command.replace(/\\/g, '/').split('/').pop()!
+
 /** The words of a segment that "Allow for project" remembers: the command, plus its subcommand for tools that have one. */
 export function commandPrefix(tokens: string[]): string[] {
   const [command, sub] = tokens
   if (!command) return []
-  const name = command.replace(/\\/g, '/').split('/').pop()!
+  const name = commandName(command)
   if (SUBCOMMAND_TOOLS.has(name) && sub && !sub.startsWith('-')) return [name, sub]
   return [name]
 }
@@ -98,5 +101,5 @@ export function bashPatternMatches(pattern: string, tokens: string[]): boolean {
   if (words.length === 0) return false
   if (!prefix && tokens.length !== words.length) return false
   if (tokens.length < words.length) return false
-  return words.every((w, i) => w === tokens[i])
+  return words.every((w, i) => (i === 0 ? commandName(w) === commandName(tokens[i]!) : w === tokens[i]))
 }

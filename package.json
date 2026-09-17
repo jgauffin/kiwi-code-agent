@@ -322,6 +322,7 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@relax.js/core": "^1.8.0",
     "dompurify": "^3.4.15",
+    "highlight.js": "^11.12.0",
     "marked": "^18.0.13",
     "mermaid": "^12.0.0",
     "zod": "^4.0.0"

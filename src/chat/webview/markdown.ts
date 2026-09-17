@@ -1,11 +1,13 @@
 import DOMPurify from 'dompurify'
 import { Marked } from 'marked'
 import mermaid from 'mermaid'
+import { escapeHtml, highlightCode } from './highlight'
 
 /**
  * Markdown for assistant text. Mermaid fences become diagrams once the
  * message is final; while streaming they stay as code so a half-written
- * diagram does not flash errors on every delta.
+ * diagram does not flash errors on every delta. Other fences are colored
+ * by language, streaming or not.
  */
 const marked = new Marked({
   gfm: true,
@@ -13,8 +15,10 @@ const marked = new Marked({
   renderer: {
     code({ text, lang }) {
       if (lang === 'mermaid') return `<pre class="mermaid">${escapeHtml(text)}</pre>`
-      const cls = lang ? ` class="language-${escapeHtml(lang)}"` : ''
-      return `<pre><code${cls}>${escapeHtml(text)}</code></pre>`
+      const { html, highlighted } = highlightCode(text, lang)
+      const classes = [lang ? `language-${escapeHtml(lang)}` : '', highlighted ? 'hljs' : ''].filter(Boolean)
+      const cls = classes.length ? ` class="${classes.join(' ')}"` : ''
+      return `<pre><code${cls}>${html}</code></pre>`
     },
   },
 })
@@ -44,8 +48,4 @@ export function renderMarkdown(text: string, target: HTMLElement, final: boolean
       node.title = error instanceof Error ? error.message : String(error)
     }
   })
-}
-
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }

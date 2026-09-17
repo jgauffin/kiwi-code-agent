@@ -158,6 +158,12 @@ describe('SdkSession', () => {
     })
   })
 
+  it('the_engines_built_in_question_tool_is_withheld_so_questions_take_the_own_tool_and_its_card', () => {
+    const fake = fakeQuery()
+    createSession(fake)
+    expect(fake.options).toMatchObject({ disallowedTools: ['AskUserQuestion'] })
+  })
+
   it('own_tools_are_served_in_process_and_reach_hooks_and_prompts_under_their_bare_name', async () => {
     const fake = fakeQuery()
     const seen: string[] = []

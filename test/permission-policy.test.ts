@@ -48,6 +48,14 @@ describe('commandLines', () => {
     ])
   })
 
+  it('the_rule_offered_for_a_command_run_by_path_covers_that_command_next_time', () => {
+    for (const command of ['./build.cmd test', '.\\build.cmd test', 'node_modules/.bin/vitest run']) {
+      const [line] = commandLines('Bash', command, [])
+      expect(line?.rule, command).toBeDefined()
+      expect(commandLines('Bash', command, [line!.rule!]), command).toEqual([{ text: command, passes: line!.rule }])
+    }
+  })
+
   it('powershell_is_judged_like_bash_under_rules_of_its_own_name', () => {
     expect(commandLines('PowerShell', 'npm run build; git status', ['Bash(npm run:*)'])).toEqual([
       { text: 'npm run build', rule: 'PowerShell(npm run:*)' },

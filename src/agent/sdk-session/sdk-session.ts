@@ -168,6 +168,9 @@ export class SdkSession implements CodeSession {
       pathToClaudeCodeExecutable: this.options.cliPath,
       spawnClaudeCodeProcess: spawnWithRuntime(this.options.runtime, this.options.onStderr ?? (() => {})),
       canUseTool: (toolName, input, ctx) => this.requestPermission(toolName, input, ctx),
+      // Questions go through the own AskUser tool on every engine. The engine's built-in one
+      // can only be answered through canUseTool, so left in it lands in the permission prompt.
+      disallowedTools: ['AskUserQuestion'],
       env: this.options.env ?? {},
     }
     if (profile.effort) options.effort = profile.effort

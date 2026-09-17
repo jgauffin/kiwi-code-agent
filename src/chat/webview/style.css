@@ -1,6 +1,7 @@
 :root {
   font-family: var(--vscode-font-family);
-  font-size: var(--vscode-font-size);
+  /* The workbench font is a size under the editor's; the conversation is read like code, so it never goes below the editor. */
+  font-size: max(var(--vscode-font-size), var(--vscode-editor-font-size));
   color: var(--vscode-foreground);
 }
 
@@ -1609,6 +1610,121 @@ select {
   border: 1px solid var(--vscode-dropdown-border);
   border-radius: 3px;
   padding: 0.2rem;
+}
+
+/*
+ * Code block token colors. Webviews get no editor token colors from the
+ * theme, only UI colors, so these follow VS Code's Dark+ and Light+ palettes
+ * and switch on the body class the host sets.
+ */
+.hljs {
+  --token-keyword: #569cd6;
+  --token-control: #c586c0;
+  --token-string: #ce9178;
+  --token-number: #b5cea8;
+  --token-comment: #6a9955;
+  --token-function: #dcdcaa;
+  --token-type: #4ec9b0;
+  --token-variable: #9cdcfe;
+  --token-tag: #569cd6;
+  --token-attr: #9cdcfe;
+  --token-added: #b5cea8;
+  --token-deleted: #f44747;
+}
+
+body.vscode-light .hljs {
+  --token-keyword: #0000ff;
+  --token-control: #af00db;
+  --token-string: #a31515;
+  --token-number: #098658;
+  --token-comment: #008000;
+  --token-function: #795e26;
+  --token-type: #267f99;
+  --token-variable: #001080;
+  --token-tag: #800000;
+  --token-attr: #e50000;
+  --token-added: #098658;
+  --token-deleted: #a31515;
+}
+
+.hljs-keyword,
+.hljs-literal,
+.hljs-built_in,
+.hljs-selector-tag,
+.hljs-doctag {
+  color: var(--token-keyword);
+}
+
+.hljs-comment,
+.hljs-quote {
+  color: var(--token-comment);
+  font-style: italic;
+}
+
+.hljs-string,
+.hljs-regexp,
+.hljs-meta .hljs-string,
+.hljs-selector-attr,
+.hljs-selector-pseudo {
+  color: var(--token-string);
+}
+
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet {
+  color: var(--token-number);
+}
+
+.hljs-title,
+.hljs-title.function_,
+.hljs-section {
+  color: var(--token-function);
+}
+
+.hljs-title.class_,
+.hljs-type,
+.hljs-selector-class,
+.hljs-selector-id {
+  color: var(--token-type);
+}
+
+.hljs-variable,
+.hljs-template-variable,
+.hljs-property,
+.hljs-params,
+.hljs-attr,
+.hljs-attribute {
+  color: var(--token-variable);
+}
+
+.hljs-name,
+.hljs-tag {
+  color: var(--token-tag);
+}
+
+.hljs-tag .hljs-attr {
+  color: var(--token-attr);
+}
+
+.hljs-meta,
+.hljs-subst {
+  color: var(--token-control);
+}
+
+.hljs-addition {
+  color: var(--token-added);
+}
+
+.hljs-deletion {
+  color: var(--token-deleted);
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong {
+  font-weight: bold;
 }
 
 @keyframes pulse {
