@@ -141,6 +141,7 @@ export class ChatApp extends HTMLElement {
         if (message.sessionId !== this.activeSessionId) return
         this.showCreating(false)
         this.transcript.reset(message.events)
+        this.composer.setHeldByQuestion(this.transcript.hasOpenQuestion)
         // A spec that exists is what the session is about; the conversation is one click away.
         this.show(this.plan?.body ? this.planTab : 'chat')
         this.composer.focusInput()
@@ -148,6 +149,7 @@ export class ChatApp extends HTMLElement {
       case 'event':
         if (message.sessionId !== this.activeSessionId) return
         this.transcript.apply(message.event)
+        this.composer.setHeldByQuestion(this.transcript.hasOpenQuestion)
         this.follow(message.event)
         break
       case 'show_new_session':

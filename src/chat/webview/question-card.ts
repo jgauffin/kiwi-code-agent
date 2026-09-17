@@ -21,9 +21,10 @@ export const isQuestionTool = (name: string): boolean => name === ASK_USER_TOOL 
 /**
  * One card per question request: a group per question in the order the model
  * asked them, each with its offered choices and a free-text "Other", and one
- * Submit for the card as a whole. Nothing is pre-selected and nothing is
- * answered by time passing; once resolved the card is the record of what was
- * asked and what was answered, and takes no further input.
+ * Submit for the card as a whole, or Skip to give no answer at all. Nothing
+ * is pre-selected and nothing is answered by time passing; once resolved the
+ * card is the record of what was asked and what was answered, and takes no
+ * further input.
  */
 export class QuestionCard extends HTMLElement {
   private requestId = ''
@@ -32,6 +33,7 @@ export class QuestionCard extends HTMLElement {
   private resolved = false
   private body!: HTMLElement
   private submit!: HTMLButtonElement
+  private skip!: HTMLButtonElement
   private hint!: HTMLElement
   private outcomeLine!: HTMLElement
 
@@ -49,9 +51,10 @@ export class QuestionCard extends HTMLElement {
       ;(input as HTMLInputElement | HTMLTextAreaElement).disabled = true
     }
     this.submit.remove()
+    this.skip.remove()
     this.hint.remove()
     this.outcomeLine.textContent =
-      outcome.kind === 'answered' ? answerText(this.request, outcome.answers) : 'Not answered.'
+      outcome.kind === 'answered' ? answerText(this.request, outcome.answers) : `Not answered${outcome.reason ? ` (${outcome.reason.toLowerCase()})` : ''}.`
     this.outcomeLine.className = outcome.kind === 'answered' ? 'answered' : 'unanswered'
     this.outcomeLine.hidden = false
     if (outcome.kind === 'answered') this.showSubmitted(outcome.answers)
@@ -72,9 +75,15 @@ export class QuestionCard extends HTMLElement {
     this.submit.className = 'submit'
     this.submit.textContent = 'Submit'
     this.submit.addEventListener('click', () => this.answer())
+    this.skip = document.createElement('button')
+    this.skip.type = 'button'
+    this.skip.className = 'skip'
+    this.skip.textContent = 'Skip'
+    this.skip.title = 'Give no answer; the model is told to ask again or work on something else.'
+    this.skip.addEventListener('click', () => this.leaveUnanswered())
     this.hint = document.createElement('span')
     this.hint.className = 'missing'
-    actions.append(this.submit, this.hint)
+    actions.append(this.submit, this.skip, this.hint)
     this.outcomeLine = document.createElement('p')
     this.outcomeLine.hidden = true
     this.replaceChildren(this.body, actions, this.outcomeLine)
@@ -169,6 +178,11 @@ export class QuestionCard extends HTMLElement {
     if (this.resolved || !canSubmit(this.request, this.answers)) return
     const answers = this.request.questions.map((q, i) => normalizeAnswer(q, this.answers[i] ?? { chosen: [] }))
     this.dispatchEvent(new QuestionAnsweredEvent(this.requestId, { kind: 'answered', answers }))
+  }
+
+  private leaveUnanswered(): void {
+    if (this.resolved) return
+    this.dispatchEvent(new QuestionAnsweredEvent(this.requestId, { kind: 'unanswered', reason: 'Skipped by the user' }))
   }
 
   /** A replayed card shows the answers that were given, not an empty form. */

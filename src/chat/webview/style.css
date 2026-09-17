@@ -1591,9 +1591,15 @@ button {
   }
 
   &.stop,
-  &.deny {
+  &.deny,
+  &.skip {
     background: var(--vscode-button-secondaryBackground);
     color: var(--vscode-button-secondaryForeground);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 }
 

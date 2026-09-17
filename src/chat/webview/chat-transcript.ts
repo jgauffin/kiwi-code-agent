@@ -10,6 +10,8 @@ import { isQuestionTool, QuestionCard } from './question-card'
 
 type AssistantBubble = { element: HTMLElement; text: HTMLElement; thinking: HTMLElement; streamed: string; finalParts: string[] }
 
+const WAITING_ON_MODEL = 'Waiting on model'
+
 /**
  * The conversation as an append-only stream. Events patch the DOM directly:
  * streamed text lands in the bubble it belongs to, tool results attach to
@@ -23,8 +25,11 @@ export class ChatTranscript extends HTMLElement {
   /** Tool calls of the question tool: the card says what they ask, so their own rows say nothing. */
   private readonly questionCalls = new Set<string>()
   private statusLine!: HTMLElement
-  private busy = false
-  private working: { element: HTMLElement; stop: () => void } | undefined
+  /** Tool calls still without a result, by id, each named as its row is. */
+  private readonly pendingTools = new Map<string, string>()
+  /** What the session is doing right now; nothing when it waits on the user or is idle. */
+  private activity: string | undefined
+  private working: { element: HTMLElement; label: string; startedAt: number; stop: () => void } | undefined
 
   connectedCallback(): void {
     if (this.childElementCount === 0) {
@@ -41,9 +46,10 @@ export class ChatTranscript extends HTMLElement {
     this.permissions.clear()
     this.questions.clear()
     this.questionCalls.clear()
+    this.pendingTools.clear()
     this.working?.stop()
     this.working = undefined
-    this.busy = false
+    this.activity = undefined
     this.setStatus('')
     for (const event of events) this.apply(event, false)
     // Streamed text is rendered once at the end of a replay, not per delta.
@@ -54,6 +60,11 @@ export class ChatTranscript extends HTMLElement {
     this.scrollToEnd()
   }
 
+  /** A question card still waiting on the user. */
+  get hasOpenQuestion(): boolean {
+    return [...this.questions.values()].some((card) => !card.isResolved)
+  }
+
   apply(event: SessionEvent, live = true): void {
     switch (event.type) {
       case 'session_started':
@@ -62,36 +73,46 @@ export class ChatTranscript extends HTMLElement {
       case 'user_message':
         // A test-run handoff quotes the command's output, colours and all.
         this.insert(block('user', event.text, renderAnsi))
-        this.busy = true
+        this.activity = WAITING_ON_MODEL
         break
       case 'assistant_text': {
         const bubble = this.bubble(event.messageId, event.parentToolUseId)
         bubble.streamed += event.delta
         if (live && bubble.finalParts.length === 0) renderMarkdown(bubble.streamed, bubble.text, false)
+        this.activity = 'Writing'
         break
       }
       case 'assistant_thinking': {
         const bubble = this.bubble(event.messageId, event.parentToolUseId)
         bubble.thinking.hidden = false
         bubble.thinking.textContent += event.delta
+        this.activity = 'Thinking'
         break
       }
       case 'assistant_message': {
         const bubble = this.bubble(event.messageId, event.parentToolUseId)
         bubble.finalParts.push(event.text)
         renderMarkdown(bubble.finalParts.join(''), bubble.text, true)
+        // The tool calls the message carries, if any, follow right after and take over.
+        this.activity = WAITING_ON_MODEL
         break
       }
-      case 'tool_call':
+      case 'tool_call': {
         // The question is put as a card, so its call and its result are not shown as a tool step.
         if (isQuestionTool(event.name)) {
           this.questionCalls.add(event.toolUseId)
           break
         }
-        this.insert(this.toolCall(event), event.parentToolUseId)
+        const details = this.toolCall(event)
+        this.insert(details, event.parentToolUseId)
+        this.pendingTools.set(event.toolUseId, `Running ${details.querySelector('summary')?.textContent ?? event.name}`)
+        this.activity = this.pendingActivity()
         break
+      }
       case 'tool_result': {
         if (this.questionCalls.has(event.toolUseId)) break
+        this.pendingTools.delete(event.toolUseId)
+        this.activity = this.pendingActivity()
         const details = this.tools.get(event.toolUseId)
         const result = document.createElement('pre')
         result.className = event.isError ? 'result error' : 'result'
@@ -112,12 +133,12 @@ export class ChatTranscript extends HTMLElement {
         card.show(event)
         this.permissions.set(event.requestId, card)
         // The card is the indicator now; a ticking clock would say the model is at work.
-        this.busy = false
+        this.activity = undefined
         break
       }
       case 'permission_resolved':
         this.permissions.get(event.requestId)?.resolve(event.decision)
-        this.busy = true
+        this.activity = this.pendingActivity()
         break
       case 'question_request': {
         const card = new QuestionCard()
@@ -126,19 +147,20 @@ export class ChatTranscript extends HTMLElement {
         card.show(event)
         this.questions.set(event.requestId, card)
         // The card is waiting on the user, not the model; a ticking clock would say otherwise.
-        this.busy = false
+        this.activity = undefined
         break
       }
       case 'question_resolved':
         this.questions.get(event.requestId)?.resolve(event.outcome)
-        this.busy = true
+        this.activity = this.pendingActivity()
         break
       case 'status':
-        // 'idle' also arrives mid-turn (after compaction, between requests); only the turn's end clears busy.
-        if (event.status !== 'idle') this.busy = true
+        // 'idle' also arrives mid-turn (after compaction, between requests); only the turn's end clears the activity.
+        if (event.status === 'requesting') this.activity = WAITING_ON_MODEL
+        if (event.status === 'compacting') this.activity = 'Compacting context'
         break
       case 'turn_done': {
-        this.busy = false
+        this.activity = undefined
         const line = document.createElement('p')
         line.className = event.isError ? 'turn error' : 'turn'
         const usage = event.usage
@@ -153,10 +175,10 @@ export class ChatTranscript extends HTMLElement {
       }
       case 'error':
         this.insert(block(event.fatal ? 'error fatal' : 'error', event.message))
-        if (event.fatal) this.busy = false
+        if (event.fatal) this.activity = undefined
         break
       case 'ended':
-        this.busy = false
+        this.activity = undefined
         this.insert(block('ended', 'Engine stopped. The next prompt resumes the conversation.'))
         break
     }
@@ -166,9 +188,14 @@ export class ChatTranscript extends HTMLElement {
     }
   }
 
-  /** A pulsing "Working…" row with elapsed time, kept last, while the model is at work. */
+  /** The newest tool call still running, or the model's turn once every call has its result. */
+  private pendingActivity(): string {
+    return [...this.pendingTools.values()].at(-1) ?? WAITING_ON_MODEL
+  }
+
+  /** A pulsing row naming the current activity, with the time spent in it, kept last while the session is at work. */
   private showWorking(): void {
-    if (!this.busy) {
+    if (!this.activity) {
       this.working?.stop()
       this.working?.element.remove()
       this.working = undefined
@@ -177,12 +204,16 @@ export class ChatTranscript extends HTMLElement {
     if (!this.working) {
       const row = document.createElement('p')
       row.className = 'working'
-      row.textContent = 'Working…'
-      const startedAt = Date.now()
+      const working = { element: row, label: '', startedAt: 0, stop: () => window.clearInterval(timer) }
       const timer = window.setInterval(() => {
-        row.textContent = `Working… ${Math.round((Date.now() - startedAt) / 1000)}s`
+        row.textContent = `${working.label}… ${Math.round((Date.now() - working.startedAt) / 1000)}s`
       }, 1000)
-      this.working = { element: row, stop: () => window.clearInterval(timer) }
+      this.working = working
+    }
+    if (this.working.label !== this.activity) {
+      this.working.label = this.activity
+      this.working.startedAt = Date.now()
+      this.working.element.textContent = `${this.activity}…`
     }
     this.appendChild(this.working.element)
   }

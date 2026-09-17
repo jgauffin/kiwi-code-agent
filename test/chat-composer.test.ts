@@ -5,13 +5,38 @@ import { describe, expect, it } from 'vitest'
 ;(globalThis as Record<string, unknown>).acquireVsCodeApi = () => ({ postMessage: () => {} })
 
 const { ChatComposer } = await import('../src/chat/webview/chat-composer')
-const { McpReconnectRequestedEvent } = await import('../src/chat/webview/events')
+const { McpReconnectRequestedEvent, PromptSubmittedEvent } = await import('../src/chat/webview/events')
 
 function composer(): InstanceType<typeof ChatComposer> {
   const node = new ChatComposer()
   document.body.appendChild(node)
   return node
 }
+
+describe('ChatComposer while a question waits', () => {
+  it('a_prompt_is_held_back_while_a_question_card_waits_and_goes_out_once_it_is_resolved', () => {
+    const node = composer()
+    const sent: string[] = []
+    node.addEventListener(PromptSubmittedEvent.type, (e) => sent.push(e.text))
+    const textarea = node.querySelector('textarea')!
+    const send = node.querySelector<HTMLButtonElement>('button.send')!
+
+    node.setHeldByQuestion(true)
+    expect(textarea.disabled).toBe(true)
+    expect(send.disabled).toBe(true)
+    expect(textarea.placeholder).toBe('Answer or skip the question above first.')
+    textarea.value = 'do it anyway'
+    node.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }))
+    expect(sent).toEqual([])
+    // Stop is the way out that needs no answer, so it stays live.
+    expect(node.querySelector<HTMLButtonElement>('button.stop')!.disabled).toBe(false)
+
+    node.setHeldByQuestion(false)
+    expect(textarea.disabled).toBe(false)
+    node.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }))
+    expect(sent).toEqual(['do it anyway'])
+  })
+})
 
 describe('ChatComposer MCP line', () => {
   it('each_server_is_shown_with_its_status_and_a_failed_one_carries_its_error', () => {

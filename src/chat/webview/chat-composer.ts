@@ -5,11 +5,15 @@ import { AllowWritesToggledEvent, InterruptRequestedEvent, McpReconnectRequested
 /** The composer's per-session switches; `undefined` hides a switch the session has no use for. */
 type Switches = { allowWrites: boolean | undefined; mcp: McpServerState[] | undefined }
 
-/** Prompt input. Enter sends, Shift+Enter breaks the line. */
+/**
+ * Prompt input. Enter sends, Shift+Enter breaks the line. Held while the
+ * session waits on a question card: a prompt sent then would queue behind
+ * the unanswered question and look like a hang. Stop stays available.
+ */
 export class ChatComposer extends HTMLElement {
   private readonly template = compileTemplate(`
     <form r-submit="submit(event)">
-      <textarea name="prompt" rows="3" placeholder="Ask for a change..." r-keydown="keydown(event)"></textarea>
+      <textarea name="prompt" rows="3" placeholder="{{placeholder}}" disabled="{{held}}" r-keydown="keydown(event)"></textarea>
       <div class="actions">
         <span class="switches">
           <label class="allow-writes" if="allowWritesAvailable" title="Let this session write files without asking. Bash and other tools still ask; deny rules still block.">
@@ -17,7 +21,7 @@ export class ChatComposer extends HTMLElement {
           </label>
         </span>
         <button type="button" class="stop" r-click="stop()">Stop</button>
-        <button type="submit" class="send">Send</button>
+        <button type="submit" class="send" disabled="{{held}}">Send</button>
       </div>
       <div class="mcp-servers" if="mcpAvailable">
         <span loop="s in servers" class="server {{s.status}}" title="{{s.title}}">
@@ -28,6 +32,7 @@ export class ChatComposer extends HTMLElement {
     </form>
   `)
   private switches: Switches = { allowWrites: undefined, mcp: undefined }
+  private held = false
 
   connectedCallback(): void {
     if (this.childElementCount > 0) return
@@ -40,14 +45,23 @@ export class ChatComposer extends HTMLElement {
     this.render()
   }
 
+  /** Whether a question card waits on the user; while it does, no prompt goes out. */
+  setHeldByQuestion(held: boolean): void {
+    if (this.held === held) return
+    this.held = held
+    this.render()
+  }
+
   focusInput(): void {
-    this.textarea.focus()
+    if (!this.held) this.textarea.focus()
   }
 
   private render(): void {
     const { allowWrites, mcp } = this.switches
     this.template.render(
       {
+        held: this.held,
+        placeholder: this.held ? 'Answer or skip the question above first.' : 'Ask for a change...',
         allowWritesAvailable: allowWrites !== undefined,
         allowWrites: allowWrites ?? false,
         mcpAvailable: mcp !== undefined && mcp.length > 0,
@@ -79,7 +93,7 @@ export class ChatComposer extends HTMLElement {
 
   private send(): void {
     const text = this.textarea.value.trim()
-    if (text === '') return
+    if (text === '' || this.held) return
     this.textarea.value = ''
     this.dispatchEvent(new PromptSubmittedEvent(text))
   }

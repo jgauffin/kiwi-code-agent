@@ -68,6 +68,58 @@ describe('terminal output in the transcript', () => {
   })
 })
 
+describe('the activity row', () => {
+  const activity = (view: Transcript) => view.querySelector('.working')?.textContent ?? null
+
+  it('a_sent_prompt_waits_on_the_model_until_it_starts_thinking_or_writing', () => {
+    const view = transcript()
+
+    view.apply({ type: 'user_message', text: 'go' })
+    expect(activity(view)).toBe('Waiting on model…')
+    view.apply({ type: 'assistant_thinking', messageId: 'm1', delta: 'hm' })
+    expect(activity(view)).toBe('Thinking…')
+    view.apply({ type: 'assistant_text', messageId: 'm1', delta: 'Sure' })
+    expect(activity(view)).toBe('Writing…')
+  })
+
+  it('a_tool_call_without_a_result_names_the_step_that_runs_and_its_result_hands_back_to_the_model', () => {
+    const view = transcript()
+
+    view.apply({ type: 'user_message', text: 'go' })
+    view.apply({ type: 'tool_call', toolUseId: 't1', name: 'Bash', input: { command: 'npm test', description: 'Run the tests' } })
+    expect(activity(view)).toBe('Running Run the tests…')
+    view.apply({ type: 'tool_call', toolUseId: 't2', name: 'Read', input: { file_path: 'src/x.ts' } })
+    expect(activity(view)).toBe('Running Read src/x.ts…')
+    view.apply({ type: 'tool_result', toolUseId: 't2', text: '', isError: false })
+    expect(activity(view)).toBe('Running Run the tests…')
+    view.apply({ type: 'tool_result', toolUseId: 't1', text: '', isError: false })
+    expect(activity(view)).toBe('Waiting on model…')
+  })
+
+  it('compaction_is_named_while_it_runs_and_the_turn_end_clears_the_row', () => {
+    const view = transcript()
+
+    view.apply({ type: 'user_message', text: 'go' })
+    view.apply({ type: 'status', status: 'compacting' })
+    expect(activity(view)).toBe('Compacting context…')
+    view.apply({ type: 'status', status: 'idle' })
+    expect(activity(view)).toBe('Compacting context…')
+    view.apply({ type: 'turn_done', isError: false, errors: [] })
+    expect(activity(view)).toBeNull()
+  })
+
+  it('a_granted_permission_resumes_the_step_it_held_up', () => {
+    const view = transcript()
+
+    view.apply({ type: 'user_message', text: 'go' })
+    view.apply({ type: 'tool_call', toolUseId: 't1', name: 'Write', input: { file_path: 'src/x.ts' } })
+    view.apply({ type: 'permission_request', requestId: 'p1', toolName: 'Write', input: { file_path: 'src/x.ts' } })
+    expect(activity(view)).toBeNull()
+    view.apply({ type: 'permission_resolved', requestId: 'p1', decision: 'allow' })
+    expect(activity(view)).toBe('Running Write src/x.ts…')
+  })
+})
+
 describe('questions in a replayed transcript', () => {
   beforeAll(() => {
     // The card's own custom element registers when its module loads; the transcript needs it defined.
@@ -110,6 +162,31 @@ describe('questions in a replayed transcript', () => {
     expect(submitted(card!)).toEqual({ kind: 'answered', answers: [{ chosen: ['No'] }] })
     // Nobody is working while the card waits, so no clock runs.
     expect(view.querySelector('.working')).toBeNull()
+  })
+
+  it('skipping_a_card_leaves_the_question_unanswered_rather_than_choosing_for_the_user', () => {
+    const view = transcript()
+
+    view.reset([{ type: 'user_message', text: 'go' }, ask('r1', 'Storage')])
+
+    const [card] = cards(view)
+    let sent: unknown
+    card!.addEventListener(QuestionAnsweredEvent.type, (e) => {
+      sent = (e as InstanceType<typeof QuestionAnsweredEvent>).outcome
+    })
+    card!.querySelector<HTMLButtonElement>('button.skip')!.click()
+    expect(sent).toEqual({ kind: 'unanswered', reason: 'Skipped by the user' })
+  })
+
+  it('the_transcript_reports_an_open_question_until_it_is_resolved', () => {
+    const view = transcript()
+
+    view.reset([{ type: 'user_message', text: 'go' }, ask('r1', 'Storage')])
+    expect(view.hasOpenQuestion).toBe(true)
+    view.apply({ type: 'question_resolved', requestId: 'r1', outcome: { kind: 'unanswered', reason: 'Skipped by the user' } })
+    expect(view.hasOpenQuestion).toBe(false)
+    expect(cards(view)[0]?.querySelector('.unanswered')?.textContent).toBe('Not answered (skipped by the user).')
+    expect(cards(view)[0]?.querySelector('button.skip')).toBeNull()
   })
 
   it('two_requests_replay_as_two_cards_in_arrival_order_each_answered_on_its_own', () => {

@@ -146,7 +146,7 @@ describe('the question card', () => {
     const cancelled = cardFor(request, 'r2')
     cancelled.resolve({ kind: 'unanswered', reason: 'Interrupted' })
 
-    expect(cancelled.querySelector('.unanswered')?.textContent).toBe('Not answered.')
+    expect(cancelled.querySelector('.unanswered')?.textContent).toBe('Not answered (interrupted).')
     expect(submitted(cancelled)).toBeUndefined()
     expect([...cancelled.querySelectorAll<HTMLTextAreaElement>('textarea')].every((f) => f.disabled)).toBe(true)
   })
