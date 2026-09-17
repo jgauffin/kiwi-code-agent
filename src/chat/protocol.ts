@@ -1,4 +1,4 @@
-import type { PermissionDecision, SessionEvent } from '../agent/session/code-session'
+import type { McpServerState, PermissionDecision, SessionEvent } from '../agent/session/code-session'
 import type { QuestionOutcome } from '../agent/session/user-question'
 import type { Amendment } from '../agent/phases/intent-writeback'
 import type { CommentRef, Review } from '../agent/phases/plan-review'
@@ -7,6 +7,7 @@ import type { Spec } from '../agent/phases/spec-model'
 import type { Task, VerificationRecord } from '../agent/phases/tasks-file'
 import type { SessionMode } from '../agent/session/session-manager'
 import type { SessionStatus } from '../agent/session/session-status'
+import type { ProfileDefaults } from '../settings/settings-store'
 
 /** One tab: a session that is live, or the one being looked at. */
 export type SessionTab = {
@@ -92,10 +93,14 @@ export type ToWebview =
       tabs: SessionTab[]
       /** Allow-writes for the active session; absent when its phase decides writes itself or no session is active. */
       allowWrites?: boolean
+      /** The active session's MCP servers as its engine last reported them; absent while it is not running or takes none. */
+      mcp?: McpServerState[]
       /** Present when the active session is a plan session. */
       plan?: PlanState
       /** Plans under `plan/` still in progress, for the new-session screen. */
       plans: ResumablePlan[]
+      /** The profiles by name and which of them new sessions get, for the new-session screen's pickers. */
+      profiles: ProfileDefaults
     }
   /** Full history of the active session, sent on switch. */
   | { type: 'transcript'; sessionId: string; events: SessionEvent[] }
@@ -133,11 +138,15 @@ export type FromWebview =
   | { type: 'interrupt' }
   /** File writes in the active session go through without a prompt while on. */
   | { type: 'set_allow_writes'; enabled: boolean }
+  /** Tries one of the active session's MCP servers again. */
+  | { type: 'reconnect_mcp'; server: string }
   | { type: 'switch_session'; sessionId: string }
   /** Stops the engine; the session stays in the list and resumes on the next prompt. */
   | { type: 'close_session'; sessionId: string }
   /** `prompt`, when given, is sent as the first message. */
   | { type: 'new_session'; mode: SessionMode; feature?: string; prompt?: string }
+  /** Sets the profile new sessions of that kind run on; `plan` with an empty name follows `work`. */
+  | { type: 'set_default_profile'; role: 'work' | 'plan'; name: string }
   /** Opens the plan session behind a spec on disk, or starts one on it when none remains; what it offers follows the spec's status. */
   | { type: 'resume_plan'; feature: string }
   /** Approves the mapped draft; refused while a decision is pending or a comment open. */

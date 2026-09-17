@@ -1,7 +1,7 @@
 import * as vscode from 'vscode'
 import { isPlanning, type SessionManager, type SessionMode, type SessionRecord } from '../agent/session/session-manager'
 import type { ModelProfile } from '../agent/session/model-profile'
-import type { SessionEvent } from '../agent/session/code-session'
+import type { McpServerState, SessionEvent } from '../agent/session/code-session'
 import { nextStatus, type SessionStatus } from '../agent/session/session-status'
 import { readSpecState, setSpecStatus, type SpecState } from '../agent/phases/spec-file'
 import { PLAN_DIR, decisionsHandoffPrompt, featureSlug, migrateSpecPrompt, resumePlanPrompt, rulingsHandoffPrompt, specPath } from '../agent/phases/blind-plan'
@@ -19,6 +19,7 @@ import { liveTasks, readTasks, stampSpecFingerprint, tasksDone, tasksPath, type 
 import {
   describeCommand,
   runVerification,
+  verificationDue,
   verificationHandoffPrompt,
   type CommandRunner,
   type VerifyRule,
@@ -29,7 +30,6 @@ import {
   assertCommentable,
   editComment,
   emptyReview,
-  findItem,
   isCommentable,
   openComments,
   readReview,
@@ -48,6 +48,8 @@ import { buildRepoMap } from '../agent/repo-map/build-map'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative } from 'node:path'
 import type { FromWebview, PlanState, RunState, SessionTab, ToWebview } from './protocol'
+import { webviewHtml } from './webview-html'
+import type { ProfileDefaults } from '../settings/settings-store'
 
 /** A per-session on/off switch the composer shows. */
 export interface SessionSwitch {
@@ -76,6 +78,12 @@ export interface PermissionStore {
   allowForSession(sessionId: string, rules: string[]): void
 }
 
+/** What new sessions run on, as the new-session screen shows and sets it. */
+export interface ProfileDefaultsStore {
+  read(): ProfileDefaults
+  set(role: 'work' | 'plan', name: string): Promise<void>
+}
+
 /** The editor panel's view type; a serializer registered under it brings the panel back after a reload. */
 export const CHAT_PANEL_TYPE = 'kiwiAgent.chatPanel'
 
@@ -93,8 +101,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private readonly verifications = new Map<string, RunState>()
   /** Consecutive failed test runs per feature; a pass or a manual run resets it. */
   private readonly verifyFailures = new Map<string, number>()
-  /** Whether each feature's board was all tested the last time an implementer touched a file: the run starts on the edge. */
-  private readonly boardDone = new Map<string, boolean>()
   /** The cleanup run per feature: what it is doing, or how the last one ended. */
   private readonly cleanups = new Map<string, RunState>()
   /** Features whose sizes were measured once their tests passed; the run does not repeat on the pass that proves its own split. */
@@ -103,6 +109,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private readonly repairing = new Set<string>()
   /** Features whose rulings were handed to the planner; Approve waits for that turn to end rather than sending them twice. */
   private readonly applying = new Set<string>()
+  /** Per running session, its MCP servers as the engine last reported them. */
+  private readonly mcpServers = new Map<string, McpServerState[]>()
   private readonly changed = new vscode.EventEmitter<void>()
   /** Fires when the active session, a status or the session list changed. */
   readonly onDidChange = this.changed.event
@@ -112,6 +120,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     private readonly extensionUri: vscode.Uri,
     private readonly sessions: SessionManager,
     private readonly profileFor: (mode: SessionMode) => ModelProfile,
+    private readonly profileDefaults: ProfileDefaultsStore,
     private readonly verifier: Verifier,
     private readonly sizeLimits: SizeLimits,
     private readonly allowWrites: SessionSwitch,
@@ -172,6 +181,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     // The plan list is read fresh, so a spec written since the last state is offered.
     void this.sendState()
     this.broadcast({ type: 'show_new_session' })
+  }
+
+  /** Re-reads what the state carries from settings, after they changed elsewhere. */
+  refresh(): void {
+    void this.sendState()
   }
 
   /**
@@ -236,14 +250,21 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       return
     }
     if (sessionId === this.activeSessionId) this.broadcast({ type: 'event', sessionId, event })
+    if (event.type === 'mcp_servers') {
+      this.mcpServers.set(sessionId, event.servers)
+      void this.sendState()
+    }
+    if (event.type === 'ended') this.mcpServers.delete(sessionId)
     if (event.type === 'session_started' || event.type === 'ended') {
       void this.sendState()
       this.changed.fire()
     }
-    if (event.type === 'tool_result' && record?.feature) {
+    if (event.type === 'tool_result' && record?.feature && sessionId === this.activeSessionId) {
       // The session just wrote the spec (a revision, decisions, a task marker); the plan bar and view must follow.
-      if (sessionId === this.activeSessionId) void this.sendState()
-      if (record.mode === 'implement') void this.followBoard(record.feature)
+      void this.sendState()
+    }
+    if (event.type === 'turn_done' && !event.isError && record?.mode === 'implement' && record.feature) {
+      void this.followBoard(record.feature)
     }
     if (event.type === 'turn_done' && record?.mode === 'plan' && record.feature) {
       // However the turn ended, the rulings are no longer in flight: Approve is the user's again, on the spec as it stands.
@@ -339,16 +360,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * An implementer touched a file: when that left the board all tested, the
-   * test run starts. On the edge only, so a board that was already all tested
-   * when the session resumed is not run again on its first read.
+   * An implementer's turn ended: a board left all tested without a passing
+   * run gets the test run, whether the turn marked the last task or fixed the
+   * code after a failed run. A board that already passed is left alone.
    */
   private async followBoard(feature: string): Promise<void> {
     const tasks = await readTasks(tasksPath(this.workspaceRoot, feature))
-    const done = tasks.exists && tasksDone(tasks.tasks)
-    const before = this.boardDone.get(feature)
-    this.boardDone.set(feature, done)
-    if (done && before === false) await this.verify(feature, false)
+    if (verificationDue(tasks)) await this.verify(feature, false)
   }
 
   /**
@@ -558,7 +576,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   private attach(webview: vscode.Webview): void {
     webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist')] }
-    webview.html = this.html(webview)
+    webview.html = webviewHtml(webview, this.extensionUri, 'chat-app')
     webview.onDidReceiveMessage((message: FromWebview) => {
       this.handle(message).catch((error: unknown) => {
         const text = error instanceof Error ? error.message : String(error)
@@ -597,6 +615,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       case 'set_allow_writes':
         if (this.activeSessionId) this.allowWrites.setEnabled(this.activeSessionId, message.enabled)
         void this.sendState()
+        return
+      case 'reconnect_mcp':
+        if (this.activeSessionId) await this.sessions.reconnectMcp(this.activeSessionId, message.server)
+        return
+      case 'set_default_profile':
+        await this.profileDefaults.set(message.role, message.name)
+        await this.sendState()
         return
       case 'switch_session':
         await this.open(message.sessionId)
@@ -645,9 +670,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         return
       }
       case 'add_comment':
-        await this.reviewing(async (review, state) => {
-          const item = message.target === 'plan' ? undefined : findItem(state.exists ? state.body : '', message.target)
-          addComment(review, message.target, message.text, item ? `${item.name}: ${item.text}` : undefined)
+        await this.reviewing(async (review) => {
+          addComment(review, message.target, message.text)
         })
         return
       case 'edit_comment':
@@ -947,8 +971,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       type: 'state',
       tabs: this.tabs(),
       ...(active && writesAsked ? { allowWrites: this.allowWrites.isEnabled(active) } : {}),
+      ...(active && this.mcpServers.has(active) ? { mcp: this.mcpServers.get(active)! } : {}),
       ...(plan ? { plan } : {}),
       plans: plans.flatMap((p) => (p.status === 'verified' ? [] : [{ feature: p.feature, status: p.status }])),
+      profiles: this.profileDefaults.read(),
     })
   }
 
@@ -961,23 +987,4 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     for (const webview of this.webviews) void webview.postMessage(message)
   }
 
-  private html(webview: vscode.Webview): string {
-    const script = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview.js'))
-    const style = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview.css'))
-    const nonce = crypto.randomUUID().replace(/-/g, '')
-    return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}' ${webview.cspSource}; img-src ${webview.cspSource} data:; font-src ${webview.cspSource} data:;">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="stylesheet" href="${style}">
-<title>KiwiAgent</title>
-</head>
-<body>
-<chat-app></chat-app>
-<script type="module" nonce="${nonce}" src="${script}"></script>
-</body>
-</html>`
-  }
 }

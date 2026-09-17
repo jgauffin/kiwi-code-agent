@@ -5,6 +5,9 @@ import type { ChatCompletionClient, CompletionDelta, CompletionRequest } from '.
 import type { Tool } from '../src/agent/openai-session/tools/tool'
 import { askUserTool } from '../src/agent/openai-session/tools/ask-user'
 import type { SessionEvent } from '../src/agent/session/code-session'
+import type { McpConnector, McpToolInfo } from '../src/agent/mcp/mcp-connection'
+import type { McpServers } from '../src/agent/mcp/mcp-config'
+import { McpToolHost } from '../src/agent/mcp/mcp-tool-host'
 
 /** A scripted model: each call to stream() plays the next scripted reply. */
 class ScriptedModel implements ChatCompletionClient {
@@ -351,6 +354,86 @@ describe('OpenAiSession', () => {
       await s.dispose()
       await reading
       expect(seen.filter((e) => e.type === 'question_resolved')).toMatchObject([{ requestId: 'q1', outcome: { kind: 'unanswered' } }])
+    })
+  })
+
+  describe('workspace MCP servers', () => {
+    const echoInfo: McpToolInfo = { name: 'echo', description: 'Echoes', inputSchema: { type: 'object', properties: { value: { type: 'string' } } } }
+    const docs = { type: 'stdio' as const, command: 'x' }
+
+    /** Every server has one `echo` tool; `broken` cannot be reached. */
+    const connector: McpConnector = async (name) => {
+      if (name === 'broken') throw new Error('spawn nope ENOENT')
+      return {
+        listTools: async () => [echoInfo],
+        callTool: async (tool, args) => ({ text: `${name}:${tool}:${JSON.stringify(args)}`, isError: false }),
+        close: async () => undefined,
+      }
+    }
+
+    function mcpSession(model: ChatCompletionClient, servers: McpServers = { docs }) {
+      return new OpenAiSession({
+        id: 's1',
+        profile: { name: 'GLM', engine: 'openai-compatible', model: 'glm' },
+        cwd: process.cwd(),
+        client: model,
+        tools: [echoTool as Tool],
+        systemPrompt: 'sys',
+        mcp: { host: new McpToolHost(connector), servers },
+      })
+    }
+
+    it('an_mcp_tool_call_asks_first_and_then_runs_through_the_connection', async () => {
+      const model = new ScriptedModel(toolCall('c1', 'mcp__docs__echo', '{"value":"x"}'), text('done'))
+      const s = mcpSession(model)
+      s.send('go')
+      const events: SessionEvent[] = []
+      for await (const e of s.events()) {
+        events.push(e)
+        if (e.type === 'permission_request') s.respondToPermission(e.requestId, { kind: 'allow' })
+        if (e.type === 'turn_done') break
+      }
+      expect(events).toContainEqual({ type: 'mcp_servers', servers: [{ name: 'docs', status: 'connected' }] })
+      expect(events).toContainEqual({ type: 'permission_request', requestId: 'c1', toolName: 'mcp__docs__echo', input: { value: 'x' } })
+      expect(events).toContainEqual({ type: 'tool_result', toolUseId: 'c1', text: 'docs:echo:{"value":"x"}', isError: false })
+      expect(model.requests[0]!.tools.map((t) => t.name)).toEqual(['Echo', 'mcp__docs__echo'])
+      expect(model.requests[0]!.tools[1]).toEqual({ name: 'mcp__docs__echo', description: 'Echoes', parameters: echoInfo.inputSchema })
+      await s.dispose()
+    })
+
+    it('the_tools_offered_to_the_model_follow_a_reload_and_a_failed_server_is_reported_not_thrown', async () => {
+      const model = new ScriptedModel(text('one'), text('two'))
+      const s = mcpSession(model)
+      const events: SessionEvent[] = []
+      const reading = (async () => {
+        for await (const e of s.events()) {
+          events.push(e)
+          if (events.filter((x) => x.type === 'turn_done').length === 2) break
+        }
+      })()
+      s.send('a')
+      await s.mcp!.reload({ other: docs, broken: docs })
+      s.send('b')
+      await reading
+      await s.dispose()
+      expect(model.requests[0]!.tools.map((t) => t.name)).toEqual(['Echo', 'mcp__docs__echo'])
+      expect(model.requests[1]!.tools.map((t) => t.name)).toEqual(['Echo', 'mcp__other__echo'])
+      expect(events.filter((e) => e.type === 'mcp_servers')).toEqual([
+        { type: 'mcp_servers', servers: [{ name: 'docs', status: 'connected' }] },
+        {
+          type: 'mcp_servers',
+          servers: [
+            { name: 'other', status: 'connected' },
+            { name: 'broken', status: 'failed', error: 'spawn nope ENOENT' },
+          ],
+        },
+      ])
+    })
+
+    it('a_session_without_servers_has_no_control', async () => {
+      const s = session(new ScriptedModel())
+      expect(s.mcp).toBeUndefined()
+      await s.dispose()
     })
   })
 })

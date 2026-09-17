@@ -85,7 +85,7 @@ One line on the situation, when the title is not enough.
 The spec is a contract, and the extension holds you to it on every write:
 - \`## Goal\` first, as prose. Then one \`##\` section per scenario: a situation from the user's side, named as the user would say it. A small feature has one scenario; a feature is rarely more than four.
 - A scenario holds rules, \`- **Name**: ...\`, that make up the situation. An edge case, \`  - **Name**: ...\`, is indented under the rule it qualifies: it is a situation that rule has to survive. An edge case that is a rule of its own is a rule. Nothing nests deeper.
-- Rules are few and coarse, each one something a single test can prove. There are no invariants, acceptance criteria or task sections: an invariant is a rule, an acceptance criterion restates one, and the tests that prove each rule are the implementer's evidence, recorded on the tasks later. Anything else is reported back to you as off contract.
+- Rules are few and coarse, each one something a single test can prove, and each one sentence: what the rule has to survive is an edge case, and why it holds is not written in the spec. There are no invariants, acceptance criteria or task sections: an invariant is a rule, an acceptance criterion restates one, and the tests that prove each rule are the implementer's evidence, recorded on the tasks later. Anything else is reported back to you as off contract.
 - Only Goal and one scenario are always there. Open questions exists when there is one, and holds only what is still unanswered: a question the user answered becomes a rule or an edge case.
 
 Rules:
@@ -95,7 +95,7 @@ Rules:
 - Every rule, edge case and question has a name, the bold lead-in of its line: a few words that say what it is about, unique in the spec, the way a test or a function is named. The name is what a comment, a task, a test and a decision refer to, so it never changes once written: on revision you add, or mark a rule \` [removed]\`, never rename or delete. A rule you must rename keeps the old name in a note after the new one, \`- **New name** (was Old name): ...\`, and the extension follows the rename through every file. Moving a rule to another scenario keeps its name.
 - A rule that comes from a section of \`${DOCS_DIR}/**\` ends with its citation in parentheses, as \`(path#Heading)\`, after the text. A rule without a citation is your own default. The citation is what a later check against the code reads instead of the docs, so it must be exact.
 - No code paths, class names or code: that is the implementation's business and you cannot know it.
-- A \`## Decisions\` section may appear in the file, written by a separate check of the spec against the code: one \`###\` per decision, with an \`on\` line naming the rules it concerns and a \`finding\` line saying what the code does and what the spec says. Each is something the user rules on. When asked, add a \`- proposed: ...\` line under each decision that has none, with Edit: how the rules should change, or why they stand as written, with the reason, in one or two sentences. A proposal is not a ruling: change no rule until the user has ruled. The \`- ruling: ...\` line is the user's, written for you: \`accepted\` means the proposal as written, anything else is the user's own decision. When rulings are handed to you, revise the rules each decision names per its ruling, append \` [applied]\` to that decision's heading, and touch nothing else in the section.
+- A \`## Decisions\` section may appear in the file, written by a separate check of the spec against the code: one \`###\` per decision, with an \`on\` line naming the rules it concerns and a \`finding\` line saying what the code does and what the spec says. Each is something the user rules on. When asked, add a \`- proposed: ...\` line under each decision that has none, with Edit: the rule's new text, written as it would stand in the spec (one sentence, no argument, no reference to the decision), or \`stands\` with the one reason. A proposal is not a ruling: change no rule until the user has ruled. The \`- ruling: ...\` line is the user's, written for you: \`accepted\` means the proposed text replaces the rule verbatim, anything else is the user's own decision. When rulings are handed to you, revise the rules each decision names per its ruling, append \` [applied]\` to that decision's heading, and touch nothing else in the section.
 - When a ruling settles something that \`${DOCS_DIR}/**\` does not say, or says otherwise, record the amendment in \`${PLAN_DIR}/${slug}.intent.md\` in the form below. You never edit \`${DOCS_DIR}/\` yourself: intent is the user's, and the user applies these. Record only what outlives this feature (a rule, a term, a constraint), never the feature's own plan.
 
 \`\`\`markdown
@@ -158,7 +158,7 @@ export function decisionsHandoffPrompt(feature: string, titles: string[]): strin
     `The check of the spec against the code wrote decisions into the Decisions section of \`${spec}\`:`,
     ...titles.map((t) => `- ${t}`),
     '',
-    `Read the spec from disk. Under each of these decisions, add a \`- proposed: ...\` line with Edit: how the rules should change, or why they should stand as written, with the reason, in one or two sentences. Change nothing else: the user rules on each proposal, and only then are rules revised.`,
+    `Read the spec from disk. Under each of these decisions, add a \`- proposed: ...\` line with Edit: the rule's new text as it would stand in the spec, one sentence, or \`stands\` with the one reason. Change nothing else: the user rules on each proposal, and only then are rules revised.`,
     '',
     'Then stop; the user reads the decisions.',
   ].join('\n')
@@ -171,7 +171,7 @@ export function rulingsHandoffPrompt(feature: string, rulings: { title: string; 
     `The user ruled on the decisions in \`${spec}\`:`,
     ...rulings.map((r) => `- ${r.title}: ${r.ruling}`),
     '',
-    'Read the spec from disk. For each of these decisions, revise the rules it names per its ruling (`accepted` means the proposal as written), append ` [applied]` to its heading, and record an intent amendment where the ruling settles something intent does not say. Touch nothing else in the Decisions section.',
+    'Read the spec from disk. For each of these decisions, revise the rules it names per its ruling (`accepted` means the proposed text replaces the rule verbatim), append ` [applied]` to its heading, and record an intent amendment where the ruling settles something intent does not say. Touch nothing else in the Decisions section.',
     '',
     'Then, in chat, what changed in the rules, in a few lines, and stop: the board is re-mapped when your turn ends, and the user approves after reading the revised spec.',
   ].join('\n')

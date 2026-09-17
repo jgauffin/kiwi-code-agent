@@ -126,6 +126,21 @@ describe('PermissionPolicy', () => {
     expect(await use(p, 'Bash', { command: 'npm test -- --watch' })).toBeUndefined()
   })
 
+  it('an_mcp_tool_asks_unless_a_rule_names_it_or_its_whole_server', async () => {
+    expect(await use(policy({}), 'mcp__docs-server__json_query', {})).toBeUndefined()
+    expect(await use(policy({ allow: ['mcp__docs-server__json_query'] }), 'mcp__docs-server__json_query', {})).toEqual({ allow: true })
+    const server = policy({ allow: ['mcp__docs-server__*'] })
+    expect(await use(server, 'mcp__docs-server__json_query', {})).toEqual({ allow: true })
+    expect(await use(server, 'mcp__docs-server__read_doc_file', {})).toEqual({ allow: true })
+    expect(await use(server, 'mcp__docs-server-2__json_query', {})).toBeUndefined()
+    expect(await use(server, 'mcp__other__json_query', {})).toBeUndefined()
+    expect(await use(policy({ deny: ['mcp__docs-server__*'], allow: ['mcp__docs-server__json_query'] }), 'mcp__docs-server__json_query', {})).toMatchObject({
+      deny: expect.stringContaining('mcp__docs-server__*'),
+    })
+    expect(projectRuleFor('mcp__docs-server__json_query')).toBe('mcp__docs-server__json_query')
+    expect(ruleLabel('mcp__docs-server__*')).toBe('mcp__docs-server__*')
+  })
+
   it('deny_rules_win_over_read_only_and_allow_rules_and_name_the_rule', async () => {
     const p = policy({ allow: ['Bash'], deny: ['Read(**/.env)', 'Bash(curl:*)'] })
     expect(await use(p, 'Read', { file_path: 'config/.env' })).toMatchObject({ deny: expect.stringContaining('Read(**/.env)') })

@@ -1,9 +1,11 @@
-import type { CodeSession, PermissionDecision, SessionEvent, TurnUsage } from '../session/code-session'
+import type { CodeSession, McpControl, PermissionDecision, SessionEvent, TurnUsage } from '../session/code-session'
 import type { QuestionOutcome, UserQuestionRequest } from '../session/user-question'
 import type { SessionHooks } from '../session/hooks'
 import type { ModelProfile } from '../session/model-profile'
 import { AsyncQueue } from '../session/async-queue'
-import type { ChatCompletionClient, ChatMessage, ToolCall, Usage } from './chat-messages'
+import type { McpServers } from '../mcp/mcp-config'
+import type { McpToolHost } from '../mcp/mcp-tool-host'
+import type { ChatCompletionClient, ChatMessage, ToolCall, ToolDefinition, Usage } from './chat-messages'
 import { ReadTracker } from './tools/read-tracker'
 import { toDefinition, type Tool, type ToolOutput } from './tools/tool'
 
@@ -17,6 +19,8 @@ export type OpenAiSessionOptions = {
   hooks?: SessionHooks
   /** Tool rounds per user turn before the engine gives up; a runaway loop costs money. */
   maxRoundsPerTurn?: number
+  /** The workspace's MCP servers and the host that connects to them; absent on a session that takes none. */
+  mcp?: { host: McpToolHost; servers: McpServers }
 }
 
 /**
@@ -34,7 +38,12 @@ export class OpenAiSession implements CodeSession {
   private readonly pending = new Map<string, (d: PermissionDecision) => void>()
   /** Questions the model put to the user, by the id of the tool call that asked. */
   private readonly questions = new Map<string, (outcome: QuestionOutcome) => void>()
-  private readonly definitions
+  /** The built-in tools plus what the MCP servers offer now; swapped as one when the servers change. */
+  private tools: Tool[]
+  private definitions: ToolDefinition[]
+  /** MCP changes run one after another; a turn waits for the one in flight before it starts. */
+  private mcpChain: Promise<void> = Promise.resolve()
+  readonly mcp: McpControl | undefined
   private turnAbort = new AbortController()
   private running = false
   private disposed = false
@@ -44,8 +53,17 @@ export class OpenAiSession implements CodeSession {
     this.id = options.id
     this.profile = options.profile
     this.messages = [{ role: 'system', content: options.systemPrompt }]
+    this.tools = options.tools
     this.definitions = options.tools.map(toDefinition)
     this.emit({ type: 'session_started', engineSessionId: options.id, model: options.profile.model })
+    const { mcp } = options
+    if (mcp) {
+      this.mcp = {
+        reload: (servers) => this.applyMcp(() => mcp.host.load(servers)),
+        reconnect: (name) => this.applyMcp(() => mcp.host.reconnect(name)),
+      }
+      void this.applyMcp(() => mcp.host.load(mcp.servers))
+    }
   }
 
   send(text: string): void {
@@ -89,13 +107,33 @@ export class OpenAiSession implements CodeSession {
     if (this.disposed) return
     this.disposed = true
     await this.interrupt()
+    await this.options.mcp?.host.close()
     this.emit({ type: 'ended' })
     this.output.end()
+  }
+
+  /**
+   * One MCP change at a time. A round in flight keeps the definitions it was
+   * sent; the next round sees the new set, and a call to a tool that went
+   * away fails like any unknown tool.
+   */
+  private applyMcp(change: () => Promise<void>): Promise<void> {
+    const host = this.options.mcp!.host
+    this.mcpChain = this.mcpChain
+      .then(change)
+      .catch((error: unknown) => this.emitError(`MCP servers: ${error instanceof Error ? error.message : String(error)}`))
+      .then(() => {
+        this.tools = [...this.options.tools, ...host.tools()]
+        this.definitions = this.tools.map(toDefinition)
+        this.emit({ type: 'mcp_servers', servers: host.statuses() })
+      })
+    return this.mcpChain
   }
 
   private async drain(): Promise<void> {
     this.running = true
     try {
+      await this.mcpChain
       while (this.queue.length > 0 && !this.disposed) {
         const text = this.queue.shift()!
         this.messages.push({ role: 'user', content: text })
@@ -193,7 +231,7 @@ export class OpenAiSession implements CodeSession {
   }
 
   private async runTool(call: ToolCall, signal: AbortSignal): Promise<ToolOutput> {
-    const tool = this.options.tools.find((t) => t.name === call.name)
+    const tool = this.tools.find((t) => t.name === call.name)
     if (!tool) return { text: `Unknown tool: ${call.name}`, isError: true }
     const raw = parseArguments(call.arguments)
     if (raw === undefined) return { text: `Tool arguments are not valid JSON: ${call.arguments.slice(0, 200)}`, isError: true }

@@ -58,12 +58,12 @@ describe('plan items', () => {
 describe('review authoring', () => {
   it('a_comment_can_be_attached_to_an_item_and_to_the_plan_as_a_whole', () => {
     const review = emptyReview()
-    addComment(review, 'Cancel command', 'this is not what cancelling means', 'Cancel command: an order can be cancelled')
+    addComment(review, 'Cancel command', 'this is not what cancelling means')
     addComment(review, 'plan', 'the goal misses the refund story')
     expect(review.rounds).toHaveLength(1)
     expect(review.rounds[0]).toMatchObject({ number: 1, strikes: [] })
     expect(review.rounds[0]!.comments).toEqual([
-      { target: 'Cancel command', text: 'this is not what cancelling means', item: 'Cancel command: an order can be cancelled' },
+      { target: 'Cancel command', text: 'this is not what cancelling means' },
       { target: 'plan', text: 'the goal misses the refund story' },
     ])
   })
@@ -169,7 +169,7 @@ describe('commenting is offered on a draft only', () => {
 describe('the review file', () => {
   it('the_file_names_targets_and_carries_no_ids', () => {
     const review = emptyReview()
-    addComment(review, 'Cancel command', 'not what cancelling means', 'Cancel command: an order can be cancelled')
+    addComment(review, 'Cancel command', 'not what cancelling means')
     addComment(review, 'plan', 'the goal misses refunds')
     strikeItem(review, 'Refund')
     strikeItem(review, 'Shipped order')
@@ -182,7 +182,8 @@ describe('the review file', () => {
     const text = renderReview(review, 'plan/orders.spec.md')
     expect(text).toContain('# Review of plan/orders.spec.md')
     expect(text).toContain('## Round 1, submitted 2026-01-01T00:00:00.000Z')
-    expect(text).toContain('- on Cancel command: not what cancelling means\n  - item: Cancel command: an order can be cancelled\n  - addressed: rewrote the rule\n  - resolved')
+    expect(text).toContain('- on Cancel command: not what cancelling means\n  - addressed: rewrote the rule\n  - resolved')
+    expect(text).not.toContain('item:')
     expect(text).toContain('- on the plan: the goal misses refunds')
     expect(text).toContain('- remove: Refund, Shipped order')
     expect(text).toContain('## Round 2, pending')

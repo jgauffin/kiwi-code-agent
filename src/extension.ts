@@ -22,6 +22,10 @@ import { jsonQueryTool, jsonSchemaTool } from './agent/openai-session/tools/json
 import { skillTool } from './agent/openai-session/tools/skill'
 import type { Tool } from './agent/openai-session/tools/tool'
 import { indexSkills } from './agent/skills/skill-index'
+import { MCP_CONFIG_FILE, readMcpConfig } from './agent/mcp/mcp-config'
+import { connectMcp } from './agent/mcp/mcp-connect'
+import { McpServerSet } from './agent/mcp/mcp-servers'
+import { McpToolHost } from './agent/mcp/mcp-tool-host'
 import { runShell } from './agent/shell/run-shell'
 import { composeHooks, type SessionHooks } from './agent/session/hooks'
 import { FileEditRecorder } from './agent/edits/file-edit-recorder'
@@ -46,6 +50,8 @@ import {
 } from './chat/chat-view-provider'
 import { openDraftPlanAction } from './chat/open-draft-plan'
 import { watchOwnBundle } from './dev-reload'
+import { SETTINGS_PANEL_TYPE, SettingsPanel } from './settings/settings-panel'
+import { SettingsStore, secretKey } from './settings/settings-store'
 
 /**
  * Tools the extension provides to every engine, beside the engine's own file
@@ -173,14 +179,24 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   }
 
+  /** The workspace's `.mcp.json`, read once and again on every change; `sessions` is resolved when a session runs, after it exists. */
+  const mcp = new McpServerSet(
+    () => readMcpConfig(workspaceRoot),
+    () => sessions.liveSessions(),
+    (message) => void vscode.window.showWarningMessage(`KiwiAgent: ${message}`),
+  )
+
   const createEngine = async (record: SessionRecord): Promise<CodeSession> => {
     const { profile } = record
     const setup = await setupFor(record)
     const allowed = (tools: Tool[]) => (setup.toolNames ? tools.filter((t) => setup.toolNames!.includes(t.name)) : tools)
+    // A mode with a tool set of its own names no MCP server; only a chat takes the workspace's.
+    const mcpServers = setup.toolNames ? undefined : await mcp.current()
     switch (profile.engine) {
       case 'claude-sdk':
         return new SdkSession({
           ownTools: allowed(OWN_TOOLS),
+          ...(mcpServers ? { mcpServers } : {}),
           id: record.id,
           profile,
           cwd: workspaceRoot,
@@ -213,6 +229,9 @@ export function activate(context: vscode.ExtensionContext): void {
           tools: allowed(allTools),
           systemPrompt: setup.systemPrompt ?? (await buildSystemPrompt(workspaceRoot, profile.systemPromptFile)),
           ...(setup.hooks ? { hooks: setup.hooks } : {}),
+          ...(mcpServers
+            ? { mcp: { host: new McpToolHost(connectMcp(workspaceRoot, (server, chunk) => output.append(`[mcp ${server}] ${chunk}`))), servers: mcpServers } }
+            : {}),
         })
       }
     }
@@ -239,10 +258,31 @@ export function activate(context: vscode.ExtensionContext): void {
       sessionAllowed.set(sessionId, [...current, ...rules.filter((r) => !current.includes(r))])
     },
   }
+  const settings = new SettingsStore(
+    {
+      get: (key, fallback) => vscode.workspace.getConfiguration('kiwiAgent').get(key, fallback),
+      update: (key, value, target) =>
+        Promise.resolve(
+          vscode.workspace
+            .getConfiguration('kiwiAgent')
+            .update(key, value, target === 'user' ? vscode.ConfigurationTarget.Global : vscode.ConfigurationTarget.Workspace),
+        ),
+      hasWorkspace: () => (vscode.workspace.workspaceFolders?.length ?? 0) > 0,
+    },
+    {
+      has: async (name) => (await context.secrets.get(secretKey(name))) !== undefined,
+      store: (name, value) => Promise.resolve(context.secrets.store(secretKey(name), value)),
+    },
+  )
+  const settingsPanel = new SettingsPanel(context.extensionUri, settings)
   chat = new ChatViewProvider(
     context.extensionUri,
     sessions,
     profileFor,
+    {
+      read: () => settings.profileDefaults(),
+      set: (role, name) => settings.save(role === 'work' ? 'activeProfile' : 'planProfile', name),
+    },
     verifier,
     sizeLimits,
     allowWritesControl,
@@ -268,13 +308,30 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('kiwiAgent.openSession', (id: string) => chat.open(id)),
     vscode.commands.registerCommand('kiwiAgent.removeSession', (record: SessionRecord) => chat.remove(record.id)),
     vscode.commands.registerCommand('kiwiAgent.openChat', () => chat.openInEditor()),
-    vscode.commands.registerCommand('kiwiAgent.setApiKey', () => setApiKey(context)),
+    vscode.commands.registerCommand('kiwiAgent.openSettings', () => settingsPanel.open()),
+    // The new-session pickers show the profiles as settings hold them, from the page or from settings.json.
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('kiwiAgent.profiles') || e.affectsConfiguration('kiwiAgent.activeProfile') || e.affectsConfiguration('kiwiAgent.planProfile')) chat.refresh()
+    }),
+    vscode.window.registerWebviewPanelSerializer(SETTINGS_PANEL_TYPE, {
+      deserializeWebviewPanel: async (panel) => settingsPanel.adopt(panel),
+    }),
+    vscode.commands.registerCommand('kiwiAgent.setApiKey', () => setApiKey(settings)),
     vscode.commands.registerCommand('kiwiAgent.migratePlans', () => chat.migratePlans()),
     vscode.commands.registerCommand('kiwiAgent.buildRepoMap', () => chat.buildRepoMap()),
+    vscode.commands.registerCommand('kiwiAgent.reconnectMcp', () => mcp.reconnectAll()),
+    watchMcpConfig(workspaceRoot, () => mcp.refresh()),
     openDraftPlanAction(chat, sessions, workspaceRoot, output),
     watchOwnBundle(context),
     { dispose: () => void sessions.disposeAll() },
   )
+}
+
+/** A save of the workspace's `.mcp.json` reaches the running sessions; so does deleting it. */
+function watchMcpConfig(workspaceRoot: string, onChange: () => Promise<void>): vscode.Disposable {
+  const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(workspaceRoot, MCP_CONFIG_FILE))
+  const changed = () => void onChange()
+  return vscode.Disposable.from(watcher, watcher.onDidCreate(changed), watcher.onDidChange(changed), watcher.onDidDelete(changed))
 }
 
 function profiles(): ModelProfile[] {
@@ -320,8 +377,8 @@ function nodeRuntime(): NodeRuntime {
   return configured ? { command: configured, args: [], env: {} } : hostExecutableAsNode(process.execPath)
 }
 
-async function setApiKey(context: vscode.ExtensionContext): Promise<void> {
-  const names = [...new Set(profiles().map((p) => p.apiKeySecret).filter((n): n is string => !!n))]
+async function setApiKey(settings: SettingsStore): Promise<void> {
+  const names = (await settings.snapshot()).keys.map((k) => k.name)
   if (names.length === 0) {
     void vscode.window.showInformationMessage('No profile declares an apiKeySecret.')
     return
@@ -330,10 +387,6 @@ async function setApiKey(context: vscode.ExtensionContext): Promise<void> {
   if (!name) return
   const key = await vscode.window.showInputBox({ title: `API key: ${name}`, password: true, ignoreFocusOut: true })
   if (key === undefined) return
-  await context.secrets.store(secretKey(name), key)
+  await settings.setApiKey(name, key)
   void vscode.window.showInformationMessage(`Stored API key for ${name}.`)
-}
-
-function secretKey(name: string): string {
-  return `kiwiAgent.apiKey.${name}`
 }

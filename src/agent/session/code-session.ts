@@ -2,8 +2,24 @@ import type { ModelProfile } from './model-profile'
 import type { FileEditChange } from '../edits/file-edit-diff'
 import type { CommandLine } from '../permissions/permission-rules'
 import type { QuestionOutcome, UserQuestionRequest } from './user-question'
+import type { McpServers } from '../mcp/mcp-config'
 
 export type { CommandLine, FileEditChange }
+
+/** One MCP server as the engine last reported it. */
+export type McpServerState = {
+  name: string
+  status: 'connected' | 'failed' | 'needs-auth' | 'pending' | 'disabled'
+  error?: string
+}
+
+/** What the host may do to a session's MCP servers. Each call ends with a fresh `mcp_servers` event. */
+export interface McpControl {
+  /** The workspace's servers changed: this set replaces the one the session runs with. */
+  reload(servers: McpServers): Promise<void>
+  /** Try one server again; a failure shows up as its status, never as a throw. */
+  reconnect(name: string): Promise<void>
+}
 
 /** Token accounting for one assistant turn, as far as the engine reports it. */
 export type TurnUsage = {
@@ -51,6 +67,8 @@ export type SessionEvent =
   /** How the request ended: the answers the user gave, or that it went unanswered. Exactly one per request. */
   | { type: 'question_resolved'; requestId: string; outcome: QuestionOutcome }
   | { type: 'status'; status: 'requesting' | 'compacting' | 'idle' }
+  /** The session's MCP servers as of now; the newest replaces the last. */
+  | { type: 'mcp_servers'; servers: McpServerState[] }
   | { type: 'turn_done'; usage?: TurnUsage; durationMs?: number; isError: boolean; errors: string[] }
   | { type: 'error'; message: string; fatal: boolean }
   | { type: 'ended' }
@@ -65,6 +83,8 @@ export type SessionEventType = SessionEvent['type']
 export interface CodeSession {
   readonly id: string
   readonly profile: ModelProfile
+  /** Absent on a session that takes no MCP servers. */
+  readonly mcp?: McpControl | undefined
   /** Queue a user turn. Returns immediately. */
   send(text: string): void
   /** Single consumer. Ends after the `ended` event. */

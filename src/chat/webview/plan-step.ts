@@ -108,7 +108,10 @@ function derive(plan: PlanState): Omit<PlanStep, 'reached'> {
     const live = plan.tasks.filter((t) => !t.removed)
     const tested = live.filter((t) => t.state === 'tested').length
     const blocked = live.filter((t) => t.state === 'blocked').length
-    const progress = `${tested} of ${live.length} tested${blocked > 0 ? `, ${blocked} blocked` : ''}`
+    // The scenario under way is what the person wants to know; the count is how far along it is.
+    const current = live.find((t) => t.state === 'in_progress')
+    const where = current ? `${current.group ?? current.name}, ` : ''
+    const progress = `${where}${tested} of ${live.length} tested${blocked > 0 ? `, ${blocked} blocked` : ''}`
     return { current: 'implement', next: { kind: 'waiting', text: progress } }
   }
 
@@ -167,6 +170,49 @@ function reached(current: Step, plan: PlanState): Step[] {
   if (plan.status === 'draft' && !steps.includes('review')) steps.push('review')
   return steps
 }
+
+const TAB_ORDER: Tab[] = ['spec', 'review', 'decisions', 'tasks', 'intent']
+
+/** The tabs with something on them, in fixed order; the spec is always there. */
+export function presentTabs(plan: PlanState): Tab[] {
+  return TAB_ORDER.filter((tab) => {
+    switch (tab) {
+      case 'spec':
+        return true
+      case 'review':
+        return plan.review.rounds.length > 0
+      case 'decisions':
+        return (plan.spec?.decisions.length ?? 0) > 0
+      case 'tasks':
+        return plan.tasks.length > 0
+      case 'intent':
+        return plan.intent !== undefined
+    }
+  })
+}
+
+/** The tab's name with the count that says whether it needs the reader. */
+export function tabLabel(tab: Tab, plan: PlanState): string {
+  switch (tab) {
+    case 'spec':
+      return 'Spec'
+    case 'review': {
+      const open = plan.review.rounds.flatMap((r) => r.comments).filter((c) => !c.closed).length
+      return counted('Review', open)
+    }
+    case 'decisions':
+      return counted('Decisions', (plan.spec?.decisions ?? []).filter((d) => d.state === 'open' && d.proposal).length)
+    case 'tasks': {
+      const live = plan.tasks.filter((t) => !t.removed)
+      if (!live.some((t) => t.state !== 'open')) return `Tasks (${live.length})`
+      return `Tasks (${live.filter((t) => t.state === 'tested').length} of ${live.length})`
+    }
+    case 'intent':
+      return counted('Intent', plan.intent?.pending ?? 0)
+  }
+}
+
+const counted = (label: string, n: number): string => (n > 0 ? `${label} (${n})` : label)
 
 /** The tab a step works in, given what the plan has to show there. */
 export function tabFor(step: Step, plan: PlanState): Tab {

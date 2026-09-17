@@ -9,7 +9,8 @@ import type { Task } from '../src/agent/phases/tasks-file'
 ;(globalThis as Record<string, unknown>).acquireVsCodeApi = () => ({ postMessage: () => {} })
 
 const { PlanView } = await import('../src/chat/webview/plan-view')
-const { ReviewActionEvent } = await import('../src/chat/webview/events')
+const { PlanFocusRequestedEvent, ReviewActionEvent } = await import('../src/chat/webview/events')
+type Tab = Parameters<InstanceType<typeof PlanView>['update']>[1]
 
 const spec: Spec = {
   title: 'Orders',
@@ -53,47 +54,52 @@ function plan(over: Partial<PlanState> = {}): PlanState {
 }
 
 const round = (over: Partial<ReviewRound>): ReviewRound => ({ number: 1, comments: [], strikes: [], ...over })
-const task = (over: Partial<Task> = {}): Task => ({ name: 'Cancel', text: 'add it', delivers: ['Cancel command'], files: [], context: [], proves: [], state: 'open', removed: false, ...over })
+const task = (over: Partial<Task> = {}): Task => ({ name: 'Cancel', text: 'add it', delivers: ['Cancel command'], files: [], context: [], how: '', proves: [], state: 'open', removed: false, ...over })
 
-function view(state: PlanState): InstanceType<typeof PlanView> {
+function view(state: PlanState, tab: Tab = 'spec'): InstanceType<typeof PlanView> {
   const node = new PlanView()
   document.body.appendChild(node)
-  node.update(state)
+  node.update(state, tab)
   return node
 }
 
-const tabs = (node: HTMLElement) => [...node.querySelectorAll<HTMLElement>('.view-tabs .tab')].map((t) => t.textContent)
 const buttons = (node: HTMLElement, label: string) => [...node.querySelectorAll<HTMLButtonElement>('button')].filter((b) => b.textContent === label)
 
-describe('PlanView tabs', () => {
-  it('a_tab_appears_once_there_is_something_on_it', () => {
-    expect(tabs(view(plan()))).toEqual(['Spec'])
-    const full = plan({
-      review: { rounds: [round({ submittedAt: 't', comments: [{ target: 'Cancel command', text: 'no' }] })] },
-      spec: { ...spec, decisions: [{ title: 'Shipped', on: [], finding: 'f', proposal: 'p', state: 'open', line: 0, end: 0 }] },
-      tasks: [task()],
-      intent: { path: 'plan/orders.intent.md', pending: 1, applied: 0, applicable: false, amendments: [] },
+describe('PlanView', () => {
+  it('shows_the_tab_it_is_given_and_falls_back_to_the_spec_when_that_tab_has_nothing', () => {
+    const node = view(plan({ tasks: [task()] }), 'tasks')
+    expect(node.querySelector('.tasks')).not.toBeNull()
+    node.update(plan(), 'tasks')
+    expect(node.querySelector('.tasks')).toBeNull()
+    expect(node.querySelector('.scenario')).not.toBeNull()
+  })
+
+  it('the_tasks_tab_shows_scenario_state_and_files_and_keeps_the_implementers_detail_off_it', () => {
+    const detailed = task({
+      group: 'Cancelling an order',
+      state: 'in_progress',
+      files: ['src/orders/cancel.ts', 'src/orders/cancel.test.ts'],
+      context: ['src/orders/order.ts'],
+      how: '- add `cancel()` beside `ship()`',
     })
-    expect(tabs(view(full))).toEqual(['Spec', 'Review (1)', 'Decisions (1)', 'Tasks (1)', 'Intent (1)'])
+    const node = view(plan({ stage: 'under_development', status: 'approved', commentable: false, tasks: [detailed] }), 'tasks')
+    expect(node.querySelector('.group > .heading')?.textContent).toBe('Cancelling an order')
+    expect(node.querySelector('.task .name')?.textContent).toBe('Cancel')
+    expect(node.querySelector('.task .badge.state')?.textContent).toBe('in progress')
+    expect([...node.querySelectorAll('.task ul.files > li')].map((li) => li.textContent)).toEqual(['src/orders/cancel.ts', 'src/orders/cancel.test.ts'])
+    const text = node.querySelector('.task')!.textContent ?? ''
+    expect(text).not.toContain('add it')
+    expect(text).not.toContain('src/orders/order.ts')
+    expect(text).not.toContain('cancel()')
+    expect(node.querySelector('.task .delivers')).toBeNull()
   })
 
-  it('the_tab_follows_the_step_when_it_changes_and_holds_otherwise', () => {
-    const node = view(plan())
-    expect(node.activeTab).toBe('spec')
-    node.update(plan({ stage: 'mapped', tasks: [task()], spec: { ...spec, decisions: [{ title: 'Shipped', on: [], finding: 'f', proposal: 'p', state: 'open', line: 0, end: 0 }] }, pendingDecisions: 1 }))
-    expect(node.activeTab).toBe('decisions')
-    node.open('tasks')
-    node.update(plan({ stage: 'mapped', tasks: [task(), task({ name: 'Refund' })], spec: { ...spec, decisions: [{ title: 'Shipped', on: [], finding: 'f', proposal: 'p', state: 'open', line: 0, end: 0 }] }, pendingDecisions: 1 }))
-    expect(node.activeTab).toBe('tasks')
-  })
-
-  it('the_review_tab_lists_answers_with_resolve_and_scrolls_to_the_first', () => {
+  it('the_review_tab_lists_answers_with_resolve_and_lands_on_the_first', () => {
     const answered = { target: 'Cancel command', text: 'too vague', resolution: { kind: 'addressed' as const, text: 'rewritten' } }
-    const node = view(plan({ stage: 'final_draft', review: { rounds: [round({ submittedAt: 't', comments: [answered] })] } }))
+    const node = view(plan({ stage: 'final_draft', review: { rounds: [round({ submittedAt: 't', comments: [answered] })] } }), 'review')
     const scrolled = vi.fn()
     Element.prototype.scrollIntoView = scrolled
-    node.open('review', { scroll: true })
-    expect(node.activeTab).toBe('review')
+    node.land({ scroll: true })
     expect(buttons(node, 'Resolve')).toHaveLength(1)
     expect(node.querySelector('.comment.attention')).not.toBeNull()
     expect(scrolled).toHaveBeenCalledOnce()
@@ -103,22 +109,27 @@ describe('PlanView tabs', () => {
     expect(action).toEqual({ type: 'resolve_comment', comment: { round: 1, index: 0 } })
   })
 
-  it('a_comment_names_its_rule_and_the_name_opens_it_on_the_spec', () => {
-    const node = view(plan({ stage: 'under_review', review: { rounds: [round({ comments: [{ target: 'Refund on cancel', text: 'why' }] })] } }))
-    node.open('review')
+  it('a_comment_names_its_rule_and_the_name_asks_for_it_on_the_spec', () => {
+    const node = view(plan({ stage: 'under_review', review: { rounds: [round({ comments: [{ target: 'Refund on cancel', text: 'why' }] })] } }), 'review')
     const link = node.querySelector<HTMLButtonElement>('.comment .on .link.item')!
     expect(link.textContent).toBe('Refund on cancel')
+    let asked: InstanceType<typeof PlanFocusRequestedEvent> | undefined
+    node.addEventListener(PlanFocusRequestedEvent.type, (e) => (asked = e as InstanceType<typeof PlanFocusRequestedEvent>))
+    link.click()
+    expect(asked?.tab).toBe('spec')
+    expect(asked?.where).toEqual({ item: 'Refund on cancel' })
+  })
+
+  it('landing_on_an_item_scrolls_its_row', () => {
+    const node = view(plan())
     const scrolled = vi.fn()
     Element.prototype.scrollIntoView = scrolled
-    link.click()
-    expect(node.activeTab).toBe('spec')
-    expect(scrolled).toHaveBeenCalledOnce()
+    node.land({ item: 'refund on cancel' })
     expect((scrolled.mock.instances[0] as HTMLElement).dataset.item).toBe('Refund on cancel')
   })
 
   it('submit_review_is_not_on_the_view', () => {
-    const node = view(plan({ stage: 'under_review', review: { rounds: [round({ comments: [{ target: 'Cancel command', text: 'no' }] })] } }))
-    node.open('review')
+    const node = view(plan({ stage: 'under_review', review: { rounds: [round({ comments: [{ target: 'Cancel command', text: 'no' }] })] } }), 'review')
     expect(buttons(node, 'Submit review')).toHaveLength(0)
     expect(buttons(node, 'Edit')).toHaveLength(1)
     expect(buttons(node, 'Remove')).toHaveLength(1)
@@ -130,7 +141,7 @@ describe('PlanView tabs', () => {
     const area = node.querySelector('textarea')!
     area.value = 'half a thought'
     area.dispatchEvent(new Event('input'))
-    node.update(plan({ body: '# Orders v2' }))
+    node.update(plan({ body: '# Orders v2' }), 'spec')
     expect(node.querySelector('textarea')!.value).toBe('half a thought')
   })
 
@@ -139,11 +150,26 @@ describe('PlanView tabs', () => {
       { title: 'Shipped', on: ['Cancel command'], finding: 'f', proposal: 'p', state: 'open' as const, line: 0, end: 0 },
       { title: 'Refund', on: [], finding: 'f', proposal: 'p', state: 'ruled' as const, ruling: 'accepted', line: 0, end: 0 },
     ]
-    const node = view(plan({ stage: 'mapped', tasks: [task()], spec: { ...spec, decisions }, pendingDecisions: 2 }))
-    expect(node.activeTab).toBe('decisions')
+    const node = view(plan({ stage: 'mapped', tasks: [task()], spec: { ...spec, decisions }, pendingDecisions: 2 }), 'decisions')
     expect(node.querySelectorAll('.decision.attention')).toHaveLength(1)
     expect(buttons(node, 'Accept proposal')).toHaveLength(1)
     expect(buttons(node, 'Change ruling')).toHaveLength(1)
+  })
+
+  it('settled_decisions_fold_into_history_with_the_ruling_as_the_record', () => {
+    const decisions = [
+      { title: 'F1', on: ['B5'], finding: 'the code counts nothing', proposal: 'say keywords', state: 'applied' as const, ruling: 'accepted', line: 0, end: 0 },
+      { title: 'F2', on: [], finding: 'gone', proposal: '', state: 'withdrawn' as const, line: 0, end: 0 },
+    ]
+    const node = view(plan({ stage: 'mapped', tasks: [task()], spec: { ...spec, decisions } }), 'decisions')
+    expect(node.querySelectorAll('.decisions > .decision')).toHaveLength(0)
+    const history = node.querySelector<HTMLDetailsElement>('.history')!
+    expect(history.open).toBe(false)
+    expect(history.querySelector('summary')!.textContent).toBe('1 applied, 1 withdrawn')
+    const applied = history.querySelector('.decision.settled.applied')!
+    expect(applied.querySelector('.ruling .text')!.textContent).toBe('say keywords')
+    expect(applied.querySelector('.foot .title')!.textContent).toBe('F1')
+    expect(buttons(node, 'Change ruling')).toHaveLength(0)
   })
 
   it('the_intent_tab_shows_each_amendment_with_its_state', () => {
@@ -151,8 +177,7 @@ describe('PlanView tabs', () => {
       { mode: 'append' as const, doc: 'docs/intent/orders.md', heading: 'Cancellation', from: 'Refund job', why: 'unsaid', text: 'Refunds run nightly.', applied: false, line: 0 },
       { mode: 'new' as const, doc: 'docs/intent/refunds.md', text: 'Refunds.', applied: true, line: 5 },
     ]
-    const node = view(plan({ stage: 'verified', status: 'approved', commentable: false, tasks: [task({ state: 'tested' })], intent: { path: 'p', pending: 1, applied: 1, applicable: true, amendments } }))
-    expect(node.activeTab).toBe('intent')
+    const node = view(plan({ stage: 'verified', status: 'approved', commentable: false, tasks: [task({ state: 'tested' })], intent: { path: 'p', pending: 1, applied: 1, applicable: true, amendments } }), 'intent')
     const rows = [...node.querySelectorAll<HTMLElement>('.amendment')]
     expect(rows.map((r) => r.className)).toEqual(['amendment pending', 'amendment applied'])
     expect(rows[0]!.querySelector('.name')!.textContent).toBe('docs/intent/orders.md#Cancellation')

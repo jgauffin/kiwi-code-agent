@@ -1,13 +1,16 @@
 import type {
   HookCallback,
   HookJSONOutput,
+  McpSdkServerConfigWithInstance,
+  McpServerConfig,
   Options,
   PermissionResult,
   Query,
   SDKMessage,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
-import type { CodeSession, PermissionDecision, SessionEvent } from '../session/code-session'
+import type { CodeSession, McpControl, McpServerState, PermissionDecision, SessionEvent } from '../session/code-session'
+import type { McpServers } from '../mcp/mcp-config'
 import type { SessionHooks } from '../session/hooks'
 import type { ModelProfile } from '../session/model-profile'
 import { AsyncQueue } from '../session/async-queue'
@@ -38,11 +41,17 @@ export type SdkSessionOptions = {
   tools?: string[]
   /** Tools this extension owns, served to the engine in-process on top of the built-ins. */
   ownTools?: Tool[]
+  /** The workspace's MCP servers; absent on a session that takes none. */
+  mcpServers?: McpServers
   query: QueryFn
   onStderr?: (chunk: string) => void
   /** Receives one line per engine message, for diagnosing what the engine does and does not send. */
   trace?: (line: string) => void
 }
+
+/** A pending server is asked about again this often, this many times: about the engine's own connection deadline. */
+const MCP_PENDING_INTERVAL_MS = 2000
+const MCP_PENDING_CHECKS = 15
 
 type PendingPermission = {
   resolve: (result: PermissionResult) => void
@@ -68,6 +77,10 @@ export class SdkSession implements CodeSession {
   private engineSessionId: string | undefined
   /** What the tools this extension owns run with; a test drives one through it as the engine would. */
   readonly toolContext: ToolContext
+  /** The in-process server for the own tools; part of every server set handed to the engine. */
+  private readonly ownServer: McpSdkServerConfigWithInstance | undefined
+  private mcpServers: McpServers | undefined
+  readonly mcp: McpControl | undefined
 
   constructor(private readonly options: SdkSessionOptions) {
     this.id = options.id
@@ -79,6 +92,9 @@ export class SdkSession implements CodeSession {
       files: new ReadTracker(),
       ask: (request) => this.askUser(request),
     }
+    this.ownServer = options.ownTools?.length ? toolServer(options.ownTools, this.toolContext) : undefined
+    this.mcpServers = options.mcpServers
+    this.mcp = options.mcpServers ? this.mcpControl() : undefined
     this.query = options.query({ prompt: this.input, options: this.buildOptions() })
     this.pumping = this.pump()
   }
@@ -159,11 +175,60 @@ export class SdkSession implements CodeSession {
     if (this.options.hooks) options.hooks = this.sdkHooks(this.options.hooks)
     if (this.options.systemPrompt !== undefined) options.systemPrompt = this.options.systemPrompt
     if (this.options.tools) options.tools = this.options.tools
-    if (this.options.ownTools?.length) {
-      const server = toolServer(this.options.ownTools, this.toolContext)
-      options.mcpServers = { [server.name]: server }
-    }
+    // The workspace's servers go in as dynamic ones, which the host can
+    // replace; the engine's own reading of the file yields to a dynamic
+    // server of the same name.
+    const servers = this.allServers()
+    if (Object.keys(servers).length) options.mcpServers = servers
     return options
+  }
+
+  /** Every server the engine runs with: the own one, then the workspace's. */
+  private allServers(): Record<string, McpServerConfig> {
+    return {
+      ...(this.ownServer ? { [this.ownServer.name]: this.ownServer } : {}),
+      ...(this.mcpServers ?? {}),
+    }
+  }
+
+  private mcpControl(): McpControl {
+    return {
+      reload: async (servers) => {
+        this.mcpServers = servers
+        await this.query.setMcpServers(this.allServers())
+        await this.reportMcp()
+      },
+      reconnect: async (name) => {
+        // A throw here says what the status says next; the status is what is shown.
+        await this.query.reconnectMcpServer(name).catch(() => undefined)
+        await this.reportMcp()
+      },
+    }
+  }
+
+  /**
+   * The workspace's servers as the engine sees them now; the own server is
+   * not the user's business, and an entry the engine read from the file
+   * itself yields to the one handed over. A server still connecting is
+   * looked at again until it settles or the engine's own deadline passes.
+   */
+  private async reportMcp(checksLeft = MCP_PENDING_CHECKS): Promise<void> {
+    if (this.output.isEnded) return
+    try {
+      const all = await this.query.mcpServerStatus()
+      const byName = new Map<string, (typeof all)[number]>()
+      for (const s of all) {
+        if (!(s.name in (this.mcpServers ?? {}))) continue
+        if (!byName.has(s.name) || s.scope === 'dynamic') byName.set(s.name, s)
+      }
+      const servers: McpServerState[] = [...byName.values()].map((s) => ({ name: s.name, status: s.status, ...(s.error ? { error: s.error } : {}) }))
+      this.output.push({ type: 'mcp_servers', servers })
+      if (checksLeft > 0 && servers.some((s) => s.status === 'pending')) {
+        setTimeout(() => void this.reportMcp(checksLeft - 1), MCP_PENDING_INTERVAL_MS)
+      }
+    } catch (error) {
+      this.output.push({ type: 'error', message: `MCP status: ${errorMessage(error)}`, fatal: false })
+    }
   }
 
   /** Maps the engine-agnostic hooks onto the SDK's hook protocol. */
@@ -270,6 +335,7 @@ export class SdkSession implements CodeSession {
         for (const event of this.mapper.map(message)) {
           if (event.type === 'session_started') this.engineSessionId = event.engineSessionId
           this.output.push(event)
+          if (event.type === 'session_started' && this.mcpServers) void this.reportMcp()
         }
       }
     } catch (error) {

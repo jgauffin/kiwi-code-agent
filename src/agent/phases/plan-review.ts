@@ -26,7 +26,7 @@ export type ReviewComment = {
   /** A rule's name or `plan` for the artifact as a whole. */
   target: string
   text: string
-  /** The item's text when the comment was written; carried to the agent when the name is gone. */
+  /** Read from older reviews only, where a comment copied its item's text; a comment now names the rule, and names never change. */
   item?: string
   /** Written by the agent when it revises; every comment gets one. */
   resolution?: Resolution
@@ -222,14 +222,10 @@ export const describeComment = (comment: ReviewComment): string => `on ${comment
 /** Comments are one line in the file; a pasted paragraph keeps its words, not its line breaks. */
 const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim()
 
-export function addComment(review: Review, target: string, text: string, itemText?: string): ReviewComment {
+export function addComment(review: Review, target: string, text: string): ReviewComment {
   const body = oneLine(text)
   if (!body) throw new Error('A comment needs text.')
-  const comment: ReviewComment = {
-    target,
-    text: body,
-    ...(itemText ? { item: oneLine(itemText) } : {}),
-  }
+  const comment: ReviewComment = { target, text: body }
   openRound(review).comments.push(comment)
   return comment
 }

@@ -1,8 +1,9 @@
 import { compileTemplate } from '@relax.js/core/html'
-import { AllowWritesToggledEvent, InterruptRequestedEvent, PromptSubmittedEvent } from './events'
+import type { McpServerState } from '../../agent/session/code-session'
+import { AllowWritesToggledEvent, InterruptRequestedEvent, McpReconnectRequestedEvent, PromptSubmittedEvent } from './events'
 
 /** The composer's per-session switches; `undefined` hides a switch the session has no use for. */
-type Switches = { allowWrites: boolean | undefined }
+type Switches = { allowWrites: boolean | undefined; mcp: McpServerState[] | undefined }
 
 /** Prompt input. Enter sends, Shift+Enter breaks the line. */
 export class ChatComposer extends HTMLElement {
@@ -18,9 +19,15 @@ export class ChatComposer extends HTMLElement {
         <button type="button" class="stop" r-click="stop()">Stop</button>
         <button type="submit" class="send">Send</button>
       </div>
+      <div class="mcp-servers" if="mcpAvailable">
+        <span loop="s in servers" class="server {{s.status}}" title="{{s.title}}">
+          {{s.name}} {{s.status}}
+          <button type="button" class="reconnect" title="Reconnect {{s.name}}" r-click="reconnect(s)">↻</button>
+        </span>
+      </div>
     </form>
   `)
-  private switches: Switches = { allowWrites: undefined }
+  private switches: Switches = { allowWrites: undefined, mcp: undefined }
 
   connectedCallback(): void {
     if (this.childElementCount > 0) return
@@ -38,13 +45,16 @@ export class ChatComposer extends HTMLElement {
   }
 
   private render(): void {
-    const { allowWrites } = this.switches
+    const { allowWrites, mcp } = this.switches
     this.template.render(
       {
         allowWritesAvailable: allowWrites !== undefined,
         allowWrites: allowWrites ?? false,
+        mcpAvailable: mcp !== undefined && mcp.length > 0,
+        servers: (mcp ?? []).map((s) => ({ ...s, title: s.error ?? s.status })),
       },
       {
+        reconnect: (s: McpServerState) => this.dispatchEvent(new McpReconnectRequestedEvent(s.name)),
         submit: (event: SubmitEvent) => {
           event.preventDefault()
           this.send()

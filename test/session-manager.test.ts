@@ -67,6 +67,33 @@ function memoryStore(): SessionStore & { saved: SessionRecord[][] } {
 const tick = () => new Promise((r) => setTimeout(r, 5))
 
 describe('SessionManager', () => {
+  it('live_sessions_are_reachable_and_a_reconnect_reaches_the_live_session_s_mcp_control', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+    try {
+      const reconnected: string[] = []
+      const manager = new SessionManager(
+        memoryStore(),
+        async (r) => {
+          const s = new FakeSession(r.id, r.profile, r.engineSessionId)
+          return Object.assign(s, { mcp: { reload: async () => {}, reconnect: async (name: string) => void reconnected.push(name) } })
+        },
+        (id) => RunLog.forSession(dir, id),
+        () => {},
+      )
+      const record = await manager.create(profile)
+      const idle = await manager.create(profile)
+      expect(manager.liveSessions()).toEqual([])
+      await manager.reconnectMcp(idle.id, 'docs')
+      await manager.send(record.id, 'hello')
+      expect(manager.liveSessions().map((s) => s.id)).toEqual([record.id])
+      await manager.reconnectMcp(record.id, 'docs')
+      expect(reconnected).toEqual(['docs'])
+      await manager.disposeAll()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('engine_starts_on_first_prompt_not_on_creation', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'sm-'))
     try {

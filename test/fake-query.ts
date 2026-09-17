@@ -1,4 +1,4 @@
-import type { Options, Query, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import type { McpServerConfig, McpServerStatus, Options, Query, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { AsyncQueue } from '../src/agent/session/async-queue'
 
 /**
@@ -8,6 +8,10 @@ import { AsyncQueue } from '../src/agent/session/async-queue'
 export function fakeQuery() {
   const emitted = new AsyncQueue<SDKMessage>()
   const received: SDKUserMessage[] = []
+  const setServers: Record<string, McpServerConfig>[] = []
+  const reconnected: string[] = []
+  let mcpStatus: McpServerStatus[] = []
+  let reconnectError: Error | undefined
   let options: Options | undefined
   let interrupted = 0
   let closed = 0
@@ -32,6 +36,15 @@ export function fakeQuery() {
         closed++
         emitted.end()
       },
+      mcpServerStatus: async () => mcpStatus,
+      setMcpServers: async (servers: Record<string, McpServerConfig>) => {
+        setServers.push(servers)
+        return { added: Object.keys(servers), removed: [], errors: {} }
+      },
+      reconnectMcpServer: async (name: string) => {
+        reconnected.push(name)
+        if (reconnectError) throw reconnectError
+      },
     }
     return q as unknown as Query
   }
@@ -41,7 +54,12 @@ export function fakeQuery() {
     emit: (m: SDKMessage) => emitted.push(m),
     endStream: () => emitted.end(),
     failStream: (e: unknown) => emitted.fail(e),
+    /** What `mcpServerStatus()` answers from now on. */
+    setMcpStatus: (status: McpServerStatus[]) => void (mcpStatus = status),
+    failReconnect: (error: Error) => void (reconnectError = error),
     received,
+    setServers,
+    reconnected,
     get options() {
       return options
     },

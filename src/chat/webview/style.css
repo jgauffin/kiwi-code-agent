@@ -24,108 +24,76 @@ chat-app {
     min-height: 0;
   }
 
-  /* The flow in one row: a dot per step, the current one lit, so the bar beneath only has to say the next thing. */
-  & > .plan-stepper {
+  /*
+   * One row: the flow as steps, the current one lit, and at the right the one
+   * next thing. The lit step is the stage; nothing restates it. Its own
+   * background sets it apart from the session tabs above and the plan tabs
+   * below, so the three rows read as three different things.
+   */
+  & > .plan-bar {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0 0.2rem;
-    padding: 0.25rem 0.6rem 0;
-    font-size: 0.8em;
+    gap: 0.3rem 0.5rem;
+    padding: 0.35rem 0.6rem;
+    margin-bottom: 0.4rem;
+    font-size: 0.85em;
+    background: var(--vscode-sideBarSectionHeader-background, var(--vscode-editorWidget-background));
 
+    & .steps {
+      display: inline-flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0 0.1rem;
+      margin-right: auto;
+    }
+
+    /* Stages in order, read left to right: a chevron between each, the passed ones plain, the one at hand lit, the rest dim. */
     & .step {
       background: none;
       border: none;
       border-radius: 0;
-      color: inherit;
+      color: var(--vscode-disabledForeground);
       padding: 0.1rem 0.3rem;
-      opacity: 0.5;
+      white-space: nowrap;
 
-      &::before {
-        content: '○ ';
+      & + .step::before {
+        content: '›';
+        margin-right: 0.45rem;
+        color: var(--vscode-descriptionForeground);
+        font-weight: 400;
       }
 
-      &.done::before,
-      &.current::before {
-        content: '● ';
-      }
-
-      &.done {
-        opacity: 0.75;
-      }
-
+      &.done,
       &.reached {
-        opacity: 0.75;
+        color: var(--vscode-foreground);
       }
 
       &.current {
-        opacity: 1;
         font-weight: 600;
         color: var(--vscode-focusBorder);
       }
 
       &:is(button):hover {
-        opacity: 1;
         text-decoration: underline;
         cursor: pointer;
       }
     }
-  }
 
-  & > .plan-bar {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.3rem 0.6rem;
-    border-bottom: 1px solid var(--vscode-panel-border);
-    font-size: 0.9em;
-
-    & .view {
-      background: none;
-      color: inherit;
-      opacity: 0.7;
-      border-bottom: 2px solid transparent;
-      border-radius: 0;
-      padding: 0.2rem 0.5rem;
-
-      &:hover {
-        opacity: 1;
-        background: var(--vscode-list-hoverBackground);
-      }
-
-      &.active {
-        opacity: 1;
-        border-bottom-color: var(--vscode-focusBorder);
-      }
-    }
-
-    & .status {
-      opacity: 0.75;
-      margin-right: auto;
-      margin-left: 0.3rem;
-
-      &.verified {
-        color: var(--vscode-testing-iconPassed);
-        opacity: 1;
-      }
-
-      &.verification {
-        color: var(--vscode-editorWarning-foreground);
-        opacity: 1;
-      }
-
-      &.running {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        font-family: var(--vscode-editor-font-family);
-        animation: pulse 1.2s ease-in-out infinite;
-      }
+    & .running {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: var(--vscode-editor-font-family);
+      animation: pulse 1.2s ease-in-out infinite;
     }
 
     & .ran {
       opacity: 0.75;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
       white-space: nowrap;
     }
 
@@ -171,6 +139,35 @@ chat-app {
       &.done {
         color: var(--vscode-testing-iconPassed);
         opacity: 1;
+      }
+    }
+  }
+
+  /* The plan's tabs and the chat as one strip: what the session has to show, each counted when it needs the reader. */
+  & > .plan-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.2rem;
+    padding: 0 0.6rem;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    font-size: 0.9em;
+
+    & .tab {
+      background: none;
+      color: inherit;
+      opacity: 0.7;
+      border-bottom: 2px solid transparent;
+      border-radius: 0;
+      padding: 0.25rem 0.6rem;
+
+      &:hover {
+        opacity: 1;
+        background: var(--vscode-list-hoverBackground);
+      }
+
+      &.active {
+        opacity: 1;
+        border-bottom-color: var(--vscode-focusBorder);
       }
     }
   }
@@ -226,34 +223,6 @@ chat-app {
       margin: 0.3rem 0;
     }
 
-    /* The view's own tabs: what the plan has to show, each with the count that says whether it needs the reader. */
-    & .view-tabs {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.2rem;
-      margin: 0 0 0.8rem;
-      border-bottom: 1px solid var(--vscode-panel-border);
-
-      & .tab {
-        background: none;
-        color: inherit;
-        opacity: 0.7;
-        border-bottom: 2px solid transparent;
-        border-radius: 0;
-        padding: 0.2rem 0.6rem;
-
-        &:hover {
-          opacity: 1;
-          background: var(--vscode-list-hoverBackground);
-        }
-
-        &.active {
-          opacity: 1;
-          border-bottom-color: var(--vscode-focusBorder);
-        }
-      }
-    }
-
     /* A review round; the one still being written is boxed, since it is the reader's own draft. */
     & .round {
       margin: 0 0 1.2rem;
@@ -295,11 +264,6 @@ chat-app {
       }
     }
 
-    & .title {
-      font-size: 1.3em;
-      margin: 0 0 0.6rem;
-    }
-
     & .problems {
       border: 1px solid var(--vscode-inputValidation-warningBorder);
       background: var(--vscode-inputValidation-warningBackground);
@@ -335,8 +299,7 @@ chat-app {
 
     /* One scenario after another, set apart by space and a heading, not by boxes. */
     & .scenario,
-    & .questions,
-    & .decisions {
+    & .questions {
       margin: 1.6rem 0 0;
 
       & .intro {
@@ -458,8 +421,95 @@ chat-app {
       opacity: 1;
     }
 
-    & .decision .chip.rule {
-      opacity: 0.7;
+    /*
+     * A decision in play is a card: the question on top, then what the code
+     * does, what is proposed and what was ruled as labelled paragraphs, and
+     * the buttons that rule at the foot. The one waiting on the reader is
+     * marked at its edge.
+     */
+    & .decisions > .decision {
+      margin: 0 0 0.9rem;
+      padding: 0.6rem 0.8rem;
+      border: 1px solid var(--vscode-panel-border);
+      border-left-width: 3px;
+      border-radius: 4px;
+      background: var(--vscode-editorWidget-background);
+
+      &.attention {
+        border-left-color: var(--vscode-editorWarning-foreground);
+      }
+
+      &.ruled {
+        border-left-color: var(--vscode-testing-iconPassed);
+      }
+
+      & > .head {
+        display: flex;
+        align-items: baseline;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+
+        & .title {
+          flex: 1;
+          margin: 0;
+          font-size: 1.05em;
+          font-weight: 600;
+        }
+      }
+
+      & > .on {
+        font-size: 0.85em;
+        opacity: 0.75;
+        margin-bottom: 0.4rem;
+      }
+
+      & .finding,
+      & .proposal,
+      & .ruling {
+        flex-direction: column;
+        gap: 0.1rem;
+        margin: 0.5rem 0 0;
+
+        & .kind {
+          padding-top: 0;
+        }
+      }
+
+      & .rulings {
+        margin: 0.7rem 0 0.1rem;
+      }
+    }
+
+    /* Settled decisions fold away: the finding and the ruling are the record, the title a footnote. */
+    & .decisions > .history {
+      margin-top: 0.6rem;
+
+      & > summary {
+        cursor: pointer;
+        opacity: 0.75;
+        font-size: 0.9em;
+      }
+
+      & .decision.settled {
+        margin: 0.6rem 0 0 0.4rem;
+        padding: 0.3rem 0 0.3rem 0.6rem;
+        border-left: 2px solid var(--vscode-panel-border);
+        opacity: 0.8;
+        font-size: 0.95em;
+
+        & .finding,
+        & .ruling {
+          margin-left: 0;
+        }
+
+        & .foot {
+          display: flex;
+          gap: 0.6rem;
+          margin-top: 0.2rem;
+          font-size: 0.8em;
+          opacity: 0.7;
+        }
+      }
     }
 
     & .rulings {
@@ -666,11 +716,6 @@ chat-app {
           font-weight: 600;
         }
 
-        & .delivers {
-          opacity: 0.7;
-          font-size: 0.85em;
-        }
-
         &.removed .line > .text {
           text-decoration: line-through;
           opacity: 0.6;
@@ -700,24 +745,11 @@ chat-app {
       }
 
       & .files {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.2rem 0.8rem;
-        margin-left: 1rem;
+        list-style: none;
+        padding: 0;
+        margin: 0.1rem 0 0 1rem;
         font-size: 0.85em;
         font-family: var(--vscode-editor-font-family);
-
-        /* What was read, not what is touched: there for the implementer, quiet for the reader. */
-        &.context {
-          opacity: 0.55;
-
-          & .label {
-            font-family: inherit;
-            text-transform: uppercase;
-            letter-spacing: 0.03em;
-            font-size: 0.85em;
-          }
-        }
       }
 
       & .verification {
@@ -848,6 +880,21 @@ chat-app {
     & h2 {
       margin: 0 0 0.6rem;
       font-size: 1.1em;
+    }
+
+    /* The two pickers: what the session runs on is chosen here, not in a settings file. */
+    & .models {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem 1rem;
+      margin-bottom: 0.8rem;
+      font-size: 0.9em;
+
+      & label {
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+      }
     }
 
     & .types {
@@ -1455,6 +1502,33 @@ chat-app {
 
         & label {
           cursor: pointer;
+        }
+      }
+    }
+
+    & .mcp-servers {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.8rem;
+      font-size: 0.8em;
+      opacity: 0.85;
+
+      & .server {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        color: var(--vscode-descriptionForeground);
+
+        &.failed,
+        &.needs-auth {
+          color: var(--vscode-errorForeground);
+        }
+
+        & .reconnect {
+          background: none;
+          color: inherit;
+          padding: 0 0.2rem;
+          line-height: 1;
         }
       }
     }

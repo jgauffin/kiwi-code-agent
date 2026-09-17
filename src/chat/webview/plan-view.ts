@@ -4,9 +4,9 @@ import type { Amendment } from '../../agent/phases/intent-writeback'
 import type { CommentRef, Review, ReviewComment, ReviewRound } from '../../agent/phases/plan-review'
 import type { Item, Scenario, Spec } from '../../agent/phases/spec-model'
 import type { Task, TaskState } from '../../agent/phases/tasks-file'
-import { ReviewActionEvent } from './events'
+import { PlanFocusRequestedEvent, ReviewActionEvent, type PlanFocus } from './events'
 import { renderMarkdown } from './markdown'
-import { planStep, tabFor, type Step, type Tab } from './plan-step'
+import { presentTabs, type Tab } from './plan-step'
 import { post } from './vscode-api'
 
 const PLAN_TARGET = 'plan'
@@ -27,36 +27,32 @@ const DECISION_STATE: Record<Decision['state'], string> = {
   withdrawn: 'withdrawn',
 }
 
-const TAB_ORDER: Tab[] = ['spec', 'review', 'decisions', 'tasks', 'intent']
-
 /** A comment box on a rule or the plan, an edit of a pending comment, or a ruling being written on a decision. */
 type Editor = { kind: 'comment'; target: string; comment?: CommentRef; text: string } | { kind: 'ruling'; target: string; text: string }
 
 /** A comment with its place in the review, which is how the host addresses it. */
 type PlacedComment = { ref: CommentRef; comment: ReviewComment; pending: boolean }
 
-/** Where to land: a tab, and on it the first row that needs an act, or the item named. */
-export type Focus = { scroll?: boolean; item?: string }
-
 const same = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase()
 
 /**
- * The plan as tabs: the spec as the contract reads it (goal, scenarios,
- * questions, with the review written on its rows), the review as a batch,
- * the decisions, the task board and the intent amendments. A tab is there
- * once there is something to show on it; the tab the current step works in
- * opens when the step changes, and the reader's own choice holds otherwise.
- * Built by hand rather than from a template so an open comment box keeps its
- * text and caret while the plan around it is re-rendered.
+ * One tab of the plan at a time: the spec as the contract reads it (goal,
+ * scenarios, questions, with the review written on its rows), the review as
+ * a batch, the decisions, the task board or the intent amendments. Which
+ * tab is the app's call, made on the strip above; a link from one tab to a
+ * rule on another asks the app the same way. Built by hand rather than from
+ * a template so an open comment box keeps its text and caret while the plan
+ * around it is re-rendered.
  */
 export class PlanView extends HTMLElement {
   private plan: PlanState | undefined
   private editor: Editor | undefined
   private signature = ''
   private tab: Tab = 'spec'
-  private step: Step | undefined
 
-  update(plan: PlanState | undefined): void {
+  update(plan: PlanState | undefined, tab: Tab): void {
+    const tabChanged = tab !== this.tab
+    this.tab = tab
     const signature = JSON.stringify(
       plan
         ? {
@@ -79,31 +75,14 @@ export class PlanView extends HTMLElement {
           }
         : null,
     )
-    const changed = signature !== this.signature
+    const changed = signature !== this.signature || tabChanged
     this.signature = signature
     this.plan = plan
-    if (!plan) {
-      this.step = undefined
-      if (changed) this.draw()
-      return
-    }
-    const step = planStep(plan).current
-    if (step !== this.step) {
-      this.step = step
-      this.tab = tabFor(step, plan)
-    }
     if (changed) this.draw()
   }
 
-  /** The tab shown; what a test or the app asks after a focus. */
-  get activeTab(): Tab {
-    return this.tab
-  }
-
-  /** Open a tab and, when asked, scroll to the first row needing an act, or to the item named. */
-  open(tab: Tab, where: Focus = {}): void {
-    this.tab = tab
-    this.draw()
+  /** Scroll to the first row needing an act, or to the item named, on the tab as drawn. */
+  land(where: PlanFocus): void {
     const target = where.item
       ? [...this.querySelectorAll<HTMLElement>('[data-item]')].find((n) => same(n.dataset.item ?? '', where.item!))
       : where.scroll
@@ -126,7 +105,6 @@ export class PlanView extends HTMLElement {
     const plan = this.plan
     if (!plan?.body || !plan.spec) return
     const spec = plan.spec
-    this.append(el('h1', 'title', spec.title || plan.specPath))
     if (spec.problems.length > 0) {
       // Off contract: the file as written, so nothing the model put there is hidden, and no review on it until it is repaired.
       this.append(this.problemsBox(spec.problems))
@@ -135,10 +113,9 @@ export class PlanView extends HTMLElement {
       this.append(raw)
       return
     }
-    const tabs = presentTabs(plan)
-    if (!tabs.includes(this.tab)) this.tab = 'spec'
-    this.append(this.tabStrip(plan, tabs))
-    switch (this.tab) {
+    // A tab whose content is gone (the last decision withdrawn, say) falls back to the spec.
+    const tab = presentTabs(plan).includes(this.tab) ? this.tab : 'spec'
+    switch (tab) {
       case 'spec':
         this.append(...this.specTab(plan, spec))
         break
@@ -155,16 +132,6 @@ export class PlanView extends HTMLElement {
         if (plan.intent) this.append(this.intentTab(plan.intent))
         break
     }
-  }
-
-  private tabStrip(plan: PlanState, tabs: Tab[]): HTMLElement {
-    const strip = el('nav', 'view-tabs')
-    for (const tab of tabs) {
-      const node = button(tabLabel(tab, plan), () => this.open(tab))
-      node.className = `tab${tab === this.tab ? ' active' : ''}`
-      strip.append(node)
-    }
-    return strip
   }
 
   private problemsBox(problems: string[]): HTMLElement {
@@ -338,7 +305,7 @@ export class PlanView extends HTMLElement {
 
   /** The rule a comment or strike is on, as a link to its row on the Spec tab. */
   private itemLink(name: string): HTMLElement {
-    const link = button(name === PLAN_TARGET ? 'the plan as a whole' : name, () => this.open('spec', { item: name }))
+    const link = button(name === PLAN_TARGET ? 'the plan as a whole' : name, () => this.dispatchEvent(new PlanFocusRequestedEvent('spec', { item: name })))
     link.className = 'link item'
     link.title = 'Show the rule on the Spec tab.'
     return link
@@ -346,35 +313,68 @@ export class PlanView extends HTMLElement {
 
   // --- decisions ----------------------------------------------------------------
 
+  /**
+   * The decisions still in play, one card each, and beneath them the settled
+   * ones folded away: an applied decision is history, its finding and ruling
+   * the record, and its title no more than a footnote.
+   */
   private decisionsSection(spec: Spec, plan: PlanState): HTMLElement {
     const section = el('section', 'decisions')
-    section.append(el('h2', 'heading', 'Decisions'))
-    const list = el('ul', 'rules')
-    for (const decision of spec.decisions) list.append(this.decisionRow(decision, plan))
-    section.append(list)
+    const pending = spec.decisions.filter((d) => d.state === 'open' || d.state === 'ruled')
+    const settled = spec.decisions.filter((d) => d.state === 'applied' || d.state === 'withdrawn')
+    if (pending.length === 0) section.append(note(settled.length > 0 ? 'Every decision is settled.' : 'The mapping found nothing in the way.'))
+    for (const decision of pending) section.append(this.decisionCard(decision, plan))
+    if (settled.length > 0) {
+      const history = document.createElement('details')
+      history.className = 'history'
+      const applied = settled.filter((d) => d.state === 'applied').length
+      const withdrawn = settled.length - applied
+      const summary = document.createElement('summary')
+      summary.textContent = [applied > 0 ? `${applied} applied` : '', withdrawn > 0 ? `${withdrawn} withdrawn` : ''].filter(Boolean).join(', ')
+      history.append(summary)
+      for (const decision of settled) history.append(this.settledDecision(decision))
+      section.append(history)
+    }
     return section
   }
 
-  /** A decision: what the code and the spec disagree on, what is proposed, and the ruling, with the buttons that make one. */
-  private decisionRow(decision: Decision, plan: PlanState): HTMLElement {
-    const rulable = plan.commentable && (decision.state === 'open' || decision.state === 'ruled')
-    const row = el('li', `item decision ${decision.state}${rulable && decision.state === 'open' && decision.proposal ? ' attention' : ''}`)
-    const line = el('div', 'line')
-    const aside = el('span', 'aside')
-    for (const name of decision.on) {
-      const chip = this.itemLink(name)
-      chip.classList.add('chip', 'rule')
-      chip.title = `Concerns the rule "${name}"; opens it on the Spec tab.`
-      aside.append(chip)
+  /** A decision to make: what the code and the spec disagree on, what is proposed, and the ruling, with the buttons that make one. */
+  private decisionCard(decision: Decision, plan: PlanState): HTMLElement {
+    const rulable = plan.commentable
+    const card = el('article', `decision ${decision.state}${rulable && decision.state === 'open' && decision.proposal ? ' attention' : ''}`)
+    const head = el('header', 'head')
+    head.append(el('h3', 'title', decision.title), el('span', `badge state ${decision.state}`, DECISION_STATE[decision.state]))
+    card.append(head)
+    if (decision.on.length > 0) {
+      const on = el('div', 'on')
+      on.append(el('span', 'label', 'on '))
+      decision.on.forEach((name, index) => {
+        if (index > 0) on.append(', ')
+        const link = this.itemLink(name)
+        link.title = `Concerns the rule "${name}"; opens it on the Spec tab.`
+        on.append(link)
+      })
+      card.append(on)
     }
-    aside.append(el('span', `badge state ${decision.state}`, DECISION_STATE[decision.state]))
-    line.append(el('span', 'text', decision.title), aside)
-    row.append(line, labelled('finding', 'finding', decision.finding))
-    if (decision.proposal) row.append(labelled('proposal', 'proposed', decision.proposal))
-    else if (decision.state === 'open') row.append(el('div', 'awaiting', 'waiting for the planner to propose'))
-    if (decision.ruling) row.append(labelled('ruling', 'ruling', decision.ruling))
-    if (rulable && this.editor?.kind === 'ruling' && same(this.editor.target, decision.title)) row.append(this.editorBox(this.editor))
-    else if (rulable) row.append(this.rulingControls(decision))
+    card.append(labelled('finding', 'the code', decision.finding))
+    if (decision.proposal) card.append(labelled('proposal', 'proposed', decision.proposal))
+    else if (decision.state === 'open') card.append(el('div', 'awaiting', 'waiting for the planner to propose'))
+    if (decision.ruling) card.append(labelled('ruling', 'ruling', decision.ruling))
+    if (rulable && this.editor?.kind === 'ruling' && same(this.editor.target, decision.title)) card.append(this.editorBox(this.editor))
+    else if (rulable) card.append(this.rulingControls(decision))
+    return card
+  }
+
+  /** A decision that is history: the finding and what was ruled, the title beneath as the reference. */
+  private settledDecision(decision: Decision): HTMLElement {
+    const row = el('div', `decision settled ${decision.state}`)
+    row.append(labelled('finding', 'the code', decision.finding))
+    if (decision.state === 'withdrawn') row.append(el('div', 'awaiting', 'withdrawn: the mapping found it no longer holds'))
+    else if (decision.ruling) row.append(labelled('ruling', 'ruled', decision.ruling === 'accepted' && decision.proposal ? decision.proposal : decision.ruling))
+    const foot = el('div', 'foot')
+    foot.append(el('span', 'title', decision.title))
+    if (decision.on.length > 0) foot.append(el('span', 'on', `on ${decision.on.join(', ')}`))
+    row.append(foot)
     return row
   }
 
@@ -431,19 +431,16 @@ export class PlanView extends HTMLElement {
     return group
   }
 
+  /**
+   * What the person wants of a task: its name, where it stands and the files
+   * it touches. The mapper's text, context and `how:` are for the implementer
+   * and stay in the file; the heading is the link to it.
+   */
   private taskRow(task: Task, plan: PlanState): HTMLElement {
     const started = plan.stage !== 'mapped'
     const row = el('li', `task ${task.state}${task.removed ? ' removed' : ''}`)
     const line = el('div', 'line')
-    line.append(named(task.name, task.text.replace(MARKER, '').trim()))
-    if (task.delivers.length > 0) {
-      const delivers = el('span', 'delivers')
-      task.delivers.forEach((name, index) => {
-        if (index > 0) delivers.append(', ')
-        delivers.append(this.itemLink(name))
-      })
-      line.append(delivers)
-    }
+    line.append(named(task.name, ''))
     if (task.removed) line.append(el('span', 'badge removed', 'removed'))
     else if (started) {
       line.append(el('span', `badge state ${task.state}`, blockedReason(task) ?? TASK_STATE[task.state]))
@@ -452,16 +449,13 @@ export class PlanView extends HTMLElement {
     }
     row.append(line)
     if (task.files.length > 0) {
-      const files = el('div', 'files')
-      for (const file of task.files) files.append(fileLink(file, file))
+      const files = el('ul', 'files')
+      for (const file of task.files) {
+        const item = el('li', 'file')
+        item.append(fileLink(file, file))
+        files.append(item)
+      }
       row.append(files)
-    }
-    if (task.context.length > 0) {
-      const context = el('div', 'files context')
-      context.title = 'What the mapping read to arrive at this task; the implementer starts here.'
-      context.append(el('span', 'label', 'context'))
-      for (const file of task.context) context.append(fileLink(file, file))
-      row.append(context)
     }
     return row
   }
@@ -577,47 +571,6 @@ export class PlanView extends HTMLElement {
     return box
   }
 }
-
-/** The tabs with something on them, in fixed order; the spec is always there. */
-function presentTabs(plan: PlanState): Tab[] {
-  return TAB_ORDER.filter((tab) => {
-    switch (tab) {
-      case 'spec':
-        return true
-      case 'review':
-        return plan.review.rounds.length > 0
-      case 'decisions':
-        return (plan.spec?.decisions.length ?? 0) > 0
-      case 'tasks':
-        return plan.tasks.length > 0
-      case 'intent':
-        return plan.intent !== undefined
-    }
-  })
-}
-
-/** The tab's name with the count that says whether it needs the reader. */
-function tabLabel(tab: Tab, plan: PlanState): string {
-  switch (tab) {
-    case 'spec':
-      return 'Spec'
-    case 'review': {
-      const open = plan.review.rounds.flatMap((r) => r.comments).filter((c) => !c.closed).length
-      return counted('Review', open)
-    }
-    case 'decisions':
-      return counted('Decisions', (plan.spec?.decisions ?? []).filter((d) => d.state === 'open' && d.proposal).length)
-    case 'tasks': {
-      const live = plan.tasks.filter((t) => !t.removed)
-      if (!live.some((t) => t.state !== 'open')) return `Tasks (${live.length})`
-      return `Tasks (${live.filter((t) => t.state === 'tested').length} of ${live.length})`
-    }
-    case 'intent':
-      return counted('Intent', plan.intent?.pending ?? 0)
-  }
-}
-
-const counted = (label: string, n: number): string => (n > 0 ? `${label} (${n})` : label)
 
 function pendingRound(review: Review) {
   const last = review.rounds.at(-1)

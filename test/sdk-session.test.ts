@@ -6,6 +6,7 @@ import { jsonQueryTool } from '../src/agent/openai-session/tools/json'
 import { askUserTool } from '../src/agent/openai-session/tools/ask-user'
 import type { Tool } from '../src/agent/openai-session/tools/tool'
 import type { SessionEvent } from '../src/agent/session/code-session'
+import type { McpServers } from '../src/agent/mcp/mcp-config'
 import { fakeQuery, initMessage, resultMessage } from './fake-query'
 
 const profile = { name: 'Claude', engine: 'claude-sdk' as const, model: 'opus' }
@@ -196,6 +197,101 @@ describe('SdkSession', () => {
     const fake = fakeQuery()
     createSession(fake)
     expect(fake.options!.mcpServers).toBeUndefined()
+    expect(fake.options!.settings).toBeUndefined()
+  })
+
+  describe('workspace MCP servers', () => {
+    const docs = { type: 'stdio' as const, command: 'node', args: ['docs.js'] }
+    const github = { type: 'http' as const, url: 'https://x.test/mcp' }
+
+    function mcpSession(fake: ReturnType<typeof fakeQuery>, servers: McpServers = { docs, github }) {
+      return new SdkSession({
+        id: 'sess-1',
+        profile,
+        cwd: '/w',
+        cliPath: '/ext/dist/cli.js',
+        runtime: { command: 'node', args: [], env: {} },
+        query: fake.query,
+        ownTools: [jsonQueryTool],
+        mcpServers: servers,
+      })
+    }
+
+    it('servers_are_passed_beside_the_own_server', () => {
+      const fake = fakeQuery()
+      mcpSession(fake)
+      expect(Object.keys(fake.options!.mcpServers!)).toEqual([TOOL_SERVER_NAME, 'docs', 'github'])
+      expect(fake.options!.mcpServers!['docs']).toEqual(docs)
+    })
+
+    it('server_statuses_are_reported_after_the_session_started_without_the_own_server_and_the_engine_s_own_reading_of_the_file', async () => {
+      const fake = fakeQuery()
+      fake.setMcpStatus([
+        { name: TOOL_SERVER_NAME, status: 'connected' },
+        { name: 'docs', status: 'failed', scope: 'project', error: 'read from the file by the engine' },
+        { name: 'docs', status: 'connected', scope: 'dynamic' },
+        { name: 'github', status: 'failed', error: 'ECONNREFUSED' },
+      ])
+      const session = mcpSession(fake)
+      fake.emit(initMessage())
+      const events = await take(session, 2)
+      expect(events[1]).toEqual({
+        type: 'mcp_servers',
+        servers: [
+          { name: 'docs', status: 'connected' },
+          { name: 'github', status: 'failed', error: 'ECONNREFUSED' },
+        ],
+      })
+      await session.dispose()
+    })
+
+    it('a_reload_replaces_the_servers_and_keeps_the_own_server', async () => {
+      const fake = fakeQuery()
+      const session = mcpSession(fake)
+      fake.setMcpStatus([{ name: 'docs', status: 'connected' }])
+      await session.mcp!.reload({ docs })
+      expect(fake.setServers).toHaveLength(1)
+      expect(Object.keys(fake.setServers[0]!)).toEqual([TOOL_SERVER_NAME, 'docs'])
+      const [event] = await take(session, 1)
+      expect(event).toEqual({ type: 'mcp_servers', servers: [{ name: 'docs', status: 'connected' }] })
+      await session.dispose()
+    })
+
+    it('a_failed_reconnect_is_the_server_s_status_not_an_error', async () => {
+      const fake = fakeQuery()
+      const session = mcpSession(fake)
+      fake.failReconnect(new Error('still down'))
+      fake.setMcpStatus([{ name: 'github', status: 'failed', error: 'still down' }])
+      await session.mcp!.reconnect('github')
+      expect(fake.reconnected).toEqual(['github'])
+      const [event] = await take(session, 1)
+      expect(event).toEqual({ type: 'mcp_servers', servers: [{ name: 'github', status: 'failed', error: 'still down' }] })
+      await session.dispose()
+    })
+
+    it('a_server_still_connecting_is_asked_about_again_until_it_settles', async () => {
+      const fake = fakeQuery()
+      const session = mcpSession(fake, { docs })
+      fake.setMcpStatus([{ name: 'docs', status: 'pending' }])
+      fake.emit(initMessage())
+      const [, first] = await take(session, 2)
+      expect(first).toEqual({ type: 'mcp_servers', servers: [{ name: 'docs', status: 'pending' }] })
+      fake.setMcpStatus([{ name: 'docs', status: 'connected' }])
+      const [second] = await take(session, 1)
+      expect(second).toEqual({ type: 'mcp_servers', servers: [{ name: 'docs', status: 'connected' }] })
+      await session.dispose()
+    }, 10_000)
+
+    it('a_session_without_servers_has_no_control_and_never_asks_for_status', async () => {
+      const fake = fakeQuery()
+      const session = createSession(fake)
+      expect(session.mcp).toBeUndefined()
+      fake.emit(initMessage())
+      fake.emit(resultMessage())
+      const events = await take(session, 2)
+      expect(events.map((e) => e.type)).toEqual(['session_started', 'turn_done'])
+      await session.dispose()
+    })
   })
 
   it('hooks_are_mapped_onto_the_sdk_hook_protocol', async () => {

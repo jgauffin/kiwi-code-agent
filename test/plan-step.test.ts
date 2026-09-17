@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { planStep, tabFor } from '../src/chat/webview/plan-step'
+import { planStep, presentTabs, tabFor, tabLabel } from '../src/chat/webview/plan-step'
 import type { PlanState } from '../src/chat/protocol'
 import type { Decision } from '../src/agent/phases/decisions'
 import type { Task } from '../src/agent/phases/tasks-file'
@@ -32,8 +32,8 @@ function decision(over: Partial<Decision>): Decision {
   return { title: 'Shipped orders', on: [], finding: 'code', proposal: '', state: 'open', line: 0, end: 0, ...over }
 }
 
-function task(state: Task['state']): Task {
-  return { name: 'Cancel', text: '', delivers: [], files: [], context: [], proves: [], state, removed: false }
+function task(state: Task['state'], group?: string): Task {
+  return { name: 'Cancel', text: '', delivers: [], ...(group ? { group } : {}), files: [], context: [], how: '', proves: [], state, removed: false }
 }
 
 const round = (over: Partial<ReviewRound>): ReviewRound => ({ number: 1, comments: [], strikes: [], ...over })
@@ -123,6 +123,14 @@ describe('planStep', () => {
     expect(step.next).toEqual({ kind: 'waiting', text: '1 of 3 tested, 1 blocked' })
   })
 
+  it('under_development_names_the_scenario_being_implemented', () => {
+    const grouped = plan({ stage: 'under_development', status: 'approved', commentable: false, tasks: [task('tested', 'Foundation'), task('in_progress', 'Cancelling an order'), task('open', 'Reporting')] })
+    expect(planStep(grouped).next).toEqual({ kind: 'waiting', text: 'Cancelling an order, 1 of 3 tested' })
+    // A flat board has only the task's name to say where the work is.
+    const flat = plan({ stage: 'under_development', status: 'approved', commentable: false, tasks: [task('in_progress'), task('open')] })
+    expect(planStep(flat).next).toEqual({ kind: 'waiting', text: 'Cancel, 0 of 2 tested' })
+  })
+
   it('verification_offers_verify_again_once_a_run_is_recorded', () => {
     const base = { stage: 'verification' as const, status: 'approved' as const, commentable: false, verifiable: true }
     expect(planStep(plan(base)).next).toMatchObject({ action: 'verify', label: 'Verify' })
@@ -162,5 +170,24 @@ describe('tabFor', () => {
     expect(tabFor('map', mapped)).toBe('tasks')
     expect(tabFor('approve', mapped)).toBe('spec')
     expect(tabFor('implement', mapped)).toBe('tasks')
+  })
+})
+
+describe('tabs', () => {
+  it('a_tab_is_present_once_it_has_content', () => {
+    expect(presentTabs(plan())).toEqual(['spec'])
+    const spec = { ...plan().spec!, decisions: [decision({ proposal: 'p' })] }
+    const full = plan({
+      spec,
+      review: { rounds: [round({ submittedAt: 't', comments: [{ target: 'Cancel', text: 'no' }] })] },
+      tasks: [task('open')],
+      intent: { path: 'p', pending: 1, applied: 0, applicable: false, amendments: [] },
+    })
+    expect(presentTabs(full)).toEqual(['spec', 'review', 'decisions', 'tasks', 'intent'])
+    expect(presentTabs(full).map((t) => tabLabel(t, full))).toEqual(['Spec', 'Review (1)', 'Decisions (1)', 'Tasks (1)', 'Intent (1)'])
+  })
+
+  it('the_tasks_tab_counts_tested_once_work_has_started', () => {
+    expect(tabLabel('tasks', plan({ tasks: [task('tested'), task('in_progress'), task('open')] }))).toBe('Tasks (1 of 3)')
   })
 })

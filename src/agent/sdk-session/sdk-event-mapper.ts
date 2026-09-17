@@ -128,7 +128,8 @@ function parentOf(parentToolUseId: string | null): { parentToolUseId?: string } 
   return parentToolUseId ? { parentToolUseId } : {}
 }
 
-function toolResultText(content: unknown): string {
+/** The text of an MCP-shaped tool result: text parts joined, other parts named by kind. */
+export function toolResultText(content: unknown): string {
   if (content === undefined || content === null) return ''
   if (typeof content === 'string') return content
   if (Array.isArray(content)) {

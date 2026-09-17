@@ -29,6 +29,8 @@ export type Task = {
   files: string[]
   /** Paths the mapping run read to reach the task: what the implementer starts from and does not have to find again. */
   context: string[]
+  /** The mapper's instruction to the implementer, markdown: the steps, the symbols to change, the pattern to follow, so building does not start with discovery. Empty when the board carries none. */
+  how: string
   /** What the implementer proved, item by item. */
   proves: Proof[]
   state: TaskState
@@ -66,6 +68,8 @@ const TASK = /^-\s+\*\*([^*]+?)\*\*\s*(?:\(([^)]*)\))?\s*:?\s*(.*)$/
 const FILES = /^\s+-\s+files\s*:\s*(.*)$/i
 const CONTEXT = /^\s+-\s+context\s*:\s*(.*)$/i
 const PROVES = /^\s+-\s+proves\s*:\s*(.*)$/i
+/** `- how:` opens a block: the rest of its line, then every line indented deeper than it, until the next key, task or heading. */
+const HOW = /^(\s+)-\s+how\s*:\s*(.*)$/i
 /** `Rule name → test/file.ts test_name`; the arrow keeps a name with spaces apart from the path. */
 const PROOF = /^(.+?)\s*(?:→|->)\s*(\S+)\s+(.+)$/
 const HEADING = /^#{1,6}\s+(.*)$/
@@ -109,8 +113,14 @@ export function parseTasks(text: string): { tasks: Task[]; verification: Verific
   let group: string | undefined
   let inVerification = false
   let verification: VerificationRecord | undefined
+  let how: HowBlock | undefined
   for (const raw of bodyOf(text).split(/\r?\n/)) {
     const line = raw.trimEnd()
+    if (how && task) {
+      if (continues(how, line)) continue
+      task.how = how.lines.join('\n').trimEnd()
+      how = undefined
+    }
     const heading = HEADING.exec(line.trim())
     if (heading) {
       inVerification = heading[1]!.trim() === VERIFICATION_SECTION
@@ -142,6 +152,11 @@ export function parseTasks(text: string): { tasks: Task[]; verification: Verific
       task.proves = proofs(proves[1]!)
       continue
     }
+    const opens = HOW.exec(line)
+    if (opens && task) {
+      how = { indent: opens[1]!.length, lines: opens[2]!.trim() ? [opens[2]!.trim()] : [] }
+      continue
+    }
     const match = TASK.exec(line.trim())
     if (!match) continue
     const body = match[3]!.trim()
@@ -152,13 +167,31 @@ export function parseTasks(text: string): { tasks: Task[]; verification: Verific
       ...(group !== undefined ? { group } : {}),
       files: [],
       context: [],
+      how: '',
       proves: [],
       state: stateOf(body),
       removed: REMOVED.test(body),
     }
     tasks.push(task)
   }
+  if (how && task) task.how = how.lines.join('\n').trimEnd()
   return { tasks, verification, spec: frontMatterValue(text, SPEC_KEY) }
+}
+
+/** A `how:` block being read: the indent of its key line, and its body dedented to the first body line. */
+type HowBlock = { indent: number; lines: string[]; dedent?: number }
+
+/** A blank line or one indented deeper than the key belongs to the block; anything else ends it. */
+function continues(how: HowBlock, line: string): boolean {
+  if (line.trim() === '') {
+    how.lines.push('')
+    return true
+  }
+  const indent = line.length - line.trimStart().length
+  if (indent <= how.indent) return false
+  how.dedent ??= indent
+  how.lines.push(line.slice(Math.min(how.dedent, indent)))
+  return true
 }
 
 export async function readTasks(path: string): Promise<TasksState> {

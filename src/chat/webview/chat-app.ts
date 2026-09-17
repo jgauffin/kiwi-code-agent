@@ -5,16 +5,18 @@ import { ChatComposer } from './chat-composer'
 import { ChatTranscript } from './chat-transcript'
 import { NewSessionView } from './new-session-view'
 import { PlanBar } from './plan-bar'
-import { PlanStepper } from './plan-stepper'
+import { PlanTabs } from './plan-tabs'
 import { PlanView } from './plan-view'
-import { tabFor, type Tab } from './plan-step'
+import { planStep, tabFor, type Step, type Tab } from './plan-step'
 import { SessionTabs } from './session-tabs'
 import {
   AllowWritesToggledEvent,
   CleanupStoppedEvent,
+  DefaultProfileChangedEvent,
   ImplementRequestedEvent,
   IntentUpdateRequestedEvent,
   InterruptRequestedEvent,
+  McpReconnectRequestedEvent,
   NewSessionRequestedEvent,
   NewSessionViewRequestedEvent,
   PermissionDecidedEvent,
@@ -34,18 +36,20 @@ import {
   SpecMapStoppedEvent,
   SpecRepairRequestedEvent,
   VerifyRequestedEvent,
-  type PlanView as PlanViewName,
+  type PlanFocus,
+  type ViewTab,
 } from './events'
 
 /**
  * Root of the chat UI. Talks to the extension host; children talk to it
  * through events. Shows the new-session screen, or the active session: its
- * transcript, or in a plan session either the transcript or the spec.
+ * transcript, or in a feature session one tab of the plan or the transcript,
+ * picked on the strip under the plan bar.
  */
 export class ChatApp extends HTMLElement {
   private readonly tabs = new SessionTabs()
-  private readonly stepper = new PlanStepper()
   private readonly planBar = new PlanBar()
+  private readonly planTabs = new PlanTabs()
   private readonly planView = new PlanView()
   private readonly newSession = new NewSessionView()
   private readonly transcript = new ChatTranscript()
@@ -53,21 +57,25 @@ export class ChatApp extends HTMLElement {
   private activeSessionId: string | undefined
   private creating = false
   private plan: PlanState | undefined
-  private view: PlanViewName = 'chat'
+  private view: ViewTab = 'chat'
+  /** The plan tab last shown, so leaving the chat comes back to it. */
+  private planTab: Tab = 'spec'
+  /** The step the plan tab was last chosen for; a new step opens its own tab, otherwise the reader's choice holds. */
+  private step: Step | undefined
 
   connectedCallback(): void {
     if (this.childElementCount > 0) return
     this.tabs.className = 'tabs'
-    this.stepper.className = 'plan-stepper'
-    this.stepper.hidden = true
     this.planBar.className = 'plan-bar'
     this.planBar.hidden = true
+    this.planTabs.className = 'plan-tabs'
+    this.planTabs.hidden = true
     this.planView.className = 'plan-view'
     this.planView.hidden = true
     this.newSession.className = 'new-session'
     this.transcript.className = 'transcript'
     this.composer.className = 'composer'
-    this.append(this.tabs, this.stepper, this.planBar, this.newSession, this.planView, this.transcript, this.composer)
+    this.append(this.tabs, this.planBar, this.planTabs, this.newSession, this.planView, this.transcript, this.composer)
 
     this.addEventListener(SpecApprovedEvent.type, () => post({ type: 'approve_spec' }))
     this.addEventListener(RulingsSentEvent.type, () => post({ type: 'send_rulings' }))
@@ -76,7 +84,7 @@ export class ChatApp extends HTMLElement {
     this.addEventListener(PlanStepSelectedEvent.type, (e) => {
       if (this.plan) this.focusPlan(tabFor(e.step, this.plan))
     })
-    this.addEventListener(PlanFocusRequestedEvent.type, (e) => this.focusPlan(e.tab, true))
+    this.addEventListener(PlanFocusRequestedEvent.type, (e) => this.focusPlan(e.tab, e.where))
     this.addEventListener(SpecMapRequestedEvent.type, () => post({ type: 'map_spec' }))
     this.addEventListener(SpecMapStoppedEvent.type, () => post({ type: 'stop_map' }))
     this.addEventListener(CleanupStoppedEvent.type, () => post({ type: 'stop_cleanup' }))
@@ -95,6 +103,7 @@ export class ChatApp extends HTMLElement {
       post({ type: 'question', requestId: e.requestId, outcome: e.outcome }),
     )
     this.addEventListener(AllowWritesToggledEvent.type, (e) => post({ type: 'set_allow_writes', enabled: e.enabled }))
+    this.addEventListener(McpReconnectRequestedEvent.type, (e) => post({ type: 'reconnect_mcp', server: e.server }))
     this.addEventListener(SessionSelectedEvent.type, (e) => {
       this.showCreating(false)
       post({ type: 'switch_session', sessionId: e.sessionId })
@@ -102,6 +111,7 @@ export class ChatApp extends HTMLElement {
     this.addEventListener(SessionClosedEvent.type, (e) => post({ type: 'close_session', sessionId: e.sessionId }))
     this.addEventListener(NewSessionViewRequestedEvent.type, () => this.showCreating(true))
     this.addEventListener(PlanResumeRequestedEvent.type, (e) => post({ type: 'resume_plan', feature: e.feature }))
+    this.addEventListener(DefaultProfileChangedEvent.type, (e) => post({ type: 'set_default_profile', role: e.role, name: e.name }))
     this.addEventListener(NewSessionRequestedEvent.type, (e) =>
       post({
         type: 'new_session',
@@ -122,10 +132,10 @@ export class ChatApp extends HTMLElement {
         this.activeSessionId = active?.id
         if (!active && !this.creating) this.showCreating(true)
         this.tabs.update(message.tabs, this.creating)
-        this.newSession.update(message.plans)
-        this.composer.setSwitches({ allowWrites: message.allowWrites })
+        this.newSession.update(message.plans, message.profiles)
+        this.composer.setSwitches({ allowWrites: message.allowWrites, mcp: message.mcp })
         this.plan = message.plan
-        this.planView.update(this.plan)
+        this.followStep()
         this.layout()
         break
       }
@@ -134,7 +144,7 @@ export class ChatApp extends HTMLElement {
         this.showCreating(false)
         this.transcript.reset(message.events)
         // A spec that exists is what the session is about; the conversation is one click away.
-        this.show(this.plan?.body ? 'plan' : 'chat')
+        this.show(this.plan?.body ? this.planTab : 'chat')
         this.composer.focusInput()
         break
       case 'event':
@@ -166,29 +176,44 @@ export class ChatApp extends HTMLElement {
         if (event.status !== 'idle') this.show('chat')
         break
       case 'turn_done':
-        if (!event.isError) this.show('plan')
+        if (!event.isError) this.show(this.planTab)
         break
     }
   }
 
-  private show(view: PlanViewName): void {
+  /** A new step opens the tab it works in; while the step holds, the reader's own tab does. */
+  private followStep(): void {
+    if (!this.plan) {
+      this.step = undefined
+      return
+    }
+    const step = planStep(this.plan).current
+    if (step === this.step) return
+    this.step = step
+    this.planTab = tabFor(step, this.plan)
+    if (this.view !== 'chat') this.view = this.planTab
+  }
+
+  private show(view: ViewTab): void {
     this.view = view
+    if (view !== 'chat') this.planTab = view
     this.layout()
   }
 
-  /** A step or the bar's next-step link opens the plan view on a tab; the link also lands on the first row to act on. */
-  private focusPlan(tab: Tab, scroll = false): void {
-    this.show('plan')
-    this.planView.open(tab, { scroll })
+  /** A step, the bar's next-step link or a link between tabs opens a plan tab and lands somewhere on it. */
+  private focusPlan(tab: Tab, where: PlanFocus = {}): void {
+    this.show(tab)
+    this.planView.land(where)
   }
 
   private layout(): void {
     const plan = this.creating ? undefined : this.plan
-    const planShown = this.view === 'plan' && plan?.body !== undefined
+    const planShown = this.view !== 'chat' && plan?.body !== undefined
     this.planView.hidden = !planShown
     this.transcript.hidden = this.creating || planShown
-    this.stepper.update(plan)
-    this.planBar.update(plan, planShown ? 'plan' : 'chat')
+    this.planBar.update(plan)
+    this.planTabs.update(plan, planShown ? this.view : 'chat')
+    this.planView.update(plan, this.planTab)
   }
 
   private showCreating(creating: boolean): void {

@@ -5,15 +5,22 @@ import { splitShellCommand } from './shell-split'
  * A rule is `Tool` (every use), `Tool(pattern)` where the pattern is a glob on
  * the workspace-relative path for file tools, or for a shell tool a command:
  * `npm test` matches that exact command, `npm run:*` any command starting with
- * those words.
+ * those words. An MCP server's tools are `mcp__<server>__<tool>`, and
+ * `mcp__<server>__*` stands for every tool of that server.
  * Pure, so the webview can name the rule a button will write.
  */
 export type PermissionRule = { tool: string; pattern?: string }
 
 export function parseRule(rule: string): PermissionRule {
-  const match = /^([A-Za-z_]\w*)(?:\((.*)\))?$/s.exec(rule.trim())
+  const match = /^([A-Za-z_][\w-]*|mcp__[\w-]+__\*)(?:\((.*)\))?$/s.exec(rule.trim())
   if (!match) throw new Error(`Not a permission rule: "${rule}" (expected Tool or Tool(pattern))`)
   return match[2] === undefined ? { tool: match[1]! } : { tool: match[1]!, pattern: match[2] }
+}
+
+/** Does the rule's tool name stand for this tool: the same name, or the server wildcard over it? */
+export function ruleCoversTool(ruleTool: string, toolName: string): boolean {
+  if (ruleTool === toolName) return true
+  return ruleTool.endsWith('__*') && toolName.startsWith(ruleTool.slice(0, -1))
 }
 
 export function formatRule(rule: PermissionRule): string {

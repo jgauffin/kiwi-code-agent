@@ -112,6 +112,16 @@ export class SessionManager {
     return this.live.has(id)
   }
 
+  /** Every engine running now, for what the host applies to all of them at once. */
+  liveSessions(): CodeSession[] {
+    return [...this.live.values()]
+  }
+
+  /** One MCP server of a live session, tried again; nothing to do for a session that is not running. */
+  async reconnectMcp(id: string, server: string): Promise<void> {
+    await this.live.get(id)?.mcp?.reconnect(server)
+  }
+
   /** The live session running under another one's tab, if any. */
   liveChildOf(parentId: string): SessionRecord | undefined {
     return this.records.find((r) => r.parentId === parentId && this.live.has(r.id))

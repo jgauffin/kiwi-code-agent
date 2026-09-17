@@ -68,6 +68,16 @@ describe('reconcile prompt', () => {
     expect(blindPlanPrompt('Order cancellation', cwd)).toContain('ends with its citation in parentheses')
   })
 
+  it('a_finding_is_the_disagreement_at_one_symbol_and_leaves_the_remedy_to_the_proposal', () => {
+    expect(prompt).toContain('The finding is one or two sentences')
+    expect(prompt).toContain('at the one path and symbol that shows it')
+    expect(prompt).toContain('not what the spec should say instead, not the task')
+    // The example is at the target length, since the example is what gets copied.
+    expect(prompt).toContain('- finding: `Order.cancel` in src/orders/order.ts refuses a shipped order; the spec cancels one and refunds it.')
+    expect(prompt).not.toContain('what the task would be')
+    expect(prompt).not.toContain('what the spec should say instead)')
+  })
+
   it('the_proposal_and_the_ruling_belong_to_others_and_the_run_ends_silently', () => {
     expect(prompt).toContain('The `proposed` line is the planner\'s and the `ruling` line is the user\'s')
     expect(prompt).toContain('When both files are written, stop.')
@@ -95,6 +105,13 @@ describe('reconcile prompt', () => {
     expect(prompt).toContain('- context:')
     expect(prompt).toContain('would otherwise have to find again')
   })
+
+  it('writes_a_how_block_per_task_so_the_implementer_builds_instead_of_discovering', () => {
+    expect(prompt).toContain('- how:')
+    expect(prompt).toContain('The `how:` block is the instruction the implementer builds from')
+    // The line the person reads stays short; the detail is beneath it.
+    expect(prompt).toContain('one sentence, for the person')
+  })
 })
 
 describe('the handoffs to the planner', () => {
@@ -103,6 +120,8 @@ describe('the handoffs to the planner', () => {
     expect(prompt).toContain('- Shipped orders cannot be cancelled\n- Refunds are asynchronous')
     expect(prompt).toContain('plan/order-cancellation.spec.md')
     expect(prompt).toContain('- proposed:')
+    // The proposal is the rule's replacement text, so accepting it is verbatim and the rule stays one sentence.
+    expect(prompt).toContain("the rule's new text as it would stand in the spec, one sentence, or `stands` with the one reason")
     expect(prompt).toContain('Change nothing else')
     expect(prompt).toContain('Then stop')
   })
@@ -113,7 +132,7 @@ describe('the handoffs to the planner', () => {
       { title: 'Refunds are asynchronous', ruling: 'keep the rule, queue the refund' },
     ])
     expect(prompt).toContain('- Shipped orders cannot be cancelled: accepted\n- Refunds are asynchronous: keep the rule, queue the refund')
-    expect(prompt).toContain('`accepted` means the proposal as written')
+    expect(prompt).toContain('`accepted` means the proposed text replaces the rule verbatim')
     expect(prompt).toContain('[applied]')
     expect(prompt).toContain('intent amendment')
     expect(prompt).toContain('the user approves after reading the revised spec')

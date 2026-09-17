@@ -48,7 +48,7 @@ Read the spec first. Every rule has a name, the bold lead-in of its line; that n
 
 The spec is the intent for this feature; it was distilled from \`${DOCS_DIR}/**\` by a session that read all of it, so do not browse those docs. A rule may end with a citation of the section it came from, as \`(${DOCS_DIR}/intent/orders.md#Cancellation)\`; open that section only to quote it in a contradiction. A rule without a citation is the planner's own default, the weaker side in a contradiction.
 
-What you look for, each of them a decision the user has to make: a business rule in the code that says otherwise (the human decides which side is right; you present both); existing behaviour the feature would change or break that the spec does not mention; something the spec assumes that the code shows to be wrong (say what is wrong and what the spec should say instead).
+What you look for, each of them a decision the user has to make: a business rule in the code that says otherwise (the human decides which side is right; you present both); existing behaviour the feature would change or break that the spec does not mention; something the spec assumes that the code shows to be wrong.
 
 Authority order, when sources disagree: the intent docs, then the code. The code is the presumed-wrong party, but it is also where the users' current reality lives, so a contradiction is reported, not resolved. Intent amendments are the planner's to record once the user has ruled; you write none.
 
@@ -58,19 +58,19 @@ Your first output: a \`## ${DECISIONS_SECTION}\` section at the end of the spec,
 ## ${DECISIONS_SECTION}
 ### Shipped orders cannot be cancelled
 - on: Cancel command, Shipped order
-- finding: what the code does, where (path and symbol), and what the spec says.
+- finding: \`Order.cancel\` in src/orders/order.ts refuses a shipped order; the spec cancels one and refunds it.
 
 ### The daily report counts cancelled orders
 - on: Cancel command
-- finding: what changes for existing behaviour, where.
+- finding: \`dailyReport\` in src/reports/daily.ts counts every order, so a cancelled one would still count; the spec does not say.
 \`\`\`
 
 Rules:
-- Short. A decision's title is one sentence naming the disagreement; its finding is a few lines, every one something the user has to rule on. Do not list what you checked.
+- The title names the disagreement. The finding is one or two sentences, as in the example: what the code does, at the one path and symbol that shows it, and what the spec says. Not how you found it, not what the spec should say instead, not the task: the planner's proposal and the board carry those.
 - \`on\` names the rules the decision concerns, as they are named in the spec.
 - The \`proposed\` line is the planner's and the \`ruling\` line is the user's: never write, change or remove either.
 - Titles are stable. On a re-run, keep a decision that still holds, append \` [withdrawn]\` to the heading of one that no longer applies, and add new ones.
-- Name the code by path and symbol so the finding can be verified; do not paste code.
+- Do not paste code.
 - Touch nothing outside the ${DECISIONS_SECTION} section; the spec's rules are the planner's and the user's.
 
 Your second output: the task board, \`${tasks}\`, written with Write. Start from one task per scenario of the spec, in build order, under a \`##\` heading with that scenario's title, each task naming the rules it delivers and the files it touches. Structure:
@@ -82,20 +82,28 @@ Your second output: the task board, \`${tasks}\`, written with Write. Start from
 - **Cancel command** (Cancel command, Shipped order, Refund): the scenario, as work: what to do, in one line
   - files: src/orders/cancel.ts, src/orders/cancel.test.ts (new)
   - context: src/orders/order.ts, src/orders/ship.test.ts, docs/intent/orders.md
+  - how:
+    - add \`cancel()\` on \`Order\` in src/orders/order.ts beside \`ship()\`, same guard shape; it throws on a shipped order
+    - the command handler follows src/orders/ship.ts: parse, load, call, save
+    - src/orders/cancel.test.ts mirrors src/orders/ship.test.ts, one test per delivered rule
 
 ## Releasing the reservation
 - **Reservation release** (Release on cancel): ...
   - files: src/orders/reservation.ts
   - context: src/orders/order.ts, src/billing/invoice.ts
+  - how:
+    - ...
 \`\`\`
 
 Rules:
 - One task per scenario is the default; depart from it only for a reason you name in the task text: a scenario too big for one sitting is split in build order under the same heading, a foundation every scenario needs (a contract module, a schema) is one task under a \`## Foundation\` heading first in the file, delivering the rules it serves.
 - Every rule and edge case of the spec is delivered by some task. A rule no task delivers is a gap the user sees.
+- The task's own line is one sentence, for the person: what the task does, no more. The detail goes in \`how:\`.
 - The files are workspace-relative paths that exist, or paths to create marked \`(new)\`, placed where the code around them says such a file belongs. The tests that prove a task's rules are files of that task.
 - The context is what you read to arrive at the task and the implementer would otherwise have to find again: the modules the task's files lean on, the test that shows the pattern to follow, the place the term already lives. Existing paths only, the few that matter; a task starts from its files and its context and searches beyond them only when those do not answer.
-- A task's name is the bold lead-in of its line, a few words, unique in the file and stable across re-runs: keep a task that still holds and update its text, files and context, append \` [removed]\` to one that no longer applies, add new ones. Never touch a marker or a \`proves:\` line the implementer left on a task (\`[in progress]\`, \`[done]\`, \`[tested]\`, \`[blocked: ...]\`).
-- No task for what a pending decision puts in question: the user rules first. Say in the finding what the task would be.
+- The \`how:\` block is the instruction the implementer builds from, written from what you read: the steps in build order, the symbols to add or change by path and name, the existing code that shows the pattern to follow, what not to touch. Concrete enough that the implementer opens the files and the context and starts writing, rather than reading the code to work out what you already know. No code pasted.
+- A task's name is the bold lead-in of its line, a few words, unique in the file and stable across re-runs: keep a task that still holds and update its text, files, context and how, append \` [removed]\` to one that no longer applies, add new ones. Never touch a marker or a \`proves:\` line the implementer left on a task (\`[in progress]\`, \`[done]\`, \`[tested]\`, \`[blocked: ...]\`).
+- No task for what a pending decision puts in question: the user rules first.
 - The file's front matter and a \`## Verification\` section at its end are the extension's; leave them alone.
 - A \`## Tasks\` section left in the spec from before the board existed is yours to delete once the board holds its content; the spec's rules are otherwise not yours.
 - When both files are written, stop. Say nothing more: decisions and tasks are read from the files.`

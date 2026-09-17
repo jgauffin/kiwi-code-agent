@@ -7,7 +7,7 @@ import type { Decision } from '../src/agent/phases/decisions'
 ;(globalThis as Record<string, unknown>).acquireVsCodeApi = () => ({ postMessage: () => {} })
 
 const { PlanBar } = await import('../src/chat/webview/plan-bar')
-const { PlanStepper } = await import('../src/chat/webview/plan-stepper')
+const { PlanTabs } = await import('../src/chat/webview/plan-tabs')
 const events = await import('../src/chat/webview/events')
 
 function plan(over: Partial<PlanState> = {}): PlanState {
@@ -38,7 +38,7 @@ const decision = (over: Partial<Decision>): Decision => ({ title: 'Shipped order
 function bar(state: PlanState): InstanceType<typeof PlanBar> {
   const node = new PlanBar()
   document.body.appendChild(node)
-  node.update(state, 'plan')
+  node.update(state)
   return node
 }
 
@@ -97,7 +97,14 @@ describe('PlanBar next step', () => {
 
     const running = bar(plan({ mapping: { live: true, text: 'reading src' } }))
     expect(running.querySelector('.next.waiting')).toBeNull()
-    expect(running.querySelector('.status.running')!.textContent).toBe('reading src')
+    expect(running.querySelector('.running')!.textContent).toBe('reading src')
+    expect(running.querySelector('.stop')).not.toBeNull()
+  })
+
+  it('the_last_run_outcome_stays_beside_the_steps_until_the_stage_moves_on', () => {
+    const node = bar(plan({ stage: 'mapped', approvable: true, mapping: { live: false, text: 'Mapped: 6 tasks, the code is clear' } }))
+    expect(node.querySelector('.ran')!.textContent).toBe('Mapped: 6 tasks, the code is clear')
+    expect(node.querySelector('.running')).toBeNull()
   })
 
   it('repair_shows_beside_the_next_step_while_the_spec_is_off_contract', () => {
@@ -108,22 +115,15 @@ describe('PlanBar next step', () => {
   })
 })
 
-describe('PlanStepper', () => {
-  function stepper(state: PlanState): InstanceType<typeof PlanStepper> {
-    const node = new PlanStepper()
-    document.body.appendChild(node)
-    node.update(state)
-    return node
-  }
-
+describe('PlanBar steps', () => {
   it('marks_the_current_step_and_the_ones_behind_it', () => {
-    const node = stepper(plan({ stage: 'mapped', approvable: true }))
+    const node = bar(plan({ stage: 'mapped', approvable: true }))
     const classes = [...node.querySelectorAll<HTMLElement>('.step')].map((s) => `${s.textContent}:${s.className.replace('step ', '')}`)
     expect(classes).toEqual(['Plan:done', 'Review:done', 'Map:done', 'Rule:done', 'Approve:current', 'Implement:future', 'Verify:future', 'Intent:future'])
   })
 
   it('a_reached_step_is_a_button_that_names_itself', () => {
-    const node = stepper(plan({ stage: 'mapped', approvable: true }))
+    const node = bar(plan({ stage: 'mapped', approvable: true }))
     let step: string | undefined
     node.addEventListener(events.PlanStepSelectedEvent.type, (e) => (step = (e as InstanceType<typeof events.PlanStepSelectedEvent>).step))
     const review = [...node.querySelectorAll<HTMLElement>('.step')].find((s) => s.textContent === 'Review')!
@@ -131,5 +131,29 @@ describe('PlanStepper', () => {
     review.click()
     expect(step).toBe('review')
     expect([...node.querySelectorAll<HTMLElement>('.step')].find((s) => s.textContent === 'Verify')!.tagName).toBe('SPAN')
+  })
+})
+
+describe('PlanTabs', () => {
+  const labels = (node: HTMLElement) => [...node.querySelectorAll<HTMLElement>('.tab')].map((t) => `${t.textContent}${t.classList.contains('active') ? '*' : ''}`)
+
+  it('a_tab_appears_once_there_is_something_on_it_and_chat_is_always_last', () => {
+    const node = new PlanTabs()
+    document.body.appendChild(node)
+    node.update(plan(), 'spec')
+    expect(labels(node)).toEqual(['Spec*', 'Chat'])
+    const spec = { ...plan().spec!, decisions: [decision({})] }
+    node.update(plan({ spec, review: { rounds: [{ number: 1, submittedAt: 't', comments: [{ target: 'Cancel', text: 'no' }], strikes: [] }] } }), 'chat')
+    expect(labels(node)).toEqual(['Spec', 'Review (1)', 'Decisions (1)', 'Chat*'])
+  })
+
+  it('picking_a_tab_names_it', () => {
+    const node = new PlanTabs()
+    document.body.appendChild(node)
+    node.update(plan(), 'spec')
+    let picked: string | undefined
+    node.addEventListener(events.PlanViewSelectedEvent.type, (e) => (picked = (e as InstanceType<typeof events.PlanViewSelectedEvent>).view))
+    ;[...node.querySelectorAll<HTMLElement>('.tab')].find((t) => t.textContent === 'Chat')!.click()
+    expect(picked).toBe('chat')
   })
 })

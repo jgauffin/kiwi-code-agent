@@ -44,6 +44,13 @@ describe('implement phase', () => {
     expect(IMPLEMENT_TOOLS).toEqual(['Read', 'Write', 'Edit', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'Bash', 'Skill', 'AskUser'])
   })
 
+  it('the_how_block_is_the_instruction_to_follow_and_not_the_implementers_to_edit', () => {
+    const prompt = implementPrompt('Order cancellation', cwd)
+    expect(prompt).toContain('`how:`')
+    expect(prompt).toContain('Follow the `how:` block')
+    expect(prompt).toContain('only the markers, the files line, the proves line and a one-line note under a task are yours')
+  })
+
   it('a_finished_task_is_not_read_again', () => {
     const prompt = implementPrompt('Order cancellation', cwd)
     expect(prompt).toContain('A task marked tested is finished')

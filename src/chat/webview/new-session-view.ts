@@ -2,7 +2,8 @@ import { compileTemplate } from '@relax.js/core/html'
 import { readData } from '@relax.js/core/forms'
 import type { SessionMode } from '../../agent/session/session-manager'
 import type { ResumablePlan } from '../protocol'
-import { NewSessionRequestedEvent, PlanResumeRequestedEvent } from './events'
+import type { ProfileDefaults } from '../../settings/settings-store'
+import { DefaultProfileChangedEvent, NewSessionRequestedEvent, PlanResumeRequestedEvent } from './events'
 
 type NewSessionForm = { mode: SessionMode; feature?: string; prompt?: string }
 
@@ -25,6 +26,19 @@ const STATUS_HINT: Record<ResumablePlan['status'], string> = {
 export class NewSessionView extends HTMLElement {
   private readonly template = compileTemplate(`
     <h2>New session</h2>
+    <div class="models">
+      <label>Model
+        <select name="work" r-change="pick('work', event)">
+          <option loop="p in work" value="{{p.name}}" selected="{{p.selected}}">{{p.name}}</option>
+        </select>
+      </label>
+      <label>Plan model
+        <select name="plan" r-change="pick('plan', event)">
+          <option value="" selected="{{planFollows}}">Same as model</option>
+          <option loop="p in plan" value="{{p.name}}" selected="{{p.selected}}">{{p.name}}</option>
+        </select>
+      </label>
+    </div>
     <div class="types">
       <button type="button" class="type {{chatState}}" r-click="choose('chat')">
         <span class="icon">🔧</span>
@@ -72,6 +86,7 @@ export class NewSessionView extends HTMLElement {
   `)
   private mode: Choice = 'chat'
   private plans: PlanRow[] = []
+  private profiles: ProfileDefaults = { names: [], active: '', plan: '' }
 
   connectedCallback(): void {
     if (this.childElementCount > 0) return
@@ -84,17 +99,22 @@ export class NewSessionView extends HTMLElement {
     this.render()
   }
 
-  update(plans: ResumablePlan[]): void {
+  update(plans: ResumablePlan[], profiles: ProfileDefaults): void {
     const rows = plans.map((p) => ({ ...p, hint: STATUS_HINT[p.status] }))
-    // State arrives often; a re-render while the user types is only worth it when the list changed.
-    if (JSON.stringify(rows) === JSON.stringify(this.plans)) return
+    // State arrives often; a re-render while the user types is only worth it when something shown changed.
+    if (JSON.stringify([rows, profiles]) === JSON.stringify([this.plans, this.profiles])) return
     this.plans = rows
+    this.profiles = profiles
     this.render()
   }
 
   private render(): void {
+    const { names, active, plan } = this.profiles
     this.template.render(
       {
+        work: names.map((name) => ({ name, selected: name === active })),
+        plan: names.map((name) => ({ name, selected: name === plan })),
+        planFollows: plan === '',
         isChat: this.mode === 'chat',
         isPlan: this.mode === 'plan',
         isResume: this.mode === 'resume',
@@ -106,6 +126,8 @@ export class NewSessionView extends HTMLElement {
       },
       {
         resume: (p: PlanRow) => this.dispatchEvent(new PlanResumeRequestedEvent(p.feature)),
+        pick: (role: 'work' | 'plan', event: Event) =>
+          this.dispatchEvent(new DefaultProfileChangedEvent(role, (event.target as HTMLSelectElement).value)),
         choose: (mode: Choice) => {
           this.mode = mode
           this.render()

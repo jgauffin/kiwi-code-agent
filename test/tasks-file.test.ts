@@ -51,6 +51,46 @@ describe('tasks file', () => {
     expect(tasks[1]!.context).toEqual([])
   })
 
+  it('a_how_block_is_read_whole_and_ends_at_the_next_key', () => {
+    const { tasks } = parseTasks(
+      board(
+        '- **Cancel command** (Cancel command): add the cancel command [tested]',
+        '  - context: src/orders/order.ts',
+        '  - how:',
+        '    - add `cancel()` on `Order` beside `ship()`, same guard shape',
+        '    - the handler follows src/orders/ship.ts: parse, load, call, save',
+        '      - files: none of this is a files line',
+        '    - tests mirror src/orders/ship.test.ts',
+        '  - files: src/orders/cancel.ts',
+        '  - proves: Cancel command → src/orders/cancel.test.ts an_open_order_can_be_cancelled',
+        '- **Reservation**: release the reservation',
+      ),
+    )
+    expect(tasks[0]!.how).toBe(
+      [
+        '- add `cancel()` on `Order` beside `ship()`, same guard shape',
+        '- the handler follows src/orders/ship.ts: parse, load, call, save',
+        '  - files: none of this is a files line',
+        '- tests mirror src/orders/ship.test.ts',
+      ].join('\n'),
+    )
+    // The keys after the block are still the task's own.
+    expect(tasks[0]!.files).toEqual(['src/orders/cancel.ts'])
+    expect(tasks[0]!.proves).toHaveLength(1)
+    expect(tasks[1]!.how).toBe('')
+  })
+
+  it('a_one_line_how_is_read_from_its_own_line', () => {
+    const { tasks } = parseTasks(board('- **Report**: report on cancellations', '  - how: copy the shape of src/reports/daily.ts', '  - files: src/reports/cancelled.ts (new)'))
+    expect(tasks[0]!.how).toBe('copy the shape of src/reports/daily.ts')
+    expect(tasks[0]!.files).toEqual(['src/reports/cancelled.ts'])
+  })
+
+  it('a_how_block_ends_at_the_next_task_or_heading', () => {
+    const { tasks } = parseTasks(board('- **One**: first', '  - how:', '    - step', '## Next', '- **Two**: second', '  - how:', '    - other step', '- **Three**: third'))
+    expect(tasks.map((t) => t.how)).toEqual(['- step', '- other step', ''])
+  })
+
   it('tasks_carry_the_heading_they_sit_under_and_verification_is_not_a_group', () => {
     const { tasks, verification } = parseTasks(
       board(

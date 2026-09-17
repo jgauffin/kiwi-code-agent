@@ -1,6 +1,6 @@
 import { readdirSync } from 'node:fs'
 import { dirname, isAbsolute, join, matchesGlob, relative, resolve } from 'node:path'
-import { readTasks, recordVerification, taskFiles, tasksFile, tasksPath, type VerificationRecord } from './tasks-file'
+import { readTasks, recordVerification, taskFiles, tasksDone, tasksFile, tasksPath, type TasksState, type VerificationRecord } from './tasks-file'
 
 /**
  * A rule says which files, when touched, make which command run, and where.
@@ -66,7 +66,16 @@ function safeReaddir(dir: string): string[] {
   }
 }
 
-export const describeCommand = (c: VerifyCommand, cwd: string): string => `\`${c.command}\` in ${relative(cwd, c.cwd).split('\\').join('/') || '.'}`
+/**
+ * The test run is owed: every task is tested and no run has passed since. Read
+ * from the board when an implement turn ends, so the fix after a failure is
+ * verified again whether or not the implementer moved a marker to get there.
+ */
+export function verificationDue(tasks: TasksState): boolean {
+  return tasks.exists && tasksDone(tasks.tasks) && tasks.verification?.ok !== true
+}
+
+export const describeCommand =(c: VerifyCommand, cwd: string): string => `\`${c.command}\` in ${relative(cwd, c.cwd).split('\\').join('/') || '.'}`
 
 /**
  * Runs the test commands the tasks' files select and records the outcome in
@@ -116,7 +125,7 @@ export function verificationHandoffPrompt(feature: string, failures: Verificatio
     lines.push(`${describeCommand(failure, cwd)}:`, '```', failure.output.trim(), '```', '')
   }
   lines.push(
-    'Fix what the output names. Mark the tasks it touches ` [in progress]` again while you work, and ` [tested]` once their tests pass; leave the rest of the board as it is. The run repeats by itself when every task is tested again.',
+    'Fix what the output names. Mark the tasks it touches ` [in progress]` while you work and ` [tested]` once their tests pass; leave the rest of the board as it is. The run runs again when you stop with every task tested.',
   )
   return lines.join('\n')
 }

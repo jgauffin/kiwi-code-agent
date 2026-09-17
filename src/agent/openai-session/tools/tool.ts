@@ -24,12 +24,15 @@ export interface Tool<S extends z.ZodObject = z.ZodObject> {
   readonly name: string
   readonly description: string
   readonly schema: S
+  /** The JSON schema handed to the model as is, for a tool whose schema was not written in zod (an MCP server's). */
+  readonly parameters?: Record<string, unknown>
   /** Read-only tools run without asking. */
   readonly readOnly: boolean
   execute(input: z.infer<S>, ctx: ToolContext): Promise<ToolOutput>
 }
 
 export function toDefinition(tool: Tool): ToolDefinition {
+  if (tool.parameters) return { name: tool.name, description: tool.description, parameters: tool.parameters }
   const { $schema: _, ...parameters } = z.toJSONSchema(tool.schema)
   return { name: tool.name, description: tool.description, parameters }
 }

@@ -61,7 +61,7 @@ async function workspace(review?: Review): Promise<string> {
 
 function pending(): Review {
   const review = emptyReview()
-  addComment(review, 'Cancel command', 'cancelling is not the same as voiding', 'Cancel command: an order can be cancelled')
+  addComment(review, 'Cancel command', 'cancelling is not the same as voiding')
   strikeItem(review, 'Refund')
   return review
 }
@@ -126,9 +126,9 @@ describe('submitting a review', () => {
     }
   })
 
-  it('a_comment_whose_item_is_gone_from_the_file_is_carried_with_the_text_it_was_written_against', async () => {
+  it('a_comment_whose_item_is_gone_from_the_file_is_carried_by_name_and_said_to_be_gone', async () => {
     const review = emptyReview()
-    addComment(review, 'Same-day refund', 'this promises too much', 'Same-day refund: every order is refunded within a day')
+    addComment(review, 'Same-day refund', 'this promises too much')
     const dir = await workspace(review)
     try {
       const post = courier(['owner-1'])
@@ -139,9 +139,7 @@ describe('submitting a review', () => {
         owner: { sessionId: 'owner-1' },
       })
       const text = post.delivered[0]!.text
-      expect(text).toContain('On "Same-day refund", which is no longer in the plan')
-      expect(text).toContain('"Same-day refund: every order is refunded within a day"')
-      expect(text).toContain('this promises too much')
+      expect(text).toContain('On "Same-day refund", which is no longer in the plan: this promises too much')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -228,6 +226,13 @@ describe('the plan session knows what a review asks of it', () => {
     expect(prompt).not.toContain('review.md')
     expect(prompt).toContain('never write, change or remove either')
     expect(blindPlanPrompt('Order cancellation', '/work/repo')).toContain('[applied]')
+  })
+
+  it('a_rule_is_one_sentence_and_a_proposal_is_the_rules_replacement_text', () => {
+    const prompt = blindPlanPrompt('Order cancellation', '/work/repo')
+    expect(prompt).toContain('each one sentence: what the rule has to survive is an edge case, and why it holds is not written in the spec')
+    expect(prompt).toContain("the rule's new text, written as it would stand in the spec (one sentence, no argument, no reference to the decision), or `stands` with the one reason")
+    expect(prompt).toContain('`accepted` means the proposed text replaces the rule verbatim')
   })
 
   it('a_session_picking_up_a_spec_reads_the_files_reports_where_it_stands_and_leaves_an_approved_spec_alone', () => {

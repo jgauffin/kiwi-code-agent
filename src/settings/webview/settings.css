@@ -1,0 +1,267 @@
+settings-app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+
+  & > .tabs {
+    display: flex;
+    gap: 0.2rem;
+    padding: 0 1.2rem;
+    border-bottom: 1px solid var(--vscode-panel-border);
+
+    & .tab {
+      background: none;
+      color: inherit;
+      opacity: 0.7;
+      border-bottom: 2px solid transparent;
+      border-radius: 0;
+      padding: 0.4rem 0.8rem;
+
+      &:hover {
+        opacity: 1;
+        background: var(--vscode-list-hoverBackground);
+      }
+
+      &.active {
+        opacity: 1;
+        border-bottom-color: var(--vscode-focusBorder);
+      }
+    }
+  }
+
+  & > .pane {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0.8rem 1.2rem 1.6rem;
+    max-width: 48rem;
+    box-sizing: border-box;
+
+    & .heading {
+      display: flex;
+      align-items: baseline;
+      gap: 0.6rem;
+      margin-bottom: 0.8rem;
+
+      & h2 {
+        margin: 0;
+        font-size: 1.2em;
+      }
+
+      /* Where the tab writes: the one fact every field on it shares. */
+      & .scope {
+        font-size: 0.85em;
+        opacity: 0.7;
+      }
+    }
+
+    & h3 {
+      margin: 1.2rem 0 0.5rem;
+      font-size: 1em;
+    }
+
+    & section {
+      margin-bottom: 1rem;
+    }
+
+    & .note,
+    & .hint {
+      margin: 0.2rem 0;
+      opacity: 0.7;
+      font-size: 0.85em;
+    }
+
+    & .field {
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+      margin: 0.5rem 0;
+      font-size: 0.9em;
+
+      & > .label {
+        font-weight: 600;
+      }
+
+      &.check {
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.4rem;
+
+        & .hint {
+          flex-basis: 100%;
+        }
+      }
+    }
+
+    & input:not([type='checkbox']),
+    & select {
+      font-family: inherit;
+      max-width: 32rem;
+      background: var(--vscode-input-background);
+      color: var(--vscode-input-foreground);
+      border: 1px solid var(--vscode-input-border, transparent);
+      border-radius: 3px;
+      padding: 0.4rem;
+
+      &:disabled {
+        opacity: 0.5;
+      }
+    }
+
+    & select {
+      background: var(--vscode-dropdown-background);
+      color: var(--vscode-dropdown-foreground);
+      border-color: var(--vscode-dropdown-border);
+    }
+
+    & input[type='number'] {
+      width: 6rem;
+    }
+
+    & .link {
+      background: none;
+      border: none;
+      padding: 0;
+      color: var(--vscode-textLink-foreground);
+      cursor: pointer;
+
+      &:hover {
+        text-decoration: underline;
+        background: none;
+      }
+    }
+
+    & .footer {
+      margin-top: 1.6rem;
+      padding-top: 0.6rem;
+      border-top: 1px solid var(--vscode-panel-border);
+      font-size: 0.85em;
+    }
+
+    & .remove,
+    & .cancel {
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+    }
+
+    & .add {
+      align-self: flex-start;
+      margin-top: 0.3rem;
+    }
+  }
+
+  & rule-list,
+  & verify-rules {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    max-width: 40rem;
+
+    & .row {
+      display: flex;
+      gap: 0.3rem;
+      align-items: center;
+
+      & input {
+        flex: 1;
+        min-width: 0;
+      }
+
+      & .remove {
+        padding: 0.3rem 0.5rem;
+      }
+    }
+  }
+
+  & verify-rules {
+    max-width: 48rem;
+
+    & .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1.5fr auto;
+
+      &.head {
+        font-size: 0.85em;
+        opacity: 0.7;
+      }
+    }
+  }
+
+  /* One profile: a card at rest, a form while edited; both keep the same frame so the list does not jump. */
+  & .profile {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin: 0.5rem 0;
+    padding: 0.6rem 0.8rem;
+    background: var(--vscode-editorWidget-background);
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 6px;
+
+    &.editing {
+      border-color: var(--vscode-focusBorder);
+    }
+
+    & .title {
+      display: flex;
+      align-items: baseline;
+      gap: 0.5rem;
+    }
+
+    & .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.3rem;
+    }
+
+    & .chip {
+      font-size: 0.8em;
+      padding: 0.1rem 0.4rem;
+      border-radius: 3px;
+      background: var(--vscode-badge-background);
+      color: var(--vscode-badge-foreground);
+    }
+
+    & .controls {
+      display: flex;
+      gap: 0.4rem;
+      margin-top: 0.2rem;
+    }
+  }
+
+  & .badge {
+    font-size: 0.75em;
+    padding: 0.05rem 0.4rem;
+    border-radius: 3px;
+    border: 1px solid var(--vscode-focusBorder);
+    color: var(--vscode-focusBorder);
+
+    &.stored {
+      border-color: var(--vscode-testing-iconPassed);
+      color: var(--vscode-testing-iconPassed);
+    }
+
+    &.missing {
+      border-color: var(--vscode-errorForeground);
+      color: var(--vscode-errorForeground);
+    }
+  }
+
+  & .key {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0.3rem 0;
+
+    & form {
+      display: flex;
+      gap: 0.3rem;
+      flex: 1;
+
+      & input {
+        flex: 1;
+      }
+    }
+  }
+}

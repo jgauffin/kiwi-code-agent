@@ -96,10 +96,16 @@ export class PlanStepSelectedEvent extends Event {
   }
 }
 
-/** The bar's next-step link: open a tab of the plan view and scroll to the first row that needs an act. */
+/** Where to land on a tab: the first row that needs an act, or the item named. */
+export type PlanFocus = { scroll?: boolean; item?: string }
+
+/** Open a tab of the plan view and land somewhere on it: the bar's next-step link, or a link from one tab to a rule on another. */
 export class PlanFocusRequestedEvent extends Event {
   static readonly type = 'plan-focus-requested'
-  constructor(public readonly tab: Tab) {
+  constructor(
+    public readonly tab: Tab,
+    public readonly where: PlanFocus = {},
+  ) {
     super(PlanFocusRequestedEvent.type, { bubbles: true })
   }
 }
@@ -168,12 +174,13 @@ export class ReviewActionEvent extends Event {
   }
 }
 
-export type PlanView = 'plan' | 'chat'
+/** What the feature session shows: one tab of the plan, or the conversation. */
+export type ViewTab = Tab | 'chat'
 
-/** The plan bar's Plan / Chat switch. */
+/** A tab picked on the strip. */
 export class PlanViewSelectedEvent extends Event {
   static readonly type = 'plan-view-selected'
-  constructor(public readonly view: PlanView) {
+  constructor(public readonly view: ViewTab) {
     super(PlanViewSelectedEvent.type, { bubbles: true })
   }
 }
@@ -196,6 +203,25 @@ export class AllowWritesToggledEvent extends Event {
   static readonly type = 'allow-writes-toggled'
   constructor(public readonly enabled: boolean) {
     super(AllowWritesToggledEvent.type, { bubbles: true })
+  }
+}
+
+/** The composer's reconnect on one of the active session's MCP servers. */
+export class McpReconnectRequestedEvent extends Event {
+  static readonly type = 'mcp-reconnect-requested'
+  constructor(public readonly server: string) {
+    super(McpReconnectRequestedEvent.type, { bubbles: true })
+  }
+}
+
+/** A picker on the new-session screen: what new sessions of that kind run on from now. */
+export class DefaultProfileChangedEvent extends Event {
+  static readonly type = 'default-profile-changed'
+  constructor(
+    public readonly role: 'work' | 'plan',
+    public readonly name: string,
+  ) {
+    super(DefaultProfileChangedEvent.type, { bubbles: true })
   }
 }
 
@@ -233,5 +259,7 @@ declare global {
     [ReviewActionEvent.type]: ReviewActionEvent
     [SessionRemovedEvent.type]: SessionRemovedEvent
     [AllowWritesToggledEvent.type]: AllowWritesToggledEvent
+    [McpReconnectRequestedEvent.type]: McpReconnectRequestedEvent
+    [DefaultProfileChangedEvent.type]: DefaultProfileChangedEvent
   }
 }

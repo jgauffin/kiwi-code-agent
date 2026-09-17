@@ -11,7 +11,7 @@ VS Code extension that runs coding sessions with a choice of engine per session.
 
 The three-phase design (blind plan, map against code, implement) is the goal; `docs/intent/agent.md` is the definition.
 
-The sidebar has a Sessions view (every session, with status) and the Chat view: tabs for the sessions in play with a status icon (📐 planning, 🔧 implementing, ✋ needs you, ⚠ error, ○ waiting), a `+` tab that opens the new-session screen, then the transcript. The model comes from settings (`kiwiAgent.activeProfile`, `kiwiAgent.planProfile`), not from the UI.
+The sidebar has a Sessions view (every session, with status) and the Chat view: tabs for the sessions in play with a status icon (📐 planning, 🔧 implementing, ✋ needs you, ⚠ error, ○ waiting), a `+` tab that opens the new-session screen, then the transcript. The new-session screen picks the model and the plan model; the gear in either view opens the settings page.
 
 Session modes:
 
@@ -51,6 +51,8 @@ Requires Node in the environment only if `kiwiAgent.nodePath` is set; otherwise 
 
 ## Settings
 
+*KiwiAgent: Settings* (or the gear in the Sessions and Chat views) opens a page in the editor with four tabs: Models and Advanced write to user settings, Permissions and Project to the workspace. API keys go to the editor's secret storage from the Models tab. The keys, for settings.json:
+
 - `kiwiAgent.profiles`: one entry per model: `name`, `engine` (`claude-sdk` or `openai-compatible`), `model`, optional `effort` and `systemPromptFile`; `openai-compatible` also takes `baseUrl` and `apiKeySecret`. Defaults: Claude Opus and Sonnet. Example:
 
   ```json
@@ -61,5 +63,6 @@ Requires Node in the environment only if `kiwiAgent.nodePath` is set; otherwise 
 - `kiwiAgent.traceEngine`: one line per Claude engine message in the KiwiAgent output channel, to see what the engine sends (thinking deltas, status) when the UI shows nothing.
 - `kiwiAgent.verify`: test commands run once every task of a feature is marked tested, over the files the tasks name, in the directory of the nearest `project` file; a repo with a backend and a frontend runs each suite once, and only the suites the feature touched. A failure is handed to the implement session, up to `kiwiAgent.verifyFailureBudget` consecutive failures. Default: `dotnet test` of the `.csproj` owning a `.cs` file, `npm test` in the `package.json` folder owning a `.ts` file.
 - Command *KiwiAgent: Set API Key for Profile* stores keys for profiles that declare `apiKeySecret`.
+- `.mcp.json` in the workspace root (Claude Code's format) gives chat sessions its servers' tools on both engines, as `mcp__<server>__<tool>`. They ask before running unless an allow rule names the tool or `mcp__<server>__*`. A save of the file reaches running sessions; *KiwiAgent: Reload MCP Servers* re-reads it and reconnects every server, and the composer shows each server's status with a reconnect button.
 
 Session events are logged to `.agent/runs/<session id>/events.jsonl` in the workspace; add `.agent/` to the workspace's `.gitignore`.

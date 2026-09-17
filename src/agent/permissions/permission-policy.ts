@@ -2,7 +2,7 @@ import { isAbsolute, matchesGlob, relative, resolve } from 'node:path'
 import type { PreToolUseOutcome, SessionHooks, ToolUse } from '../session/hooks'
 import type { SessionEvent } from '../session/code-session'
 import { isReadOnlyCommand, isReadOnlySegment, type ReadOnlyContext } from './read-only-commands'
-import { bashPatternMatches, commandLines, isShellTool, parseRule, type PermissionRule } from './permission-rules'
+import { bashPatternMatches, commandLines, isShellTool, parseRule, ruleCoversTool, type PermissionRule } from './permission-rules'
 import { splitShellCommand, type ShellSegment } from './shell-split'
 
 export type PermissionRules = { allow: string[]; deny: string[] }
@@ -58,7 +58,7 @@ export class PermissionPolicy implements SessionHooks {
    * so no allow rule can cover it.
    */
   private matches(rule: PermissionRule, tool: ToolUse, segments: 'all' | 'any'): boolean {
-    if (rule.tool !== tool.toolName) return false
+    if (!ruleCoversTool(rule.tool, tool.toolName)) return false
     if (rule.pattern === undefined) return !isShellTool(tool.toolName) || segments === 'any' || !splitShellCommand(this.command(tool)).substitutes
     if (isShellTool(tool.toolName)) {
       const parsed = splitShellCommand(this.command(tool))

@@ -16,7 +16,8 @@
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
-    "onWebviewPanel:kiwiAgent.chatPanel"
+    "onWebviewPanel:kiwiAgent.chatPanel",
+    "onWebviewPanel:kiwiAgent.settingsPanel"
   ],
   "contributes": {
     "viewsContainers": {
@@ -66,6 +67,11 @@
         "title": "KiwiAgent: Open Chat in Editor"
       },
       {
+        "command": "kiwiAgent.openSettings",
+        "title": "KiwiAgent: Settings",
+        "icon": "$(gear)"
+      },
+      {
         "command": "kiwiAgent.setApiKey",
         "title": "KiwiAgent: Set API Key for Profile"
       },
@@ -76,6 +82,10 @@
       {
         "command": "kiwiAgent.buildRepoMap",
         "title": "KiwiAgent: Build Repo Map"
+      },
+      {
+        "command": "kiwiAgent.reconnectMcp",
+        "title": "KiwiAgent: Reload MCP Servers"
       }
     ],
     "menus": {
@@ -89,6 +99,11 @@
           "command": "kiwiAgent.openDraftPlan",
           "when": "view == kiwiAgent.sessions && kiwiAgent.hasDraftPlans",
           "group": "navigation@2"
+        },
+        {
+          "command": "kiwiAgent.openSettings",
+          "when": "view == kiwiAgent.sessions || view == kiwiAgent.chat",
+          "group": "navigation@9"
         }
       ],
       "view/item/context": [
@@ -220,8 +235,14 @@
         },
         "kiwiAgent.cleanup.ignore": {
           "type": "array",
-          "items": { "type": "string" },
-          "default": ["**/*.test.*", "**/*.spec.*", "**/__tests__/**"],
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "**/*.test.*",
+            "**/*.spec.*",
+            "**/__tests__/**"
+          ],
           "description": "Workspace-relative globs of edited files the cleanup never measures: tests, generated code."
         },
         "kiwiAgent.profiles": {
@@ -298,6 +319,7 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.2.112",
     "@anthropic-ai/sdk": "^0.81.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@relax.js/core": "^1.8.0",
     "dompurify": "^3.4.15",
     "marked": "^18.0.13",

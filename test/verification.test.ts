@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { commandsFor, findUpward, runVerification, verificationHandoffPrompt, type VerifyRule } from '../src/agent/phases/verification'
+import { commandsFor, findUpward, runVerification, verificationDue, verificationHandoffPrompt, type VerifyRule } from '../src/agent/phases/verification'
 import { parseTasks } from '../src/agent/phases/tasks-file'
 
 let dir: string
@@ -95,7 +95,7 @@ describe('runVerification', () => {
     expect(prompt).toContain('plan/order-cancellation.tasks.md')
     expect(prompt).toContain('`npm test` in .')
     expect(prompt).toContain('THE ERROR')
-    expect(prompt).toContain('[in progress]')
+    expect(prompt).toContain('runs again when you stop')
   })
 
   it('nothing_to_run_is_recorded_as_such_rather_than_leaving_the_board_stuck', async () => {
@@ -107,5 +107,27 @@ describe('runVerification', () => {
 
   it('refuses_without_a_tasks_file', async () => {
     await expect(runVerification({ cwd: dir, feature: 'Order cancellation', rules, run })).rejects.toThrow(/no tasks file/i)
+  })
+})
+
+describe('verificationDue', () => {
+  const tasks = (text: string) => ({ exists: true as const, ...parseTasks(text) })
+
+  it('an_all_tested_board_whose_last_run_failed_is_verified_again_without_the_implementer_re_marking_a_task', () => {
+    expect(verificationDue(tasks('- **T1**: a [tested]\n\n## Verification\n- 2026-09-14T21:19:46Z: failed, `npm test` in .\n'))).toBe(true)
+  })
+
+  it('an_all_tested_board_never_run_is_due', () => {
+    expect(verificationDue(tasks('- **T1**: a [tested]\n'))).toBe(true)
+  })
+
+  it('a_board_that_already_passed_is_not_run_again', () => {
+    expect(verificationDue(tasks('- **T1**: a [tested]\n\n## Verification\n- 2026-09-14T21:19:46Z: passed, `npm test` in .\n'))).toBe(false)
+  })
+
+  it('a_board_with_open_or_blocked_work_is_not_due', () => {
+    expect(verificationDue(tasks('- **T1**: a [tested]\n- **T2**: b [blocked: no db]\n'))).toBe(false)
+    expect(verificationDue(tasks('- **T1**: a [tested]\n- **T2**: b [done]\n'))).toBe(false)
+    expect(verificationDue({ exists: false })).toBe(false)
   })
 })

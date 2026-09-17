@@ -9,9 +9,11 @@ Blind planning exists because a planner that can read the code inherits the code
 A session runs on one engine, chosen per session or per phase:
 
 - Claude through the Agent SDK (Claude Code as a library, JavaScript build, inherited Claude Code login).
-- GLM-5.3-Flash and Kimi K3 through Berget AI (OpenAI-compatible) with our own loop and tools.
+- Any OpenAI-compatible provider (Berget AI's GLM and Kimi, say) with our own loop and tools.
 
 The extension only sees `CodeSession`: send a prompt, stream events, answer permission requests, interrupt. Engines differ below that line.
+
+Both take the workspace's `.mcp.json`: Claude through its own MCP client, the own loop through a client per server. The tools carry the same names and fall under the same permission rules on either engine, so a project's servers work the same whichever model runs.
 
 ## Shape
 
@@ -26,7 +28,7 @@ Nothing in the plan files is a synthetic id. A rule, a task and a decision are n
 
 ### Stages
 
-Where a feature stands is derived from its files under `plan/` and held nowhere else, so the stage and the files can never disagree. The plan view adapts to it: a stepper (Plan, Review, Map, Rule, Approve, Implement, Verify, Intent) marks the step the stage asks of the person, and the bar beneath it states the one next thing: a button when it moves the plan on (Map against code, Submit review, Send rulings, Approve, Implement, Verify, Update intent), a link into the plan view when the act is on a row there (answers to resolve, decisions to rule on), a line of text while the planner or a run is at work. The plan itself is tabs, each present once it has content: Spec (the goal, scenarios and questions, commented on in place), Review (the rounds, with the planner's answers and Resolve), Decisions, Tasks and Intent. A reached step on the stepper opens the tab it works in; Review stays reachable on any draft, nothing past approval.
+Where a feature stands is derived from its files under `plan/` and held nowhere else, so the stage and the files can never disagree. The plan view adapts to it. One row is the plan bar: the steps (Plan, Review, Map, Rule, Approve, Implement, Verify, Intent) with the one the stage asks of the person lit, and at its right the one next thing: a button when it moves the plan on (Map against code, Submit review, Send rulings, Approve, Implement, Verify, Update intent), a link into the plan when the act is on a row there (answers to resolve, decisions to rule on), a line of text while the planner or a run is at work. Nothing restates the stage in words. The row under it is one strip of tabs: the plan's, each present once it has content (Spec with the goal, scenarios and questions commented on in place; Review with the rounds, the planner's answers and Resolve; Decisions; Tasks; Intent), and Chat last. A reached step opens the tab it works in; Review stays reachable on any draft, nothing past approval.
 
 | stage | derived from |
 |---|---|
@@ -70,8 +72,8 @@ Prose.
 ## Decisions
 ### Shipped orders cannot be cancelled
 - on: Cancel command
-- finding: what the code does, where, and what the spec says
-- proposed: how the rules should change, or why they stand
+- finding: what the code does, at one path and symbol, and what the spec says
+- proposed: the rule's new text, or `stands` with the reason
 - ruling: accepted
 ```
 
@@ -100,7 +102,7 @@ A run, not a session: started from the plan bar, it runs under the plan session'
 
 The job is to find what stands in the feature's way before implementation starts, not to grade the spec. Only disagreements are reported, each as a decision for the user; a rule the code accommodates without incident is not mentioned. An empty list is a valid result. What the run looks for: a business rule in the code that says otherwise (the human decides which side is right), existing behaviour the feature would change or break that the spec does not mention, and something the spec assumes that the code shows to be wrong.
 
-Output, two files. A `Decisions` section in the spec, one `###` per decision titled by the disagreement, with an `on` line naming the rules it concerns and a `finding` line naming the code it rests on, short enough to read in one sitting. The run writes titles, `on` and `finding` only. When the run ends with decisions that have no proposal, the plan session is handed their titles and adds a `proposed` line under each: how the rules should change, or why they stand, with the reason.
+Output, two files. A `Decisions` section in the spec, one `###` per decision titled by the disagreement, with an `on` line naming the rules it concerns and a `finding` line of one or two sentences: what the code does, at the one path and symbol that shows it, and what the spec says; not how it was found and not what the spec should say instead. The run writes titles, `on` and `finding` only. When the run ends with decisions that have no proposal, the plan session is handed their titles and adds a `proposed` line under each: the rule's new text as it would stand in the spec, or `stands` with the reason. Accepting replaces the rule with that text verbatim, so the rule stays one sentence and the argument stays in the decision.
 
 The user rules in place, on the plan view's Decisions tab: Accept proposal writes `ruling: accepted`, Rule otherwise writes the user's own words; nothing is sent. Send rulings, from the plan bar, rules every remaining proposal accepted and hands all rulings to the plan session, which revises the rules per each ruling, marks the decision `[applied]` and records intent amendments where a ruling settles what intent does not say. Approve is refused while a decision is pending: the user approves what the planner wrote, not what it proposed. A decision the mapper finds no longer holds on a re-run is marked `[withdrawn]`.
 
@@ -114,9 +116,12 @@ spec: 3f9a1c2e
 - **Cancel command** (Cancel command, Shipped order): add the cancel command
   - files: src/orders/cancel.ts, src/orders/cancel.test.ts (new)
   - context: src/orders/order.ts, src/orders/ship.test.ts
+  - how:
+    - add `cancel()` on `Order` beside `ship()`, same guard shape
+    - the handler follows src/orders/ship.ts; the test file mirrors src/orders/ship.test.ts
 ```
 
-`context:` is what the run read to arrive at the task (the modules the files lean on, the test showing the pattern, where the term already lives), so an implementer that does not have the mapper's conversation starts from `files:` and `context:` and searches only for what they do not answer.
+The task's line is one sentence, for the person. `context:` is what the run read to arrive at the task (the modules the files lean on, the test showing the pattern, where the term already lives) and `how:` is the instruction built from that reading (the steps, the symbols to change by path and name, the pattern to follow, what not to touch), so an implementer that does not have the mapper's conversation starts from `files:`, `context:` and `how:` and searches only for what they do not answer. The plan view's Tasks tab shows the scenario, each task's state and its files; the rest is the implementer's and stays in the file.
 
 The front matter records the fingerprint of the spec the board was mapped from (goal, scenarios and questions; not decisions, so a proposal or a ruling does not count). A plan turn that changes the spec under a mapped board makes it stale: the plan bar says so, approval is refused, and the board is re-mapped when a plan turn ends with no decision pending; a board mapped under a pending decision would carry no task for what it questions and go stale on the revision. Mapping is offered as a button only on a spec nobody has commented on; after that it runs by itself.
 
