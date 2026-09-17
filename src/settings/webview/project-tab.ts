@@ -44,8 +44,8 @@ export class ProjectTab extends HTMLElement {
     const planning = el('section', 'planning')
     planning.append(
       el('h3', '', 'Planning'),
-      this.globs('Hidden from the planner', 'planIgnore', snapshot.planIgnore, disabled, 'docs/intent/drafts/**'),
-      note('The blind planner reads docs/intent/** except these.'),
+      this.globs('Hidden from the planner', 'planIgnore', snapshot.planIgnore, disabled, 'docs/drafts/**'),
+      note('The blind planner reads docs/**, the README and every spec, except these.'),
     )
 
     this.append(verify, cleanup, planning, settingsFileLink('workspace'))

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { isApprovable, isMappable, planStage, remapDue, tasksStale } from '../src/agent/phases/plan-stage'
+import { decisions } from '../src/agent/phases/decisions'
 import { parseReview } from '../src/agent/phases/plan-review'
 import type { SpecState } from '../src/agent/phases/spec-file'
 import { parseSpec, specFingerprint } from '../src/agent/phases/spec-model'
@@ -14,7 +15,6 @@ const review = (text: string) => parseReview(`# Review\n\n${text}`)
 const noReview = review('')
 const noTasks: TasksState = { exists: false }
 const tasks = (...lines: string[]): TasksState => ({ exists: true, ...parseTasks(lines.join('\n')) })
-const decided = (section: string): SpecState => ({ ...draft, body: `${body}\n## Decisions\n${section}\n` })
 
 describe('plan stage', () => {
   it('is_missing_without_a_spec', () => {
@@ -74,31 +74,28 @@ describe('plan stage', () => {
     expect(tasksStale(draft, fresh)).toBe(false)
     const revised: SpecState = { ...draft, body: body.replace('can be cancelled', 'can be cancelled until shipped') }
     expect(tasksStale(revised, fresh)).toBe(true)
-    // A proposal or a ruling written into the Decisions section is not a change to the plan.
-    const withDecisions = decided('### X\n- on: Cancel command\n- finding: x\n- proposed: y\n- ruling: accepted')
-    expect(tasksStale(withDecisions, fresh)).toBe(false)
     expect(tasksStale(draft, noTasks)).toBe(false)
     expect(tasksStale(draft, tasks('- **A**: a'))).toBe(false)
   })
 
   it('a_stale_board_is_not_remapped_while_a_ruling_awaits_the_planner', () => {
     const stale: TasksState = { exists: true, ...parseTasks(withSpecFingerprint('- **A**: a', 'ffff0000')) }
-    const open = decided('### X\n- on: Cancel command\n- finding: x\n- proposed: change it\n\n### Y\n- on: Cancel command\n- finding: y')
-    expect(remapDue(open, noReview, stale)).toBe(false)
-    const ruled = decided('### X\n- on: Cancel command\n- finding: x\n- proposed: change it\n- ruling: accepted')
-    expect(remapDue(ruled, noReview, stale)).toBe(false)
+    const open = decisions('### X\n- on: Cancel command\n- finding: x\n- proposed: change it\n\n### Y\n- on: Cancel command\n- finding: y')
+    expect(remapDue(draft, noReview, stale, open)).toBe(false)
+    const ruled = decisions('### X\n- on: Cancel command\n- finding: x\n- proposed: change it\n- ruling: keep')
+    expect(remapDue(draft, noReview, stale, ruled)).toBe(false)
   })
 
   it('applying_the_last_ruling_makes_the_remap_due', () => {
     const stale: TasksState = { exists: true, ...parseTasks(withSpecFingerprint('- **A**: a', 'ffff0000')) }
-    const applied = decided('### X [applied]\n- on: Cancel command\n- finding: x\n- proposed: change it\n- ruling: accepted\n\n### Y [withdrawn]\n- finding: y')
-    expect(remapDue(applied, noReview, stale)).toBe(true)
-    expect(remapDue(draft, noReview, stale)).toBe(true)
+    const applied = decisions('### X [applied]\n- on: Cancel command\n- finding: x\n- proposed: change it\n- ruling: change it\n\n### Y [withdrawn]\n- finding: y')
+    expect(remapDue(draft, noReview, stale, applied)).toBe(true)
+    expect(remapDue(draft, noReview, stale, [])).toBe(true)
     // A current board, an unmapped spec or a review in flight is not a re-map.
     const fresh: TasksState = { exists: true, ...parseTasks(withSpecFingerprint('- **A**: a', specFingerprint(parseSpec(body)))) }
-    expect(remapDue(draft, noReview, fresh)).toBe(false)
-    expect(remapDue(draft, noReview, noTasks)).toBe(false)
-    expect(remapDue(draft, review('## Round 1, pending\n- on Cancel command: no'), stale)).toBe(false)
+    expect(remapDue(draft, noReview, fresh, [])).toBe(false)
+    expect(remapDue(draft, noReview, noTasks, [])).toBe(false)
+    expect(remapDue(draft, review('## Round 1, pending\n- on Cancel command: no'), stale, [])).toBe(false)
   })
 
   it('approval_is_offered_on_a_mapped_draft_whose_board_is_current', () => {

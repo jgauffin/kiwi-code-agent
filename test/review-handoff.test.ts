@@ -228,18 +228,20 @@ describe('the plan session knows what a review asks of it', () => {
     expect(blindPlanPrompt('Order cancellation', '/work/repo')).toContain('[applied]')
   })
 
-  it('a_rule_is_one_sentence_and_a_proposal_is_the_rules_replacement_text', () => {
+  it('a_rule_is_one_sentence_and_each_proposal_is_a_replacement_text_the_ruling_picks_keeps_or_overrides', () => {
     const prompt = blindPlanPrompt('Order cancellation', '/work/repo')
     expect(prompt).toContain('each one sentence: what the rule has to survive is an edge case, and why it holds is not written in the spec')
-    expect(prompt).toContain("the rule's new text, written as it would stand in the spec (one sentence, no argument, no reference to the decision), or `stands` with the one reason")
-    expect(prompt).toContain('`accepted` means the proposed text replaces the rule verbatim')
+    expect(prompt).toContain("written as the rule's new text as it would stand in the spec (one sentence, no argument, no reference to the decision)")
+    expect(prompt).toContain('`keep` means the rule stands and the code will change')
+    expect(prompt).toContain('the text of a proposal means it replaces the rule verbatim')
+    expect(prompt).toContain('Keeping the rule as it stands is always offered to the user, so do not propose it')
   })
 
   it('a_session_picking_up_a_spec_reads_the_files_reports_where_it_stands_and_leaves_an_approved_spec_alone', () => {
     const prompt = resumePlanPrompt('Order cancellation')
     expect(prompt).toContain('plan/order-cancellation.spec.md')
     expect(prompt).toContain('plan/order-cancellation.review.md')
-    expect(prompt).toContain('plan/order-cancellation.intent.md')
+    expect(prompt).toContain('plan/order-cancellation.decisions.md')
     expect(prompt).toContain('Do not start over')
     expect(prompt).toContain('An approved spec is settled')
     expect(prompt).toContain('Then stop')

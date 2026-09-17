@@ -23,12 +23,6 @@ The model side of the exchange.
 
 ## Open questions
 - **Choice with text**: may a single-select question take text and a choice?
-
-## Decisions
-### The tool refuses an empty answer
-- on: Free text
-- finding: the code says otherwise
-- proposed: keep the rule
 `
 
 describe('spec contract', () => {
@@ -51,7 +45,6 @@ describe('spec contract', () => {
     expect(parsed.scenarios[1]!.behaviours[0]).toMatchObject({ name: 'Free text', text: 'free text is always accepted [removed]', removed: true })
     expect(parsed.scenarios[1]!.behaviours[0]!.edges.map((e) => e.name)).toEqual(['Multi-select and text', 'Single-select and text'])
     expect(parsed.questions).toEqual([{ name: 'Choice with text', text: 'may a single-select question take text and a choice?', removed: false }])
-    expect(parsed.decisions.map((d) => d.title)).toEqual(['The tool refuses an empty answer'])
   })
 
   it('a_citation_sits_between_the_text_and_the_markers_and_a_parenthesis_without_a_hash_is_prose', () => {
@@ -119,11 +112,18 @@ stray line
       'line 13: "### Sub": sub-headings are not part of the contract; a scenario is a `##` heading, its rules are items.',
       'line 14: "Trailing prose.": prose after a scenario\'s items; a rule is an item, a remark belongs in the intro.',
       'line 17: "- not a question": Open questions holds `- **Name**: question` items only.',
-      'line 21: "Untitled": a decision without a finding line.',
-      'line 23: "stray line": a decision holds on, finding, proposed and ruling lines only.',
+      'line 20: a `## Decisions` section; decisions live in the feature\'s decisions file, and Repair moves them there: leave the section alone.',
       // The goal held an item and no prose, so there is no goal.
       'no `## Goal` section.',
     ])
+  })
+
+  it('a_decisions_section_left_in_a_spec_is_one_problem_and_its_lines_are_not_read_as_rules', () => {
+    const legacy = `${spec}\n## Decisions\n### The tool refuses an empty answer\n- on: Free text\n- finding: the code says otherwise\n`
+    const parsed = parseSpec(legacy)
+    expect(parsed.problems).toHaveLength(1)
+    expect(parsed.problems[0]).toContain('`## Decisions` section')
+    expect(parsed.scenarios.map((s) => s.title)).toEqual(['Asking a question', 'Answering'])
   })
 
   it('a_spec_without_goal_or_scenario_or_with_a_reused_name_is_off_contract', () => {
@@ -134,10 +134,10 @@ stray line
     ])
   })
 
-  it('the_fingerprint_follows_the_plan_and_ignores_the_decisions', () => {
+  it('the_fingerprint_follows_the_plan', () => {
     const base = specFingerprint(parseSpec(spec))
     expect(base).toMatch(/^[0-9a-f]{8}$/)
-    expect(specFingerprint(parseSpec(spec.replace('- proposed: keep the rule', '- proposed: drop the rule\n- ruling: accepted')))).toBe(base)
+    expect(specFingerprint(parseSpec(spec))).toBe(base)
     expect(specFingerprint(parseSpec(spec.replace('a request carries', 'one request carries')))).not.toBe(base)
     expect(specFingerprint(parseSpec(spec.replace('may a single-select', 'must a single-select')))).not.toBe(base)
   })

@@ -14,10 +14,11 @@ function plan(over: Partial<PlanState> = {}): PlanState {
   return {
     specPath: 'plan/orders.spec.md',
     tasksPath: 'plan/orders.tasks.md',
+    decisionsPath: 'plan/orders.decisions.md',
     stage: 'created',
     status: 'draft',
     body: '# Orders',
-    spec: { title: 'Orders', goal: '', scenarios: [], questions: [], decisions: [], problems: [] },
+    spec: { title: 'Orders', goal: '', scenarios: [], questions: [], problems: [] },
     stale: false,
     repairable: false,
     mappable: true,
@@ -27,13 +28,15 @@ function plan(over: Partial<PlanState> = {}): PlanState {
     review: { rounds: [] },
     commentable: true,
     approvable: false,
+    decisions: [],
     pendingDecisions: 0,
     applyingRulings: false,
+    reviewingDocs: false,
     ...over,
   }
 }
 
-const decision = (over: Partial<Decision>): Decision => ({ title: 'Shipped orders', on: [], finding: 'code', proposal: 'drop', state: 'open', line: 0, end: 0, ...over })
+const decision = (over: Partial<Decision>): Decision => ({ title: 'Shipped orders', on: [], finding: 'code', proposals: ['drop'], state: 'open', line: 0, end: 0, ...over })
 
 function bar(state: PlanState): InstanceType<typeof PlanBar> {
   const node = new PlanBar()
@@ -64,8 +67,7 @@ describe('PlanBar next step', () => {
     expect(next(submit)!.textContent).toBe('Submit review (1)')
     expect(dispatched(submit, events.ReviewSubmittedEvent.type, () => next(submit)!.click())).toBe(true)
 
-    const spec = { ...plan().spec!, decisions: [decision({})] }
-    const rulings = bar(plan({ stage: 'mapped', spec, pendingDecisions: 1 }))
+    const rulings = bar(plan({ stage: 'mapped', decisions: [decision({ state: 'ruled', ruling: 'drop' })], pendingDecisions: 1 }))
     const button = rulings.querySelector<HTMLElement>('.next.send_rulings')!
     expect(button.textContent).toBe('Send rulings (1)')
     expect(dispatched(rulings, events.RulingsSentEvent.type, () => button.click())).toBe(true)
@@ -83,11 +85,10 @@ describe('PlanBar next step', () => {
     expect(tab).toBe('review')
   })
 
-  it('decisions_to_rule_on_link_beside_send_rulings', () => {
-    const spec = { ...plan().spec!, decisions: [decision({}), decision({ title: 'Refund', state: 'ruled', ruling: 'accepted' })] }
-    const node = bar(plan({ stage: 'mapped', spec, pendingDecisions: 2 }))
+  it('an_open_decision_links_to_the_wizard_instead_of_offering_send_rulings', () => {
+    const node = bar(plan({ stage: 'mapped', decisions: [decision({}), decision({ title: 'Refund', state: 'ruled', ruling: 'keep' })], pendingDecisions: 2 }))
     expect(node.querySelector('.next.goto')!.textContent).toContain('1 to rule on')
-    expect(node.querySelector('.next.send_rulings')).not.toBeNull()
+    expect(node.querySelector('.next.send_rulings')).toBeNull()
   })
 
   it('waiting_is_text_and_yields_to_a_running_line', () => {
@@ -119,7 +120,7 @@ describe('PlanBar steps', () => {
   it('marks_the_current_step_and_the_ones_behind_it', () => {
     const node = bar(plan({ stage: 'mapped', approvable: true }))
     const classes = [...node.querySelectorAll<HTMLElement>('.step')].map((s) => `${s.textContent}:${s.className.replace('step ', '')}`)
-    expect(classes).toEqual(['Plan:done', 'Review:done', 'Map:done', 'Rule:done', 'Approve:current', 'Implement:future', 'Verify:future', 'Intent:future'])
+    expect(classes).toEqual(['Plan:done', 'Review:done', 'Map:done', 'Rule:done', 'Approve:current', 'Implement:future', 'Verify:future'])
   })
 
   it('a_reached_step_is_a_button_that_names_itself', () => {
@@ -142,8 +143,7 @@ describe('PlanTabs', () => {
     document.body.appendChild(node)
     node.update(plan(), 'spec')
     expect(labels(node)).toEqual(['Spec*', 'Chat'])
-    const spec = { ...plan().spec!, decisions: [decision({})] }
-    node.update(plan({ spec, review: { rounds: [{ number: 1, submittedAt: 't', comments: [{ target: 'Cancel', text: 'no' }], strikes: [] }] } }), 'chat')
+    node.update(plan({ decisions: [decision({})], review: { rounds: [{ number: 1, submittedAt: 't', comments: [{ target: 'Cancel', text: 'no' }], strikes: [] }] } }), 'chat')
     expect(labels(node)).toEqual(['Spec', 'Review (1)', 'Decisions (1)', 'Chat*'])
   })
 

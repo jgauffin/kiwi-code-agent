@@ -26,7 +26,6 @@ const spec: Spec = {
     },
   ],
   questions: [],
-  decisions: [],
   problems: [],
 }
 
@@ -34,6 +33,7 @@ function plan(over: Partial<PlanState> = {}): PlanState {
   return {
     specPath: 'plan/orders.spec.md',
     tasksPath: 'plan/orders.tasks.md',
+    decisionsPath: 'plan/orders.decisions.md',
     stage: 'created',
     status: 'draft',
     body: '# Orders',
@@ -47,8 +47,10 @@ function plan(over: Partial<PlanState> = {}): PlanState {
     review: { rounds: [] },
     commentable: true,
     approvable: false,
+    decisions: [],
     pendingDecisions: 0,
     applyingRulings: false,
+    reviewingDocs: false,
     ...over,
   }
 }
@@ -145,41 +147,55 @@ describe('PlanView', () => {
     expect(node.querySelector('textarea')!.value).toBe('half a thought')
   })
 
-  it('a_decision_to_rule_on_is_marked_for_attention', () => {
+  it('the_wizard_shows_the_first_open_decision_with_every_way_to_settle_it', () => {
     const decisions = [
-      { title: 'Shipped', on: ['Cancel command'], finding: 'f', proposal: 'p', state: 'open' as const, line: 0, end: 0 },
-      { title: 'Refund', on: [], finding: 'f', proposal: 'p', state: 'ruled' as const, ruling: 'accepted', line: 0, end: 0 },
+      { title: 'Refund', on: [], finding: 'f', proposals: ['queue it'], state: 'ruled' as const, ruling: 'keep', line: 0, end: 0 },
+      { title: 'Shipped', on: ['Cancel command'], finding: 'the code refuses; the spec allows', proposals: ['refuse it', 'allow it'], state: 'open' as const, line: 0, end: 0 },
     ]
-    const node = view(plan({ stage: 'mapped', tasks: [task()], spec: { ...spec, decisions }, pendingDecisions: 2 }), 'decisions')
+    const node = view(plan({ stage: 'mapped', tasks: [task()], decisions, pendingDecisions: 2 }), 'decisions')
+    expect(node.querySelector('.wizard .count')!.textContent).toBe('Decision 2 of 2')
+    expect(node.querySelector('.decision .title')!.textContent).toBe('Shipped')
     expect(node.querySelectorAll('.decision.attention')).toHaveLength(1)
-    expect(buttons(node, 'Accept proposal')).toHaveLength(1)
-    expect(buttons(node, 'Change ruling')).toHaveLength(1)
+    const options = [...node.querySelectorAll<HTMLElement>('.option')].map((o) => `${o.querySelector('.kind')!.textContent}: ${o.querySelector('.text')!.textContent}`)
+    expect(options).toEqual(['Change the spec: refuse it', 'Change the spec: allow it', 'Keep the spec: the code changes', 'Own ruling: say what should happen'])
+    let action: unknown
+    node.addEventListener(ReviewActionEvent.type, (e) => (action = (e as InstanceType<typeof ReviewActionEvent>).action))
+    node.querySelector<HTMLButtonElement>('.option.change')!.click()
+    expect(action).toEqual({ type: 'rule_decision', decision: 'Shipped', ruling: 'refuse it' })
+    node.querySelector<HTMLButtonElement>('.option.keep')!.click()
+    expect(action).toEqual({ type: 'rule_decision', decision: 'Shipped', ruling: 'keep' })
+  })
+
+  it('a_ruled_decision_shows_its_choice_and_can_be_reached_from_the_steps', () => {
+    const decisions = [
+      { title: 'Refund', on: [], finding: 'f', proposals: ['queue it'], state: 'ruled' as const, ruling: 'queue it', line: 0, end: 0 },
+      { title: 'Shipped', on: [], finding: 'f', proposals: ['refuse it'], state: 'ruled' as const, ruling: 'do both', line: 0, end: 0 },
+    ]
+    const node = view(plan({ stage: 'mapped', tasks: [task()], decisions, pendingDecisions: 2 }), 'decisions')
+    expect(node.querySelector('.wizard .left')!.textContent).toBe('all ruled')
+    expect(node.querySelector('.decision .title')!.textContent).toBe('Refund')
+    expect(node.querySelector('.option.chosen .text')!.textContent).toBe('queue it')
+    expect([...node.querySelectorAll('.steps .step')].map((s) => s.className)).toEqual(['step ruled current', 'step ruled'])
+    ;[...node.querySelectorAll<HTMLButtonElement>('.steps .link')].find((b) => b.textContent === 'Shipped')!.click()
+    expect(node.querySelector('.decision .title')!.textContent).toBe('Shipped')
+    expect(node.querySelector('.option.own.chosen .text')!.textContent).toBe('do both')
+    expect(node.querySelector('.decision .ruling .text')!.textContent).toBe('do both')
   })
 
   it('settled_decisions_fold_into_history_with_the_ruling_as_the_record', () => {
     const decisions = [
-      { title: 'F1', on: ['B5'], finding: 'the code counts nothing', proposal: 'say keywords', state: 'applied' as const, ruling: 'accepted', line: 0, end: 0 },
-      { title: 'F2', on: [], finding: 'gone', proposal: '', state: 'withdrawn' as const, line: 0, end: 0 },
+      { title: 'F1', on: ['B5'], finding: 'the code counts nothing', proposals: ['say keywords'], state: 'applied' as const, ruling: 'keep', line: 0, end: 0 },
+      { title: 'F2', on: [], finding: 'gone', proposals: [], state: 'withdrawn' as const, line: 0, end: 0 },
     ]
-    const node = view(plan({ stage: 'mapped', tasks: [task()], spec: { ...spec, decisions } }), 'decisions')
+    const node = view(plan({ stage: 'mapped', tasks: [task()], decisions }), 'decisions')
     expect(node.querySelectorAll('.decisions > .decision')).toHaveLength(0)
+    expect(node.querySelector('.wizard')).toBeNull()
     const history = node.querySelector<HTMLDetailsElement>('.history')!
     expect(history.open).toBe(false)
     expect(history.querySelector('summary')!.textContent).toBe('1 applied, 1 withdrawn')
     const applied = history.querySelector('.decision.settled.applied')!
-    expect(applied.querySelector('.ruling .text')!.textContent).toBe('say keywords')
+    expect(applied.querySelector('.ruling .text')!.textContent).toBe('keep the spec; the code changes')
     expect(applied.querySelector('.foot .title')!.textContent).toBe('F1')
-    expect(buttons(node, 'Change ruling')).toHaveLength(0)
-  })
-
-  it('the_intent_tab_shows_each_amendment_with_its_state', () => {
-    const amendments = [
-      { mode: 'append' as const, doc: 'docs/intent/orders.md', heading: 'Cancellation', from: 'Refund job', why: 'unsaid', text: 'Refunds run nightly.', applied: false, line: 0 },
-      { mode: 'new' as const, doc: 'docs/intent/refunds.md', text: 'Refunds.', applied: true, line: 5 },
-    ]
-    const node = view(plan({ stage: 'verified', status: 'approved', commentable: false, tasks: [task({ state: 'tested' })], intent: { path: 'p', pending: 1, applied: 1, applicable: true, amendments } }), 'intent')
-    const rows = [...node.querySelectorAll<HTMLElement>('.amendment')]
-    expect(rows.map((r) => r.className)).toEqual(['amendment pending', 'amendment applied'])
-    expect(rows[0]!.querySelector('.name')!.textContent).toBe('docs/intent/orders.md#Cancellation')
+    expect(node.querySelectorAll('.option')).toHaveLength(0)
   })
 })

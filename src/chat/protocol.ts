@@ -1,6 +1,6 @@
 import type { McpServerState, PermissionDecision, SessionEvent } from '../agent/session/code-session'
 import type { QuestionOutcome } from '../agent/session/user-question'
-import type { Amendment } from '../agent/phases/intent-writeback'
+import type { Decision } from '../agent/phases/decisions'
 import type { CommentRef, Review } from '../agent/phases/plan-review'
 import type { PlanStage } from '../agent/phases/plan-stage'
 import type { Spec } from '../agent/phases/spec-model'
@@ -25,6 +25,8 @@ export type PlanState = {
   specPath: string
   /** Workspace-relative path of the tasks file, whether or not it exists yet. */
   tasksPath: string
+  /** Workspace-relative path of the decisions file, whether or not it exists yet. */
+  decisionsPath: string
   /** Where the feature stands, derived from its files. */
   stage: PlanStage
   /** The spec's front-matter status; `missing` while no spec is written. */
@@ -59,30 +61,18 @@ export type PlanState = {
   commentable: boolean
   /** The plan is mapped and no comment is open, so it may be approved. */
   approvable: boolean
-  /** Decisions the user ruled on that the planner has not applied yet, plus the open ones Approve would rule `accepted`. */
+  /** What the mapping found, in file order, with the planner's options and the user's rulings; empty until the spec is mapped. */
+  decisions: Decision[]
+  /** Decisions not yet applied to the rules: the open ones and those ruled but still with the planner. */
   pendingDecisions: number
   /** The rulings are with the planner; Approve is offered again once that turn ends. */
   applyingRulings: boolean
-  /** Amendments to product intent this feature settled; absent when none were proposed. */
-  intent?: IntentState
+  /** The planner is listing what the docs should now say, right after approval; Implement is offered once that turn ends. */
+  reviewingDocs: boolean
 }
 
 /** One line on a run under the plan: its current step while it runs, its outcome once it ended. */
 export type RunState = { live: boolean; text: string }
-
-/** The proposed write-back to `docs/**`: what the agent wrote, what the human has yet to apply. */
-export type IntentState = {
-  /** Workspace-relative path of the amendment file. */
-  path: string
-  /** Amendments not yet written into `docs/`. */
-  pending: number
-  /** Amendments already written, kept as the record of what intent owes this feature. */
-  applied: number
-  /** The write-back can be run from here: the spec is approved and something is pending. */
-  applicable: boolean
-  /** What the planner proposed, in file order, for the Intent tab. */
-  amendments: Amendment[]
-}
 
 /** A plan on disk the new-session screen offers to pick up; verified ones are finished and not offered. */
 export type ResumablePlan = { feature: string; status: 'draft' | 'approved' }
@@ -126,7 +116,7 @@ export type ReviewAction =
   | { type: 'submit_review' }
   /** Closes a comment: the human has read the agent's resolution, agreed with or not. */
   | { type: 'resolve_comment'; comment: CommentRef }
-  /** Writes the ruling under the decision: `accepted`, or the user's own text. No turn is spent; Send rulings hands them over. */
+  /** Writes the ruling under the decision: `keep`, a proposal's text, or the user's own. No turn is spent; Send rulings hands them over. */
   | { type: 'rule_decision'; decision: string; ruling: string }
 
 export type FromWebview =
@@ -151,7 +141,7 @@ export type FromWebview =
   | { type: 'resume_plan'; feature: string }
   /** Approves the mapped draft; refused while a decision is pending or a comment open. */
   | { type: 'approve_spec' }
-  /** Rules every open proposal accepted and hands all pending rulings to the plan session to apply. */
+  /** Hands the rulings to the plan session to apply; refused while a decision is still open. */
   | { type: 'send_rulings' }
   | ReviewAction
   /** Maps the active plan session's spec against the code as a run under it; the plan bar shows its progress. */
@@ -166,8 +156,6 @@ export type FromWebview =
   | { type: 'implement_spec' }
   /** Runs the test commands over the tasks' files again, whatever the last record says. */
   | { type: 'verify_spec' }
-  /** Writes the pending intent amendments into `docs/`; refused on a draft. */
-  | { type: 'update_intent' }
   /** Opens an edited file, at the line the edit changed when one is known. */
   | { type: 'open_file'; path: string; line?: number }
   /** Opens the whole edit in the editor's diff view: the pre-edit snapshot against the file as it now stands. */

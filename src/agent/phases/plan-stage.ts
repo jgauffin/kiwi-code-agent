@@ -1,4 +1,4 @@
-import { pendingDecisions } from './decisions'
+import { pendingDecisions, type Decision } from './decisions'
 import { struckItems, type Review } from './plan-review'
 import { standingStrikes } from './review-handoff'
 import type { SpecState } from './spec-file'
@@ -51,9 +51,9 @@ export function tasksStale(spec: SpecState, tasks: TasksState): boolean {
  * planner's revision of the rules would leave it stale again, so the re-map
  * waits for the last one.
  */
-export function remapDue(spec: SpecState, review: Review, tasks: TasksState): boolean {
+export function remapDue(spec: SpecState, review: Review, tasks: TasksState, decisions: Decision[]): boolean {
   if (!spec.exists) return false
-  return planStage(spec, review, tasks) === 'mapped' && tasksStale(spec, tasks) && pendingDecisions(spec.body).length === 0
+  return planStage(spec, review, tasks) === 'mapped' && tasksStale(spec, tasks) && pendingDecisions(decisions).length === 0
 }
 
 /** The spec may be approved: it is mapped from the spec as it stands, and every comment on it is closed. */

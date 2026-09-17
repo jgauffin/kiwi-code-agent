@@ -80,7 +80,7 @@ export class NewSessionView extends HTMLElement {
       <label>User story or feature description
         <textarea name="prompt" rows="6" required placeholder="As a ... I want ... so that ..."></textarea>
       </label>
-      <p class="hint">The planner reads docs/intent/** only and writes plan/&lt;feature&gt;.spec.md.</p>
+      <p class="hint">The planner reads docs/**, the README and the other specs, never the code, and writes plan/&lt;feature&gt;.spec.md.</p>
       <button type="submit">Start planning</button>
     </form>
   `)

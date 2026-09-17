@@ -14,7 +14,6 @@ import {
   CleanupStoppedEvent,
   DefaultProfileChangedEvent,
   ImplementRequestedEvent,
-  IntentUpdateRequestedEvent,
   InterruptRequestedEvent,
   McpReconnectRequestedEvent,
   NewSessionRequestedEvent,
@@ -91,7 +90,6 @@ export class ChatApp extends HTMLElement {
     this.addEventListener(SpecRepairRequestedEvent.type, () => post({ type: 'repair_spec' }))
     this.addEventListener(ImplementRequestedEvent.type, () => post({ type: 'implement_spec' }))
     this.addEventListener(VerifyRequestedEvent.type, () => post({ type: 'verify_spec' }))
-    this.addEventListener(IntentUpdateRequestedEvent.type, () => post({ type: 'update_intent' }))
     this.addEventListener(PlanViewSelectedEvent.type, (e) => this.show(e.view))
 
     this.addEventListener(PromptSubmittedEvent.type, (e) => post({ type: 'send', text: e.text }))

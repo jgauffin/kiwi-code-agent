@@ -7,9 +7,9 @@ import type { PlanState } from '../protocol'
  * person, which is what the stepper and the bar's next-step slot show.
  */
 
-export type Step = 'plan' | 'review' | 'map' | 'rule' | 'approve' | 'implement' | 'verify' | 'intent'
+export type Step = 'plan' | 'review' | 'map' | 'rule' | 'approve' | 'implement' | 'verify'
 
-export const STEPS: Step[] = ['plan', 'review', 'map', 'rule', 'approve', 'implement', 'verify', 'intent']
+export const STEPS: Step[] = ['plan', 'review', 'map', 'rule', 'approve', 'implement', 'verify']
 
 export const STEP_LABEL: Record<Step, string> = {
   plan: 'Plan',
@@ -19,13 +19,12 @@ export const STEP_LABEL: Record<Step, string> = {
   approve: 'Approve',
   implement: 'Implement',
   verify: 'Verify',
-  intent: 'Intent',
 }
 
 /** A tab of the plan view; each step works in one of them. */
-export type Tab = 'spec' | 'review' | 'decisions' | 'tasks' | 'intent'
+export type Tab = 'spec' | 'review' | 'decisions' | 'tasks'
 
-export type NextAction = 'map' | 'submit_review' | 'send_rulings' | 'approve' | 'implement' | 'verify' | 'update_intent'
+export type NextAction = 'map' | 'submit_review' | 'send_rulings' | 'approve' | 'implement' | 'verify'
 
 export type NextStep =
   /** A button in the bar: the act moves the plan on. */
@@ -98,6 +97,7 @@ function derive(plan: PlanState): Omit<PlanStep, 'reached'> {
   if (plan.stage === 'mapped' && plan.status === 'draft') return mappedDraft(plan)
 
   if (plan.stage === 'mapped') {
+    if (plan.reviewingDocs) return { current: 'approve', next: { kind: 'waiting', text: 'the planner is listing what the docs should now say' } }
     if (plan.implementable) {
       return { current: 'implement', next: { kind: 'action', action: 'implement', label: 'Implement', hint: 'Start a fresh session that builds the tasks one by one.' } }
     }
@@ -125,37 +125,25 @@ function derive(plan: PlanState): Omit<PlanStep, 'reached'> {
 
   // verified
   if (plan.cleanup?.live) return { current: 'verify', next: { kind: 'waiting', text: plan.cleanup.text } }
-  if (plan.intent?.applicable) {
-    const n = plan.intent.pending
-    return {
-      current: 'intent',
-      next: {
-        kind: 'action',
-        action: 'update_intent',
-        label: `Update intent (${n})`,
-        hint: `Write the ${plural(n, 'amendment')} in ${plan.intent.path} into the intent docs, so the next feature is planned from what this one settled.`,
-      },
-    }
-  }
-  return { current: 'intent', next: { kind: 'done', text: 'verified' } }
+  return { current: 'verify', next: { kind: 'done', text: 'verified' } }
 }
 
 function mappedDraft(plan: PlanState): Omit<PlanStep, 'reached'> {
-  const decisions = plan.spec?.decisions ?? []
-  const unproposed = decisions.filter((d) => d.state === 'open' && !d.proposal).length
+  const unproposed = plan.decisions.filter((d) => d.state === 'open' && d.proposals.length === 0).length
   if (unproposed > 0) return { current: 'rule', next: { kind: 'waiting', text: `the planner is proposing on ${plural(unproposed, 'decision')}` } }
   if (plan.applyingRulings) return { current: 'rule', next: { kind: 'waiting', text: `the planner is applying ${plural(plan.pendingDecisions, 'ruling')}` } }
   if (plan.pendingDecisions > 0) {
-    const open = decisions.filter((d) => d.state === 'open').length
+    const open = plan.decisions.filter((d) => d.state === 'open').length
+    // Every ruling is the user's: with several options to choose from there is no default, so the bar links to the wizard until all are ruled.
+    if (open > 0) return { current: 'rule', next: { kind: 'goto', tab: 'decisions', label: `${open} to rule on`, hint: 'Rule on each decision: change the spec one of the proposed ways, keep it and change the code instead, or say it in your own words.' } }
     return {
       current: 'rule',
       next: {
         kind: 'action',
         action: 'send_rulings',
         label: `Send rulings (${plan.pendingDecisions})`,
-        hint: 'Hand the rulings to the planner; a proposal not ruled on counts as accepted. The planner revises the rules, then the plan can be approved.',
+        hint: 'Hand the rulings to the planner, which revises the rules; then the plan can be approved.',
       },
-      ...(open > 0 ? { goto: { tab: 'decisions', label: `${open} to rule on` } } : {}),
     }
   }
   if (plan.stale) {
@@ -171,7 +159,7 @@ function reached(current: Step, plan: PlanState): Step[] {
   return steps
 }
 
-const TAB_ORDER: Tab[] = ['spec', 'review', 'decisions', 'tasks', 'intent']
+const TAB_ORDER: Tab[] = ['spec', 'review', 'decisions', 'tasks']
 
 /** The tabs with something on them, in fixed order; the spec is always there. */
 export function presentTabs(plan: PlanState): Tab[] {
@@ -182,11 +170,9 @@ export function presentTabs(plan: PlanState): Tab[] {
       case 'review':
         return plan.review.rounds.length > 0
       case 'decisions':
-        return (plan.spec?.decisions.length ?? 0) > 0
+        return plan.decisions.length > 0
       case 'tasks':
         return plan.tasks.length > 0
-      case 'intent':
-        return plan.intent !== undefined
     }
   })
 }
@@ -201,14 +187,12 @@ export function tabLabel(tab: Tab, plan: PlanState): string {
       return counted('Review', open)
     }
     case 'decisions':
-      return counted('Decisions', (plan.spec?.decisions ?? []).filter((d) => d.state === 'open' && d.proposal).length)
+      return counted('Decisions', plan.decisions.filter((d) => d.state === 'open').length)
     case 'tasks': {
       const live = plan.tasks.filter((t) => !t.removed)
       if (!live.some((t) => t.state !== 'open')) return `Tasks (${live.length})`
       return `Tasks (${live.filter((t) => t.state === 'tested').length} of ${live.length})`
     }
-    case 'intent':
-      return counted('Intent', plan.intent?.pending ?? 0)
   }
 }
 
@@ -226,8 +210,6 @@ export function tabFor(step: Step, plan: PlanState): Tab {
     case 'implement':
     case 'verify':
       return 'tasks'
-    case 'intent':
-      return plan.intent ? 'intent' : 'tasks'
     default:
       return 'spec'
   }

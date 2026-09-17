@@ -29,14 +29,30 @@ describe('ScopeGuard for blind planning', () => {
     expect(await use('Grep', { pattern: 'cancel', path: 'src' })).toMatchObject({ deny: expect.any(String) })
   })
 
-  it('only_the_spec_file_and_its_review_are_writable_and_writing_them_needs_no_permission_prompt', async () => {
+  it('only_the_spec_file_its_review_and_its_decisions_are_writable_and_writing_them_needs_no_permission_prompt', async () => {
     expect(await use('Write', { file_path: 'plan/order-cancellation.spec.md' })).toEqual({ allow: true })
     expect(await use('Edit', { file_path: 'plan/order-cancellation.review.md' })).toEqual({ allow: true })
     expect(await use('Read', { file_path: 'plan/order-cancellation.review.md' })).toBeUndefined()
     expect(await use('Write', { file_path: 'plan/other.spec.md' })).toMatchObject({ deny: expect.any(String) })
-    // Intent is amended by proposing, never by writing: the planner owns the amendment file, not the doc.
-    expect(await use('Write', { file_path: 'plan/order-cancellation.intent.md' })).toEqual({ allow: true })
-    expect(await use('Edit', { file_path: 'docs/intent/orders.md' })).toMatchObject({ deny: expect.any(String) })
+    // The planner proposes on the decisions in their own file; the mapper's other file, the tasks, is not its to read.
+    expect(await use('Edit', { file_path: 'plan/order-cancellation.decisions.md' })).toEqual({ allow: true })
+    expect(await use('Read', { file_path: 'plan/order-cancellation.decisions.md' })).toBeUndefined()
+    expect(await use('Read', { file_path: 'plan/order-cancellation.tasks.md' })).toMatchObject({ deny: expect.any(String) })
+  })
+
+  it('the_docs_are_the_users_so_a_write_there_is_neither_allowed_outright_nor_denied_but_asked', async () => {
+    expect(await use('Edit', { file_path: 'docs/intent/orders.md' })).toBeUndefined()
+    expect(await use('Write', { file_path: 'docs/features/refunds.md' })).toBeUndefined()
+    // A doc hidden from the planner cannot be written either.
+    expect(await use('Edit', { file_path: 'docs/api/orders.md' })).toMatchObject({ deny: expect.any(String) })
+  })
+
+  it('every_specs_is_readable_as_intent_but_no_other_features_review_tasks_or_decisions', async () => {
+    expect(await use('Read', { file_path: 'plan/refunds.spec.md' })).toBeUndefined()
+    expect(await use('Glob', { pattern: '*.spec.md', path: 'plan' })).toBeUndefined()
+    expect(await use('Read', { file_path: 'plan/refunds.review.md' })).toMatchObject({ deny: expect.any(String) })
+    expect(await use('Read', { file_path: 'plan/refunds.tasks.md' })).toMatchObject({ deny: expect.any(String) })
+    expect(await use('Read', { file_path: 'plan/refunds.decisions.md' })).toMatchObject({ deny: expect.any(String) })
   })
 
   it('paths_outside_the_workspace_and_bash_are_denied', async () => {
@@ -68,6 +84,7 @@ describe('blind plan helpers', () => {
   it('prompt_names_the_feature_the_spec_file_and_the_stable_names', () => {
     const prompt = blindPlanPrompt('Order cancellation', cwd)
     expect(prompt).toContain('plan/order-cancellation.spec.md')
+    expect(prompt).toContain('plan/order-cancellation.decisions.md')
     expect(prompt).toContain('status: draft')
     expect(prompt).toContain('it never changes once written')
     expect(prompt).toContain('(was Old name)')
@@ -81,6 +98,18 @@ describe('blind plan helpers', () => {
     expect(prompt).toContain('indented under the rule it qualifies')
     expect(prompt).toContain('no invariants, acceptance criteria or task sections')
     expect(prompt).toContain('  - **Shipped order**:')
+  })
+
+  it('prompt_reads_the_other_specs_as_intent_and_asks_when_a_doc_and_a_spec_disagree', () => {
+    const prompt = blindPlanPrompt('Order cancellation', cwd)
+    expect(prompt).toContain('plan/*.spec.md')
+    expect(prompt).toContain("an approved spec is that feature's definition")
+    expect(prompt).toContain('Where a doc and an approved spec disagree, ask')
+    expect(prompt).toContain('or of another feature\'s spec ends with its citation')
+    // The docs are edited only on request, and never by way of an amendment file.
+    expect(prompt).toContain('only when the user asks you to')
+    expect(prompt).not.toContain('intent.md')
+    expect(prompt).not.toContain('amendment')
   })
 })
 

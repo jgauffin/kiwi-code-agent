@@ -6,15 +6,18 @@ export type Scope = {
   readable: string[]
   /** Globs, workspace-relative, of what Write and Edit may touch. */
   writable: string[]
+  /** Globs a write may reach only with the user's say-so: neither the phase's deliverable nor off limits, so the ordinary permission prompt decides. */
+  askable?: string[]
   /** Globs carved out of `readable`; a match is denied even when readable allows it. */
   ignored?: string[]
 }
 
 /**
  * Enforces a phase's file scope at the tool call, where the model cannot
- * talk its way around it. A blind planner reads intent docs and writes one
- * spec; everything else is denied with the reason. A write inside the scope
- * is the phase's deliverable, so it goes through without a permission prompt.
+ * talk its way around it. A blind planner reads the docs and the specs and
+ * writes one spec; everything else is denied with the reason. A write inside
+ * the scope is the phase's deliverable, so it goes through without a
+ * permission prompt.
  */
 export class ScopeGuard implements SessionHooks {
   constructor(
@@ -33,15 +36,23 @@ export class ScopeGuard implements SessionHooks {
       case 'Write':
       case 'Edit':
       case 'MultiEdit':
-        return this.check(input['file_path'], this.scope.writable, 'write') ?? { allow: true }
+        return this.write(input['file_path'])
       case 'NotebookEdit':
-        return this.check(input['notebook_path'], this.scope.writable, 'write') ?? { allow: true }
+        return this.write(input['notebook_path'])
       case 'Bash':
       case 'PowerShell':
         return { deny: `${tool.toolName} is not available in this phase.` }
       default:
         return undefined
     }
+  }
+
+  /** A deliverable is allowed outright; an askable path is left to the permission prompt; anything else is denied. */
+  private write(raw: unknown): PreToolUseOutcome {
+    const denied = this.check(raw, this.scope.writable, 'write')
+    if (denied === undefined) return { allow: true }
+    if (this.scope.askable && this.check(raw, this.scope.askable, 'write') === undefined) return undefined
+    return denied
   }
 
   private check(raw: unknown, globs: string[], verb: string, directory = false): PreToolUseOutcome {
@@ -51,9 +62,11 @@ export class ScopeGuard implements SessionHooks {
     if (rel.startsWith('..')) return { deny: `Cannot ${verb} outside the workspace: ${raw}` }
     const ignored = (this.scope.ignored ?? []).find((g) => matchesGlob(rel, g) || (directory && matchesGlob(`${rel}/x`, g)))
     if (ignored) return { deny: `Cannot ${verb} ${raw}: excluded from this phase by the ignore setting (${ignored}).` }
-    // A search directory must itself lie inside the allowed tree: searching
-    // from the workspace root would list names of files the phase must not see.
-    const allowed = globs.some((g) => matchesGlob(rel, g) || (directory && matchesGlob(`${rel}/x`, g)))
+    // A search directory must itself lie inside the allowed tree, or be the
+    // folder a readable glob picks files from: searching from the workspace
+    // root would list names of files the phase must not see, while listing
+    // `plan/` beside the specs gives away nothing but the other plan files' names.
+    const allowed = globs.some((g) => matchesGlob(rel, g) || (directory && (matchesGlob(`${rel}/x`, g) || g.startsWith(`${rel}/`))))
     if (allowed) return undefined
     return { deny: `Cannot ${verb} ${raw}: this phase is limited to ${globs.join(', ')}.` }
   }

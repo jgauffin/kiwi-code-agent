@@ -2,7 +2,6 @@ import type { PlanState } from '../protocol'
 import {
   CleanupStoppedEvent,
   ImplementRequestedEvent,
-  IntentUpdateRequestedEvent,
   PlanFocusRequestedEvent,
   PlanStepSelectedEvent,
   ReviewSubmittedEvent,
@@ -126,8 +125,6 @@ function eventFor(action: NextAction): Event {
       return new ImplementRequestedEvent()
     case 'verify':
       return new VerifyRequestedEvent()
-    case 'update_intent':
-      return new IntentUpdateRequestedEvent()
   }
 }
 

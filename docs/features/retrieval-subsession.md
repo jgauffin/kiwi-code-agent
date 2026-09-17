@@ -10,5 +10,6 @@ A tool the reconcile and implement phases call to look things up without filling
 - Budget is per call (tool calls and tokens), set by the caller; exhaustion returns what was found so far.
 - Independent questions are independent sessions with no shared state; the caller may issue several at once.
 - The transcript shows a retrieval as one collapsible row with the question, status and counts; the sub-session's own transcript is reachable from it.
+- The type indexes of the repo map are the sub-session's to read, by the path it is given. Nothing of the map is injected into it.
 
 Not included: retrieval in the plan phase, caching across sessions, a repo map (separate feature).

@@ -158,14 +158,6 @@ export class ImplementRequestedEvent extends Event {
   }
 }
 
-/** The plan bar's "Update intent": write the proposed amendments into `docs/`. */
-export class IntentUpdateRequestedEvent extends Event {
-  static readonly type = 'intent-update-requested'
-  constructor() {
-    super(IntentUpdateRequestedEvent.type, { bubbles: true })
-  }
-}
-
 /** Any review gesture on the plan view, on its way to the extension host. */
 export class ReviewActionEvent extends Event {
   static readonly type = 'review-action'
@@ -254,7 +246,6 @@ declare global {
     [SpecRepairRequestedEvent.type]: SpecRepairRequestedEvent
     [VerifyRequestedEvent.type]: VerifyRequestedEvent
     [ImplementRequestedEvent.type]: ImplementRequestedEvent
-    [IntentUpdateRequestedEvent.type]: IntentUpdateRequestedEvent
     [PlanViewSelectedEvent.type]: PlanViewSelectedEvent
     [ReviewActionEvent.type]: ReviewActionEvent
     [SessionRemovedEvent.type]: SessionRemovedEvent

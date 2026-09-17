@@ -3,18 +3,16 @@ import { readFile } from 'node:fs/promises'
 import { isAbsolute, relative, resolve } from 'node:path'
 import type { PostToolUseOutcome, SessionHooks, ToolUse } from '../session/hooks'
 import { PLAN_DIR } from './blind-plan'
-import { DECISIONS_SECTION, parseDecisions, type Decision } from './decisions'
 import type { PlanItem } from './plan-review'
 import { bodyOf } from './spec-file'
 
 /**
  * The spec as a contract: a goal, scenarios from the user's side holding the
- * rules with their edge cases nested under the rule they qualify, open
- * questions, and the decisions a mapping run wrote. Every rule has a name,
- * the bold lead-in of its line, and the name is what everything else refers
- * to: a comment, a task, a test, a decision. Parsed once, here; what does not
- * fit the contract is reported as a problem, never dropped, so the planner is
- * told and the view can show it.
+ * rules with their edge cases nested under the rule they qualify, and open
+ * questions. Every rule has a name, the bold lead-in of its line, and the
+ * name is what everything else refers to: a comment, a task, a test, a
+ * decision. Parsed once, here; what does not fit the contract is reported as
+ * a problem, never dropped, so the planner is told and the view can show it.
  */
 
 export type Item = {
@@ -36,13 +34,14 @@ export type Spec = {
   goal: string
   scenarios: Scenario[]
   questions: Item[]
-  decisions: Decision[]
   /** Contract violations, each naming its line; empty when the spec is on contract. */
   problems: string[]
 }
 
 export const GOAL_SECTION = 'Goal'
 export const QUESTIONS_SECTION = 'Open questions'
+/** Where decisions used to live; a spec still holding the section is migrated, not parsed. */
+export const LEGACY_DECISIONS_SECTION = 'Decisions'
 
 const TITLE = /^#\s+(.*)$/
 const SECTION = /^##\s+(.*)$/
@@ -65,8 +64,7 @@ export function parseSpecText(text: string): Spec {
 }
 
 export function parseSpec(body: string, firstLine = 1): Spec {
-  const decided = parseDecisions(body)
-  const spec: Spec = { title: '', goal: '', scenarios: [], questions: [], decisions: decided.decisions, problems: [] }
+  const spec: Spec = { title: '', goal: '', scenarios: [], questions: [], problems: [] }
   const names = new Set<string>()
   let section: 'none' | 'goal' | 'scenario' | 'questions' | 'decisions' = 'none'
   let scenario: Scenario | undefined
@@ -94,8 +92,10 @@ export function parseSpec(body: string, firstLine = 1): Spec {
       behaviour = undefined
       if (same(name, GOAL_SECTION)) section = 'goal'
       else if (same(name, QUESTIONS_SECTION)) section = 'questions'
-      else if (same(name, DECISIONS_SECTION)) section = 'decisions'
-      else {
+      else if (same(name, LEGACY_DECISIONS_SECTION)) {
+        section = 'decisions'
+        problem(number, `a \`## ${LEGACY_DECISIONS_SECTION}\` section; decisions live in the feature's decisions file, and Repair moves them there: leave the section alone.`)
+      } else {
         section = 'scenario'
         scenario = { title: name, intro: '', behaviours: [] }
         intro = []
@@ -103,7 +103,7 @@ export function parseSpec(body: string, firstLine = 1): Spec {
       }
       continue
     }
-    // The decisions are parsed on their own; their problems are merged below.
+    // A legacy section is reported once, above; its lines are the migration's.
     if (section === 'decisions') continue
     if (SUBHEADING.test(line)) {
       problem(number, `"${line}": sub-headings are not part of the contract; a scenario is a \`##\` heading, its rules are items.`)
@@ -172,7 +172,6 @@ export function parseSpec(body: string, firstLine = 1): Spec {
         break
     }
   }
-  for (const p of decided.problems) problem(p.line + firstLine, p.text)
   spec.problems.sort(byLine)
   spec.goal = goal.join('\n')
   if (!spec.goal) spec.problems.push(`no \`## ${GOAL_SECTION}\` section.`)
@@ -220,11 +219,7 @@ export function scenarioOf(spec: Spec, name: string): Scenario | undefined {
   return spec.scenarios.find((s) => s.behaviours.some((b) => same(b.name, name) || b.edges.some((e) => same(e.name, name))))
 }
 
-/**
- * What the tasks were mapped from: the goal, the scenarios and the questions.
- * Decisions are left out on purpose, so a proposal or a ruling written into
- * the section is not a change to the plan the board was built for.
- */
+/** What the tasks were mapped from: the goal, the scenarios and the questions. */
 export function specFingerprint(spec: Spec): string {
   const hash = createHash('sha1')
   hash.update(JSON.stringify({ goal: spec.goal, scenarios: spec.scenarios, questions: spec.questions }))
@@ -258,6 +253,6 @@ export function contractProblems(file: string, problems: string[]): string {
     `\`${file}\` is off contract. Fix it before you stop:`,
     ...problems.map((p) => `- ${p}`),
     '',
-    `The contract: \`## ${GOAL_SECTION}\` as prose, then one \`##\` per scenario holding \`- **Name**: rule\` items with their edge cases nested as \`  - **Name**: ...\`, then \`## ${QUESTIONS_SECTION}\` with \`- **Name**: question\` items, then \`## ${DECISIONS_SECTION}\` with one \`###\` per decision. Nothing else.`,
+    `The contract: \`## ${GOAL_SECTION}\` as prose, then one \`##\` per scenario holding \`- **Name**: rule\` items with their edge cases nested as \`  - **Name**: ...\`, then \`## ${QUESTIONS_SECTION}\` with \`- **Name**: question\` items. Nothing else.`,
   ].join('\n')
 }

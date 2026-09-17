@@ -1,18 +1,17 @@
-import { DOCS_DIR, PLAN_DIR, featureSlug } from './blind-plan'
-import { DECISIONS_SECTION } from './decisions'
+import { DOCS_DIR, PLAN_DIR, SPECS_GLOB, featureSlug } from './blind-plan'
+import { KEEP_RULING, decisionsFile } from './decisions'
 import type { Scope } from './scope-guard'
 import { tasksFile } from './tasks-file'
 import { MAP_ROOT } from '../repo-map/map-files'
 import type { SessionEvent } from '../session/code-session'
 
-/** The mapping run sees everything and may change nothing but the spec and its tasks. */
+/** The mapping run sees everything and may change nothing but its own two outputs; the spec is the planner's and the user's. */
 export function reconcileScope(feature: string): Scope {
-  const slug = featureSlug(feature)
   return {
     // `**` does not match a dot-prefixed segment, so the map's root is named:
     // the run is given the type indexes the summary points it at.
     readable: ['**', `${MAP_ROOT}/**`],
-    writable: [`${PLAN_DIR}/${slug}.spec.md`, tasksFile(feature)],
+    writable: [decisionsFile(feature), tasksFile(feature)],
   }
 }
 
@@ -39,6 +38,7 @@ export function reconcileKickoff(continued: boolean): string {
  */
 export function reconcilePrompt(feature: string, cwd: string): string {
   const spec = `${PLAN_DIR}/${featureSlug(feature)}.spec.md`
+  const decisions = decisionsFile(feature)
   const tasks = tasksFile(feature)
   return `You are mapping the spec for the feature "${feature}" against the source code it will be built in.
 
@@ -46,16 +46,17 @@ The spec at \`${spec}\` under ${cwd} was written blind, from product intent alon
 
 Read the spec first. Every rule has a name, the bold lead-in of its line; that name is how you refer to it everywhere. Then search the code for what the spec touches: the rules it changes, the behaviour it adds to, the places its terms already live.
 
-The spec is the intent for this feature; it was distilled from \`${DOCS_DIR}/**\` by a session that read all of it, so do not browse those docs. A rule may end with a citation of the section it came from, as \`(${DOCS_DIR}/intent/orders.md#Cancellation)\`; open that section only to quote it in a contradiction. A rule without a citation is the planner's own default, the weaker side in a contradiction.
+The spec is the intent for this feature; it was distilled from \`${DOCS_DIR}/**\` and the other features' specs under \`${SPECS_GLOB}\` by a session that read all of them, so do not browse those. A rule may end with a citation of the section it came from, as \`(${DOCS_DIR}/intent/orders.md#Cancellation)\`; open that section only to quote it in a contradiction. A rule without a citation is the planner's own default, the weaker side in a contradiction.
 
 What you look for, each of them a decision the user has to make: a business rule in the code that says otherwise (the human decides which side is right; you present both); existing behaviour the feature would change or break that the spec does not mention; something the spec assumes that the code shows to be wrong.
 
-Authority order, when sources disagree: the intent docs, then the code. The code is the presumed-wrong party, but it is also where the users' current reality lives, so a contradiction is reported, not resolved. Intent amendments are the planner's to record once the user has ruled; you write none.
+Authority order, when sources disagree: the docs and the approved specs, then the code. The code is the presumed-wrong party, but it is also where the users' current reality lives, so a contradiction is reported, not resolved.
 
-Your first output: a \`## ${DECISIONS_SECTION}\` section at the end of the spec, one \`###\` per decision, and nothing else in the file changes. Structure:
+Your first output: the decisions file, \`${decisions}\`, one \`###\` per decision. Structure:
 
 \`\`\`markdown
-## ${DECISIONS_SECTION}
+# Decisions for ${feature}
+
 ### Shipped orders cannot be cancelled
 - on: Cancel command, Shipped order
 - finding: \`Order.cancel\` in src/orders/order.ts refuses a shipped order; the spec cancels one and refunds it.
@@ -66,12 +67,12 @@ Your first output: a \`## ${DECISIONS_SECTION}\` section at the end of the spec,
 \`\`\`
 
 Rules:
-- The title names the disagreement. The finding is one or two sentences, as in the example: what the code does, at the one path and symbol that shows it, and what the spec says. Not how you found it, not what the spec should say instead, not the task: the planner's proposal and the board carry those.
+- The title names the disagreement. The finding is one or two sentences, as in the example: what the code does, at the one path and symbol that shows it, and what the spec says. Not how you found it, not what the spec should say instead, not the task: the planner's proposals and the board carry those.
 - \`on\` names the rules the decision concerns, as they are named in the spec.
-- The \`proposed\` line is the planner's and the \`ruling\` line is the user's: never write, change or remove either.
-- Titles are stable. On a re-run, keep a decision that still holds, append \` [withdrawn]\` to the heading of one that no longer applies, and add new ones.
+- The \`proposed\` lines are the planner's and the \`ruling\` line is the user's: never write, change or remove either.
+- Titles are stable. On a re-run, keep a decision that still holds, append \` [withdrawn]\` to the heading of one that no longer applies, and add new ones. A decision marked \` [applied]\` is settled: one ruled \`${KEEP_RULING}\` means the spec stands and the code changes, which is work for the task that touches it, so its \`how:\` says so; do not report it again.
 - Do not paste code.
-- Touch nothing outside the ${DECISIONS_SECTION} section; the spec's rules are the planner's and the user's.
+- The spec is not yours to write: its rules are the planner's and the user's.
 
 Your second output: the task board, \`${tasks}\`, written with Write. Start from one task per scenario of the spec, in build order, under a \`##\` heading with that scenario's title, each task naming the rules it delivers and the files it touches. Structure:
 
@@ -81,7 +82,7 @@ Your second output: the task board, \`${tasks}\`, written with Write. Start from
 ## Cancelling an order
 - **Cancel command** (Cancel command, Shipped order, Refund): the scenario, as work: what to do, in one line
   - files: src/orders/cancel.ts, src/orders/cancel.test.ts (new)
-  - context: src/orders/order.ts, src/orders/ship.test.ts, docs/intent/orders.md
+  - context: src/orders/order.ts, src/orders/ship.test.ts
   - how:
     - add \`cancel()\` on \`Order\` in src/orders/order.ts beside \`ship()\`, same guard shape; it throws on a shipped order
     - the command handler follows src/orders/ship.ts: parse, load, call, save
@@ -105,7 +106,6 @@ Rules:
 - A task's name is the bold lead-in of its line, a few words, unique in the file and stable across re-runs: keep a task that still holds and update its text, files, context and how, append \` [removed]\` to one that no longer applies, add new ones. Never touch a marker or a \`proves:\` line the implementer left on a task (\`[in progress]\`, \`[done]\`, \`[tested]\`, \`[blocked: ...]\`).
 - No task for what a pending decision puts in question: the user rules first.
 - The file's front matter and a \`## Verification\` section at its end are the extension's; leave them alone.
-- A \`## Tasks\` section left in the spec from before the board existed is yours to delete once the board holds its content; the spec's rules are otherwise not yours.
 - When both files are written, stop. Say nothing more: decisions and tasks are read from the files.`
 }
 

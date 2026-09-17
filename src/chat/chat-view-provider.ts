@@ -4,8 +4,17 @@ import type { ModelProfile } from '../agent/session/model-profile'
 import type { McpServerState, SessionEvent } from '../agent/session/code-session'
 import { nextStatus, type SessionStatus } from '../agent/session/session-status'
 import { readSpecState, setSpecStatus, type SpecState } from '../agent/phases/spec-file'
-import { PLAN_DIR, decisionsHandoffPrompt, featureSlug, migrateSpecPrompt, resumePlanPrompt, rulingsHandoffPrompt, specPath } from '../agent/phases/blind-plan'
-import { acceptProposals, assertRulingsSent, openDecisions, pendingDecisions, withRuling } from '../agent/phases/decisions'
+import {
+  PLAN_DIR,
+  decisionsHandoffPrompt,
+  docsReviewPrompt,
+  featureSlug,
+  migrateSpecPrompt,
+  resumePlanPrompt,
+  rulingsHandoffPrompt,
+  specPath,
+} from '../agent/phases/blind-plan'
+import { assertAllRuled, assertRulingsSent, decisionsFile, decisionsPath, openDecisions, pendingDecisions, readDecisions, withRuling } from '../agent/phases/decisions'
 import { listPlans } from '../agent/phases/plan-list'
 import { progressLine, reconcileKickoff } from '../agent/phases/reconcile'
 import { assertImplementable, implementKickoff } from '../agent/phases/implement'
@@ -42,7 +51,6 @@ import {
   type Review,
 } from '../agent/phases/plan-review'
 import { submitReview, type ReviewCourier } from '../agent/phases/review-handoff'
-import { assertAmendable, intentPath, label, pending, readAmendments, writeBackIntent, type Amendment } from '../agent/phases/intent-writeback'
 import { editDiffTitle, editLine, isRunSnapshot, runsRoot } from '../agent/edits/open-edit'
 import { buildRepoMap } from '../agent/repo-map/build-map'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -109,6 +117,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private readonly repairing = new Set<string>()
   /** Features whose rulings were handed to the planner; Approve waits for that turn to end rather than sending them twice. */
   private readonly applying = new Set<string>()
+  /** Features whose planner is listing what the docs should now say, right after approval; Implement waits for that turn. */
+  private readonly reviewingDocs = new Set<string>()
   /** Per running session, its MCP servers as the engine last reported them. */
   private readonly mcpServers = new Map<string, McpServerState[]>()
   private readonly changed = new vscode.EventEmitter<void>()
@@ -260,7 +270,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this.changed.fire()
     }
     if (event.type === 'tool_result' && record?.feature && sessionId === this.activeSessionId) {
-      // The session just wrote the spec (a revision, decisions, a task marker); the plan bar and view must follow.
+      // The session just wrote a plan file (a revision, proposals, a task marker); the plan bar and view must follow.
       void this.sendState()
     }
     if (event.type === 'turn_done' && !event.isError && record?.mode === 'implement' && record.feature) {
@@ -268,7 +278,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
     if (event.type === 'turn_done' && record?.mode === 'plan' && record.feature) {
       // However the turn ended, the rulings are no longer in flight: Approve is the user's again, on the spec as it stands.
-      if (this.applying.delete(record.feature)) void this.sendState()
+      const applied = this.applying.delete(record.feature)
+      const reviewed = this.reviewingDocs.delete(record.feature)
+      if (applied || reviewed) void this.sendState()
       if (!event.isError) void this.followPlan(record)
     }
   }
@@ -288,8 +300,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const spec = await readSpecState(specPath(this.workspaceRoot, feature))
     const tasks = await readTasks(tasksPath(this.workspaceRoot, feature))
     const review = await readReview(reviewPath(this.workspaceRoot, feature)).catch(() => emptyReview())
+    const decisions = await readDecisions(decisionsPath(this.workspaceRoot, feature))
     // With a review in flight the accept of its last comment maps; here it is a ruling or a repair that moved the spec.
-    if (remapDue(spec, review, tasks)) await this.startMapping(record)
+    if (remapDue(spec, review, tasks, decisions)) await this.startMapping(record)
   }
 
   /** A mapping run has no transcript in the UI: its events become the one line the plan bar shows. */
@@ -328,9 +341,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * The run is over: stop its engine, count what it left in the spec and the
-   * tasks file and, when there are decisions without a proposal, hand them to
-   * the planner to propose on.
+   * The run is over: stop its engine, count what it left in the decisions
+   * file and the tasks file and, when there are decisions without a proposal,
+   * hand them to the planner to propose on.
    */
   private async finishMapping(child: SessionRecord, errors: string[]): Promise<void> {
     const parentId = child.parentId!
@@ -346,10 +359,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       const tasks = await readTasks(tasksPath(this.workspaceRoot, feature))
       // The board is stamped with the spec it was built from; a later change to the plan makes it stale.
       if (state.exists && tasks.exists) await stampSpecFingerprint(tasksPath(this.workspaceRoot, feature), specFingerprint(parseSpec(state.body)))
-      const open = state.exists ? openDecisions(state.body) : []
+      const open = openDecisions(await readDecisions(decisionsPath(this.workspaceRoot, feature)))
       const count = tasks.exists ? liveTasks(tasks.tasks).length : 0
       text = `Mapped: ${count} task${count === 1 ? '' : 's'}, ${open.length === 0 ? 'the code is clear' : `${open.length} decision${open.length === 1 ? '' : 's'}`}`
-      const unproposed = open.filter((d) => d.proposal.length === 0).map((d) => d.title)
+      const unproposed = open.filter((d) => d.proposals.length === 0).map((d) => d.title)
       if (unproposed.length > 0 && this.sessions.get(parentId)) {
         await this.sessions.send(parentId, decisionsHandoffPrompt(feature, unproposed))
       }
@@ -644,28 +657,31 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         const review = await readReview(reviewPath(this.workspaceRoot, feature))
         assertApprovable(review)
         const spec = await readSpecState(path)
-        if (spec.exists) assertRulingsSent(spec.body)
+        assertRulingsSent(await readDecisions(decisionsPath(this.workspaceRoot, feature)))
         const tasks = await readTasks(tasksPath(this.workspaceRoot, feature))
         const stage = planStage(spec, review, tasks)
         if (tasksStale(spec, tasks)) throw new Error('The tasks predate the last change to the spec; they are re-mapped when the plan session’s turn ends with every decision applied.')
         if (!isApprovable(stage, spec, tasks)) throw new Error('Map the spec against the code first: approval covers the tasks too.')
         await setSpecStatus(path, 'approved')
         await this.sendState()
+        // The spec is now the feature's definition; the docs it was planned from may say less, or otherwise. The planner lists it.
+        this.reviewingDocs.add(feature)
+        await this.sendToPlanner(record, docsReviewPrompt(feature))
         return
       }
       case 'send_rulings': {
         const record = this.activeRecord()
-        const path = this.activeSpecPath()
-        if (!record || !path || !record.feature) return
-        const spec = await readSpecState(path)
-        if (!spec.exists || !(await this.handOverRulings(record, path, spec.body))) throw new Error('No decision is pending; there is nothing to send.')
+        if (!record?.feature) return
+        if (!(await this.handOverRulings(record))) throw new Error('No decision is pending; there is nothing to send.')
         return
       }
       case 'rule_decision': {
         const path = this.activeSpecPath()
-        if (!path) return
+        const feature = this.activeRecord()?.feature
+        if (!path || !feature) return
         assertCommentable(await readSpecState(path))
-        await writeFile(path, withRuling(await readFile(path, 'utf8'), message.decision, message.ruling), 'utf8')
+        const decisions = decisionsPath(this.workspaceRoot, feature)
+        await writeFile(decisions, withRuling(await readFile(decisions, 'utf8'), message.decision, message.ruling), 'utf8')
         await this.sendState()
         return
       }
@@ -764,16 +780,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         if (feature) await this.verify(feature, true)
         return
       }
-      case 'update_intent': {
-        const feature = this.activeRecord()?.feature
-        const path = this.activeSpecPath()
-        if (!feature || !path) return
-        assertAmendable(await readSpecState(path))
-        const result = await writeBackIntent({ cwd: this.workspaceRoot, feature })
-        await this.sendState()
-        await this.reportWriteBack(result.docs, result.failed)
-        return
-      }
       case 'open_file': {
         // An edit names its file absolutely; a task names it relative to the workspace.
         const path = isAbsolute(message.path) ? message.path : join(this.workspaceRoot, message.path)
@@ -794,26 +800,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         return
       }
     }
-  }
-
-  /** What landed in `docs/` and what did not: the user is applying these, so nothing happens silently. */
-  private async reportWriteBack(docs: string[], failed: { amendment: Amendment; reason: string }[]): Promise<void> {
-    if (failed.length > 0) {
-      const detail = failed.map((f) => `${label(f.amendment)}: ${f.reason}`).join('; ')
-      void vscode.window.showWarningMessage(
-        `KiwiAgent: ${docs.length > 0 ? `updated ${docs.join(', ')}. ` : ''}${failed.length} amendment${failed.length === 1 ? '' : 's'} could not be applied: ${detail}`,
-      )
-      return
-    }
-    if (docs.length === 0) {
-      void vscode.window.showInformationMessage('KiwiAgent: no intent amendments are waiting to be applied.')
-      return
-    }
-    const open = 'Open'
-    const choice = await vscode.window.showInformationMessage(`KiwiAgent: intent updated in ${docs.join(', ')}.`, open)
-    if (choice !== open) return
-    const file = vscode.Uri.file(join(this.workspaceRoot, docs[0]!))
-    await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(file))
   }
 
   private activeRecord(): SessionRecord | undefined {
@@ -845,27 +831,29 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Send rulings: every open decision with a proposal is ruled `accepted`,
-   * and the rulings go to the plan session to apply. Approval waits for the
-   * revised spec, so the user approves what the planner actually wrote, not
-   * what it proposed. False when nothing was pending.
+   * Send rulings: every pending decision is ruled by the user, and the rulings
+   * go to the plan session to apply. Approval waits for the revised spec, so
+   * the user approves what the planner actually wrote, not what it proposed.
+   * False when nothing was pending.
    */
-  private async handOverRulings(record: SessionRecord, path: string, body: string): Promise<boolean> {
-    const unproposed = openDecisions(body).filter((d) => !d.proposal)
-    if (unproposed.length > 0) {
-      throw new Error(`${unproposed.length === 1 ? 'A decision awaits' : `${unproposed.length} decisions await`} the planner's proposal: ${unproposed.map((d) => d.title).join('; ')}.`)
-    }
-    if (pendingDecisions(body).length === 0) return false
-    const accepted = acceptProposals(await readFile(path, 'utf8'))
-    if (accepted.accepted.length > 0) await writeFile(path, accepted.text, 'utf8')
-    const rulings = pendingDecisions(accepted.text).map((d) => ({ title: d.title, ruling: d.ruling ?? '' }))
-    const prompt = rulingsHandoffPrompt(record.feature!, rulings)
-    this.applying.add(record.feature!)
+  private async handOverRulings(record: SessionRecord): Promise<boolean> {
+    const feature = record.feature!
+    const decisions = await readDecisions(decisionsPath(this.workspaceRoot, feature))
+    const pending = pendingDecisions(decisions)
+    if (pending.length === 0) return false
+    assertAllRuled(decisions)
+    const rulings = pending.map((d) => ({ title: d.title, ruling: d.ruling ?? '' }))
+    this.applying.add(feature)
+    await this.sendToPlanner(record, rulingsHandoffPrompt(feature, rulings))
+    return true
+  }
+
+  /** A prompt for the plan session that owns the feature, or a fresh plan session when it is gone. */
+  private async sendToPlanner(record: SessionRecord, prompt: string): Promise<void> {
     const courier = this.courier()
     if (courier.isLive(record.id)) await courier.send(record.id, prompt)
     else await courier.start(record.feature!, prompt)
     await this.sendState()
-    return true
   }
 
   /** A submitted review goes to the plan session that wrote the spec, or a fresh plan session when it is gone. */
@@ -891,14 +879,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const cleanup = this.cleanups.get(feature)
     const review = await readReview(reviewPath(this.workspaceRoot, feature)).catch(() => emptyReview())
     const tasks: TasksState = await readTasks(tasksPath(this.workspaceRoot, feature))
-    const amendments = await readAmendments(intentPath(this.workspaceRoot, feature)).catch(() => [])
-    const waiting = pending(amendments).length
+    const decisions = await readDecisions(decisionsPath(this.workspaceRoot, feature))
     const stage = planStage(state, review, tasks)
     const spec = state.exists ? parseSpec(state.body) : undefined
     const relativeTo = (file: string) => relative(this.workspaceRoot, file).split('\\').join('/')
     return {
       specPath: relativeTo(path),
       tasksPath: relativeTo(tasksPath(this.workspaceRoot, feature)),
+      decisionsPath: decisionsFile(feature),
       stage,
       status: state.exists ? state.status : 'missing',
       ...(state.exists ? { body: state.body } : {}),
@@ -907,7 +895,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       repairable: fromPlan && (spec?.problems.length ?? 0) > 0,
       mappable: fromPlan && isMappable(stage, state) && mapping?.live !== true,
       ...(mapping ? { mapping } : {}),
-      implementable: fromPlan && stage === 'mapped' && state.status === 'approved',
+      implementable: fromPlan && stage === 'mapped' && state.status === 'approved' && !this.reviewingDocs.has(feature),
       // Offered while the board is tested and the last record did not pass; a re-run after a pass is a manual choice too.
       verifiable: (stage === 'verification' || stage === 'verified') && verification?.live !== true,
       ...(verification ? { verification } : {}),
@@ -917,20 +905,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       review,
       commentable: isCommentable(state),
       approvable: isApprovable(stage, state, tasks) && !this.applying.has(feature),
-      pendingDecisions: state.exists ? pendingDecisions(state.body).length : 0,
+      decisions,
+      pendingDecisions: pendingDecisions(decisions).length,
       applyingRulings: this.applying.has(feature),
-      ...(amendments.length > 0
-        ? {
-            intent: {
-              path: relative(this.workspaceRoot, intentPath(this.workspaceRoot, feature)).split('\\').join('/'),
-              pending: waiting,
-              applied: amendments.length - waiting,
-              // Offered after approval, and still offered once the feature is built: intent owes the same debt either way.
-              applicable: state.exists && state.status === 'approved' && waiting > 0,
-              amendments,
-            },
-          }
-        : {}),
+      reviewingDocs: this.reviewingDocs.has(feature),
     }
   }
 

@@ -9,10 +9,11 @@ function plan(over: Partial<PlanState> = {}): PlanState {
   return {
     specPath: 'plan/orders.spec.md',
     tasksPath: 'plan/orders.tasks.md',
+    decisionsPath: 'plan/orders.decisions.md',
     stage: 'created',
     status: 'draft',
     body: '# Orders',
-    spec: { title: 'Orders', goal: '', scenarios: [], questions: [], decisions: [], problems: [] },
+    spec: { title: 'Orders', goal: '', scenarios: [], questions: [], problems: [] },
     stale: false,
     repairable: false,
     mappable: true,
@@ -22,14 +23,16 @@ function plan(over: Partial<PlanState> = {}): PlanState {
     review: { rounds: [] },
     commentable: true,
     approvable: false,
+    decisions: [],
     pendingDecisions: 0,
     applyingRulings: false,
+    reviewingDocs: false,
     ...over,
   }
 }
 
 function decision(over: Partial<Decision>): Decision {
-  return { title: 'Shipped orders', on: [], finding: 'code', proposal: '', state: 'open', line: 0, end: 0, ...over }
+  return { title: 'Shipped orders', on: [], finding: 'code', proposals: [], state: 'open', line: 0, end: 0, ...over }
 }
 
 function task(state: Task['state'], group?: string): Task {
@@ -81,18 +84,20 @@ describe('planStep', () => {
   })
 
   it('a_decision_without_a_proposal_waits_on_the_planner', () => {
-    const spec = { ...plan().spec!, decisions: [decision({})] }
-    const step = planStep(plan({ stage: 'mapped', spec, pendingDecisions: 1 }))
+    const step = planStep(plan({ stage: 'mapped', decisions: [decision({})], pendingDecisions: 1 }))
     expect(step.current).toBe('rule')
     expect(step.next).toEqual({ kind: 'waiting', text: 'the planner is proposing on 1 decision' })
   })
 
-  it('pending_decisions_offer_send_rulings_not_approve', () => {
-    const spec = { ...plan().spec!, decisions: [decision({ proposal: 'drop it' }), decision({ title: 'Refund', proposal: 'keep', state: 'ruled', ruling: 'accepted' })] }
-    const step = planStep(plan({ stage: 'mapped', spec, pendingDecisions: 2 }))
+  it('an_open_decision_links_to_the_wizard_and_send_rulings_waits_for_every_ruling', () => {
+    const open = decision({ proposals: ['drop it', 'narrow it'] })
+    const ruled = decision({ title: 'Refund', proposals: ['queue it'], state: 'ruled', ruling: 'keep' })
+    const step = planStep(plan({ stage: 'mapped', decisions: [open, ruled], pendingDecisions: 2 }))
     expect(step.current).toBe('rule')
-    expect(step.next).toMatchObject({ kind: 'action', action: 'send_rulings', label: 'Send rulings (2)' })
-    expect(step.goto).toEqual({ tab: 'decisions', label: '1 to rule on' })
+    expect(step.next).toMatchObject({ kind: 'goto', tab: 'decisions', label: '1 to rule on' })
+    const allRuled = planStep(plan({ stage: 'mapped', decisions: [{ ...open, state: 'ruled', ruling: 'drop it' }, ruled], pendingDecisions: 2 }))
+    expect(allRuled.next).toMatchObject({ kind: 'action', action: 'send_rulings', label: 'Send rulings (2)' })
+    expect(allRuled.goto).toBeUndefined()
   })
 
   it('rulings_with_the_planner_wait', () => {
@@ -117,6 +122,12 @@ describe('planStep', () => {
     expect(planStep(plan({ stage: 'mapped', status: 'approved', commentable: false })).next).toMatchObject({ kind: 'waiting' })
   })
 
+  it('right_after_approval_the_planner_lists_what_the_docs_should_say_before_implement_is_offered', () => {
+    const step = planStep(plan({ stage: 'mapped', status: 'approved', commentable: false, reviewingDocs: true }))
+    expect(step.current).toBe('approve')
+    expect(step.next).toEqual({ kind: 'waiting', text: 'the planner is listing what the docs should now say' })
+  })
+
   it('under_development_reports_progress_and_blocks', () => {
     const step = planStep(plan({ stage: 'under_development', status: 'approved', commentable: false, tasks: [task('tested'), task('blocked'), task('open')] }))
     expect(step.current).toBe('implement')
@@ -137,15 +148,10 @@ describe('planStep', () => {
     expect(planStep(plan({ ...base, lastVerification: { at: 't', ok: false, text: 'failed' } })).next).toMatchObject({ label: 'Verify again' })
   })
 
-  it('verified_with_amendments_offers_update_intent', () => {
-    const intent = { path: 'plan/orders.intent.md', pending: 2, applied: 0, applicable: true, amendments: [] }
-    const step = planStep(plan({ stage: 'verified', status: 'approved', commentable: false, intent }))
-    expect(step.current).toBe('intent')
-    expect(step.next).toMatchObject({ action: 'update_intent', label: 'Update intent (2)' })
-  })
-
-  it('verified_without_amendments_is_done', () => {
-    expect(planStep(plan({ stage: 'verified', status: 'approved', commentable: false })).next).toEqual({ kind: 'done', text: 'verified' })
+  it('verified_is_done_at_the_verify_step', () => {
+    const step = planStep(plan({ stage: 'verified', status: 'approved', commentable: false }))
+    expect(step.current).toBe('verify')
+    expect(step.next).toEqual({ kind: 'done', text: 'verified' })
   })
 
   it('review_stays_reachable_on_a_mapped_draft', () => {
@@ -176,15 +182,14 @@ describe('tabFor', () => {
 describe('tabs', () => {
   it('a_tab_is_present_once_it_has_content', () => {
     expect(presentTabs(plan())).toEqual(['spec'])
-    const spec = { ...plan().spec!, decisions: [decision({ proposal: 'p' })] }
     const full = plan({
-      spec,
+      decisions: [decision({ proposals: ['p'] }), decision({ title: 'Refund', state: 'ruled', ruling: 'keep' })],
       review: { rounds: [round({ submittedAt: 't', comments: [{ target: 'Cancel', text: 'no' }] })] },
       tasks: [task('open')],
-      intent: { path: 'p', pending: 1, applied: 0, applicable: false, amendments: [] },
     })
-    expect(presentTabs(full)).toEqual(['spec', 'review', 'decisions', 'tasks', 'intent'])
-    expect(presentTabs(full).map((t) => tabLabel(t, full))).toEqual(['Spec', 'Review (1)', 'Decisions (1)', 'Tasks (1)', 'Intent (1)'])
+    expect(presentTabs(full)).toEqual(['spec', 'review', 'decisions', 'tasks'])
+    // The decisions count is what is left to rule on.
+    expect(presentTabs(full).map((t) => tabLabel(t, full))).toEqual(['Spec', 'Review (1)', 'Decisions (1)', 'Tasks (1)'])
   })
 
   it('the_tasks_tab_counts_tested_once_work_has_started', () => {

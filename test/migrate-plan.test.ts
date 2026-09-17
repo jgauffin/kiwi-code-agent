@@ -5,17 +5,16 @@ import { join } from 'node:path'
 import {
   applyRenames,
   collectRenames,
+  extractDecisions,
   extractLegacyTasks,
   migratePlan,
   modernizeFindings,
-  modernizeIntent,
   modernizeReview,
   modernizeSpecItems,
   modernizeTasks,
 } from '../src/agent/phases/migrate-plan'
 import { migrateSpecPrompt } from '../src/agent/phases/blind-plan'
 import { decisions } from '../src/agent/phases/decisions'
-import { parseAmendments } from '../src/agent/phases/intent-writeback'
 import { parseReview } from '../src/agent/phases/plan-review'
 import { parseSpecText } from '../src/agent/phases/spec-model'
 import { parseTasks } from '../src/agent/phases/tasks-file'
@@ -99,12 +98,17 @@ describe('ids become names', () => {
 - on: T1
 - finding: reports break
 `)
-    expect(decisions(text).map((d) => [d.title, d.state, d.on])).toEqual([
+    expect(modernizeFindings(text)).toBe(text)
+    // The section then leaves the spec for the decisions file, where the parser reads it.
+    const lifted = extractDecisions(text)
+    expect(lifted.spec).toBe('## S\n- **B1**: a\n')
+    expect(lifted.decisions).toBe('### F1\n- on: B1\n- finding: the code says otherwise\n- proposed: keep B1\n\n### F2 [applied]\n- on: B11, E5\n- finding: assumed\n- proposed: change it\n\n### F3 [withdrawn]\n- on: T1\n- finding: reports break')
+    expect(decisions(lifted.decisions).map((d) => [d.title, d.state, d.on])).toEqual([
       ['F1', 'open', ['B1']],
       ['F2', 'applied', ['B11', 'E5']],
       ['F3', 'withdrawn', ['T1']],
     ])
-    expect(modernizeFindings(text)).toBe(text)
+    expect(extractDecisions(lifted.spec)).toEqual({ spec: lifted.spec, decisions: '' })
   })
 
   it('a_migrated_board_names_its_tasks_and_pairs_each_proof_with_an_arrow', () => {
@@ -134,20 +138,6 @@ describe('ids become names', () => {
     expect(modernizeReview(text)).toBe(text)
   })
 
-  it('a_migrated_amendment_is_headed_by_its_target_spaces_and_all', () => {
-    const old =
-      '## A1 (append) docs/intent/orders.md#Cancellation [applied]\n- from: F3\n\ntext\n\n## A2 (new) docs/intent/x.md\n\nmore\n\n## A3 (replace) docs/intent/agent.md#Phase 1: Blind plan\n\nspaced\n'
-    const text = modernizeIntent(old)
-    expect(text).toBe(
-      '## docs/intent/orders.md#Cancellation (append) [applied]\n- from: F3\n\ntext\n\n## docs/intent/x.md (new)\n\nmore\n\n## docs/intent/agent.md#Phase 1: Blind plan (replace)\n\nspaced\n',
-    )
-    expect(parseAmendments(text).map((a) => [a.doc, a.heading, a.mode, a.applied])).toEqual([
-      ['docs/intent/orders.md', 'Cancellation', 'append', true],
-      ['docs/intent/x.md', undefined, 'new', false],
-      ['docs/intent/agent.md', 'Phase 1: Blind plan', 'replace', false],
-    ])
-    expect(modernizeIntent(text)).toBe(text)
-  })
 })
 
 describe('renames', () => {
@@ -215,27 +205,41 @@ describe('migratePlan', () => {
     )
     await writeFile(join(dir, 'plan', 'orders.tasks.md'), '---\nspec: 00000000\n---\n# Tasks for Orders\n\n- T1 (B1, E1): x [tested]\n  - proves: B1 test/a.test.ts holds\n')
     await writeFile(join(dir, 'plan', 'orders.review.md'), '# Review\n\n## Round 1 — submitted t\n- C1 (B1): hm\n  - addressed: ok\n  - accepted\n')
-    await writeFile(join(dir, 'plan', 'orders.intent.md'), '## A1 (append) docs/intent/orders.md#Cancel\n\ntext\n')
     const report = await migratePlan(dir, 'Orders')
     expect(report.problems).toEqual([])
     expect(report.steps).toEqual([
       'rewrote the spec to the named-rule contract.',
+      'moved 1 decision(s) from the spec into the decisions file.',
       'rewrote the tasks file to the named-rule contract.',
       'rewrote the review to the named-rule contract.',
-      'rewrote the intent file to the named-rule contract.',
       'stamped the tasks file with the spec it was mapped from.',
     ])
-    const spec = parseSpecText(await readFile(join(dir, 'plan', 'orders.spec.md'), 'utf8'))
+    const specText = await readFile(join(dir, 'plan', 'orders.spec.md'), 'utf8')
+    const spec = parseSpecText(specText)
     expect(spec.scenarios[0]!.behaviours[0]).toMatchObject({ name: 'B1', citation: 'docs/intent/orders.md#Cancel', edges: [{ name: 'E1' }] })
-    expect(spec.decisions.map((d) => d.state)).toEqual(['applied'])
+    expect(specText).not.toContain('## Decisions')
+    const ruled = await readFile(join(dir, 'plan', 'orders.decisions.md'), 'utf8')
+    expect(ruled).toBe('# Decisions for Orders\n\n### F1 [applied]\n- on: B1\n- finding: x\n- proposed: y\n')
+    expect(decisions(ruled).map((d) => d.state)).toEqual(['applied'])
     const board = parseTasks(await readFile(join(dir, 'plan', 'orders.tasks.md'), 'utf8'))
     expect(board.tasks[0]).toMatchObject({ name: 'T1', delivers: ['B1', 'E1'], proves: [{ item: 'B1' }] })
     expect(board.spec).toMatch(/^[0-9a-f]{8}$/)
     expect(board.spec).not.toBe('00000000')
     expect(parseReview(await readFile(join(dir, 'plan', 'orders.review.md'), 'utf8')).rounds[0]!.comments[0]).toMatchObject({ target: 'B1', closed: true })
-    expect(parseAmendments(await readFile(join(dir, 'plan', 'orders.intent.md'), 'utf8'))[0]).toMatchObject({ heading: 'Cancel', mode: 'append' })
     // Running it again changes nothing.
     expect((await migratePlan(dir, 'Orders')).steps).toEqual([])
+  })
+
+  it('a_decisions_section_joins_a_decisions_file_that_already_exists_without_repeating_a_title', async () => {
+    await writeFile(join(dir, 'plan', 'orders.spec.md'), '# Orders\n\n## Goal\ng\n\n## S\n- **A**: a\n\n## Decisions\n### X\n- finding: x\n\n### Y\n- finding: y\n')
+    await writeFile(join(dir, 'plan', 'orders.decisions.md'), '# Decisions for Orders\n\n### X [applied]\n- finding: x\n- ruling: keep\n')
+    const report = await migratePlan(dir, 'Orders')
+    expect(report.steps).toEqual(['moved 2 decision(s) from the spec into the decisions file.'])
+    expect(await readFile(join(dir, 'plan', 'orders.decisions.md'), 'utf8')).toBe(
+      '# Decisions for Orders\n\n### X [applied]\n- finding: x\n- ruling: keep\n\n### Y\n- finding: y\n',
+    )
+    expect(await readFile(join(dir, 'plan', 'orders.spec.md'), 'utf8')).toBe('# Orders\n\n## Goal\ng\n\n## S\n- **A**: a\n')
+    expect(report.problems).toEqual([])
   })
 
   it('after_the_planners_turn_the_renames_are_followed_and_the_board_is_stamped', async () => {
@@ -260,7 +264,7 @@ describe('migratePlan', () => {
     expect((await migratePlan(dir, 'Orders')).steps).toEqual([])
   })
 
-  it('a_broken_intent_file_and_a_missing_spec_are_reported_not_hidden', async () => {
+  it('a_missing_spec_is_reported_not_hidden', async () => {
     expect((await migratePlan(dir, 'Nope')).problems).toEqual(['no spec file.'])
   })
 

@@ -1,5 +1,6 @@
 import { DOCS_DIR, PLAN_DIR, featureSlug } from './blind-plan'
 import { ASK_USER_TOOL } from '../openai-session/tools/ask-user'
+import { KEEP_RULING, decisionsFile } from './decisions'
 import type { SpecState } from './spec-file'
 import { tasksDone, tasksFile, type TasksState } from './tasks-file'
 
@@ -18,7 +19,7 @@ export function implementKickoff(continued: Continued): string {
   switch (continued) {
     case 'mapping':
       return [
-        'The spec you mapped is approved and its decisions are ruled and applied; the board you wrote is the work. Read the spec again for the rulings, then implement it task by task.',
+        'The spec you mapped is approved and its decisions are ruled and applied; the board you wrote is the work. Read the spec again for the revised rules and the decisions file for the rulings, then implement it task by task.',
         'The files and context you read hold unless a tool result says a file changed; do not read them again to be sure.',
       ].join(' ')
     case 'implement':
@@ -48,10 +49,13 @@ export function assertImplementable(spec: SpecState, tasks: TasksState): void {
  */
 export function implementPrompt(feature: string, cwd: string): string {
   const spec = `${PLAN_DIR}/${featureSlug(feature)}.spec.md`
+  const decisions = decisionsFile(feature)
   const tasks = tasksFile(feature)
   return `You are implementing the feature "${feature}" from its approved spec at \`${spec}\` under ${cwd}, task by task from \`${tasks}\`.
 
-The spec is the contract: goal, rules, edge cases, and decisions the user has ruled on. Every rule has a name, the bold lead-in of its line. A human approved it; do not reinterpret it. Where the code and the spec disagree, the spec wins. Where the spec is silent, do the simplest thing that satisfies it and note the choice in one line under the task.
+The spec is the contract: goal, rules and edge cases. Every rule has a name, the bold lead-in of its line. A human approved it; do not reinterpret it. Where the code and the spec disagree, the spec wins. Where the spec is silent, do the simplest thing that satisfies it and note the choice in one line under the task.
+
+\`${decisions}\`, where it exists, holds what the user ruled where the code and the spec disagreed. A decision ruled \`${KEEP_RULING}\` means the rule stands and the code changes: that is work, done with the task that touches it.
 
 The tasks file is the board. Each task names the rules it delivers, the files it touches (\`files:\`), what was read to arrive at it (\`context:\`: the modules those files lean on, the test that shows the pattern, where the term already lives) and how to build it (\`how:\`: the steps, the symbols to add or change, the pattern to follow). The mapping has been done; start a task by reading its files and its context, and search the code only for what they do not answer. Follow the \`how:\` block; depart from it only where the code as you read it says it cannot be done that way, and say so in the one-line note under the task. Work through the board in order; a task's state is a marker appended to its line, and you move it along as you go:
 - \` [in progress]\` when you start it;
@@ -69,10 +73,8 @@ The \`proves:\` line is the evidence the user reads on the spec: one entry per d
 
 Keep the task's \`files:\` line true to what you touched: add a file you needed that the board did not name. When a decision only the user can make stands in the way (a fork the spec and the board leave open, which of two ways to take), put it with the \`${ASK_USER_TOOL}\` tool and carry on with the answer, rather than blocking the task or stopping.
 
-A decision whose ruling says to fix the code is work too; do it with the task it touches.
-
 Rules:
-- In the tasks file, only the markers, the files line, the proves line and a one-line note under a task are yours; the \`how:\` block is the mapper's. The spec is not yours to change at all.
+- In the tasks file, only the markers, the files line, the proves line and a one-line note under a task are yours; the \`how:\` block is the mapper's. The spec and the decisions file are not yours to change at all.
 - Never edit \`${DOCS_DIR}/\`: intent is the user's.
 - Read a file before editing it; read it again when a tool result says it changed underneath you. Do not re-explore what the context line already names.
 - A task marked tested is finished: its files are not read unless a later task names them, and a context file read for an earlier task is not read again unless a tool result says it changed.

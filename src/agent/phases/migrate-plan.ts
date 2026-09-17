@@ -1,19 +1,20 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { specPath } from './blind-plan'
-import { intentPath, readAmendments } from './intent-writeback'
+import { decisions, decisionsPath } from './decisions'
 import { reviewPath } from './plan-review'
-import { parseSpecText, specFingerprint } from './spec-model'
+import { LEGACY_DECISIONS_SECTION, parseSpecText, specFingerprint } from './spec-model'
 import { readTasks, stampSpecFingerprint, tasksPath } from './tasks-file'
 
 /**
  * Brings a feature's plan files to the contract. What can be done by rule is
- * done here: a legacy task section becomes the tasks file, the id-based shapes
- * become the named ones with the old id standing in as the name, names the
- * planner changed are followed through every file, the board is stamped. What
- * needs judgment (scenarios, nesting, real names for the rules) is left to the
- * planner, whose prompt the caller sends when `problems` remain; running this
- * again after that turn finishes the job. Every legacy shape is known here
- * and nowhere else, so the parsers read one contract.
+ * done here: a legacy task section becomes the tasks file, a decisions section
+ * becomes the decisions file, the id-based shapes become the named ones with
+ * the old id standing in as the name, names the planner changed are followed
+ * through every file, the board is stamped. What needs judgment (scenarios,
+ * nesting, real names for the rules) is left to the planner, whose prompt the
+ * caller sends when `problems` remain; running this again after that turn
+ * finishes the job. Every legacy shape is known here and nowhere else, so the
+ * parsers read one contract.
  */
 
 export type MigrationReport = {
@@ -44,31 +45,41 @@ const ID_COMMENT = /^-\s+C\d+\s*\(([^)]*)\)\s*:\s*(.*)$/
 const STRUCK = /^-\s+struck\s*:\s*(.*)$/i
 const ACCEPTED = /^(\s+-\s+)accepted\b(.*)$/i
 const ROUND = /^(##\s+Round\s+\d+)\s+—\s+(.*)$/
-const ID_AMENDMENT = /^##\s+A\d+\s*\(([A-Za-z]+)\)\s+(.+?)\s*(\[applied\])?\s*$/
 const OLD_REVIEW_NOTE = 'A submitted comment keeps its id.'
 const REVIEW_NOTE = 'A comment names the rule it is on.'
 
+/** Cuts one `##` section out of the spec: what is left, and the section's lines without its heading. */
+function liftSection(specText: string, heading: string): { spec: string; lines: string[] } {
+  const kept: string[] = []
+  const lines: string[] = []
+  let inside = false
+  for (const line of specText.split(/\r?\n/)) {
+    const section = SECTION.exec(line.trim())
+    if (section) inside = section[1]!.trim().toLowerCase() === heading.toLowerCase()
+    if (!inside) kept.push(line)
+    else if (!section) lines.push(line.trimEnd())
+  }
+  return { spec: kept.join('\n').replace(/\n{3,}/g, '\n\n'), lines }
+}
+
 /** Lifts a `## Tasks` section out of the spec as tasks-file lines, ids first. */
 export function extractLegacyTasks(specText: string): { spec: string; tasks: string[] } {
-  const lines = specText.split(/\r?\n/)
-  const kept: string[] = []
-  const tasks: string[] = []
-  let inTasks = false
-  for (const line of lines) {
-    const heading = SECTION.exec(line.trim())
-    if (heading) inTasks = heading[1]!.trim().toLowerCase() === TASKS_HEADING.toLowerCase()
-    if (!inTasks) {
-      kept.push(line)
-      continue
-    }
-    if (heading || line.trim().length === 0) continue
-    const trailing = TRAILING_IDS.exec(line.trim())
-    if (trailing) {
+  const lifted = liftSection(specText, TASKS_HEADING)
+  const tasks = lifted.lines
+    .filter((line) => line.trim().length > 0)
+    .map((line) => {
+      const trailing = TRAILING_IDS.exec(line.trim())
+      if (!trailing) return line
       const markers = trailing[4]!.trim()
-      tasks.push(`- ${trailing[1]} (${trailing[3]}): ${trailing[2]}${markers ? ` ${markers}` : ''}`)
-    } else tasks.push(line.trimEnd())
-  }
-  return { spec: kept.join('\n').replace(/\n{3,}/g, '\n\n'), tasks }
+      return `- ${trailing[1]} (${trailing[3]}): ${trailing[2]}${markers ? ` ${markers}` : ''}`
+    })
+  return { spec: lifted.spec, tasks }
+}
+
+/** Lifts a `## Decisions` section out of the spec as the decisions file's body. */
+export function extractDecisions(specText: string): { spec: string; decisions: string } {
+  const lifted = liftSection(specText, LEGACY_DECISIONS_SECTION)
+  return { spec: lifted.spec, decisions: lifted.lines.join('\n').trim() }
 }
 
 const mapLines = (text: string, fn: (line: string) => string): string => text.split(/\r?\n/).map(fn).join('\n')
@@ -168,15 +179,6 @@ export function modernizeReview(text: string): string {
   })
 }
 
-/** `## A1 (append) docs/x.md#H [applied]` becomes `## docs/x.md#H (append) [applied]`. */
-export function modernizeIntent(text: string): string {
-  return mapLines(text, (line) => {
-    const match = ID_AMENDMENT.exec(line.trim())
-    if (!match) return line
-    return `## ${match[2]} (${match[1]!.toLowerCase()})${match[3] ? ' [applied]' : ''}`
-  })
-}
-
 /** Strips the planner's `(was X)` notes and returns what they say: old name → new name. */
 export function collectRenames(specText: string): { spec: string; renames: Map<string, string> } {
   const renames = new Map<string, string>()
@@ -213,7 +215,7 @@ export async function migratePlan(cwd: string, feature: string): Promise<Migrati
   const spec = specPath(cwd, feature)
   const tasks = tasksPath(cwd, feature)
   const review = reviewPath(cwd, feature)
-  const intent = intentPath(cwd, feature)
+  const decisionsFile = decisionsPath(cwd, feature)
   let specText = await readIfThere(spec)
   if (specText === undefined) {
     report.problems.push('no spec file.')
@@ -238,6 +240,24 @@ export async function migratePlan(cwd: string, feature: string): Promise<Migrati
     report.steps.push('rewrote the spec to the named-rule contract.')
   }
 
+  const lifted = extractDecisions(specText)
+  if (lifted.spec !== specText) {
+    specText = lifted.spec
+    const existing = await readIfThere(decisionsFile)
+    // A decisions file already there keeps what it has; the spec's section adds only the titles it lacks.
+    const known = new Set(decisions(existing ?? '').map((d) => d.title.toLowerCase()))
+    const added = decisions(lifted.decisions).filter((d) => !known.has(d.title.toLowerCase()))
+    if (existing === undefined) {
+      const title = /^#\s+(.*)$/m.exec(specText)?.[1]?.trim() ?? feature
+      await writeFile(decisionsFile, `# Decisions for ${title}\n\n${lifted.decisions}\n`, 'utf8')
+    } else if (added.length > 0) {
+      const lines = lifted.decisions.split('\n')
+      const blocks = added.map((d) => lines.slice(d.line, d.end).join('\n'))
+      await writeFile(decisionsFile, `${existing.trimEnd()}\n\n${blocks.join('\n\n')}\n`, 'utf8')
+    }
+    report.steps.push(`moved ${decisions(lifted.decisions).length} decision(s) from the spec into the decisions file.`)
+  }
+
   const renamed = collectRenames(specText)
   if (renamed.renames.size > 0) {
     specText = applyRenames(renamed.spec, renamed.renames)
@@ -257,7 +277,6 @@ export async function migratePlan(cwd: string, feature: string): Promise<Migrati
   const modernized: [string, (text: string) => string, string][] = [
     [tasks, modernizeTasks, 'the tasks file'],
     [review, modernizeReview, 'the review'],
-    [intent, modernizeIntent, 'the intent file'],
   ]
   for (const [path, modernize, what] of modernized) {
     const text = await readIfThere(path)
@@ -278,11 +297,6 @@ export async function migratePlan(cwd: string, feature: string): Promise<Migrati
     report.steps.push('stamped the tasks file with the spec it was mapped from.')
   }
 
-  try {
-    await readAmendments(intent)
-  } catch (error) {
-    report.problems.push(`intent file cannot be read: ${error instanceof Error ? error.message : String(error)}`)
-  }
   report.problems.push(...parsed.problems)
   return report
 }

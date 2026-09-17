@@ -1,6 +1,6 @@
-import type { IntentState, PlanState } from '../protocol'
+import type { PlanState } from '../protocol'
 import type { Decision } from '../../agent/phases/decisions'
-import type { Amendment } from '../../agent/phases/intent-writeback'
+import { KEEP_RULING } from '../../agent/phases/ruling'
 import type { CommentRef, Review, ReviewComment, ReviewRound } from '../../agent/phases/plan-review'
 import type { Item, Scenario, Spec } from '../../agent/phases/spec-model'
 import type { Task, TaskState } from '../../agent/phases/tasks-file'
@@ -38,10 +38,10 @@ const same = (a: string, b: string): boolean => a.trim().toLowerCase() === b.tri
 /**
  * One tab of the plan at a time: the spec as the contract reads it (goal,
  * scenarios, questions, with the review written on its rows), the review as
- * a batch, the decisions, the task board or the intent amendments. Which
- * tab is the app's call, made on the strip above; a link from one tab to a
- * rule on another asks the app the same way. Built by hand rather than from
- * a template so an open comment box keeps its text and caret while the plan
+ * a batch, the decisions one at a time, or the task board. Which tab is the
+ * app's call, made on the strip above; a link from one tab to a rule on
+ * another asks the app the same way. Built by hand rather than from a
+ * template so an open comment box keeps its text and caret while the plan
  * around it is re-rendered.
  */
 export class PlanView extends HTMLElement {
@@ -49,6 +49,8 @@ export class PlanView extends HTMLElement {
   private editor: Editor | undefined
   private signature = ''
   private tab: Tab = 'spec'
+  /** The pending decision the wizard shows, by title; the first open one when unset or gone. */
+  private shown: string | undefined
 
   update(plan: PlanState | undefined, tab: Tab): void {
     const tabChanged = tab !== this.tab
@@ -64,14 +66,14 @@ export class PlanView extends HTMLElement {
             tasks: plan.tasks,
             stale: plan.stale,
             lastVerification: plan.lastVerification,
-            pendingDecisions: plan.pendingDecisions,
+            decisions: plan.decisions,
             applyingRulings: plan.applyingRulings,
-            intent: plan.intent,
             // What the step is read from beyond the files: a run in flight (not its progress line, which ticks), an implement session to start.
             mapping: plan.mapping?.live,
             verification: plan.verification?.live,
             cleanup: plan.cleanup?.live,
             implementable: plan.implementable,
+            reviewingDocs: plan.reviewingDocs,
           }
         : null,
     )
@@ -123,13 +125,10 @@ export class PlanView extends HTMLElement {
         this.append(this.reviewTab(plan))
         break
       case 'decisions':
-        this.append(this.decisionsSection(spec, plan))
+        this.append(this.decisionsSection(plan))
         break
       case 'tasks':
         this.append(this.tasksSection(plan))
-        break
-      case 'intent':
-        if (plan.intent) this.append(this.intentTab(plan.intent))
         break
     }
   }
@@ -150,7 +149,7 @@ export class PlanView extends HTMLElement {
     if (!plan.commentable && plan.review.rounds.length > 0) {
       nodes.push(note('This plan is approved. Its review is kept as the record of how it was reached; reopen or supersede the plan to comment again.'))
     }
-    if (plan.stale) nodes.push(note(staleNote(spec.decisions.filter((d) => d.state === 'open' || d.state === 'ruled').map((d) => d.title))))
+    if (plan.stale) nodes.push(note(staleNote(pendingDecisions(plan).map((d) => d.title))))
     nodes.push(this.wholePlanRow(plan), this.goalSection(spec))
     for (const scenario of spec.scenarios) nodes.push(this.scenarioCard(scenario, plan))
     if (spec.questions.length > 0) nodes.push(this.questionsSection(spec, plan))
@@ -314,16 +313,22 @@ export class PlanView extends HTMLElement {
   // --- decisions ----------------------------------------------------------------
 
   /**
-   * The decisions still in play, one card each, and beneath them the settled
-   * ones folded away: an applied decision is history, its finding and ruling
-   * the record, and its title no more than a footnote.
+   * A wizard over the decisions still in play: one at a time, the finding
+   * explained and the ways to settle it as buttons, a pick moving on to the
+   * next open one; the list beneath is the way back to any of them. The
+   * settled ones are folded away: an applied decision is history, its finding
+   * and ruling the record, and its title no more than a footnote.
    */
-  private decisionsSection(spec: Spec, plan: PlanState): HTMLElement {
+  private decisionsSection(plan: PlanState): HTMLElement {
     const section = el('section', 'decisions')
-    const pending = spec.decisions.filter((d) => d.state === 'open' || d.state === 'ruled')
-    const settled = spec.decisions.filter((d) => d.state === 'applied' || d.state === 'withdrawn')
+    const pending = pendingDecisions(plan)
+    const settled = plan.decisions.filter((d) => d.state === 'applied' || d.state === 'withdrawn')
     if (pending.length === 0) section.append(note(settled.length > 0 ? 'Every decision is settled.' : 'The mapping found nothing in the way.'))
-    for (const decision of pending) section.append(this.decisionCard(decision, plan))
+    else {
+      const current = pending.find((d) => this.shown !== undefined && same(d.title, this.shown)) ?? pending.find((d) => d.state === 'open') ?? pending[0]!
+      const index = pending.indexOf(current)
+      section.append(this.wizardHeader(pending, index), this.decisionCard(current, plan), this.decisionSteps(pending, current))
+    }
     if (settled.length > 0) {
       const history = document.createElement('details')
       history.className = 'history'
@@ -338,10 +343,44 @@ export class PlanView extends HTMLElement {
     return section
   }
 
-  /** A decision to make: what the code and the spec disagree on, what is proposed, and the ruling, with the buttons that make one. */
+  /** Where the wizard stands, with a step back and forward through the pending decisions. */
+  private wizardHeader(pending: Decision[], index: number): HTMLElement {
+    const head = el('header', 'wizard')
+    const open = pending.filter((d) => d.state === 'open').length
+    head.append(el('span', 'count', `Decision ${index + 1} of ${pending.length}`), el('span', 'left', open === 0 ? 'all ruled' : `${open} to rule on`))
+    const nav = el('span', 'nav')
+    const previous = button('Previous', () => this.show(pending[index - 1]!))
+    previous.disabled = index === 0
+    const next = button('Next', () => this.show(pending[index + 1]!))
+    next.disabled = index === pending.length - 1
+    nav.append(previous, next)
+    head.append(nav)
+    return head
+  }
+
+  private show(decision: Decision): void {
+    this.shown = decision.title
+    this.editor = undefined
+    this.draw()
+  }
+
+  /** The pending decisions in order, the one shown marked; a click is the way back to a ruled one. */
+  private decisionSteps(pending: Decision[], current: Decision): HTMLElement {
+    const list = el('ol', 'steps')
+    for (const decision of pending) {
+      const row = el('li', `step ${decision.state}${decision === current ? ' current' : ''}`)
+      const link = button(decision.title, () => this.show(decision))
+      link.className = 'link'
+      row.append(link, el('span', `badge state ${decision.state}`, DECISION_STATE[decision.state]))
+      list.append(row)
+    }
+    return list
+  }
+
+  /** A decision to make: what the code and the spec disagree on, and the ways to settle it, each a button. */
   private decisionCard(decision: Decision, plan: PlanState): HTMLElement {
     const rulable = plan.commentable
-    const card = el('article', `decision ${decision.state}${rulable && decision.state === 'open' && decision.proposal ? ' attention' : ''}`)
+    const card = el('article', `decision ${decision.state}${rulable && decision.state === 'open' && decision.proposals.length > 0 ? ' attention' : ''}`)
     const head = el('header', 'head')
     head.append(el('h3', 'title', decision.title), el('span', `badge state ${decision.state}`, DECISION_STATE[decision.state]))
     card.append(head)
@@ -357,12 +396,20 @@ export class PlanView extends HTMLElement {
       card.append(on)
     }
     card.append(labelled('finding', 'the code', decision.finding))
-    if (decision.proposal) card.append(labelled('proposal', 'proposed', decision.proposal))
-    else if (decision.state === 'open') card.append(el('div', 'awaiting', 'waiting for the planner to propose'))
-    if (decision.ruling) card.append(labelled('ruling', 'ruling', decision.ruling))
+    if (decision.proposals.length === 0 && decision.state === 'open') card.append(el('div', 'awaiting', 'waiting for the planner to propose'))
+    if (decision.ruling) card.append(labelled('ruling', 'ruling', rulingText(decision)))
     if (rulable && this.editor?.kind === 'ruling' && same(this.editor.target, decision.title)) card.append(this.editorBox(this.editor))
-    else if (rulable) card.append(this.rulingControls(decision))
+    else if (rulable) card.append(this.rulingOptions(decision))
     return card
+  }
+
+  /** Writes the ruling and moves the wizard on to the next open decision, the one after this first; stays when none is left. */
+  private rule(title: string, ruling: string): void {
+    const pending = this.plan ? pendingDecisions(this.plan) : []
+    const index = pending.findIndex((d) => same(d.title, title))
+    const after = pending.slice(index + 1).find((d) => d.state === 'open') ?? pending.find((d, i) => d.state === 'open' && i !== index)
+    this.shown = after?.title ?? title
+    this.act({ type: 'rule_decision', decision: title, ruling })
   }
 
   /** A decision that is history: the finding and what was ruled, the title beneath as the reference. */
@@ -370,7 +417,7 @@ export class PlanView extends HTMLElement {
     const row = el('div', `decision settled ${decision.state}`)
     row.append(labelled('finding', 'the code', decision.finding))
     if (decision.state === 'withdrawn') row.append(el('div', 'awaiting', 'withdrawn: the mapping found it no longer holds'))
-    else if (decision.ruling) row.append(labelled('ruling', 'ruled', decision.ruling === 'accepted' && decision.proposal ? decision.proposal : decision.ruling))
+    else if (decision.ruling) row.append(labelled('ruling', 'ruled', rulingText(decision)))
     const foot = el('div', 'foot')
     foot.append(el('span', 'title', decision.title))
     if (decision.on.length > 0) foot.append(el('span', 'on', `on ${decision.on.join(', ')}`))
@@ -378,22 +425,34 @@ export class PlanView extends HTMLElement {
     return row
   }
 
-  private rulingControls(decision: Decision): HTMLElement {
-    const wrap = el('div', 'rulings')
-    if (decision.state === 'open' && decision.proposal) {
-      wrap.append(
-        button('Accept proposal', () => this.act({ type: 'rule_decision', decision: decision.title, ruling: 'accepted' }), {
-          title: 'Rule as proposed. Send rulings from the plan bar hands them to the planner; nothing is sent now.',
-        }),
-      )
+  /**
+   * The ways to settle a decision: change the spec one of the proposed ways,
+   * keep it and change the code, or say it in the user's own words. The
+   * chosen one is marked; a pick writes the ruling and moves the wizard on
+   * to the next open decision. Nothing is sent until Send rulings.
+   */
+  private rulingOptions(decision: Decision): HTMLElement {
+    const wrap = el('div', 'options')
+    const pick = (ruling: string) => this.rule(decision.title, ruling)
+    const chosen = (ruling: string) => decision.ruling !== undefined && same(decision.ruling, ruling)
+    const sent = 'Send rulings from the plan bar hands them to the planner; nothing is sent now.'
+    for (const proposal of decision.proposals) {
+      const option = button('', () => pick(proposal), { title: `Rule that the rule reads so. ${sent}` })
+      option.className = `option change${chosen(proposal) ? ' chosen' : ''}`
+      option.append(el('span', 'kind', 'Change the spec'), el('span', 'text', proposal))
+      wrap.append(option)
     }
-    const own = decision.state === 'ruled' ? 'Change ruling' : decision.proposal ? 'Rule otherwise' : 'Rule'
-    const otherwise = button(own, () => this.openEditor({ kind: 'ruling', target: decision.title, text: decision.ruling === 'accepted' ? '' : (decision.ruling ?? '') }), {
-      title: 'Write your own ruling. Send rulings from the plan bar hands them to the planner; nothing is sent now.',
+    const keep = button('', () => pick(KEEP_RULING), { title: `The rule stands as written; the code is changed to match. ${sent}` })
+    keep.className = `option keep${chosen(KEEP_RULING) ? ' chosen' : ''}`
+    keep.append(el('span', 'kind', 'Keep the spec'), el('span', 'text', 'the code changes'))
+    wrap.append(keep)
+    const ownRuling = decision.ruling !== undefined && !chosen(KEEP_RULING) && !decision.proposals.some((p) => chosen(p))
+    const own = button('', () => this.openEditor({ kind: 'ruling', target: decision.title, text: ownRuling ? decision.ruling! : '' }), {
+      title: `Write the ruling in your own words. ${sent}`,
     })
-    // Secondary beside an accept; the only choice on a decision without a proposal, so primary there.
-    if (decision.state === 'open' && decision.proposal) otherwise.className = 'otherwise'
-    wrap.append(otherwise)
+    own.className = `option own${ownRuling ? ' chosen' : ''}`
+    own.append(el('span', 'kind', 'Own ruling'), el('span', 'text', ownRuling ? decision.ruling! : 'say what should happen'))
+    wrap.append(own)
     return wrap
   }
 
@@ -457,36 +516,6 @@ export class PlanView extends HTMLElement {
       }
       row.append(files)
     }
-    return row
-  }
-
-  // --- intent -------------------------------------------------------------------
-
-  /** What this feature owes the intent docs: each amendment as it would land, marked once it has. */
-  private intentTab(intent: IntentState): HTMLElement {
-    const section = el('section', 'intent')
-    const heading = el('h2', 'heading', 'Intent amendments')
-    heading.title = intent.path
-    section.append(heading)
-    if (intent.amendments.length === 0) section.append(note('The planner proposed no amendment.'))
-    const list = el('ul', 'amendments')
-    for (const amendment of intent.amendments) list.append(this.amendmentRow(amendment))
-    section.append(list)
-    return section
-  }
-
-  private amendmentRow(a: Amendment): HTMLElement {
-    const row = el('li', `amendment ${a.applied ? 'applied' : 'pending'}`)
-    const line = el('div', 'line')
-    const target = fileLink(a.doc, `${a.doc}${a.heading ? `#${a.heading}` : ''}`)
-    target.classList.add('name')
-    line.append(target, el('span', 'chip mode', a.mode), el('span', `badge state ${a.applied ? 'applied' : 'open'}`, a.applied ? 'applied' : 'pending'))
-    row.append(line)
-    if (a.from) row.append(labelled('from', 'from', a.from))
-    if (a.why) row.append(labelled('why', 'why', a.why))
-    const text = el('div', 'prose text')
-    renderMarkdown(a.text, text, true)
-    row.append(text)
     return row
   }
 
@@ -561,7 +590,7 @@ export class PlanView extends HTMLElement {
       const text = area.value.trim()
       if (!text) return
       this.editor = undefined
-      if (editor.kind === 'ruling') this.act({ type: 'rule_decision', decision: editor.target, ruling: text })
+      if (editor.kind === 'ruling') this.rule(editor.target, text)
       else if (editor.comment) this.act({ type: 'edit_comment', comment: editor.comment, text })
       else this.act({ type: 'add_comment', target: editor.target, text })
       this.draw()
@@ -575,6 +604,16 @@ export class PlanView extends HTMLElement {
 function pendingRound(review: Review) {
   const last = review.rounds.at(-1)
   return last && last.submittedAt === undefined ? last : undefined
+}
+
+/** Decisions still in play: open, or ruled and with the planner. */
+function pendingDecisions(plan: PlanState): Decision[] {
+  return plan.decisions.filter((d) => d.state === 'open' || d.state === 'ruled')
+}
+
+/** The ruling as the reader should see it: `keep` says what it means, anything else is the text as written. */
+function rulingText(decision: Decision): string {
+  return decision.ruling !== undefined && same(decision.ruling, KEEP_RULING) ? 'keep the spec; the code changes' : (decision.ruling ?? '')
 }
 
 function struckItems(review: Review): string[] {
@@ -608,7 +647,7 @@ function named(name: string, text: string): HTMLElement {
   return span
 }
 
-/** A labelled line: what the mapper found, what the planner proposed, what the user ruled, where an amendment came from. */
+/** A labelled line: what the mapper found, what the user ruled. */
 function labelled(className: string, kind: string, text: string): HTMLElement {
   const line = el('div', className)
   line.append(el('span', 'kind', kind), el('span', 'text', text))

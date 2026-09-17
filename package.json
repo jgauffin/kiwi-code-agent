@@ -147,7 +147,7 @@
             "type": "string"
           },
           "default": [],
-          "description": "Workspace-relative globs a Plan session must not read, carved out of docs/** and the root README. Example: docs/api/**."
+          "description": "Workspace-relative globs a Plan session must not read, carved out of docs/**, the root README and plan/*.spec.md. Example: docs/api/**."
         },
         "kiwiAgent.permissions.allow": {
           "type": "array",
