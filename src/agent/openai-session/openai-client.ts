@@ -19,24 +19,31 @@ export class OpenAiClient implements ChatCompletionClient {
   }
 
   async *stream(request: CompletionRequest): AsyncIterable<CompletionDelta> {
-    const response = await this.fetchFn(`${this.options.baseUrl.replace(/\/$/, '')}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${this.options.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: request.model,
-        messages: request.messages.map(toWire),
-        tools: request.tools.map((t) => ({
-          type: 'function',
-          function: { name: t.name, description: t.description, parameters: t.parameters },
-        })),
-        stream: true,
-        stream_options: { include_usage: true },
-      }),
-      signal: request.signal,
-    })
+    const url = `${this.options.baseUrl.replace(/\/$/, '')}/chat/completions`
+    let response: Response
+    try {
+      response = await this.fetchFn(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${this.options.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: request.model,
+          messages: request.messages.map(toWire),
+          tools: request.tools.map((t) => ({
+            type: 'function',
+            function: { name: t.name, description: t.description, parameters: t.parameters },
+          })),
+          stream: true,
+          stream_options: { include_usage: true },
+        }),
+        signal: request.signal,
+      })
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') throw error
+      throw new NetworkError(url, error)
+    }
     if (!response.ok || !response.body) {
       const text = await response.text().catch(() => '')
       throw new ApiError(response.status, text)
@@ -77,6 +84,32 @@ export class ApiError extends Error {
   ) {
     super(status ? `API error ${status}: ${body.slice(0, 500)}` : `API error: ${body.slice(0, 500)}`)
   }
+}
+
+/**
+ * The request never got an HTTP response. Node's fetch says only "fetch
+ * failed" and hides the reason (refused connection, unknown host, bad
+ * certificate) in `cause`, so this surfaces it along with the URL tried.
+ */
+export class NetworkError extends Error {
+  constructor(
+    readonly url: string,
+    cause: unknown,
+  ) {
+    super(`Could not reach ${url}: ${describe(cause)}`, { cause })
+  }
+}
+
+function describe(error: unknown): string {
+  if (!(error instanceof Error)) return String(error)
+  const inner = error.cause
+  if (inner !== undefined && inner !== null && error.message === 'fetch failed') return describe(inner)
+  const parts = [error.message]
+  if (error instanceof AggregateError) {
+    // Happy Eyeballs: one attempt per address family, each with its own reason.
+    parts.push(...error.errors.map(describe))
+  }
+  return parts.filter(Boolean).join('; ') || error.name
 }
 
 type Chunk = {

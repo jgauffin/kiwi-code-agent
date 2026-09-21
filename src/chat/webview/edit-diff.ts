@@ -1,5 +1,6 @@
 import type { FileEditChange } from '../../agent/session/code-session'
 import { omittedNotice } from '../../agent/edits/file-edit-diff'
+import { fillCode, languageForPath } from './highlight'
 import { post } from './vscode-api'
 
 /**
@@ -15,7 +16,8 @@ export function editDiffView(change: FileEditChange): HTMLElement {
     box.append(line('p', 'edit-summary', change.summary))
     return box
   }
-  for (const diff of change.diffs) box.append(diffBlock(diff))
+  const lang = languageForPath(change.path)
+  for (const diff of change.diffs) box.append(diffBlock(diff, lang))
   if (change.omitted > 0) box.append(omission(change))
   return box
 }
@@ -51,10 +53,26 @@ function omission(change: FileEditChange): HTMLElement {
   return paragraph
 }
 
-function diffBlock(diff: string): HTMLElement {
+/**
+ * Code lines are colored one at a time in the file's language, so the +/-
+ * mark stays outside the tokens; a construct spanning lines (a block comment)
+ * may color imperfectly, which the diff editor is there for.
+ */
+function diffBlock(diff: string, lang: string | undefined): HTMLElement {
   const block = document.createElement('pre')
   block.className = 'diff'
-  for (const text of diff.split('\n')) block.append(line('span', `diff-line ${kindOf(text)}`, text))
+  for (const text of diff.split('\n')) {
+    const kind = kindOf(text)
+    const row = line('span', `diff-line ${kind}`)
+    if (kind === 'hunk') {
+      row.textContent = text
+    } else {
+      const code = line('span', 'code')
+      fillCode(code, text.slice(1), lang)
+      row.append(text.slice(0, 1), code)
+    }
+    block.append(row)
+  }
   return block
 }
 

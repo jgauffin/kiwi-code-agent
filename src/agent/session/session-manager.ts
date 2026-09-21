@@ -23,7 +23,12 @@ export type SessionRecord = {
   parentId?: string
   /** Workspace-relative paths a cleanup run was given to split; what it may write, beside new files next to them. */
   files?: string[]
-  /** Engine-side conversation id: the engine's own once it reports it, or inherited from the session this one continues. Lets a closed session continue. */
+  /**
+   * Engine-side conversation id, what lets a closed session continue. For the
+   * Claude SDK it is the engine's own, inherited from the session this one
+   * continues; for the own loop it names the session record whose run log
+   * this conversation starts in.
+   */
   engineSessionId?: string
   createdAt: string
 }
@@ -54,15 +59,21 @@ export type CreateOptions = {
   files?: string[]
   /**
    * The session whose conversation the new one carries on, so what it read is
-   * not read again. Honoured when the engine resumes; otherwise the session
+   * not read again. Honoured on the same engine; across engines the session
    * starts empty and the files on disk are its whole input.
    */
   continues?: SessionRecord | undefined
 }
 
-/** The Claude SDK resumes a conversation by its id; the own loop starts every session empty. */
-export function canContinue(previous: SessionRecord, profile: ModelProfile): boolean {
-  return previous.engineSessionId !== undefined && previous.profile.engine === 'claude-sdk' && profile.engine === 'claude-sdk'
+/** What the new session resumes from: the engine's conversation id for the Claude SDK, the previous record's log for the own loop. */
+export function continuationOf(previous: SessionRecord, profile: ModelProfile): string | undefined {
+  if (previous.engineSessionId === undefined || previous.profile.engine !== profile.engine) return undefined
+  switch (profile.engine) {
+    case 'claude-sdk':
+      return previous.engineSessionId
+    case 'openai-compatible':
+      return previous.id
+  }
 }
 
 export type EngineFactory = (record: SessionRecord) => Promise<CodeSession>
@@ -134,7 +145,7 @@ export class SessionManager {
 
   async create(profile: ModelProfile, mode: SessionMode = 'chat', feature?: string, options: CreateOptions = {}): Promise<SessionRecord> {
     const { parentId, files, continues } = options
-    const continued = continues && canContinue(continues, profile) ? continues.engineSessionId : undefined
+    const continued = continues ? continuationOf(continues, profile) : undefined
     const record: SessionRecord = {
       id: crypto.randomUUID(),
       title: titleFor(mode, feature),
@@ -219,6 +230,18 @@ export class SessionManager {
     return this.runLogFor(id)
       .read()
       .then((entries) => entries.map((e) => e.event))
+  }
+
+  /**
+   * The whole conversation behind a session: the transcripts of the sessions
+   * it continues, oldest first, then its own. Only the own loop's records name
+   * a record as their engine session; any other id resolves to nothing.
+   */
+  async conversation(id: string): Promise<SessionEvent[]> {
+    const record = this.require(id)
+    const previous = record.engineSessionId !== undefined && record.engineSessionId !== id ? this.get(record.engineSessionId) : undefined
+    const own = await this.transcript(id)
+    return previous ? [...(await this.conversation(previous.id)), ...own] : own
   }
 
   async disposeAll(): Promise<void> {

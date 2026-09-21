@@ -8,6 +8,7 @@ import type { McpToolHost } from '../mcp/mcp-tool-host'
 import type { ChatCompletionClient, ChatMessage, ToolCall, ToolDefinition, Usage } from './chat-messages'
 import { ReadTracker } from './tools/read-tracker'
 import { toDefinition, type Tool, type ToolOutput } from './tools/tool'
+import { UNANSWERED_TOOL_RESULT } from './history'
 
 export type OpenAiSessionOptions = {
   id: string
@@ -16,6 +17,8 @@ export type OpenAiSessionOptions = {
   client: ChatCompletionClient
   tools: Tool[]
   systemPrompt: string
+  /** The conversation this session carries on: the id it reports as its engine session, and the messages so far. */
+  resume?: { engineSessionId: string; history: ChatMessage[] }
   hooks?: SessionHooks
   /** Tool rounds per user turn before the engine gives up; a runaway loop costs money. */
   maxRoundsPerTurn?: number
@@ -52,10 +55,10 @@ export class OpenAiSession implements CodeSession {
   constructor(private readonly options: OpenAiSessionOptions) {
     this.id = options.id
     this.profile = options.profile
-    this.messages = [{ role: 'system', content: options.systemPrompt }]
+    this.messages = [{ role: 'system', content: options.systemPrompt }, ...(options.resume?.history ?? [])]
     this.tools = options.tools
     this.definitions = options.tools.map(toDefinition)
-    this.emit({ type: 'session_started', engineSessionId: options.id, model: options.profile.model })
+    this.emit({ type: 'session_started', engineSessionId: options.resume?.engineSessionId ?? options.id, model: options.profile.model })
     const { mcp } = options
     if (mcp) {
       this.mcp = {
@@ -220,11 +223,12 @@ export class OpenAiSession implements CodeSession {
     if (text) this.emit({ type: 'assistant_message', messageId, text })
     const toolCalls = [...calls.entries()].sort((a, b) => a[0] - b[0]).map(([, c]) => c)
     for (const call of toolCalls) {
+      const input = parseArguments(call.arguments)
       this.emit({
         type: 'tool_call',
         toolUseId: call.id,
         name: call.name,
-        input: parseArguments(call.arguments) ?? call.arguments,
+        ...(input === undefined ? { input: call.arguments, malformed: true } : { input }),
       })
     }
     return { role: 'assistant', content: text, ...(reasoning ? { reasoning } : {}), toolCalls }
@@ -312,7 +316,7 @@ export class OpenAiSession implements CodeSession {
       else break
     }
     for (const call of last.toolCalls) {
-      if (!answered.has(call.id)) this.messages.push({ role: 'tool', toolCallId: call.id, content: '[interrupted before this tool ran]' })
+      if (!answered.has(call.id)) this.messages.push({ role: 'tool', toolCallId: call.id, content: UNANSWERED_TOOL_RESULT })
     }
   }
 

@@ -10,6 +10,7 @@ import { hostExecutableAsNode, type NodeRuntime } from './agent/sdk-session/node
 import { RunLog } from './agent/runs/run-log'
 import { OpenAiSession } from './agent/openai-session/openai-session'
 import { OpenAiClient } from './agent/openai-session/openai-client'
+import { messagesFromEvents } from './agent/openai-session/history'
 import { buildSystemPrompt } from './agent/openai-session/system-prompt'
 import { readTool } from './agent/openai-session/tools/read'
 import { writeTool } from './agent/openai-session/tools/write'
@@ -221,6 +222,10 @@ export function activate(context: vscode.ExtensionContext): void {
         // Indexed per session so a skill added to the workspace shows up on the next one.
         const skills = await indexSkills(workspaceRoot)
         const allTools = [readTool, writeTool, editTool, globTool, grepTool, ...OWN_TOOLS, bashTool(), ...(skills.length ? [skillTool(skills)] : [])]
+        // A session that ran before, or continues one that did, picks its conversation up from the run log.
+        const resume = record.engineSessionId
+          ? { engineSessionId: record.engineSessionId, history: messagesFromEvents(await sessions.conversation(record.id)) }
+          : undefined
         return new OpenAiSession({
           id: record.id,
           profile,
@@ -228,6 +233,7 @@ export function activate(context: vscode.ExtensionContext): void {
           client: new OpenAiClient({ baseUrl: profile.baseUrl, apiKey }),
           tools: allowed(allTools),
           systemPrompt: setup.systemPrompt ?? (await buildSystemPrompt(workspaceRoot, profile.systemPromptFile)),
+          ...(resume ? { resume } : {}),
           ...(setup.hooks ? { hooks: setup.hooks } : {}),
           ...(mcpServers
             ? { mcp: { host: new McpToolHost(connectMcp(workspaceRoot, (server, chunk) => output.append(`[mcp ${server}] ${chunk}`))), servers: mcpServers } }

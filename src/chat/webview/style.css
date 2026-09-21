@@ -1225,6 +1225,11 @@ chat-app {
       & .diff-line {
         display: block;
         white-space: pre;
+
+        /* A colored line reads like the editor: the tinted background and the +/- mark carry the diff, not the text color. */
+        & .code.hljs {
+          color: var(--vscode-foreground);
+        }
       }
 
       & .diff-line.add {

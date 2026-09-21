@@ -4,6 +4,7 @@ import { splitShellCommand } from '../../agent/permissions/shell-split'
 import { renderAnsi } from './ansi'
 import { editDiffView, fileLink } from './edit-diff'
 import { formatUsage } from './format-usage'
+import { fillCode } from './highlight'
 import { renderMarkdown } from './markdown'
 import { PermissionCard } from './permission-card'
 import { isQuestionTool, QuestionCard } from './question-card'
@@ -245,10 +246,10 @@ export class ChatTranscript extends HTMLElement {
     if (shell) {
       // A shell step is named by what it is for; its body is the commands it runs, one per line.
       summary.textContent = shell.description ?? summarizeInput(event.input)
-      input.textContent = shell.lines.join('\n')
+      fillCode(input, shell.lines.join('\n'), 'bash')
     } else {
       summary.textContent = `${event.name} ${summarizeInput(event.input)}`
-      input.textContent = JSON.stringify(event.input, null, 2)
+      fillCode(input, JSON.stringify(event.input, null, 2), 'json')
     }
     details.append(summary, input)
     this.tools.set(event.toolUseId, details)

@@ -119,6 +119,40 @@ describe('OpenAiSession', () => {
     const results = events.filter((e) => e.type === 'tool_result')
     expect(results[0]).toMatchObject({ isError: true, text: expect.stringContaining('not valid JSON') })
     expect(results[1]).toMatchObject({ isError: true, text: expect.stringContaining('value') })
+    // The log tells the text that was not JSON apart from a parsed value, so a replay sends what the model wrote.
+    expect(events.filter((e) => e.type === 'tool_call')).toEqual([
+      { type: 'tool_call', toolUseId: 'c1', name: 'Echo', input: '{"value":', malformed: true },
+      { type: 'tool_call', toolUseId: 'c2', name: 'Echo', input: { nope: 1 } },
+    ])
+    await s.dispose()
+  })
+
+  it('a_resumed_session_carries_its_conversation_on_and_reports_the_id_it_resumed', async () => {
+    const model = new ScriptedModel(text('and more'))
+    const s = new OpenAiSession({
+      id: 's2',
+      profile: { name: 'GLM', engine: 'openai-compatible', model: 'glm' },
+      cwd: process.cwd(),
+      client: model,
+      tools: [echoTool as Tool],
+      systemPrompt: 'sys',
+      resume: {
+        engineSessionId: 's1',
+        history: [
+          { role: 'user', content: 'earlier' },
+          { role: 'assistant', content: 'noted', toolCalls: [] },
+        ],
+      },
+    })
+    s.send('now')
+    const events = await untilTurnDone(s)
+    expect(events[0]).toEqual({ type: 'session_started', engineSessionId: 's1', model: 'glm' })
+    expect(model.requests[0]!.messages).toEqual([
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'earlier' },
+      { role: 'assistant', content: 'noted', toolCalls: [] },
+      { role: 'user', content: 'now' },
+    ])
     await s.dispose()
   })
 

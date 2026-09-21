@@ -46,7 +46,8 @@ export type SessionEvent =
   | { type: 'assistant_thinking'; messageId: string; delta: string; parentToolUseId?: string }
   /** Final text of an assistant message, replaces whatever was streamed under the same id. */
   | { type: 'assistant_message'; messageId: string; text: string; parentToolUseId?: string }
-  | { type: 'tool_call'; toolUseId: string; name: string; input: unknown; parentToolUseId?: string }
+  /** `malformed` is set when the model's arguments were not JSON: `input` is then their text as written. */
+  | { type: 'tool_call'; toolUseId: string; name: string; input: unknown; malformed?: true; parentToolUseId?: string }
   /** `edit` is set on a file edit that changed something: the diff the step made, as the chat shows it. */
   | { type: 'tool_result'; toolUseId: string; text: string; isError: boolean; parentToolUseId?: string; edit?: FileEditChange }
   | {

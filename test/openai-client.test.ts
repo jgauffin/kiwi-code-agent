@@ -93,4 +93,46 @@ describe('OpenAiClient', () => {
     await expect(collect(client)).rejects.toMatchObject({ status: 401, body: '{"error":"bad key"}' })
     await expect(collect(client)).rejects.toBeInstanceOf(ApiError)
   })
+
+  it('network_failure_names_the_endpoint_and_the_underlying_cause_instead_of_fetch_failed', async () => {
+    const cause = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:8080'), { code: 'ECONNREFUSED' })
+    const client = new OpenAiClient({
+      baseUrl: 'http://127.0.0.1:8080/v1',
+      apiKey: 'k',
+      fetch: async () => {
+        throw new TypeError('fetch failed', { cause })
+      },
+    })
+    await expect(collect(client)).rejects.toThrow(
+      'Could not reach http://127.0.0.1:8080/v1/chat/completions: connect ECONNREFUSED 127.0.0.1:8080',
+    )
+  })
+
+  it('network_failure_lists_every_address_tried_when_node_reports_an_aggregate', async () => {
+    const cause = new AggregateError(
+      [new Error('connect ECONNREFUSED ::1:8080'), new Error('connect ECONNREFUSED 127.0.0.1:8080')],
+      '',
+    )
+    const client = new OpenAiClient({
+      baseUrl: 'http://localhost:8080/v1',
+      apiKey: 'k',
+      fetch: async () => {
+        throw new TypeError('fetch failed', { cause })
+      },
+    })
+    await expect(collect(client)).rejects.toThrow(
+      'Could not reach http://localhost:8080/v1/chat/completions: connect ECONNREFUSED ::1:8080; connect ECONNREFUSED 127.0.0.1:8080',
+    )
+  })
+
+  it('aborting_the_request_is_not_reported_as_a_network_failure', async () => {
+    const client = new OpenAiClient({
+      baseUrl: 'http://127.0.0.1:8080/v1',
+      apiKey: 'k',
+      fetch: async () => {
+        throw new DOMException('This operation was aborted', 'AbortError')
+      },
+    })
+    await expect(collect(client)).rejects.toMatchObject({ name: 'AbortError' })
+  })
 })

@@ -22,24 +22,44 @@ import xml from 'highlight.js/lib/languages/xml'
 import yaml from 'highlight.js/lib/languages/yaml'
 
 // Only the languages that show up in agent replies are bundled; the full set
-// would dwarf the rest of the webview. An unregistered fence renders as plain text.
+// would dwarf the rest of the webview. An unregistered language renders as plain text.
 const languages: Record<string, Parameters<typeof hljs.registerLanguage>[1]> = {
   bash, csharp, css, diff, dockerfile, go, ini, java, javascript, json, kotlin,
   markdown, powershell, python, rust, scss, shell, sql, typescript, xml, yaml,
 }
 for (const [name, grammar] of Object.entries(languages)) hljs.registerLanguage(name, grammar)
-hljs.registerAliases(['cs'], { languageName: 'csharp' })
-hljs.registerAliases(['html', 'svg', 'xaml', 'csproj'], { languageName: 'xml' })
-hljs.registerAliases(['sh', 'zsh'], { languageName: 'bash' })
-hljs.registerAliases(['ps1', 'pwsh'], { languageName: 'powershell' })
-hljs.registerAliases(['yml'], { languageName: 'yaml' })
-hljs.registerAliases(['toml'], { languageName: 'ini' })
+// File extensions highlight.js has no alias for.
+hljs.registerAliases(['xaml', 'csproj', 'props', 'targets', 'xsd', 'vsixmanifest'], { languageName: 'xml' })
+hljs.registerAliases(['cmd', 'bat'], { languageName: 'shell' })
 
-/** HTML for a code block: token spans when the language is known, escaped text otherwise. */
-export function highlightCode(text: string, lang: string | undefined): { html: string; highlighted: boolean } {
+export type Highlighted = { html: string; highlighted: boolean }
+
+/** HTML for code: token spans when the language is known, escaped text otherwise. */
+export function highlightCode(text: string, lang: string | undefined): Highlighted {
   const language = lang ? hljs.getLanguage(lang) : undefined
   if (!language) return { html: escapeHtml(text), highlighted: false }
   return { html: hljs.highlight(text, { language: lang!, ignoreIllegals: true }).value, highlighted: true }
+}
+
+/** Fills the element with the colored code, or with plain text when the language is unknown. */
+export function fillCode(target: HTMLElement, text: string, lang: string | undefined): void {
+  const { html, highlighted } = highlightCode(text, lang)
+  if (!highlighted) {
+    target.textContent = text
+    return
+  }
+  target.innerHTML = html
+  target.classList.add('hljs')
+}
+
+/** The language a file is written in, judged by its name; undefined when none is bundled for it. */
+export function languageForPath(path: string): string | undefined {
+  const name = path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1).toLowerCase()
+  if (name === 'dockerfile') return 'dockerfile'
+  const dot = name.lastIndexOf('.')
+  if (dot < 0) return undefined
+  const extension = name.slice(dot + 1)
+  return hljs.getLanguage(extension) ? extension : undefined
 }
 
 export function escapeHtml(text: string): string {

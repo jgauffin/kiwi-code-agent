@@ -487,7 +487,45 @@ describe('SessionManager', () => {
       }
     })
 
-    it('a_record_continuing_an_own_loop_session_starts_fresh', async () => {
+    it('a_record_continuing_an_own_loop_session_names_that_record_and_its_conversation_is_the_chain_of_logs', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+      try {
+        const { manager, engines } = setup(dir)
+        const check = await manager.create(berget, 'reconcile', 'Orders')
+        await manager.send(check.id, 'map')
+        engines[0]!.out.push({ type: 'session_started', engineSessionId: check.id, model: 'glm' })
+        engines[0]!.out.push({ type: 'user_message', text: 'map' })
+        await tick()
+        await manager.close(check.id)
+
+        const implementer = await manager.create(berget, 'implement', 'Orders', { continues: manager.get(check.id) })
+        expect(implementer.engineSessionId).toBe(check.id)
+        await manager.send(implementer.id, 'implement')
+        expect(engines[1]!.resumedFrom).toBe(check.id)
+        // The engine reports the conversation it resumed, so the chain survives a reload.
+        engines[1]!.out.push({ type: 'session_started', engineSessionId: check.id, model: 'glm' })
+        engines[1]!.out.push({ type: 'user_message', text: 'implement' })
+        await tick()
+        await manager.close(implementer.id)
+        expect(manager.get(implementer.id)!.engineSessionId).toBe(check.id)
+
+        const again = await manager.create(berget, 'implement', 'Orders', { continues: manager.get(implementer.id) })
+        expect(again.engineSessionId).toBe(implementer.id)
+        await manager.send(again.id, 'once more')
+        engines[2]!.out.push({ type: 'user_message', text: 'once more' })
+        await tick()
+        expect((await manager.conversation(again.id)).filter((e) => e.type === 'user_message').map((e) => e.text)).toEqual([
+          'map',
+          'implement',
+          'once more',
+        ])
+        await manager.disposeAll()
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
+
+    it('a_conversation_is_not_continued_across_engines_or_from_a_session_that_never_ran', async () => {
       const dir = await mkdtemp(join(tmpdir(), 'sm-'))
       try {
         const { manager, engines } = setup(dir)
@@ -495,11 +533,29 @@ describe('SessionManager', () => {
         await manager.send(check.id, 'map')
         engines[0]!.out.push({ type: 'session_started', engineSessionId: check.id, model: 'glm' })
         await tick()
-        expect((await manager.create(berget, 'implement', 'Orders', { continues: manager.get(check.id) })).engineSessionId).toBeUndefined()
-        // Nor across engines: a Claude implementer cannot pick up a Berget mapping, or the other way round.
+        // A Claude implementer cannot pick up a Berget mapping, or the other way round.
         expect((await manager.create(profile, 'implement', 'Orders', { continues: manager.get(check.id) })).engineSessionId).toBeUndefined()
         const never = await manager.create(profile, 'reconcile', 'Orders')
         expect((await manager.create(profile, 'implement', 'Orders', { continues: never })).engineSessionId).toBeUndefined()
+        const neverOwn = await manager.create(berget, 'reconcile', 'Orders')
+        expect((await manager.create(berget, 'implement', 'Orders', { continues: neverOwn })).engineSessionId).toBeUndefined()
+        await manager.disposeAll()
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
+
+    it('a_session_that_ran_before_names_itself_and_its_conversation_is_its_own_log', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+      try {
+        const { manager, engines } = setup(dir)
+        const chat = await manager.create(berget)
+        await manager.send(chat.id, 'hi')
+        engines[0]!.out.push({ type: 'session_started', engineSessionId: chat.id, model: 'glm' })
+        engines[0]!.out.push({ type: 'user_message', text: 'hi' })
+        await tick()
+        expect(manager.get(chat.id)!.engineSessionId).toBe(chat.id)
+        expect((await manager.conversation(chat.id)).map((e) => e.type)).toEqual(['session_started', 'user_message'])
         await manager.disposeAll()
       } finally {
         await rm(dir, { recursive: true, force: true })

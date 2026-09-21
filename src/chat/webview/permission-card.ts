@@ -3,6 +3,7 @@ import { isShellTool, projectRuleFor, ruleLabel } from '../../agent/permissions/
 import type { RememberedRules } from '../protocol'
 import { editDiffView } from './edit-diff'
 import { PermissionDecidedEvent } from './events'
+import { fillCode } from './highlight'
 
 type PermissionRequest = Extract<SessionEvent, { type: 'permission_request' }>
 
@@ -78,7 +79,7 @@ export class PermissionCard extends HTMLElement {
     }
     const input = document.createElement('pre')
     input.className = 'input'
-    input.textContent = JSON.stringify(r.input, null, 2)
+    fillCode(input, JSON.stringify(r.input, null, 2), 'json')
     const wrapper = document.createElement('div')
     wrapper.append(input, this.wholeCallActions(r))
     return wrapper
@@ -109,7 +110,7 @@ export class PermissionCard extends HTMLElement {
       const item = document.createElement('li')
       item.className = 'command'
       const text = document.createElement('code')
-      text.textContent = line.text
+      fillCode(text, line.text, 'bash')
       item.append(text, this.lineStatus(line, index))
       list.appendChild(item)
     })
