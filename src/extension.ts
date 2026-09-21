@@ -219,7 +219,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!profile.apiKeySecret) throw new Error(`Profile "${profile.name}" has no apiKeySecret`)
         const apiKey = await context.secrets.get(secretKey(profile.apiKeySecret))
         if (!apiKey) throw new Error(`No API key stored for "${profile.apiKeySecret}". Run "KiwiAgent: Set API Key for Profile".`)
-        // Indexed per session so a skill added to the workspace shows up on the next one.
+        // Indexed per session so a skill added to the workspace or the user profile shows up on the next one.
         const skills = await indexSkills(workspaceRoot)
         const allTools = [readTool, writeTool, editTool, globTool, grepTool, ...OWN_TOOLS, bashTool(), ...(skills.length ? [skillTool(skills)] : [])]
         // A session that ran before, or continues one that did, picks its conversation up from the run log.

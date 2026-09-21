@@ -2,25 +2,32 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { indexSkills } from '../src/agent/skills/skill-index'
+import { indexSkills as indexUnder } from '../src/agent/skills/skill-index'
 import { skillTool } from '../src/agent/openai-session/tools/skill'
 import { ReadTracker } from '../src/agent/openai-session/tools/read-tracker'
 import { toDefinition, type ToolContext } from '../src/agent/openai-session/tools/tool'
 
 let dir: string
+let home: string
 let ctx: ToolContext
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'skills-'))
+  home = await mkdtemp(join(tmpdir(), 'skills-home-'))
   ctx = { cwd: dir, signal: new AbortController().signal, files: new ReadTracker() }
 })
 
-afterEach(() => rm(dir, { recursive: true, force: true }))
+afterEach(async () => {
+  await rm(dir, { recursive: true, force: true })
+  await rm(home, { recursive: true, force: true })
+})
 
-async function skill(folder: string, content: string, root = '.claude'): Promise<void> {
-  await mkdir(join(dir, root, 'skills', folder), { recursive: true })
-  await writeFile(join(dir, root, 'skills', folder, 'SKILL.md'), content)
+async function skill(folder: string, content: string, root = '.claude', base = dir): Promise<void> {
+  await mkdir(join(base, root, 'skills', folder), { recursive: true })
+  await writeFile(join(base, root, 'skills', folder, 'SKILL.md'), content)
 }
+
+const indexSkills = (cwd: string) => indexUnder(cwd, home)
 
 describe('skill index', () => {
   it('lists_each_skill_by_frontmatter_name_and_description', async () => {
@@ -53,6 +60,24 @@ describe('skill index', () => {
       ['only-agent', 'Agent only.'],
       ['shared', 'From .agent.'],
     ])
+  })
+
+  it('user_skills_under_claude_and_agent_roots_are_indexed', async () => {
+    await skill('a', '---\nname: user-claude\ndescription: From ~/.claude.\n---\nbody', '.claude', home)
+    await skill('b', '---\nname: user-agent\ndescription: From ~/.agent.\n---\nbody', '.agent', home)
+    const skills = await indexSkills(dir)
+    expect(skills.map((s) => [s.name, s.description])).toEqual([
+      ['user-agent', 'From ~/.agent.'],
+      ['user-claude', 'From ~/.claude.'],
+    ])
+    expect(skills[1]!.dir).toBe(join(home, '.claude', 'skills', 'a'))
+  })
+
+  it('workspace_skill_replaces_user_skill_with_the_same_name', async () => {
+    await skill('a', '---\nname: shared\ndescription: From the user.\n---\nbody', '.agent', home)
+    await skill('b', '---\nname: shared\ndescription: From the workspace.\n---\nbody', '.claude')
+    const skills = await indexSkills(dir)
+    expect(skills.map((s) => [s.name, s.description])).toEqual([['shared', 'From the workspace.']])
   })
 
   it('a_folder_without_skill_md_and_a_workspace_without_skills_are_not_errors', async () => {

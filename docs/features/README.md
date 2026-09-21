@@ -15,3 +15,4 @@ One file per feature, in rough build order. Each says what the feature does; `do
 11. [ado-integration.md](ado-integration.md)
 12. [own-loop-compaction.md](own-loop-compaction.md)
 13. [mcp-servers.md](mcp-servers.md)
+14. [instructions-and-skills.md](instructions-and-skills.md)

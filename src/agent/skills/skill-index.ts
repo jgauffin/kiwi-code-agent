@@ -1,5 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { readOptional } from '../instructions/instruction-files'
 
 export type SkillEntry = {
   name: string
@@ -10,16 +12,20 @@ export type SkillEntry = {
 }
 
 /**
- * Workspace-relative roots, both in Claude Code's layout so one skill serves
- * both engines. `.agent/skills` is ours and wins when a name is in both.
+ * Skill roots in override order, later wins: the user's serve every
+ * workspace, the workspace's replace them on a shared name, and at each
+ * level `.agent/skills` (ours) beats `.claude/skills` (Claude Code's layout,
+ * so one skill serves both engines).
  */
-export const SKILL_ROOTS = ['.claude/skills', '.agent/skills']
+export function skillRoots(cwd: string, home = homedir()): string[] {
+  return [home, cwd].flatMap((base) => [join(base, '.claude', 'skills'), join(base, '.agent', 'skills')])
+}
 
-/** Every `<root>/<folder>/SKILL.md` under the workspace, one entry per name, sorted. */
-export async function indexSkills(cwd: string): Promise<SkillEntry[]> {
+/** Every `<root>/<folder>/SKILL.md`, one entry per name, sorted. */
+export async function indexSkills(cwd: string, home = homedir()): Promise<SkillEntry[]> {
   const byName = new Map<string, SkillEntry>()
-  for (const root of SKILL_ROOTS) {
-    for (const skill of await indexRoot(join(cwd, root))) byName.set(skill.name, skill)
+  for (const root of skillRoots(cwd, home)) {
+    for (const skill of await indexRoot(root)) byName.set(skill.name, skill)
   }
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name))
 }
@@ -78,13 +84,4 @@ export function splitFrontmatter(text: string): { frontmatter: Record<string, st
 function unquote(value: string): string {
   const quoted = /^(["'])(.*)\1$/.exec(value)
   return quoted ? quoted[2]! : value
-}
-
-async function readOptional(path: string): Promise<string | undefined> {
-  try {
-    return await readFile(path, 'utf8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
-    throw error
-  }
 }

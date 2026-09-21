@@ -170,7 +170,7 @@ Parked: build scoped to the project owning the edited file; read-before-edit sta
 
 ## Instructions
 
-Small shared core plus a per-phase file. Per-type rules inject via PreToolUse hook matched on the path at edit time.
+Small shared core plus a per-phase file. Per-type rules inject via PreToolUse hook matched on the path at edit time. The user's and the workspace's instruction files (`CLAUDE.md`, `AGENTS.md`; `docs/features/instructions-and-skills.md` lists the paths) follow the core on the own loop, global first, so the same rules reach every engine and every workspace.
 
 - Checkable rules (no `#region`, no AutoMapper/MediatR, nullable on, no `Any`) go to analyzers, `.editorconfig`, BannedApiAnalyzers, grep in the verification hook.
 - Judgment rules (rule of three, earned abstraction) go to the prompt.
@@ -178,7 +178,7 @@ Small shared core plus a per-phase file. Per-type rules inject via PreToolUse ho
 
 ### Skills
 
-`.claude/skills/<name>/SKILL.md` and `.agent/skills/<name>/SKILL.md`, Claude Code's layout, so one skill serves both engines; `.agent/skills` wins on a shared name. The index (name and description from the frontmatter) rides in the `Skill` tool's description; the model loads a skill itself when a task matches, and the tool returns the body with the skill's folder for relative paths. Phases 2 and 3 and chat carry the tool; the blind planner does not, since skills describe how code is written.
+`.claude/skills/<name>/SKILL.md` and `.agent/skills/<name>/SKILL.md`, under the user profile and under the workspace, Claude Code's layout, so one skill serves both engines. On a shared name the workspace wins over the user and `.agent/skills` over `.claude/skills`. The index (name and description from the frontmatter) rides in the `Skill` tool's description; the model loads a skill itself when a task matches, and the tool returns the body with the skill's folder for relative paths. Phases 2 and 3 and chat carry the tool; the blind planner does not, since skills describe how code is written.
 
 ## Coordination
 
