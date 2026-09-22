@@ -6,6 +6,10 @@
   "publisher": "coderr",
   "private": true,
   "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jgauffin/kiwi-code-agent.git"
+  },
   "engines": {
     "vscode": "^1.104.0",
     "node": ">=22.0.0"
