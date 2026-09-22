@@ -318,7 +318,6 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.2.112",
-    "@anthropic-ai/sdk": "^0.81.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@relax.js/core": "^1.8.0",
     "dompurify": "^3.4.15",
@@ -326,6 +325,10 @@
     "marked": "^18.0.13",
     "mermaid": "^12.0.0",
     "zod": "^4.0.0"
+  },
+  "overrides": {
+    "@anthropic-ai/sdk": "^0.92.0",
+    "lodash-es": "^4.18.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
