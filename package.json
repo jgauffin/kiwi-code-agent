@@ -11,7 +11,7 @@
     "url": "https://github.com/jgauffin/kiwi-code-agent.git"
   },
   "engines": {
-    "vscode": "^1.104.0",
+    "vscode": "^1.100.0",
     "node": ">=22.0.0"
   },
   "categories": [
@@ -336,7 +336,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "@types/vscode": "^1.104.0",
+    "@types/vscode": "~1.100.0",
     "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.28.2",
     "jsdom": "^30.0.1",
