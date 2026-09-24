@@ -70,8 +70,8 @@ export class PermissionCard extends HTMLElement {
 
   private body(r: PermissionRequest): HTMLElement {
     if (isShellTool(r.toolName) && this.lines.length) return this.commandList()
-    // A file edit is asked about as the change it would make; a denied one shows only the outcome, nothing changed.
-    const change = this.decision === 'deny' ? undefined : r.edit
+    // A file edit is asked about as the change it would make; once decided, the edit step shows what it did, or nothing changed.
+    const change = this.decision === undefined ? r.edit : undefined
     if (change) {
       const wrapper = document.createElement('div')
       wrapper.append(editDiffView(change), this.wholeCallActions(r))
@@ -89,15 +89,23 @@ export class PermissionCard extends HTMLElement {
     const actions = document.createElement('div')
     actions.className = 'actions'
     if (this.decision !== undefined) return actions
-    actions.appendChild(button('allow', 'Allow', () => this.decide({ kind: 'allow' })))
+    // A tool is allowed as a whole, whatever its arguments; a file write per call, the session's "Allow writes" covers the rest.
     const rule = projectRuleFor(r.toolName)
     if (rule) {
-      const remember = button('allow-project', `Allow ${ruleLabel(rule)} for project`, () => {
+      const label = ruleLabel(rule)
+      const session = button('allow-session', `Allow ${label} for session`, () => {
+        this.remembered.session.push(rule)
+        this.decide({ kind: 'allow' })
+      })
+      session.title = `Later calls of ${rule} pass without asking, until this session's host is restarted.`
+      const project = button('allow-project', `Allow ${label} for project`, () => {
         this.remembered.project.push(rule)
         this.decide({ kind: 'allow' })
       })
-      remember.title = `Writes ${rule} to kiwiAgent.permissions.allow in this workspace.`
-      actions.appendChild(remember)
+      project.title = `Writes ${rule} to kiwiAgent.permissions.allow in this workspace.`
+      actions.append(session, project)
+    } else {
+      actions.appendChild(button('allow', 'Allow', () => this.decide({ kind: 'allow' })))
     }
     actions.appendChild(button('deny', 'Deny', () => this.decide({ kind: 'deny' })))
     return actions

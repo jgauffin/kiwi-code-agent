@@ -132,6 +132,43 @@ describe('a shell call on the permission card', () => {
   })
 })
 
+describe('a call that is not a shell command', () => {
+  const mcpRequest = (): Request => ({ type: 'permission_request', requestId: 'm1', toolName: 'mcp__docs__search', input: { query: 'x' } })
+  const labels = (c: Card) => [...c.querySelectorAll('button')].map((b) => b.textContent)
+  const press = (c: Card, label: string) => [...c.querySelectorAll('button')].find((b) => b.textContent === label)!.click()
+
+  it('is_allowed_for_the_tool_whatever_its_arguments_for_the_session_or_the_project', () => {
+    const { card: c } = card(mcpRequest())
+
+    expect(labels(c)).toEqual(['Allow mcp__docs__search for session', 'Allow mcp__docs__search for project', 'Deny'])
+  })
+
+  it('allowing_for_the_session_remembers_the_tool_as_a_rule_without_arguments', () => {
+    const { card: c, decisions } = card(mcpRequest())
+
+    press(c, 'Allow mcp__docs__search for session')
+
+    expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'allow', remember: { session: ['mcp__docs__search'], project: [] } }])
+  })
+
+  it('a_file_write_is_allowed_per_call_since_the_session_switch_covers_the_rest', () => {
+    const { card: c } = card({ type: 'permission_request', requestId: 'e1', toolName: 'Edit', input: { file_path: 'a.ts' } })
+
+    expect(labels(c)).toEqual(['Allow', 'Deny'])
+  })
+
+  it('an_allowed_edit_leaves_its_diff_to_the_edit_step_so_it_is_shown_once', () => {
+    const change = { path: 'a.ts', label: 'a.ts', diffs: ['@@ -1 +1 @@\n-a\n+b'], omitted: 0 }
+    const { card: c } = card({ type: 'permission_request', requestId: 'e1', toolName: 'Edit', input: { file_path: 'a.ts' }, edit: change })
+    expect(c.querySelector('.edit')).not.toBeNull()
+
+    c.resolve('allow')
+
+    expect(c.querySelector('.edit')).toBeNull()
+    expect(c.querySelector('.decision')?.textContent).toBe('Allowed')
+  })
+})
+
 describe('a shell step in the transcript', () => {
   it('is_named_by_its_description_and_shows_its_commands_one_per_line', () => {
     const view = new ChatTranscript()

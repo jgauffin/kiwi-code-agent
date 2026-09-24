@@ -26,7 +26,9 @@ function submitted(card: QuestionCard): QuestionOutcome | undefined {
 
 const submitButton = (card: QuestionCard) => card.querySelector<HTMLButtonElement>('button.submit')
 const groups = (card: QuestionCard) => [...card.querySelectorAll<HTMLElement>('section.question')]
-const hint = (card: QuestionCard) => card.querySelector<HTMLElement>('.missing')?.textContent ?? ''
+const visible = (card: QuestionCard) => groups(card).filter((g) => !g.hidden).map((g) => g.querySelector('.header')?.textContent)
+const shown = (card: QuestionCard) => [...card.querySelectorAll<HTMLButtonElement>('button')].filter((b) => !b.hidden).map((b) => b.textContent)
+const button = (card: QuestionCard, className: string) => card.querySelector<HTMLButtonElement>(`button.${className}`)!
 
 function choose(card: QuestionCard, group: number, label: string): void {
   const input = [...(groups(card)[group]?.querySelectorAll<HTMLInputElement>('input') ?? [])].find((i) => i.value === label)
@@ -43,48 +45,60 @@ function type(card: QuestionCard, group: number, text: string): void {
 }
 
 describe('the question card', () => {
-  it('one_card_per_request_shows_a_group_per_question_in_the_order_asked_under_one_submit', () => {
-    const card = cardFor({
-      questions: [
-        { header: 'Storage', question: 'Where do orders live?', options: [{ label: 'SQL', explanation: 'One database' }, { label: 'Files' }] },
-        { header: 'Naming', question: 'What do we call it?', options: [{ label: 'Order' }, { label: 'Ticket' }], multiSelect: true },
-      ],
-    })
+  const twoQuestions: UserQuestionRequest = {
+    questions: [
+      { header: 'Storage', question: 'Where do orders live?', options: [{ label: 'SQL', explanation: 'One database' }, { label: 'Files' }] },
+      { header: 'Naming', question: 'What do we call it?', options: [{ label: 'Order' }, { label: 'Ticket' }], multiSelect: true },
+    ],
+  }
+
+  it('several_questions_are_asked_one_at_a_time_in_the_order_asked', () => {
+    const card = cardFor(twoQuestions)
 
     const [first, second] = groups(card)
-    expect(groups(card)).toHaveLength(2)
-    expect(first?.querySelector('.header')?.textContent).toBe('Storage')
+    expect(visible(card)).toEqual(['Storage'])
+    expect(card.querySelector('.step')?.textContent).toBe('1 of 2')
     expect(first?.querySelector('.ask')?.textContent).toBe('Where do orders live?')
     expect([...(first?.querySelectorAll('.label') ?? [])].map((l) => l.textContent)).toEqual(['SQL', 'Files'])
     expect(first?.querySelector('.explanation')?.textContent).toBe('One database')
-    expect(second?.querySelector('.header')?.textContent).toBe('Naming')
     // Single-select takes one answer, multi-select several; every question also takes words of the user's own.
     expect(first?.querySelector('input')?.type).toBe('radio')
     expect(second?.querySelector('input')?.type).toBe('checkbox')
     expect(groups(card).every((g) => g.querySelector('textarea') !== null)).toBe(true)
-    expect(card.querySelectorAll('button.submit')).toHaveLength(1)
+    expect(shown(card)).toEqual(['Next', 'Skip'])
   })
 
-  it('submit_needs_an_answer_to_every_question_and_says_which_are_missing', () => {
-    const card = cardFor({
-      questions: [
-        { header: 'Storage', question: 'Where?', options: [{ label: 'SQL' }] },
-        { header: 'Naming', question: 'What?', options: [{ label: 'Order' }] },
-      ],
-    })
+  it('next_needs_the_current_question_answered_and_back_keeps_what_was_answered', () => {
+    const card = cardFor(twoQuestions)
 
-    // Nothing is chosen for the user, so nothing can be submitted yet.
-    expect(submitButton(card)?.disabled).toBe(true)
-    expect(hint(card)).toBe('Answer Storage, Naming to submit.')
-    expect(submitted(card)).toBeUndefined()
-
+    // Nothing is chosen for the user, so there is no moving on yet.
+    expect(button(card, 'next').disabled).toBe(true)
     choose(card, 0, 'SQL')
-    expect(submitButton(card)?.disabled).toBe(true)
-    expect(hint(card)).toBe('Answer Naming to submit.')
+    expect(button(card, 'next').disabled).toBe(false)
 
+    button(card, 'next').click()
+    expect(visible(card)).toEqual(['Naming'])
+    expect(card.querySelector('.step')?.textContent).toBe('2 of 2')
+    expect(shown(card)).toEqual(['Back', 'Submit', 'Skip'])
+    expect(submitButton(card)?.disabled).toBe(true)
+
+    button(card, 'back').click()
+    expect(visible(card)).toEqual(['Storage'])
+    expect(groups(card)[0]?.querySelector<HTMLInputElement>('input[value="SQL"]')?.checked).toBe(true)
+
+    button(card, 'next').click()
     choose(card, 1, 'Order')
+    expect(submitted(card)).toEqual({ kind: 'answered', answers: [{ chosen: ['SQL'] }, { chosen: ['Order'] }] })
+  })
+
+  it('a_single_question_has_no_steps_only_submit_and_skip', () => {
+    const card = cardFor({ questions: [{ header: 'Storage', question: 'Where?', options: [{ label: 'SQL' }] }] })
+
+    expect(card.querySelector('.step')).toBeNull()
+    expect(shown(card)).toEqual(['Submit', 'Skip'])
+    expect(submitButton(card)?.disabled).toBe(true)
+    choose(card, 0, 'SQL')
     expect(submitButton(card)?.disabled).toBe(false)
-    expect(hint(card)).toBe('')
   })
 
   it('a_multi_select_answer_submits_every_chosen_option_and_the_free_text_together', () => {
@@ -127,27 +141,35 @@ describe('the question card', () => {
     expect(submitted(card)).toEqual({ kind: 'answered', answers: [{ chosen: [], other: 'KiwiAgent' }] })
   })
 
-  it('a_resolved_card_keeps_what_was_asked_and_answered_and_takes_no_further_input', () => {
+  it('a_resolved_card_is_replaced_by_each_question_and_its_answer_as_text', () => {
     const request: UserQuestionRequest = {
-      questions: [{ header: 'Storage', question: 'Where?', options: [{ label: 'SQL' }, { label: 'Files' }] }],
+      questions: [
+        { header: 'Storage', question: 'Where?', options: [{ label: 'SQL' }, { label: 'Files' }] },
+        { header: 'Engines', question: 'Which?', options: [{ label: 'Claude' }, { label: 'GLM' }], multiSelect: true },
+      ],
     }
     const answered = cardFor(request)
 
-    answered.resolve({ kind: 'answered', answers: [{ chosen: ['SQL'] }] })
+    answered.resolve({ kind: 'answered', answers: [{ chosen: ['SQL'] }, { chosen: ['Claude', 'GLM'], other: 'and Kimi' }] })
 
     expect(answered.isResolved).toBe(true)
-    expect(submitButton(answered)).toBeNull()
+    expect(answered.querySelectorAll('input, textarea, button')).toHaveLength(0)
     expect(submitted(answered)).toBeUndefined()
-    expect(answered.querySelector('.header')?.textContent).toBe('Storage')
-    expect(answered.querySelector('.answered')?.textContent).toContain('SQL')
-    expect([...answered.querySelectorAll<HTMLInputElement>('input')].every((i) => i.disabled)).toBe(true)
-    expect([...answered.querySelectorAll<HTMLInputElement>('input')].find((i) => i.value === 'SQL')?.checked).toBe(true)
+    const rows = [...answered.querySelectorAll('.answered .question')].map((q) => [
+      q.querySelector('.header')?.textContent,
+      q.querySelector('.ask')?.textContent,
+      q.querySelector('.answer')?.textContent,
+    ])
+    expect(rows).toEqual([
+      ['Storage', 'Where?', 'SQL'],
+      ['Engines', 'Which?', 'Claude, GLM, and Kimi'],
+    ])
 
     const cancelled = cardFor(request, 'r2')
     cancelled.resolve({ kind: 'unanswered', reason: 'Interrupted' })
 
     expect(cancelled.querySelector('.unanswered')?.textContent).toBe('Not answered (interrupted).')
-    expect(submitted(cancelled)).toBeUndefined()
-    expect([...cancelled.querySelectorAll<HTMLTextAreaElement>('textarea')].every((f) => f.disabled)).toBe(true)
+    expect([...cancelled.querySelectorAll('.ask')].map((a) => a.textContent)).toEqual(['Where?', 'Which?'])
+    expect(cancelled.querySelectorAll('input, textarea, button')).toHaveLength(0)
   })
 })

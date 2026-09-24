@@ -1345,7 +1345,10 @@ chat-app {
 
       & .question {
         display: block;
+      }
 
+      /* Only a resolved card lists its questions together; the form shows one at a time. */
+      & :is(.answered, .asked) > .question {
         & + .question {
           margin-top: 0.8rem;
           border-top: 1px solid var(--vscode-panel-border);
@@ -1412,20 +1415,23 @@ chat-app {
         margin-top: 0.6rem;
       }
 
+      & .step,
       & .missing {
         opacity: 0.8;
         font-size: 0.85em;
       }
 
-      & .answered,
-      & .unanswered {
-        margin: 0.5rem 0 0;
+      /* A resolved card: each question, and beneath it what was answered. */
+      & .answer {
+        margin: 0;
         white-space: pre-wrap;
-        opacity: 0.8;
-        font-size: 0.9em;
+        font-weight: 600;
       }
 
       & .unanswered {
+        margin: 0.5rem 0 0;
+        opacity: 0.8;
+        font-size: 0.9em;
         font-style: italic;
       }
     }
@@ -1598,7 +1604,8 @@ button {
 
   &.stop,
   &.deny,
-  &.skip {
+  &.skip,
+  &.back {
     background: var(--vscode-button-secondaryBackground);
     color: var(--vscode-button-secondaryForeground);
   }
