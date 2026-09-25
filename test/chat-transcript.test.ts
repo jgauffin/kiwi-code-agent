@@ -68,6 +68,42 @@ describe('terminal output in the transcript', () => {
   })
 })
 
+describe('file edits in the transcript', () => {
+  const edit = (path: string) => ({ path, label: path, diffs: ['@@ -1 +1 @@\n-a\n+b'], omitted: 0 })
+  const write = (id: string, path: string, isError = false): SessionEvent[] => [
+    { type: 'tool_call', toolUseId: id, name: 'Write', input: { file_path: path } },
+    { type: 'tool_result', toolUseId: id, text: isError ? 'Permission denied' : `File written: ${path}`, isError, ...(isError ? {} : { edit: edit(path) }) },
+  ]
+  const steps = (view: Transcript) => [...view.querySelectorAll<HTMLDetailsElement>('details.tool')]
+
+  it('a_successful_edit_shows_its_diff_without_the_tools_confirmation_text', () => {
+    const view = transcript()
+
+    view.reset(write('t1', 'src/a.ts'))
+
+    expect(steps(view)[0]?.querySelector('.edit')).not.toBeNull()
+    expect(view.querySelectorAll('pre.result')).toHaveLength(0)
+  })
+
+  it('a_failed_edit_still_shows_why_it_failed', () => {
+    const view = transcript()
+
+    view.reset(write('t1', 'src/a.ts', true))
+
+    expect(view.querySelector('pre.result')?.textContent).toBe('Permission denied')
+  })
+
+  it('only_the_latest_successful_edit_stays_open', () => {
+    const view = transcript()
+
+    view.reset([...write('t1', 'src/a.ts'), ...write('t2', 'src/b.ts')])
+    view.apply(write('t3', 'src/c.ts')[0]!)
+    view.apply(write('t3', 'src/c.ts')[1]!)
+
+    expect(steps(view).map((s) => s.open)).toEqual([false, false, true])
+  })
+})
+
 describe('the activity row', () => {
   const activity = (view: Transcript) => view.querySelector('.working')?.textContent ?? null
 

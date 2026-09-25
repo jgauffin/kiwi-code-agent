@@ -2,7 +2,7 @@ import { isAbsolute, matchesGlob, relative, resolve } from 'node:path'
 import type { PreToolUseOutcome, SessionHooks, ToolUse } from '../session/hooks'
 import type { SessionEvent } from '../session/code-session'
 import { isReadOnlyCommand, isReadOnlySegment, type ReadOnlyContext } from './read-only-commands'
-import { bashPatternMatches, commandLines, isShellTool, parseRule, ruleCoversTool, type PermissionRule } from './permission-rules'
+import { bashPatternMatches, commandLines, isShellTool, parseRule, ruleCoversTool, TRANSFER_TOOLS, type PermissionRule } from './permission-rules'
 import { splitShellCommand, type ShellSegment } from './shell-split'
 
 export type PermissionRules = { allow: string[]; deny: string[] }
@@ -14,7 +14,7 @@ export type PermissionRules = { allow: string[]; deny: string[] }
  */
 const READ_ONLY_TOOLS = new Set(['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'LS', 'NotebookRead', 'TodoRead', 'TodoWrite', 'AskUser'])
 
-const FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'NotebookRead', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'LS'])
+const FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'NotebookRead', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'LS', ...TRANSFER_TOOLS])
 
 /**
  * Decides tool calls before any permission prompt, on every engine: a deny
@@ -67,8 +67,10 @@ export class PermissionPolicy implements SessionHooks {
       return segments === 'all' ? parsed.segments.every(covered) : parsed.segments.some(covered)
     }
     if (FILE_TOOLS.has(tool.toolName)) {
-      const path = this.relativePath(tool)
-      return path !== undefined && matchesGlob(path, rule.pattern)
+      // A move touches both its ends: a deny on either blocks it, an allow must cover both.
+      const paths = this.relativePaths(tool)
+      const covered = (path: string) => matchesGlob(path, rule.pattern!)
+      return paths.length > 0 && (segments === 'all' ? paths.every(covered) : paths.some(covered))
     }
     return false
   }
@@ -78,10 +80,10 @@ export class PermissionPolicy implements SessionHooks {
     return typeof command === 'string' ? command : ''
   }
 
-  private relativePath(tool: ToolUse): string | undefined {
+  private relativePaths(tool: ToolUse): string[] {
     const input = (tool.input ?? {}) as Record<string, unknown>
-    const raw = input['file_path'] ?? input['notebook_path'] ?? input['path']
-    return typeof raw === 'string' ? this.relativeTo(raw) : undefined
+    const raw = TRANSFER_TOOLS.has(tool.toolName) ? [input['source'], input['destination']] : [input['file_path'] ?? input['notebook_path'] ?? input['path']]
+    return raw.filter((p): p is string => typeof p === 'string').map((p) => this.relativeTo(p))
   }
 
   private relativeTo(raw: string): string {

@@ -25,6 +25,8 @@ export class ChatTranscript extends HTMLElement {
   private readonly questions = new Map<string, QuestionCard>()
   /** Tool calls of the question tool: the card says what they ask, so their own rows say nothing. */
   private readonly questionCalls = new Set<string>()
+  /** The newest successful edit, the one edit step left open. */
+  private openEdit: HTMLDetailsElement | undefined
   private statusLine!: HTMLElement
   /** Tool calls still without a result, by id, each named as its row is. */
   private readonly pendingTools = new Map<string, string>()
@@ -48,6 +50,7 @@ export class ChatTranscript extends HTMLElement {
     this.questions.clear()
     this.questionCalls.clear()
     this.pendingTools.clear()
+    this.openEdit = undefined
     this.working?.stop()
     this.working = undefined
     this.activity = undefined
@@ -119,9 +122,17 @@ export class ChatTranscript extends HTMLElement {
         result.className = event.isError ? 'result error' : 'result'
         renderAnsi(event.text, result)
         if (details) {
+          details.classList.toggle('failed', event.isError)
+          // A written file speaks through its diff; the tool's confirmation says nothing more.
+          if (event.edit && !event.isError) {
+            showEdit(details, event.edit)
+            // Only the newest edit stays open, so a run of edits does not bury the conversation.
+            if (this.openEdit) this.openEdit.open = false
+            this.openEdit = details
+            break
+          }
           if (event.edit) showEdit(details, event.edit)
           details.appendChild(result)
-          details.classList.toggle('failed', event.isError)
         } else {
           this.insert(result, event.parentToolUseId)
         }
@@ -320,7 +331,8 @@ function shellCall(input: unknown): { description?: string; lines: string[] } | 
 function summarizeInput(input: unknown): string {
   if (typeof input !== 'object' || input === null) return ''
   const record = input as Record<string, unknown>
-  const key = ['command', 'file_path', 'pattern', 'path', 'query', 'description'].find((k) => typeof record[k] === 'string')
+  if (typeof record['source'] === 'string' && typeof record['destination'] === 'string') return `${record['source']} → ${record['destination']}`
+  const key =['command', 'file_path', 'pattern', 'path', 'query', 'description'].find((k) => typeof record[k] === 'string')
   if (!key) return ''
   const value = record[key] as string
   return value.length > 80 ? value.slice(0, 77) + '...' : value

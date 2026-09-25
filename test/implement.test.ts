@@ -41,7 +41,7 @@ describe('implement phase', () => {
     expect(prompt).toContain('context:')
     expect(prompt).toContain('search the code only for what they do not answer')
     expect(prompt).toContain('docs/')
-    expect(IMPLEMENT_TOOLS).toEqual(['Read', 'Write', 'Edit', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'Bash', 'Skill', 'AskUser'])
+    expect(IMPLEMENT_TOOLS).toEqual(['Read', 'Write', 'Edit', 'Move', 'Copy', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'Bash', 'Skill', 'AskUser'])
   })
 
   it('the_how_block_is_the_instruction_to_follow_and_not_the_implementers_to_edit', () => {

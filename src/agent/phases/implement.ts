@@ -5,7 +5,7 @@ import type { SpecState } from './spec-file'
 import { tasksDone, tasksFile, type TasksState } from './tasks-file'
 
 /** AskUser is here so a fork the plan does not settle is ruled on by the user instead of blocking the task. */
-export const IMPLEMENT_TOOLS = ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'Bash', 'Skill', ASK_USER_TOOL]
+export const IMPLEMENT_TOOLS = ['Read', 'Write', 'Edit', 'Move', 'Copy', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'Bash', 'Skill', ASK_USER_TOOL]
 
 /** Whose conversation the implement session carries on, if any: the mapping run that wrote the board, or an earlier implementer. */
 export type Continued = 'mapping' | 'implement' | undefined

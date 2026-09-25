@@ -21,6 +21,7 @@ import { bashTool } from './agent/openai-session/tools/bash'
 import { askUserTool } from './agent/openai-session/tools/ask-user'
 import { jsonQueryTool, jsonSchemaTool } from './agent/openai-session/tools/json'
 import { skillTool } from './agent/openai-session/tools/skill'
+import { copyTool, moveTool } from './agent/openai-session/tools/move-copy'
 import type { Tool } from './agent/openai-session/tools/tool'
 import { indexSkills } from './agent/skills/skill-index'
 import { MCP_CONFIG_FILE, readMcpConfig } from './agent/mcp/mcp-config'
@@ -59,7 +60,7 @@ import { SettingsStore, secretKey } from './settings/settings-store'
  * and shell tools. A mode's tool set decides which of them it is offered; a
  * chat session names none, so it gets them all.
  */
-const OWN_TOOLS: Tool[] = [jsonSchemaTool, jsonQueryTool, askUserTool]
+const OWN_TOOLS: Tool[] = [jsonSchemaTool, jsonQueryTool, askUserTool, moveTool, copyTool]
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('KiwiAgent')
@@ -97,7 +98,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   /** The composer's per-session switch: writes without a prompt. */
   const switchableHooks = (record: SessionRecord): { hooks: SessionHooks } => ({
-    hooks: new WriteAllowance(() => allowWritesControl.isEnabled(record.id)),
+    hooks: new WriteAllowance(workspaceRoot, () => allowWritesControl.isEnabled(record.id)),
   })
 
   /** Per session, what captures the file it is about to edit and turns it into the diff the chat shows. */

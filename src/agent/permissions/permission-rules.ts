@@ -27,8 +27,11 @@ export function formatRule(rule: PermissionRule): string {
   return rule.pattern === undefined ? rule.tool : `${rule.tool}(${rule.pattern})`
 }
 
+/** Tools that take a file from one path to another; their input names both ends. */
+export const TRANSFER_TOOLS: ReadonlySet<string> = new Set(['Move', 'Copy'])
+
 /** Tools that write a file. A write is answered per call or per session, never remembered for the project. */
-export const WRITE_TOOLS: ReadonlySet<string> = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
+export const WRITE_TOOLS: ReadonlySet<string> = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', ...TRANSFER_TOOLS])
 
 /**
  * Tools that run a command line. Both are judged, prompted and remembered

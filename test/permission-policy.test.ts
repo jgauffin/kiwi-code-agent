@@ -192,16 +192,38 @@ describe('WriteAllowance', () => {
 
   it('file_writes_pass_without_a_prompt_while_the_session_switch_is_on', async () => {
     let on = false
-    const allowance = new WriteAllowance(() => on)
+    const allowance = new WriteAllowance(cwd, () => on)
     expect(await use(allowance, 'Edit', { file_path: 'src/a.ts' })).toBeUndefined()
     on = true
     for (const tool of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']) expect(await use(allowance, tool, { file_path: 'src/a.ts' }), tool).toEqual({ allow: true })
     expect(await use(allowance, 'Bash', { command: 'echo hi > f' })).toBeUndefined()
   })
 
+  it('a_move_or_copy_passes_under_the_switch_only_when_both_ends_are_inside_the_project', async () => {
+    let on = false
+    const allowance = new WriteAllowance(cwd, () => on)
+    const outside = process.platform === 'win32' ? 'E:\\elsewhere\\a.ts' : '/elsewhere/a.ts'
+    expect(await use(allowance, 'Move', { source: 'src/a.ts', destination: 'lib/a.ts' })).toBeUndefined()
+    on = true
+    for (const tool of ['Move', 'Copy']) {
+      expect(await use(allowance, tool, { source: 'src/a.ts', destination: `${cwd}/lib/a.ts` }), tool).toEqual({ allow: true })
+      expect(await use(allowance, tool, { source: 'src/a.ts', destination: '../other/a.ts' }), tool).toBeUndefined()
+      expect(await use(allowance, tool, { source: outside, destination: 'src/a.ts' }), tool).toBeUndefined()
+      expect(await use(allowance, tool, { source: '.', destination: 'copy' }), tool).toBeUndefined()
+    }
+  })
+
+  it('a_move_is_denied_when_a_deny_rule_names_either_end_and_allowed_only_when_a_rule_covers_both', async () => {
+    const p = new PermissionPolicy(cwd, () => ({ allow: ['Move(src/**)'], deny: ['Move(**/.env)'] }))
+    expect(await use(p, 'Move', { source: 'src/a.ts', destination: 'src/b.ts' })).toEqual({ allow: true })
+    expect(await use(p, 'Move', { source: 'src/a.ts', destination: 'lib/a.ts' })).toBeUndefined()
+    expect(await use(p, 'Move', { source: 'src/a.ts', destination: 'config/.env' })).toMatchObject({ deny: expect.stringContaining('Move(**/.env)') })
+    expect(projectRuleFor('Move')).toBeUndefined()
+  })
+
   it('a_deny_rule_still_blocks_a_write_the_switch_would_allow', async () => {
     const policy = new PermissionPolicy(cwd, () => ({ allow: [], deny: ['Write(**/.env)'] }))
-    const hooks = composeHooks(policy, new WriteAllowance(() => true))
+    const hooks = composeHooks(policy, new WriteAllowance(cwd, () => true))
     expect(await use(hooks, 'Write', { file_path: 'config/.env' })).toMatchObject({ deny: expect.stringContaining('Write(**/.env)') })
     expect(await use(hooks, 'Write', { file_path: 'src/a.ts' })).toEqual({ allow: true })
   })

@@ -1196,6 +1196,8 @@ chat-app {
         white-space: pre-wrap;
         max-height: 20rem;
         overflow: auto;
+        /* Colored code sits on the step like plain text does, not on a block of its own. */
+        background: transparent;
       }
 
       & .result.error {
@@ -1246,10 +1248,17 @@ chat-app {
         opacity: 0.6;
       }
 
-      & .edit-summary,
-      & .omitted {
+      & .edit-summary {
         margin: 0.2rem 0;
         opacity: 0.8;
+      }
+
+      /* A way out to the full edit, not part of it: kept small and out of the diff's reading line. */
+      & .omitted {
+        margin: 0.1rem 0;
+        font-size: 0.8em;
+        text-align: right;
+        opacity: 0.7;
       }
     }
 

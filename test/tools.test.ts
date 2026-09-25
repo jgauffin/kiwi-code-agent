@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ReadTracker } from '../src/agent/openai-session/tools/read-tracker'
 import { readTool } from '../src/agent/openai-session/tools/read'
 import { writeTool } from '../src/agent/openai-session/tools/write'
 import { editTool } from '../src/agent/openai-session/tools/edit'
+import { copyTool, moveTool } from '../src/agent/openai-session/tools/move-copy'
 import { globTool } from '../src/agent/openai-session/tools/glob'
 import { grepTool } from '../src/agent/openai-session/tools/grep'
 import { bashTool } from '../src/agent/openai-session/tools/bash'
@@ -95,6 +97,51 @@ describe('Write', () => {
     const result = await writeTool.execute({ file_path: 'a.txt', content: 'lost' }, ctx)
     expect(result.isError).toBe(true)
     expect(await readFile(join(dir, 'a.txt'), 'utf8')).toBe('keep')
+  })
+})
+
+describe('Move and Copy', () => {
+  it('move_relocates_a_file_creating_missing_directories', async () => {
+    await writeFile(join(dir, 'a.txt'), 'x')
+    const result = await moveTool.execute({ source: 'a.txt', destination: 'deep/b.txt' }, ctx)
+    expect(result.isError).toBe(false)
+    expect(existsSync(join(dir, 'a.txt'))).toBe(false)
+    expect(await readFile(join(dir, 'deep/b.txt'), 'utf8')).toBe('x')
+  })
+
+  it('copy_duplicates_a_folder_and_leaves_the_original', async () => {
+    await mkdir(join(dir, 'src/sub'), { recursive: true })
+    await writeFile(join(dir, 'src/sub/a.txt'), 'x')
+    const result = await copyTool.execute({ source: 'src', destination: 'lib' }, ctx)
+    expect(result.isError).toBe(false)
+    expect(await readFile(join(dir, 'src/sub/a.txt'), 'utf8')).toBe('x')
+    expect(await readFile(join(dir, 'lib/sub/a.txt'), 'utf8')).toBe('x')
+  })
+
+  it('neither_overwrites_an_existing_destination', async () => {
+    await writeFile(join(dir, 'a.txt'), 'new')
+    await writeFile(join(dir, 'b.txt'), 'keep')
+    for (const tool of [moveTool, copyTool]) {
+      const result = await tool.execute({ source: 'a.txt', destination: 'b.txt' }, ctx)
+      expect(result.isError, tool.name).toBe(true)
+      expect(result.text).toContain('already exists')
+    }
+    expect(await readFile(join(dir, 'b.txt'), 'utf8')).toBe('keep')
+    expect(await readFile(join(dir, 'a.txt'), 'utf8')).toBe('new')
+  })
+
+  it('a_missing_source_is_a_tool_error', async () => {
+    const result = await moveTool.execute({ source: 'nope.txt', destination: 'b.txt' }, ctx)
+    expect(result.isError).toBe(true)
+    expect(result.text).toContain('nope.txt')
+  })
+
+  it('a_moved_file_must_be_read_again_before_it_is_edited', async () => {
+    await writeFile(join(dir, 'a.txt'), 'x')
+    await readTool.execute({ file_path: 'a.txt' }, ctx)
+    await moveTool.execute({ source: 'a.txt', destination: 'b.txt' }, ctx)
+    const result = await editTool.execute({ file_path: 'b.txt', old_string: 'x', new_string: 'y' }, ctx)
+    expect(result.text).toContain('not been read')
   })
 })
 
