@@ -42,6 +42,16 @@ export class PermissionCard extends HTMLElement {
   private render(): void {
     const r = this.request
     if (!r) return
+    // Once every command is allowed there is nothing left to answer: the call reads as the command it runs.
+    const settled = this.decision === 'allow' && isShellTool(r.toolName)
+    this.classList.toggle('allowed', settled)
+    if (settled) {
+      const command = document.createElement('pre')
+      command.className = 'command'
+      fillCode(command, (r.input as { command?: unknown })?.command?.toString() ?? '', 'bash')
+      this.replaceChildren(command)
+      return
+    }
     const prompt = document.createElement('div')
     prompt.className = 'prompt'
     const title = document.createElement('strong')

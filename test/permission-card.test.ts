@@ -118,16 +118,17 @@ describe('a shell call on the permission card', () => {
     expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'allow' }])
   })
 
-  it('a_resolved_card_shows_the_outcome_and_takes_no_more_input', () => {
+  it('an_allowed_call_leaves_only_the_complete_command_and_takes_no_more_input', () => {
     const { card: c, decisions } = card(shellRequest())
 
     c.resolve('allow')
 
     expect(c.isResolved).toBe(true)
+    expect(c.classList.contains('allowed')).toBe(true)
+    expect(c.querySelector('pre.command')?.textContent).toBe('npm run build && npx vitest run && ls -la')
+    expect(rows(c)).toHaveLength(0)
     expect(c.querySelectorAll('button')).toHaveLength(0)
-    expect(c.querySelector('.decision')?.textContent).toBe('Allowed')
-    expect(status(rows(c)[2]!)).toBe('read-only')
-    expect(() => click(rows(c)[0]!, 'Allow npm run for session')).toThrow()
+    expect(c.querySelector('.decision')).toBeNull()
     expect(decisions).toHaveLength(0)
   })
 })

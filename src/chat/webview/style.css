@@ -1283,6 +1283,21 @@ chat-app {
       border-radius: 6px;
       padding: 0.5rem 0.6rem;
 
+      &.allowed {
+        border-color: transparent;
+        background: none;
+        padding: 0 0.6rem;
+      }
+
+      & pre.command {
+        margin: 0;
+        font-family: var(--vscode-editor-font-family);
+        font-size: 0.85em;
+        white-space: pre-wrap;
+        background: transparent;
+        opacity: 0.85;
+      }
+
       & .input {
         font-family: var(--vscode-editor-font-family);
         font-size: 0.85em;
