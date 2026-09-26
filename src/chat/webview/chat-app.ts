@@ -15,6 +15,7 @@ import {
   DefaultProfileChangedEvent,
   ImplementRequestedEvent,
   InterruptRequestedEvent,
+  LinkOpenFileRequestedEvent,
   McpReconnectRequestedEvent,
   NewSessionRequestedEvent,
   NewSessionViewRequestedEvent,
@@ -92,7 +93,10 @@ export class ChatApp extends HTMLElement {
     this.addEventListener(VerifyRequestedEvent.type, () => post({ type: 'verify_spec' }))
     this.addEventListener(PlanViewSelectedEvent.type, (e) => this.show(e.view))
 
-    this.addEventListener(PromptSubmittedEvent.type, (e) => post({ type: 'send', text: e.text }))
+    this.addEventListener(PromptSubmittedEvent.type, (e) =>
+      post({ type: 'send', text: e.text, ...(e.files.length > 0 ? { files: e.files } : {}) }),
+    )
+    this.addEventListener(LinkOpenFileRequestedEvent.type, () => post({ type: 'link_open_file' }))
     this.addEventListener(InterruptRequestedEvent.type, () => post({ type: 'interrupt' }))
     this.addEventListener(PermissionDecidedEvent.type, (e) =>
       post({ type: 'permission', requestId: e.requestId, decision: e.decision }),
@@ -151,6 +155,9 @@ export class ChatApp extends HTMLElement {
         this.transcript.apply(message.event)
         this.composer.setHeldByQuestion(this.transcript.hasOpenQuestion)
         this.follow(message.event)
+        break
+      case 'linked_file':
+        this.composer.linkFile(message.path)
         break
       case 'show_new_session':
         this.showCreating(true)

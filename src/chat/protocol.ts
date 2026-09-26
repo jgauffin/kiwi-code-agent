@@ -94,6 +94,8 @@ export type ToWebview =
     }
   /** Full history of the active session, sent on switch. */
   | { type: 'transcript'; sessionId: string; events: SessionEvent[] }
+  /** The file the editor had open when the composer asked to link it, as it will be named in the prompt. */
+  | { type: 'linked_file'; path: string }
   /** Show the new-session screen (from the Sessions view's + button). */
   | { type: 'show_new_session' }
   | { type: 'event'; sessionId: string; event: SessionEvent }
@@ -121,7 +123,10 @@ export type ReviewAction =
 
 export type FromWebview =
   | { type: 'ready' }
-  | { type: 'send'; text: string }
+  /** `files` are the composer's linked files; the prompt tells the agent to read them. */
+  | { type: 'send'; text: string; files?: string[] }
+  /** Answers with `linked_file` for the file open in the editor, so the composer can link it. */
+  | { type: 'link_open_file' }
   | { type: 'permission'; requestId: string; decision: UserPermissionDecision }
   /** The card's answers to a question the model asked, or that the user left it unanswered. */
   | { type: 'question'; requestId: string; outcome: QuestionOutcome }

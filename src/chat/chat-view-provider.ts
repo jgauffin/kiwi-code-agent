@@ -55,6 +55,7 @@ import { editDiffTitle, editLine, isRunSnapshot, runsRoot } from '../agent/edits
 import { buildRepoMap } from '../agent/repo-map/build-map'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative } from 'node:path'
+import { linkedFilePath, withLinkedFiles } from './linked-files'
 import type { FromWebview, PlanState, RunState, SessionTab, ToWebview } from './protocol'
 import { webviewHtml } from './webview-html'
 import type { ProfileDefaults } from '../settings/settings-store'
@@ -607,8 +608,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         return
       case 'send':
         if (!this.activeSessionId) await this.newSession('chat')
-        await this.sessions.send(this.activeSessionId!, message.text)
+        await this.sessions.send(this.activeSessionId!, withLinkedFiles(message.text, message.files ?? []))
         return
+      case 'link_open_file': {
+        // A chat panel of its own leaves no active text editor, so the file beside it is the one meant.
+        const editor = vscode.window.activeTextEditor ?? vscode.window.visibleTextEditors[0]
+        if (!editor) {
+          void vscode.window.showWarningMessage('KiwiAgent: no file is open in the editor to link.')
+          return
+        }
+        this.broadcast({ type: 'linked_file', path: linkedFilePath(this.workspaceRoot, editor.document.uri.fsPath) })
+        return
+      }
       case 'permission': {
         if (!this.activeSessionId) return
         // The rules are in place before the call runs, so a second call they cover in the same turn already passes.

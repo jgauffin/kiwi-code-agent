@@ -5,8 +5,20 @@ import type { Step, Tab } from './plan-step'
 
 export class PromptSubmittedEvent extends Event {
   static readonly type = 'prompt-submitted'
-  constructor(public readonly text: string) {
+  constructor(
+    public readonly text: string,
+    /** The files linked on the composer when it was sent; the prompt tells the agent to read them. */
+    public readonly files: string[] = [],
+  ) {
     super(PromptSubmittedEvent.type, { bubbles: true })
+  }
+}
+
+/** The composer's "Link open file": link whatever the editor has open. */
+export class LinkOpenFileRequestedEvent extends Event {
+  static readonly type = 'link-open-file-requested'
+  constructor() {
+    super(LinkOpenFileRequestedEvent.type, { bubbles: true })
   }
 }
 
@@ -227,6 +239,7 @@ export class SessionRemovedEvent extends Event {
 declare global {
   interface HTMLElementEventMap {
     [PromptSubmittedEvent.type]: PromptSubmittedEvent
+    [LinkOpenFileRequestedEvent.type]: LinkOpenFileRequestedEvent
     [InterruptRequestedEvent.type]: InterruptRequestedEvent
     [PermissionDecidedEvent.type]: PermissionDecidedEvent
     [QuestionAnsweredEvent.type]: QuestionAnsweredEvent
