@@ -203,6 +203,16 @@ describe('the activity row', () => {
     expect(activity(view)).toBe('Writing…')
   })
 
+  it('a_session_being_brought_up_says_so_until_its_engine_reports_in', () => {
+    const view = transcript()
+
+    view.apply({ type: 'user_message', text: 'go' })
+    view.apply({ type: 'status', status: 'starting' })
+    expect(activity(view)).toBe('Starting the session…')
+    view.apply({ type: 'session_started', engineSessionId: 'e1', model: 'opus' })
+    expect(activity(view)).toBe('Waiting on model…')
+  })
+
   it('a_tool_call_without_a_result_names_the_step_that_runs_and_its_result_hands_back_to_the_model', () => {
     const view = transcript()
 

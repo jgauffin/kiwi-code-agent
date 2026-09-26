@@ -1,3 +1,4 @@
+import { commandName, unwrapCommand } from './command-wrappers'
 import { isReadOnlySegment, type ReadOnlyContext } from './read-only-commands'
 import { splitShellCommand } from './shell-split'
 
@@ -46,11 +47,10 @@ export const isShellTool = (toolName: string): boolean => SHELL_TOOLS.has(toolNa
 const SUBCOMMAND_TOOLS = new Set(['npm', 'npx', 'pnpm', 'yarn', 'git', 'dotnet', 'cargo', 'go', 'docker', 'gh', 'az', 'kubectl'])
 
 /** A command is named without its path, so `./build.cmd` and `build.cmd` are the same command. */
-const commandName = (command: string): string => command.replace(/\\/g, '/').split('/').pop()!
-
 /** The words of a segment that "Allow for project" remembers: the command, plus its subcommand for tools that have one. */
 export function commandPrefix(tokens: string[]): string[] {
-  const [command, sub] = tokens
+  // A rule remembered for `timeout` would cover everything it ever wraps, so the wrapper is taken off first.
+  const [command, sub] = unwrapCommand(tokens)
   if (!command) return []
   const name = commandName(command)
   if (SUBCOMMAND_TOOLS.has(name) && sub && !sub.startsWith('-')) return [name, sub]
@@ -97,12 +97,17 @@ export function ruleLabel(rule: string): string {
   return parsed.pattern === undefined ? parsed.tool : parsed.pattern.replace(/:\*$/, '')
 }
 
-/** Does a Bash rule pattern cover this segment? */
+/**
+ * Does a Bash rule pattern cover this segment? Both sides are judged on the
+ * command that runs, so a rule for `npm test` covers `timeout 300 npm test`
+ * and a deny rule for `rm` is not walked past by wrapping it.
+ */
 export function bashPatternMatches(pattern: string, tokens: string[]): boolean {
   const prefix = pattern.endsWith(':*')
-  const words = splitShellCommand(prefix ? pattern.slice(0, -2) : pattern).segments[0]?.tokens ?? []
+  const words = unwrapCommand(splitShellCommand(prefix ? pattern.slice(0, -2) : pattern).segments[0]?.tokens ?? [])
+  const run = unwrapCommand(tokens)
   if (words.length === 0) return false
-  if (!prefix && tokens.length !== words.length) return false
-  if (tokens.length < words.length) return false
-  return words.every((w, i) => (i === 0 ? commandName(w) === commandName(tokens[i]!) : w === tokens[i]))
+  if (!prefix && run.length !== words.length) return false
+  if (run.length < words.length) return false
+  return words.every((w, i) => (i === 0 ? commandName(w) === commandName(run[i]!) : w === run[i]))
 }

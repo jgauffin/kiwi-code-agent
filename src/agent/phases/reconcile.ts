@@ -59,15 +59,15 @@ Your first output: the decisions file, \`${decisions}\`, one \`###\` per decisio
 
 ### Shipped orders cannot be cancelled
 - on: Cancel command, Shipped order
-- finding: \`Order.cancel\` in src/orders/order.ts refuses a shipped order; the spec cancels one and refunds it.
+- finding: \`Order.cancel\` in src/orders/order.ts refuses a shipped order outright, so neither rule can hold as written.
 
 ### The daily report counts cancelled orders
 - on: Cancel command
-- finding: \`dailyReport\` in src/reports/daily.ts counts every order, so a cancelled one would still count; the spec does not say.
+- finding: \`dailyReport\` in src/reports/daily.ts counts every order whatever its state, and the rule is silent on what a cancelled one does to the report.
 \`\`\`
 
 Rules:
-- The title names the disagreement. The finding is one or two sentences, as in the example: what the code does, at the one path and symbol that shows it, and what the spec says. Not how you found it, not what the spec should say instead, not the task: the planner's proposals and the board carry those.
+- The title names the disagreement. The finding is one or two sentences, as in the example: what the code does today, at the one path and symbol that shows it, and how that stands against the rules in \`on\`: it contradicts them, or they are silent on it. Do not quote or restate a rule; the user reads it verbatim beside your finding. Not how you found it, not what the spec should say instead, not the task: the planner's proposals and the board carry those.
 - \`on\` names the rules the decision concerns, as they are named in the spec.
 - The \`proposed\` lines are the planner's and the \`ruling\` line is the user's: never write, change or remove either.
 - Titles are stable. On a re-run, keep a decision that still holds, append \` [withdrawn]\` to the heading of one that no longer applies, and add new ones. A decision marked \` [applied]\` is settled: one ruled \`${KEEP_RULING}\` means the spec stands and the code changes, which is work for the task that touches it, so its \`how:\` says so; do not report it again.

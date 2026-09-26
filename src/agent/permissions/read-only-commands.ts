@@ -1,3 +1,4 @@
+import { commandName, unwrapCommand } from './command-wrappers'
 import { splitShellCommand, type ShellSegment } from './shell-split'
 
 /**
@@ -10,7 +11,8 @@ const READ_ONLY = new Set([
   'ls', 'dir', 'cat', 'head', 'tail', 'less', 'more', 'wc', 'sort', 'uniq', 'cut', 'tr', 'tac', 'nl', 'column',
   'grep', 'egrep', 'fgrep', 'rg', 'ag', 'diff', 'cmp', 'comm', 'jq', 'yq',
   'cd', 'pwd', 'echo', 'printf', 'true', 'false', 'test', '[', 'which', 'type', 'where', 'whoami', 'hostname', 'date', 'uname',
-  'env', 'printenv', 'stat', 'file', 'du', 'df', 'tree', 'basename', 'dirname', 'realpath', 'readlink',
+  // `env` is not here: it runs a command, so it is unwrapped instead, and bare `env` that only prints comes out empty.
+  'printenv', 'stat', 'file', 'du', 'df', 'tree', 'basename', 'dirname', 'realpath', 'readlink',
   'md5sum', 'sha1sum', 'sha256sum', 'tasklist', 'ps', 'uptime',
   // Shell builtins that touch only the shell's own state. `eval`, `exec`, `source`, `.` and `trap` run code and are not here.
   ':', '[[', 'read', 'export', 'unset', 'set', 'shift', 'local', 'declare', 'typeset', 'readonly', 'break', 'continue', 'return', 'exit', 'wait', 'sleep',
@@ -58,9 +60,10 @@ export type ReadOnlyContext = {
 
 export function isReadOnlySegment(segment: ShellSegment, context: ReadOnlyContext = {}): boolean {
   if (segment.writesFile) return false
-  const [raw, ...args] = segment.tokens
+  // `timeout 30 ls` is a listing and `env FOO=1 rm -rf x` is a deletion: what runs is what counts.
+  const [raw, ...args] = unwrapCommand(segment.tokens)
   if (!raw) return true
-  const command = raw.replace(/\\/g, '/').split('/').pop()!.replace(/\.exe$/i, '')
+  const command = commandName(raw)
   // Moving around inside the project changes nothing; leaving it is a prompt.
   if (command === 'cd') return args.length === 1 && (context.insideProject?.(args[0]!) ?? false)
   if (READ_ONLY.has(command)) return true

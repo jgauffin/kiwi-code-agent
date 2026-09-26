@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
-import { renderMarkdown } from '../src/chat/webview/markdown'
+import { renderMarkdown, renderMarkdownInline } from '../src/chat/webview/markdown'
 
 function render(text: string, final = true): HTMLElement {
   const target = document.createElement('div')
@@ -47,5 +47,27 @@ describe('code block syntax coloring', () => {
     const target = render('```mermaid\ngraph TD; A-->B\n```')
     expect(target.querySelector('pre.mermaid')).not.toBeNull()
     expect(target.querySelector('.hljs')).toBeNull()
+  })
+})
+
+describe('one line of markdown', () => {
+  const inline = (text: string): HTMLElement => {
+    const target = document.createElement('div')
+    renderMarkdownInline(text, target)
+    return target
+  }
+
+  it('renders_as_phrasing_content_so_it_can_sit_inside_a_button', () => {
+    const target = inline('`Order.cancel` **refuses** a shipped order')
+    expect(target.querySelector('p')).toBeNull()
+    expect(target.querySelector('code')!.textContent).toBe('Order.cancel')
+    expect(target.querySelector('strong')!.textContent).toBe('refuses')
+  })
+
+  it('keeps_plain_markup_and_strips_what_could_run', () => {
+    const target = inline('<b>bold</b> <img src=x onerror=alert(1)> <script>alert(1)</script>')
+    expect(target.querySelector('b')!.textContent).toBe('bold')
+    expect(target.querySelector('img')!.hasAttribute('onerror')).toBe(false)
+    expect(target.querySelector('script')).toBeNull()
   })
 })

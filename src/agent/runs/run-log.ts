@@ -26,6 +26,11 @@ export class RunLog {
     return join(this.dir, 'events.jsonl')
   }
 
+  /** Resolves once every append queued so far has landed, so a read sees them. */
+  settled(): Promise<void> {
+    return this.chain
+  }
+
   append(event: SessionEvent): Promise<void> {
     const entry: RunLogEntry = { at: new Date().toISOString(), event }
     this.chain = this.chain.then(async () => {

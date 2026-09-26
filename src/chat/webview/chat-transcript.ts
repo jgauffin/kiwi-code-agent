@@ -15,6 +15,7 @@ type AssistantBubble = { element: HTMLElement; text: HTMLElement; thinking: HTML
 type Activity = { label: string; needsUser: boolean }
 
 const WAITING_ON_MODEL = 'Waiting on model'
+const STARTING = 'Starting the session'
 const NEEDS_APPROVAL = 'Waiting for you to allow or deny'
 const NEEDS_ANSWER = 'Waiting for your answer'
 
@@ -84,6 +85,8 @@ export class ChatTranscript extends HTMLElement {
     switch (event.type) {
       case 'session_started':
         this.setStatus(`${event.model} · Claude Code ${event.engineVersion ?? ''}`.trim())
+        // The engine is up, so what the turn waits on takes over from the start-up.
+        if (this.activity) this.activity = this.currentActivity()
         break
       case 'user_message':
         // A test-run handoff quotes the command's output, colours and all.
@@ -186,6 +189,7 @@ export class ChatTranscript extends HTMLElement {
         break
       case 'status':
         // 'idle' also arrives mid-turn (after compaction, between requests); only the turn's end clears the activity.
+        if (event.status === 'starting') this.activity = atWork(STARTING)
         if (event.status === 'requesting') this.activity = atWork(WAITING_ON_MODEL)
         if (event.status === 'compacting') this.activity = atWork('Compacting context')
         break

@@ -29,8 +29,9 @@ const STATUS_HINT: Record<ResumablePlan['status'], string> = {
  * on disk; the fields differ per card, so a new type means a new card, not
  * more conditionals.
  *
- * Only the chat card links files: a planner reads the docs, the README and the
- * specs and nothing else, so a linked source file would be a read it is denied.
+ * A card with a prompt links files beside its start button. On the plan card
+ * that is a doc or a spec: a planner reads docs/**, the README and the specs
+ * and nothing else, so a linked source file is a read it is denied.
  * The docs card has nothing to fill in, and is still a card with a button: a
  * session costs tokens, so it is never one stray click away.
  */
@@ -87,8 +88,10 @@ export class NewSessionView extends HTMLElement {
       <label>First prompt (optional)
         <textarea name="prompt" rows="4" placeholder="What should be done?" r-input="edit('prompt', event)"></textarea>
       </label>
-      <linked-files-row class="linked-files"></linked-files-row>
-      <button type="submit">Start chat</button>
+      <div class="submit">
+        <button type="submit">Start chat</button>
+        <linked-files-row class="linked-files"></linked-files-row>
+      </div>
     </form>
     <form class="plan-fields" if="isPlan" r-submit="create(event)">
       <label>Feature name
@@ -98,7 +101,10 @@ export class NewSessionView extends HTMLElement {
         <textarea name="prompt" rows="6" required placeholder="As a ... I want ... so that ..." r-input="edit('prompt', event)"></textarea>
       </label>
       <p class="hint">The planner reads docs/**, the README and the other specs, never the code, and writes plan/&lt;feature&gt;.spec.md.</p>
-      <button type="submit">Start planning</button>
+      <div class="submit">
+        <button type="submit">Start planning</button>
+        <linked-files-row class="linked-files"></linked-files-row>
+      </div>
     </form>
     <form class="docs-fields" if="isDocs" r-submit="create(event)">
       <p class="hint">Reads docs/**, the README and the specs, and says in chat where their arrangement would cost a planner: what it has to read whole, what it cannot cite. It changes a doc only when you ask, one confirmed write at a time.</p>

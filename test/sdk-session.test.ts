@@ -36,16 +36,17 @@ async function take(session: SdkSession, count: number): Promise<SessionEvent[]>
 const tick = () => new Promise((r) => setTimeout(r, 0))
 
 describe('SdkSession', () => {
-  it('a_prompt_is_echoed_as_user_message_and_forwarded_to_the_engine', async () => {
+  it('a_prompt_is_forwarded_to_the_engine_and_not_echoed_as_an_event', async () => {
     const fake = fakeQuery()
     const session = createSession(fake)
     session.send('fix the bug')
-    const [event] = await take(session, 1)
-    expect(event).toEqual({ type: 'user_message', text: 'fix the bug' })
     await tick()
     expect(fake.received).toEqual([
       { type: 'user', message: { role: 'user', content: 'fix the bug' }, parent_tool_use_id: null },
     ])
+    fake.emit(resultMessage())
+    // The host echoes the prompt before the engine exists; an echo here would show it twice.
+    expect((await take(session, 1)).map((e) => e.type)).toEqual(['turn_done'])
     await session.dispose()
   })
 

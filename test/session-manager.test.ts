@@ -148,9 +148,46 @@ describe('SessionManager', () => {
       await manager.send(record.id, 'and again')
       expect(engines[1]!.resumedFrom).toBe('eng-7')
 
-      expect(seen.map((e) => e.type)).toEqual(['session_started'])
+      // Each prompt is echoed and reports the start-up before its engine exists.
+      expect(seen.map((e) => e.type)).toEqual(['user_message', 'status', 'session_started', 'user_message', 'status'])
       const transcript = await manager.transcript(record.id)
-      expect(transcript.map((e) => e.type)).toEqual(['session_started'])
+      expect(transcript.map((e) => e.type)).toEqual(['user_message', 'status', 'session_started', 'user_message', 'status'])
+      await manager.disposeAll()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('the_prompt_is_echoed_and_the_start_up_reported_while_the_engine_is_still_being_brought_up', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+    try {
+      const seen: SessionEvent[] = []
+      let release = () => {}
+      const started = new Promise<void>((r) => {
+        release = r
+      })
+      const manager = new SessionManager(
+        memoryStore(),
+        async (r) => {
+          await started
+          return new FakeSession(r.id, r.profile, r.engineSessionId)
+        },
+        (id) => RunLog.forSession(dir, id),
+        (_, e) => seen.push(e),
+      )
+      const record = await manager.create(profile)
+      const sending = manager.send(record.id, 'go')
+      await tick()
+      // Building a repo or docs map can hold the start up for a while; the chat has to show the wait.
+      expect(seen).toEqual([
+        { type: 'user_message', text: 'go' },
+        { type: 'status', status: 'starting' },
+      ])
+      release()
+      await sending
+      // A prompt to an engine already running says nothing about starting.
+      await manager.send(record.id, 'again')
+      expect(seen.filter((e) => e.type === 'status')).toHaveLength(1)
       await manager.disposeAll()
     } finally {
       await rm(dir, { recursive: true, force: true })
@@ -216,7 +253,16 @@ describe('SessionManager', () => {
       expect(engines[1]!.sent[0]).toMatch(/allowed/)
       expect(seen.find((e) => e.type === 'permission_resolved')).toEqual({ type: 'permission_resolved', requestId: 'req-1', decision: 'allow' })
       const transcript = await manager.transcript(record.id)
-      expect(transcript.map((e) => e.type)).toEqual(['session_started', 'permission_request', 'permission_resolved'])
+      expect(transcript.map((e) => e.type)).toEqual([
+        'user_message',
+        'status',
+        'session_started',
+        'permission_request',
+        'permission_resolved',
+        // The decision becomes the next turn: a prompt like any other, on an engine that has to start again.
+        'user_message',
+        'status',
+      ])
 
       // The same request cannot be decided twice, however often the engine stops.
       await manager.close(record.id)
@@ -515,7 +561,6 @@ describe('SessionManager', () => {
         const check = await manager.create(berget, 'reconcile', 'Orders')
         await manager.send(check.id, 'map')
         engines[0]!.out.push({ type: 'session_started', engineSessionId: check.id, model: 'glm' })
-        engines[0]!.out.push({ type: 'user_message', text: 'map' })
         await tick()
         await manager.close(check.id)
 
@@ -525,7 +570,6 @@ describe('SessionManager', () => {
         expect(engines[1]!.resumedFrom).toBe(check.id)
         // The engine reports the conversation it resumed, so the chain survives a reload.
         engines[1]!.out.push({ type: 'session_started', engineSessionId: check.id, model: 'glm' })
-        engines[1]!.out.push({ type: 'user_message', text: 'implement' })
         await tick()
         await manager.close(implementer.id)
         expect(manager.get(implementer.id)!.engineSessionId).toBe(check.id)
@@ -533,7 +577,6 @@ describe('SessionManager', () => {
         const again = await manager.create(berget, 'implement', 'Orders', { continues: manager.get(implementer.id) })
         expect(again.engineSessionId).toBe(implementer.id)
         await manager.send(again.id, 'once more')
-        engines[2]!.out.push({ type: 'user_message', text: 'once more' })
         await tick()
         expect((await manager.conversation(again.id)).filter((e) => e.type === 'user_message').map((e) => e.text)).toEqual([
           'map',
@@ -573,10 +616,10 @@ describe('SessionManager', () => {
         const chat = await manager.create(berget)
         await manager.send(chat.id, 'hi')
         engines[0]!.out.push({ type: 'session_started', engineSessionId: chat.id, model: 'glm' })
-        engines[0]!.out.push({ type: 'user_message', text: 'hi' })
         await tick()
         expect(manager.get(chat.id)!.engineSessionId).toBe(chat.id)
-        expect((await manager.conversation(chat.id)).map((e) => e.type)).toEqual(['session_started', 'user_message'])
+        // The prompt and the start-up are the host's, logged before the engine says anything.
+        expect((await manager.conversation(chat.id)).map((e) => e.type)).toEqual(['user_message', 'status', 'session_started'])
         await manager.disposeAll()
       } finally {
         await rm(dir, { recursive: true, force: true })
@@ -635,11 +678,11 @@ describe('SessionManager', () => {
         expect(engines[0]!.answers).toEqual([{ requestId: 'q-1', outcome: answered }])
         // No new prompt was needed: the live engine resumes on its own tool result.
         expect(engines[0]!.sent).toEqual(['plan it'])
-        expect(seen.map((e) => e.type)).toEqual(['question_request', 'question_resolved'])
+        expect(seen.map((e) => e.type)).toEqual(['user_message', 'status', 'question_request', 'question_resolved'])
         const transcript = await manager.transcript(record.id)
-        expect(transcript.map((e) => e.type)).toEqual(['question_request', 'question_resolved'])
-        expect(transcript[0]).toMatchObject({ requestId: 'q-1', request: card })
-        expect(transcript[1]).toMatchObject({ requestId: 'q-1', outcome: answered })
+        expect(transcript.map((e) => e.type)).toEqual(['user_message', 'status', 'question_request', 'question_resolved'])
+        expect(transcript[2]).toMatchObject({ requestId: 'q-1', request: card })
+        expect(transcript[3]).toMatchObject({ requestId: 'q-1', outcome: answered })
         await manager.disposeAll()
       } finally {
         await rm(dir, { recursive: true, force: true })

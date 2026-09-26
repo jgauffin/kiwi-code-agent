@@ -18,12 +18,12 @@ export class ChatComposer extends HTMLElement {
   private readonly template = compileTemplate(`
     <form r-submit="submit(event)">
       <textarea name="prompt" rows="3" placeholder="{{placeholder}}" disabled="{{held}}" r-keydown="keydown(event)"></textarea>
-      <linked-files-row class="linked-files"></linked-files-row>
       <div class="actions">
         <span class="switches">
           <label class="allow-writes" if="allowWritesAvailable" title="Let this session write files without asking. Bash and other tools still ask; deny rules still block.">
             <input type="checkbox" name="allowWrites" checked="{{allowWrites}}" r-change="toggleAllowWrites(event)"> Allow writes
           </label>
+          <linked-files-row class="linked-files"></linked-files-row>
         </span>
         <button type="button" class="stop" r-click="stop()">Stop</button>
         <button type="submit" class="send" disabled="{{held}}">Send</button>

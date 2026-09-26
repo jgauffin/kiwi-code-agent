@@ -144,6 +144,11 @@
           "default": "Claude",
           "description": "Name of the profile in kiwiAgent.profiles used for new sessions."
         },
+        "kiwiAgent.fontSize": {
+          "type": "number",
+          "default": 0,
+          "description": "Font size in pixels for the chat and settings views. 0 follows editor.fontSize, a step above it. A value outside 8-40 is ignored. Takes effect when the view is reopened."
+        },
         "kiwiAgent.planProfile": {
           "type": "string",
           "default": "",

@@ -32,6 +32,15 @@ function ensureMermaid(): void {
   mermaid.initialize({ startOnLoad: false, theme: dark ? 'dark' : 'default', securityLevel: 'strict' })
 }
 
+/**
+ * One line of markdown as phrasing content: emphasis, code spans and links,
+ * with no paragraph around them, so it can be put inside a button or a span.
+ */
+export function renderMarkdownInline(text: string, target: HTMLElement): void {
+  const html = marked.parseInline(text, { async: false })
+  target.replaceChildren(DOMPurify.sanitize(html, { RETURN_DOM_FRAGMENT: true, ADD_ATTR: ['class'] }))
+}
+
 export function renderMarkdown(text: string, target: HTMLElement, final: boolean): void {
   const html = marked.parse(text, { async: false })
   const fragment = DOMPurify.sanitize(html, { RETURN_DOM_FRAGMENT: true, ADD_ATTR: ['class'] })

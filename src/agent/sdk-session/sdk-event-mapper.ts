@@ -8,8 +8,8 @@ import { bareToolName } from './tool-server'
  * Stateful because streaming deltas do not carry the message id they belong
  * to; `message_start` does, and the mapper remembers it until the next one.
  *
- * User messages are not mapped: the session emits `user_message` when it
- * sends, and replays on resume are restored from the run log instead.
+ * User messages are not mapped: the host emits `user_message` when it sends,
+ * and replays on resume are restored from the run log instead.
  */
 export class SdkEventMapper {
   private currentMessageId = ''

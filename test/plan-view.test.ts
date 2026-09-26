@@ -166,7 +166,7 @@ describe('PlanView', () => {
     expect(action).toEqual({ type: 'rule_decision', decision: 'Shipped', ruling: 'keep' })
   })
 
-  it('a_ruled_decision_shows_its_choice_and_can_be_reached_from_the_steps', () => {
+  it('a_ruled_decision_shows_its_choice_and_the_header_is_the_only_way_to_the_next_one', () => {
     const decisions = [
       { title: 'Refund', on: [], finding: 'f', proposals: ['queue it'], state: 'ruled' as const, ruling: 'queue it', line: 0, end: 0 },
       { title: 'Shipped', on: [], finding: 'f', proposals: ['refuse it'], state: 'ruled' as const, ruling: 'do both', line: 0, end: 0 },
@@ -175,11 +175,60 @@ describe('PlanView', () => {
     expect(node.querySelector('.wizard .left')!.textContent).toBe('all ruled')
     expect(node.querySelector('.decision .title')!.textContent).toBe('Refund')
     expect(node.querySelector('.option.chosen .text')!.textContent).toBe('queue it')
-    expect([...node.querySelectorAll('.steps .step')].map((s) => s.className)).toEqual(['step ruled current', 'step ruled'])
-    ;[...node.querySelectorAll<HTMLButtonElement>('.steps .link')].find((b) => b.textContent === 'Shipped')!.click()
+    // Titles under the options would read as further ways to settle the decision on screen.
+    expect(node.querySelector('.steps')).toBeNull()
+    buttons(node, 'Next')[0]!.click()
     expect(node.querySelector('.decision .title')!.textContent).toBe('Shipped')
     expect(node.querySelector('.option.own.chosen .text')!.textContent).toBe('do both')
     expect(node.querySelector('.decision .ruling .text')!.textContent).toBe('do both')
+  })
+
+  it('the_card_shows_the_rules_as_the_spec_has_them_beside_what_the_code_does', () => {
+    const decisions = [
+      { title: 'Shipped', on: ['Cancel command', 'Shipped order', 'Renamed away'], finding: '`Order.cancel` refuses it', proposals: [], state: 'open' as const, line: 0, end: 0 },
+    ]
+    const node = view(plan({ stage: 'mapped', tasks: [task()], decisions, pendingDecisions: 1 }), 'decisions')
+    const rules = [...node.querySelectorAll('.sides .spec .rule')].map((r) => r.textContent)
+    expect(rules).toEqual(['Cancel command: an open order can be cancelled', 'Shipped order: refused', 'Renamed away'])
+    expect(node.querySelector('.sides .finding .text')!.innerHTML).toContain('<code>Order.cancel</code>')
+    // The names head the spec side, so the row of links above the finding is gone.
+    expect(node.querySelector('.decision > .on')).toBeNull()
+    let asked: InstanceType<typeof PlanFocusRequestedEvent> | undefined
+    node.addEventListener(PlanFocusRequestedEvent.type, (e) => (asked = e as InstanceType<typeof PlanFocusRequestedEvent>))
+    node.querySelector<HTMLButtonElement>('.sides .spec .rule .name')!.click()
+    expect(asked?.where).toEqual({ item: 'Cancel command' })
+  })
+
+  it('an_option_shows_the_rules_new_text_without_repeating_the_name_of_the_rule_it_rewrites', () => {
+    const proposal = '**Cancel command**: an open order can be cancelled *until* it ships'
+    const decisions = [{ title: 'Shipped', on: ['Cancel command'], finding: 'f', proposals: [proposal], state: 'open' as const, line: 0, end: 0 }]
+    const node = view(plan({ stage: 'mapped', tasks: [task()], decisions, pendingDecisions: 1 }), 'decisions')
+    const text = node.querySelector('.option.change .text')!
+    expect(text.textContent).toBe('an open order can be cancelled until it ships')
+    expect(text.innerHTML).toContain('<em>until</em>')
+    expect(node.querySelector('.option.change .rule')).toBeNull()
+    let action: unknown
+    node.addEventListener(ReviewActionEvent.type, (e) => (action = (e as InstanceType<typeof ReviewActionEvent>).action))
+    node.querySelector<HTMLButtonElement>('.option.change')!.click()
+    // The ruling is the proposal as the file has it; only the card leaves the lead-in off.
+    expect(action).toEqual({ type: 'rule_decision', decision: 'Shipped', ruling: proposal })
+  })
+
+  it('an_option_names_the_rule_it_rewrites_when_the_decision_is_on_more_than_one', () => {
+    const decisions = [
+      {
+        title: 'Shipped',
+        on: ['Cancel command', 'Shipped order'],
+        finding: 'f',
+        proposals: ['**Shipped order**: refused with a reason'],
+        state: 'open' as const,
+        line: 0,
+        end: 0,
+      },
+    ]
+    const node = view(plan({ stage: 'mapped', tasks: [task()], decisions, pendingDecisions: 1 }), 'decisions')
+    expect(node.querySelector('.option.change .rule')!.textContent).toBe('Shipped order')
+    expect(node.querySelector('.option.change .text')!.textContent).toBe('refused with a reason')
   })
 
   it('settled_decisions_fold_into_history_with_the_ruling_as_the_record', () => {

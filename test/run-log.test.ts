@@ -25,6 +25,15 @@ describe('RunLog', () => {
       expect(entries[0]!.at).toMatch(/^\d{4}-\d{2}-\d{2}T/)
     }))
 
+  it('settled_waits_for_appends_nobody_awaited_so_a_read_right_after_them_sees_them', () =>
+    withTempDir(async (dir) => {
+      const log = RunLog.forSession(dir, 'sess')
+      void log.append({ type: 'user_message', text: 'one' })
+      void log.append({ type: 'ended' })
+      await log.settled()
+      expect((await log.read()).map((e) => e.event.type)).toEqual(['user_message', 'ended'])
+    }))
+
   it('a_session_without_a_log_yet_reads_as_empty', () =>
     withTempDir(async (dir) => {
       expect(await RunLog.forSession(dir, 'never').read()).toEqual([])

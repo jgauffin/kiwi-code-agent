@@ -79,7 +79,6 @@ describe('OpenAiSession', () => {
     const events = await untilTurnDone(s)
     expect(events.map((e) => e.type)).toEqual([
       'session_started',
-      'user_message',
       'status',
       'assistant_text',
       'assistant_message',

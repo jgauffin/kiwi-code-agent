@@ -121,6 +121,27 @@ describe('NewSessionView fields across cards', () => {
     node.remove()
   })
 
+  it('the_plan_card_links_files_too_so_a_doc_or_a_spec_can_be_named_for_the_planner', () => {
+    const node = view()
+    card(node, 'plan').click()
+    type(node, '.plan-fields input[name=feature]', 'Order cancellation')
+    type(node, '.plan-fields textarea[name=prompt]', 'As a buyer I want to cancel')
+    const row = node.querySelector('.plan-fields linked-files-row') as InstanceType<typeof LinkedFilesRow>
+    row.link('docs/intent/orders.md')
+    let files: string[] | undefined
+    node.addEventListener(events.NewSessionRequestedEvent.type, (e) => (files = e.files))
+    node.querySelector('.plan-fields')!.dispatchEvent(new Event('submit', { cancelable: true }))
+    expect(files).toEqual(['docs/intent/orders.md'])
+    node.remove()
+  })
+
+  it('the_button_that_links_a_file_stands_beside_the_one_that_starts_the_session', () => {
+    const node = view()
+    const submit = node.querySelector('.chat-fields .submit')!
+    expect([...submit.children].map((c) => c.tagName.toLowerCase())).toEqual(['button', 'linked-files-row'])
+    node.remove()
+  })
+
   it('starting_a_chat_lets_go_of_the_files_linked_for_it', () => {
     const node = view()
     const row = node.querySelector('.chat-fields linked-files-row') as InstanceType<typeof LinkedFilesRow>

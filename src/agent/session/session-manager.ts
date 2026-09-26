@@ -111,6 +111,8 @@ export class SessionManager {
   private readonly live = new Map<string, CodeSession>()
   /** Per session, the call the user allowed after its engine had stopped; answered for them when the resumed engine asks. */
   private readonly preapproved = new Map<string, { toolName: string; input: string }>()
+  /** One log per session: the write chain that keeps entries in emission order belongs to the instance. */
+  private readonly logs = new Map<string, RunLog>()
 
   constructor(
     private readonly store: SessionStore,
@@ -180,6 +182,10 @@ export class SessionManager {
       record.title = text.length > 60 ? text.slice(0, 57) + '...' : text
       await this.store.save(this.records)
     }
+    // Echoed here rather than by the engine, and the start-up said out loud: bringing an
+    // engine up can take a repo or docs map build, and the wait is the user's to see.
+    await this.emit(record, { type: 'user_message', text })
+    if (!this.live.has(id)) await this.emit(record, { type: 'status', status: 'starting' })
     ;(await this.ensureLive(record)).send(text)
   }
 
@@ -235,13 +241,24 @@ export class SessionManager {
   async remove(id: string): Promise<void> {
     await this.close(id)
     this.records = this.records.filter((r) => r.id !== id && r.parentId !== id)
+    this.logs.delete(id)
     await this.store.save(this.records)
   }
 
-  transcript(id: string): Promise<SessionEvent[]> {
-    return this.runLogFor(id)
-      .read()
-      .then((entries) => entries.map((e) => e.event))
+  async transcript(id: string): Promise<SessionEvent[]> {
+    const log = this.logFor(id)
+    // Everything queued is on disk before it is read back: a request answered right after it arrived is in there.
+    await log.settled()
+    return (await log.read()).map((e) => e.event)
+  }
+
+  /** The session's log, kept: entries land in emission order only while one instance chains the writes. */
+  private logFor(id: string): RunLog {
+    const existing = this.logs.get(id)
+    if (existing) return existing
+    const log = this.runLogFor(id)
+    this.logs.set(id, log)
+    return log
   }
 
   /**
@@ -276,7 +293,7 @@ export class SessionManager {
   }
 
   private async pump(record: SessionRecord, session: CodeSession): Promise<void> {
-    const log = this.runLogFor(record.id)
+    const log = this.logFor(record.id)
     for await (const raw of session.events()) {
       // A decoration that fails must not cost the event itself.
       const event = await this.decorate(record.id, raw).catch(() => raw)
@@ -310,7 +327,7 @@ export class SessionManager {
 
   /** An event of the session's own, outside its engine: logged and shown like the engine's. */
   private async emit(record: SessionRecord, event: SessionEvent): Promise<void> {
-    await this.runLogFor(record.id).append(event)
+    await this.logFor(record.id).append(event)
     this.listener(record.id, event)
   }
 

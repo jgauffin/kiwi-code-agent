@@ -71,7 +71,6 @@ export class OpenAiSession implements CodeSession {
 
   send(text: string): void {
     if (this.disposed) return
-    this.emit({ type: 'user_message', text })
     this.queue.push(text)
     if (!this.running) void this.drain()
   }

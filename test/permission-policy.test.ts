@@ -30,6 +30,35 @@ describe('isReadOnlyCommand', () => {
   })
 })
 
+describe('commands that wrap another command', () => {
+  it('a_wrapper_is_judged_by_what_it_runs_not_by_its_own_name', () => {
+    for (const c of ['timeout 30 ls -la', 'timeout -k 5 30 cat x', 'timeout --foreground 1m git status', 'nohup ls', 'env FOO=1 cat x', 'env -u PATH ls', 'env -i FOO=1 BAR=2 grep -rn foo src'])
+      expect(isReadOnlyCommand(c), c).toBe(true)
+    for (const c of ['timeout 30 rm -rf build', 'timeout -s KILL 30 npm test', 'nohup rm x', 'env FOO=1 rm -rf build', 'env -u PATH git commit -m x', 'timeout 30 env FOO=1 rm x'])
+      expect(isReadOnlyCommand(c), c).toBe(false)
+  })
+
+  it('a_wrapper_with_nothing_to_run_only_reports_and_one_that_cannot_be_read_is_presumed_to_mutate', () => {
+    // Bare `env` prints the environment; `env -S` splits a string of its own into a command.
+    for (const c of ['env', 'env FOO=1']) expect(isReadOnlyCommand(c), c).toBe(true)
+    for (const c of ['env -S "rm -rf x"', 'env --unknown-flag ls', 'timeout --verbose']) expect(isReadOnlyCommand(c), c).toBe(false)
+  })
+
+  it('a_rule_covers_the_command_it_names_however_it_is_wrapped', async () => {
+    const ruled = (rules: Partial<PermissionRules>, command: string) =>
+      new PermissionPolicy(cwd, () => ({ allow: [], deny: [], ...rules })).preToolUse({ toolName: 'Bash', input: { command }, toolUseId: 't' })
+    expect(await ruled({ allow: ['Bash(npm test)'] }, 'timeout 300 npm test')).toEqual({ allow: true })
+    // And a deny is not walked past by wrapping what it blocks.
+    expect(await ruled({ deny: ['Bash(rm:*)'] }, 'env FOO=1 rm -rf build')).toMatchObject({ deny: expect.stringContaining('Bash(rm:*)') })
+    expect(await ruled({ deny: ['Bash(rm:*)'] }, 'timeout 5 rm -rf build')).toMatchObject({ deny: expect.stringContaining('Bash(rm:*)') })
+  })
+
+  it('the_rule_offered_for_a_wrapped_command_names_the_command_not_the_wrapper', () => {
+    // A remembered `Bash(timeout:*)` would cover everything timeout is ever pointed at.
+    expect(commandLines('Bash', 'timeout 300 npm run build', [])).toEqual([{ text: 'timeout 300 npm run build', rule: 'Bash(npm run:*)' }])
+  })
+})
+
 describe('commandLines', () => {
   it('each_mutating_command_is_offered_the_rule_of_its_command_and_subcommand_and_a_read_only_one_passes', () => {
     expect(commandLines('Bash', 'npm run build && npx vitest run && ls -la', [])).toEqual([

@@ -1,7 +1,12 @@
 :root {
   font-family: var(--vscode-font-family);
-  /* The workbench font is a size under the editor's; the conversation is read like code, so it never goes below the editor. */
-  font-size: max(var(--vscode-font-size), var(--vscode-editor-font-size));
+  /*
+   * The conversation is read like code, so it never renders below the editor. Proportional text needs to
+   * be a step larger than monospace to read the same size beside it. The var() fallbacks keep the whole
+   * declaration valid: an undefined custom property inside max() would drop it and take the floor with it.
+   * kiwiAgent.fontSize overrides the result.
+   */
+  font-size: calc(max(var(--vscode-font-size, 13px), var(--vscode-editor-font-size, 14px)) + 1px);
   color: var(--vscode-foreground);
 }
 
@@ -37,9 +42,7 @@ chat-app {
     align-items: center;
     gap: 0.3rem 0.5rem;
     padding: 0.35rem 0.6rem;
-    margin-bottom: 0.4rem;
-    font-size: 0.85em;
-    background: var(--vscode-sideBarSectionHeader-background, var(--vscode-editorWidget-background));
+    margin-bottom: 0.4rem;    background: var(--vscode-sideBarSectionHeader-background, var(--vscode-editorWidget-background));
 
     & .steps {
       display: inline-flex;
@@ -151,8 +154,6 @@ chat-app {
     gap: 0.2rem;
     padding: 0 0.6rem;
     border-bottom: 1px solid var(--vscode-panel-border);
-    font-size: 0.9em;
-
     & .tab {
       background: none;
       color: inherit;
@@ -196,6 +197,15 @@ chat-app {
     & ul,
     & ol {
       margin: 0.4rem 0;
+    }
+
+    /* A path or a symbol in a rule, a finding or a ruling: the file's backticks, set as code. */
+    & code {
+      font-family: var(--vscode-editor-font-family);
+      background: var(--vscode-textCodeBlock-background);
+      padding: 0 0.2em;
+      border-radius: 3px;
+      overflow-wrap: anywhere;
     }
 
     & ul,
@@ -244,7 +254,6 @@ chat-app {
     }
 
     & .comment .on {
-      font-size: 0.85em;
       opacity: 0.75;
     }
 
@@ -284,9 +293,7 @@ chat-app {
 
       & .problem {
         margin: 0.15rem 0;
-        font-family: var(--vscode-editor-font-family);
-        font-size: 0.9em;
-      }
+        font-family: var(--vscode-editor-font-family);      }
     }
 
     & .whole {
@@ -326,9 +333,7 @@ chat-app {
       line-height: 1.55;
 
       &.edge {
-        margin: 0 0 0.45rem;
-        font-size: 0.95em;
-        opacity: 0.9;
+        margin: 0 0 0.45rem;        opacity: 0.9;
       }
 
       /* The name is the lead-in, as it is in the file; the text follows it. */
@@ -369,13 +374,11 @@ chat-app {
     }
 
     & .citation {
-      font-size: 0.8em;
       opacity: 0.6;
     }
 
     /* What is in order is a small mark; only a gap wears a badge. */
     & .chip {
-      font-size: 0.78em;
       opacity: 0.55;
       font-family: var(--vscode-editor-font-family);
 
@@ -401,7 +404,6 @@ chat-app {
       opacity: 0.9;
 
       & .kind {
-        font-size: 0.8em;
         text-transform: uppercase;
         letter-spacing: 0.03em;
         opacity: 0.8;
@@ -431,9 +433,7 @@ chat-app {
       }
 
       & .left {
-        flex: 1;
-        font-size: 0.85em;
-        opacity: 0.75;
+        flex: 1;        opacity: 0.75;
       }
 
       & .nav {
@@ -442,9 +442,7 @@ chat-app {
 
         & button {
           background: var(--vscode-button-secondaryBackground);
-          color: var(--vscode-button-secondaryForeground);
-          font-size: 0.85em;
-          padding: 0.1rem 0.5rem;
+          color: var(--vscode-button-secondaryForeground);          padding: 0.1rem 0.5rem;
 
           &:hover:not(:disabled) {
             background: var(--vscode-button-secondaryHoverBackground);
@@ -454,25 +452,6 @@ chat-app {
             opacity: 0.5;
             cursor: default;
           }
-        }
-      }
-    }
-
-    /* The pending decisions as a list beneath the card: the one shown marked, the ruled ones reachable to change. */
-    & .decisions > .steps {
-      margin: 0 0 0.8rem;
-      padding: 0 0 0 1.2rem;
-      font-size: 0.9em;
-
-      & .step {
-        display: flex;
-        gap: 0.5rem;
-        align-items: baseline;
-        opacity: 0.8;
-
-        &.current {
-          opacity: 1;
-          font-weight: 600;
         }
       }
     }
@@ -514,13 +493,13 @@ chat-app {
       }
 
       & > .on {
-        font-size: 0.85em;
         opacity: 0.75;
         margin-bottom: 0.4rem;
       }
 
       & .finding,
-      & .ruling {
+      & .ruling,
+      & .spec {
         flex-direction: column;
         gap: 0.1rem;
         margin: 0.5rem 0 0;
@@ -530,12 +509,47 @@ chat-app {
         }
       }
 
+      /*
+       * The disagreement, both sides at once: the rules as the spec has them
+       * and what the code does. Side by side where there is room, stacked
+       * when there is not.
+       */
+      & .sides {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+        gap: 0.3rem 1.2rem;
+
+        & .side {
+          display: flex;
+        }
+
+        & .kind {
+          text-transform: uppercase;
+          letter-spacing: 0.03em;
+          opacity: 0.8;
+          white-space: nowrap;
+        }
+
+        & .rule {
+          margin: 0 0 0.2rem;
+
+          & .name {
+            font-weight: 600;
+          }
+        }
+      }
+
       /* Each way to settle the decision is one wide button: what kind of ruling it is, then the rule as it would read. */
       & .options {
         display: flex;
         flex-direction: column;
         gap: 0.4rem;
         margin: 0.7rem 0 0.1rem;
+
+        & .lead {
+          margin: 0 0 0.1rem;
+          opacity: 0.75;
+        }
 
         & .option {
           display: flex;
@@ -553,11 +567,16 @@ chat-app {
           }
 
           & .kind {
-            font-size: 0.8em;
             text-transform: uppercase;
             letter-spacing: 0.03em;
             white-space: nowrap;
             opacity: 0.8;
+          }
+
+          /* Which rule this option rewrites; shown only when the decision is on more than one. */
+          & .rule {
+            font-weight: 600;
+            white-space: nowrap;
           }
 
           & .text {
@@ -579,17 +598,13 @@ chat-app {
 
       & > summary {
         cursor: pointer;
-        opacity: 0.75;
-        font-size: 0.9em;
-      }
+        opacity: 0.75;      }
 
       & .decision.settled {
         margin: 0.6rem 0 0 0.4rem;
         padding: 0.3rem 0 0.3rem 0.6rem;
         border-left: 2px solid var(--vscode-panel-border);
         opacity: 0.8;
-        font-size: 0.95em;
-
         & .finding,
         & .ruling {
           margin-left: 0;
@@ -598,9 +613,7 @@ chat-app {
         & .foot {
           display: flex;
           gap: 0.6rem;
-          margin-top: 0.2rem;
-          font-size: 0.8em;
-          opacity: 0.7;
+          margin-top: 0.2rem;          opacity: 0.7;
         }
       }
     }
@@ -613,9 +626,7 @@ chat-app {
     & .controls button,
     & .resolution button {
       background: var(--vscode-button-secondaryBackground);
-      color: var(--vscode-button-secondaryForeground);
-      font-size: 0.85em;
-      padding: 0.1rem 0.5rem;
+      color: var(--vscode-button-secondaryForeground);      padding: 0.1rem 0.5rem;
 
       &:hover {
         background: var(--vscode-button-secondaryHoverBackground);
@@ -661,7 +672,6 @@ chat-app {
     }
 
     & .badge {
-      font-size: 0.8em;
       opacity: 0.8;
       border: 1px solid var(--vscode-panel-border);
       border-radius: 3px;
@@ -724,7 +734,6 @@ chat-app {
       opacity: 0.9;
 
       & .kind {
-        font-size: 0.8em;
         text-transform: uppercase;
         letter-spacing: 0.03em;
       }
@@ -743,7 +752,6 @@ chat-app {
     }
 
     & .awaiting {
-      font-size: 0.85em;
       opacity: 0.65;
     }
 
@@ -772,7 +780,6 @@ chat-app {
 
     & .tasks {
       & .group > .heading {
-        font-size: 0.95em;
         border: none;
         margin: 0.6rem 0 0.1rem;
         opacity: 0.85;
@@ -823,21 +830,15 @@ chat-app {
       & .files {
         list-style: none;
         padding: 0;
-        margin: 0.1rem 0 0 1rem;
-        font-size: 0.85em;
-        font-family: var(--vscode-editor-font-family);
+        margin: 0.1rem 0 0 1rem;        font-family: var(--vscode-editor-font-family);
       }
 
       & .verification {
         display: flex;
         gap: 0.4rem;
-        font-size: 0.9em;
-
         & .kind {
           text-transform: uppercase;
-          letter-spacing: 0.03em;
-          font-size: 0.85em;
-        }
+          letter-spacing: 0.03em;        }
 
         &.ok .kind {
           color: var(--vscode-testing-iconPassed);
@@ -932,8 +933,6 @@ chat-app {
       flex-wrap: wrap;
       gap: 0.6rem 1rem;
       margin-bottom: 0.8rem;
-      font-size: 0.9em;
-
       & label {
         display: flex;
         flex-direction: column;
@@ -969,9 +968,7 @@ chat-app {
       }
 
       & .hint {
-        opacity: 0.7;
-        font-size: 0.85em;
-      }
+        opacity: 0.7;      }
     }
 
     & form {
@@ -982,13 +979,10 @@ chat-app {
       & label {
         display: flex;
         flex-direction: column;
-        gap: 0.2rem;
-        font-size: 0.9em;
-      }
+        gap: 0.2rem;      }
 
       & input,
       & textarea {
-        font-family: inherit;
         background: var(--vscode-input-background);
         color: var(--vscode-input-foreground);
         border: 1px solid var(--vscode-input-border, transparent);
@@ -998,21 +992,25 @@ chat-app {
 
       & .hint {
         margin: 0;
-        opacity: 0.7;
-        font-size: 0.85em;
-      }
+        opacity: 0.7;      }
 
       & button[type='submit'] {
         align-self: flex-start;
+      }
+
+      /* Start the session, then what it should read: one line, the files after the button that links them. */
+      & .submit {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem;
       }
     }
 
     & .resume {
       & > .hint {
         margin: 0;
-        opacity: 0.7;
-        font-size: 0.85em;
-      }
+        opacity: 0.7;      }
 
       & .plans {
         list-style: none;
@@ -1040,9 +1038,7 @@ chat-app {
         }
 
         & .hint {
-          opacity: 0.7;
-          font-size: 0.85em;
-        }
+          opacity: 0.7;        }
 
         &.approved .hint {
           color: var(--vscode-testing-iconPassed);
@@ -1061,25 +1057,27 @@ chat-app {
 
     & .status {
       margin: 0;
-      opacity: 0.6;
-      font-size: 0.85em;
-    }
+      opacity: 0.6;    }
 
+    /*
+     * The prompt is re-read as often as the reply, so it stays in the reading
+     * flow at the left with an accent bar, not as a faint bubble stranded at
+     * the right edge of a wide window.
+     */
     & .user {
-      align-self: flex-end;
-      max-width: 90%;
-      background: var(--vscode-input-background);
+      align-self: stretch;
+      background: var(--vscode-textBlockQuote-background, var(--vscode-input-background));
       border: 1px solid var(--vscode-input-border, transparent);
-      border-radius: 6px;
+      border-left: 3px solid var(--vscode-textBlockQuote-border, var(--vscode-focusBorder));
+      border-radius: 4px;
       padding: 0.4rem 0.6rem;
       white-space: pre-wrap;
+      color: var(--vscode-foreground);
     }
 
     & .assistant {
       & .thinking {
-        opacity: 0.5;
-        font-size: 0.85em;
-        white-space: pre-wrap;
+        opacity: 0.5;        white-space: pre-wrap;
         max-height: 8rem;
         overflow-y: auto;
         margin: 0 0 0.3rem;
@@ -1113,9 +1111,7 @@ chat-app {
         }
 
         & code {
-          font-family: var(--vscode-editor-font-family);
-          font-size: 0.9em;
-          background: var(--vscode-textCodeBlock-background);
+          font-family: var(--vscode-editor-font-family);          background: var(--vscode-textCodeBlock-background);
           padding: 0 0.2em;
           border-radius: 3px;
         }
@@ -1176,8 +1172,6 @@ chat-app {
     & .tool {
       border-left: 2px solid var(--vscode-panel-border);
       padding-left: 0.5rem;
-      font-size: 0.9em;
-
       &.failed {
         border-left-color: var(--vscode-errorForeground);
       }
@@ -1200,9 +1194,7 @@ chat-app {
       & .input,
       & .result {
         margin: 0.3rem 0;
-        font-family: var(--vscode-editor-font-family);
-        font-size: 0.9em;
-        white-space: pre-wrap;
+        font-family: var(--vscode-editor-font-family);        white-space: pre-wrap;
         max-height: 20rem;
         overflow: auto;
         /* Colored code sits on the step like plain text does, not on a block of its own. */
@@ -1228,9 +1220,7 @@ chat-app {
 
       & .diff {
         margin: 0.3rem 0;
-        font-family: var(--vscode-editor-font-family);
-        font-size: 0.9em;
-        overflow-x: auto;
+        font-family: var(--vscode-editor-font-family);        overflow-x: auto;
       }
 
       & .diff-line {
@@ -1264,9 +1254,7 @@ chat-app {
 
       /* A way out to the full edit, not part of it: kept small and out of the diff's reading line. */
       & .omitted {
-        margin: 0.1rem 0;
-        font-size: 0.8em;
-        text-align: right;
+        margin: 0.1rem 0;        text-align: right;
         opacity: 0.7;
       }
     }
@@ -1300,17 +1288,13 @@ chat-app {
 
       & pre.command {
         margin: 0;
-        font-family: var(--vscode-editor-font-family);
-        font-size: 0.85em;
-        white-space: pre-wrap;
+        font-family: var(--vscode-editor-font-family);        white-space: pre-wrap;
         background: transparent;
         opacity: 0.85;
       }
 
       & .input {
-        font-family: var(--vscode-editor-font-family);
-        font-size: 0.85em;
-        white-space: pre-wrap;
+        font-family: var(--vscode-editor-font-family);        white-space: pre-wrap;
         max-height: 10rem;
         overflow: auto;
         margin: 0.3rem 0;
@@ -1340,9 +1324,7 @@ chat-app {
 
           & code {
             flex: 1 1 12rem;
-            font-family: var(--vscode-editor-font-family);
-            font-size: 0.9em;
-            white-space: pre-wrap;
+            font-family: var(--vscode-editor-font-family);            white-space: pre-wrap;
             word-break: break-all;
           }
         }
@@ -1356,7 +1338,6 @@ chat-app {
         }
 
         & .line-status {
-          font-size: 0.9em;
           opacity: 0.8;
 
           &.denied {
@@ -1419,16 +1400,12 @@ chat-app {
         & .explanation {
           display: block;
           margin-left: 1.4rem;
-          opacity: 0.75;
-          font-size: 0.9em;
-        }
+          opacity: 0.75;        }
       }
 
       & .other {
         display: block;
         margin-top: 0.5rem;
-        font-size: 0.9em;
-
         & textarea {
           display: block;
           width: 100%;
@@ -1453,9 +1430,7 @@ chat-app {
 
       & .step,
       & .missing {
-        opacity: 0.8;
-        font-size: 0.85em;
-      }
+        opacity: 0.8;      }
 
       /* A resolved card: each question, and beneath it what was answered. */
       & .answer {
@@ -1466,17 +1441,13 @@ chat-app {
 
       & .unanswered {
         margin: 0.5rem 0 0;
-        opacity: 0.8;
-        font-size: 0.9em;
-        font-style: italic;
+        opacity: 0.8;        font-style: italic;
       }
     }
 
     & .turn {
       margin: 0;
-      opacity: 0.6;
-      font-size: 0.8em;
-      text-align: right;
+      opacity: 0.6;      text-align: right;
 
       &.error {
         color: var(--vscode-errorForeground);
@@ -1490,16 +1461,12 @@ chat-app {
     }
 
     & .ended {
-      opacity: 0.6;
-      font-size: 0.85em;
-      font-style: italic;
+      opacity: 0.6;      font-style: italic;
     }
 
     & .working {
       margin: 0;
-      opacity: 0.7;
-      font-size: 0.9em;
-      animation: pulse 1.2s ease-in-out infinite;
+      opacity: 0.7;      animation: pulse 1.2s ease-in-out infinite;
 
       /* The turn is stalled on the user, not running: it reads as a warning, not as background progress. */
       &.needs-user {
@@ -1577,7 +1544,6 @@ chat-app {
       width: 100%;
       box-sizing: border-box;
       resize: vertical;
-      font-family: inherit;
       background: var(--vscode-input-background);
       color: var(--vscode-input-foreground);
       border: 1px solid var(--vscode-input-border, transparent);
@@ -1587,6 +1553,7 @@ chat-app {
 
     & .actions {
       display: flex;
+      flex-wrap: wrap;
       justify-content: flex-end;
       align-items: center;
       gap: 0.4rem;
@@ -1596,8 +1563,7 @@ chat-app {
         display: flex;
         align-items: center;
         gap: 0.8rem;
-        font-size: 0.85em;
-        opacity: 0.85;
+        min-width: 0;        opacity: 0.85;
 
         & label {
           cursor: pointer;
@@ -1608,9 +1574,7 @@ chat-app {
     & .mcp-servers {
       display: flex;
       flex-wrap: wrap;
-      gap: 0.8rem;
-      font-size: 0.8em;
-      opacity: 0.85;
+      gap: 0.8rem;      opacity: 0.85;
 
       & .server {
         display: inline-flex;
@@ -1634,28 +1598,23 @@ chat-app {
   }
 }
 
-/* The linked files under a prompt box: the composer's and the new-session card's. */
+/* The linked files beside the button that links them: the composer's and the new-session card's. */
 linked-files-row {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 0.3rem;
-  font-size: 0.85em;
-
+  /* A flex item may be given less than its content; the chips wrap among themselves rather than under the button. */
+  min-width: 0;
   & .link-file {
-    background: var(--vscode-button-secondaryBackground);
-    color: var(--vscode-button-secondaryForeground);
+    flex: none;
     padding: 0.2rem 0.5rem;
-
-    &:hover {
-      background: var(--vscode-button-secondaryHoverBackground);
-    }
   }
 
   & .files {
     display: flex;
     flex-wrap: wrap;
     gap: 0.3rem;
+    min-width: 0;
   }
 
   & .file {
@@ -1682,6 +1641,18 @@ linked-files-row {
   }
 }
 
+/*
+ * A form control does not inherit the page font. Left alone it renders in the browser's own family and
+ * size, which is below the floor the root sets and beside text that follows it.
+ */
+button,
+select,
+input,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+}
+
 button {
   background: var(--vscode-button-background);
   color: var(--vscode-button-foreground);
@@ -1694,12 +1665,24 @@ button {
     background: var(--vscode-button-hoverBackground);
   }
 
+  /*
+   * The secondary look. Not every theme carries the secondary colors, and an
+   * undefined var() drops the declaration rather than falling back to the one
+   * above it, so each one names what to use instead: without it the button
+   * loses its background and reads as a link.
+   */
   &.stop,
   &.deny,
   &.skip,
-  &.back {
-    background: var(--vscode-button-secondaryBackground);
-    color: var(--vscode-button-secondaryForeground);
+  &.back,
+  &.link-file {
+    background: var(--vscode-button-secondaryBackground, var(--vscode-input-background));
+    color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+    border: 1px solid var(--vscode-button-border, var(--vscode-input-border, transparent));
+
+    &:hover {
+      background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground));
+    }
   }
 
   &:disabled {

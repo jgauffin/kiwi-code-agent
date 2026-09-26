@@ -5,7 +5,7 @@ import type { CommentRef, Review, ReviewComment, ReviewRound } from '../../agent
 import type { Item, Scenario, Spec } from '../../agent/phases/spec-model'
 import type { Task, TaskState } from '../../agent/phases/tasks-file'
 import { PlanFocusRequestedEvent, ReviewActionEvent, type PlanFocus } from './events'
-import { renderMarkdown } from './markdown'
+import { renderMarkdown, renderMarkdownInline } from './markdown'
 import { presentTabs, type Tab } from './plan-step'
 import { post } from './vscode-api'
 
@@ -313,11 +313,12 @@ export class PlanView extends HTMLElement {
   // --- decisions ----------------------------------------------------------------
 
   /**
-   * A wizard over the decisions still in play: one at a time, the finding
-   * explained and the ways to settle it as buttons, a pick moving on to the
-   * next open one; the list beneath is the way back to any of them. The
-   * settled ones are folded away: an applied decision is history, its finding
-   * and ruling the record, and its title no more than a footnote.
+   * A wizard over the decisions still in play: one at a time, both sides of
+   * the disagreement and the ways to settle it as buttons, a pick moving on
+   * to the next open one. Only the header steps between them, so nothing
+   * under the card can be read as another way to settle this one. The settled
+   * ones are folded away: an applied decision is history, its finding and
+   * ruling the record, and its title no more than a footnote.
    */
   private decisionsSection(plan: PlanState): HTMLElement {
     const section = el('section', 'decisions')
@@ -327,7 +328,7 @@ export class PlanView extends HTMLElement {
     else {
       const current = pending.find((d) => this.shown !== undefined && same(d.title, this.shown)) ?? pending.find((d) => d.state === 'open') ?? pending[0]!
       const index = pending.indexOf(current)
-      section.append(this.wizardHeader(pending, index), this.decisionCard(current, plan), this.decisionSteps(pending, current))
+      section.append(this.wizardHeader(pending, index), this.decisionCard(current, plan))
     }
     if (settled.length > 0) {
       const history = document.createElement('details')
@@ -364,43 +365,53 @@ export class PlanView extends HTMLElement {
     this.draw()
   }
 
-  /** The pending decisions in order, the one shown marked; a click is the way back to a ruled one. */
-  private decisionSteps(pending: Decision[], current: Decision): HTMLElement {
-    const list = el('ol', 'steps')
-    for (const decision of pending) {
-      const row = el('li', `step ${decision.state}${decision === current ? ' current' : ''}`)
-      const link = button(decision.title, () => this.show(decision))
-      link.className = 'link'
-      row.append(link, el('span', `badge state ${decision.state}`, DECISION_STATE[decision.state]))
-      list.append(row)
-    }
-    return list
-  }
-
   /** A decision to make: what the code and the spec disagree on, and the ways to settle it, each a button. */
   private decisionCard(decision: Decision, plan: PlanState): HTMLElement {
     const rulable = plan.commentable
     const card = el('article', `decision ${decision.state}${rulable && decision.state === 'open' && decision.proposals.length > 0 ? ' attention' : ''}`)
     const head = el('header', 'head')
-    head.append(el('h3', 'title', decision.title), el('span', `badge state ${decision.state}`, DECISION_STATE[decision.state]))
-    card.append(head)
-    if (decision.on.length > 0) {
-      const on = el('div', 'on')
-      on.append(el('span', 'label', 'on '))
-      decision.on.forEach((name, index) => {
-        if (index > 0) on.append(', ')
-        const link = this.itemLink(name)
-        link.title = `Concerns the rule "${name}"; opens it on the Spec tab.`
-        on.append(link)
-      })
-      card.append(on)
-    }
-    card.append(labelled('finding', 'the code', decision.finding))
+    head.append(el('h3', 'title', decision.title))
+    if (decision.state !== 'open') head.append(el('span', `badge state ${decision.state}`, DECISION_STATE[decision.state]))
+    card.append(head, this.sides(decision, plan))
     if (decision.proposals.length === 0 && decision.state === 'open') card.append(el('div', 'awaiting', 'waiting for the planner to propose'))
     if (decision.ruling) card.append(labelled('ruling', 'ruling', rulingText(decision)))
     if (rulable && this.editor?.kind === 'ruling' && same(this.editor.target, decision.title)) card.append(this.editorBox(this.editor))
-    else if (rulable) card.append(this.rulingOptions(decision))
+    else if (rulable) card.append(this.rulingOptions(decision, plan))
     return card
+  }
+
+  /**
+   * The two sides of the disagreement, side by side: the rules as the spec
+   * has them, so the contract is read here rather than on the other tab, and
+   * what the code does today.
+   */
+  private sides(decision: Decision, plan: PlanState): HTMLElement {
+    const sides = el('div', 'sides')
+    if (decision.on.length > 0) {
+      const block = el('div', 'spec side')
+      block.append(el('span', 'kind', 'the spec'))
+      const rules = el('span', 'text')
+      for (const name of decision.on) rules.append(this.specRule(name, plan))
+      block.append(rules)
+      sides.append(block)
+    }
+    sides.append(labelled('finding side', 'the code', decision.finding))
+    return sides
+  }
+
+  /** A rule the decision is on, as the spec has it; the name stays the link to its row. */
+  private specRule(name: string, plan: PlanState): HTMLElement {
+    const row = el('div', 'rule')
+    const link = this.itemLink(name)
+    link.classList.add('name')
+    link.title = `Concerns the rule "${name}"; opens it on the Spec tab.`
+    row.append(link)
+    const item = plan.spec ? itemNamed(plan.spec, name) : undefined
+    if (!item) return row
+    const text = el('span', 'text')
+    renderMarkdownInline(item.text.replace(MARKER, '').trim(), text)
+    row.append(': ', text)
+    return row
   }
 
   /** Writes the ruling and moves the wizard on to the next open decision, the one after this first; stays when none is left. */
@@ -431,15 +442,24 @@ export class PlanView extends HTMLElement {
    * chosen one is marked; a pick writes the ruling and moves the wizard on
    * to the next open decision. Nothing is sent until Send rulings.
    */
-  private rulingOptions(decision: Decision): HTMLElement {
+  private rulingOptions(decision: Decision, plan: PlanState): HTMLElement {
     const wrap = el('div', 'options')
     const pick = (ruling: string) => this.rule(decision.title, ruling)
     const chosen = (ruling: string) => decision.ruling !== undefined && same(decision.ruling, ruling)
     const sent = 'Send rulings from the plan bar hands them to the planner; nothing is sent now.'
+    if (decision.state === 'open' && decision.proposals.length > 0) {
+      wrap.append(el('p', 'lead', 'Pick one: the spec then reads as chosen and the code is built to it. Nothing is sent until Send rulings.'))
+    }
     for (const proposal of decision.proposals) {
       const option = button('', () => pick(proposal), { title: `Rule that the rule reads so. ${sent}` })
       option.className = `option change${chosen(proposal) ? ' chosen' : ''}`
-      option.append(el('span', 'kind', 'Change the spec'), el('span', 'text', proposal))
+      const rewritten = rewrittenRule(proposal, decision, plan)
+      option.append(el('span', 'kind', 'Change the spec'))
+      // The rule is named above; repeating its lead-in on every option buries the sentence that differs.
+      if (rewritten && decision.on.length > 1) option.append(el('span', 'rule', rewritten.name))
+      const text = el('span', 'text')
+      renderMarkdownInline(rewritten?.text ?? proposal, text)
+      option.append(text)
       wrap.append(option)
     }
     const keep = button('', () => pick(KEEP_RULING), { title: `The rule stands as written; the code is changed to match. ${sent}` })
@@ -451,7 +471,10 @@ export class PlanView extends HTMLElement {
       title: `Write the ruling in your own words. ${sent}`,
     })
     own.className = `option own${ownRuling ? ' chosen' : ''}`
-    own.append(el('span', 'kind', 'Own ruling'), el('span', 'text', ownRuling ? decision.ruling! : 'say what should happen'))
+    const ownText = el('span', 'text')
+    if (ownRuling) renderMarkdownInline(decision.ruling!, ownText)
+    else ownText.textContent = 'say what should happen'
+    own.append(el('span', 'kind', 'Own ruling'), ownText)
     wrap.append(own)
     return wrap
   }
@@ -612,6 +635,31 @@ function pendingDecisions(plan: PlanState): Decision[] {
 }
 
 /** The ruling as the reader should see it: `keep` says what it means, anything else is the text as written. */
+/**
+ * The rule, edge case or question of that name; undefined once the spec no
+ * longer has it. Here rather than in the spec model, which the webview cannot
+ * import: it reads files.
+ */
+function itemNamed(spec: Spec, name: string): Item | undefined {
+  for (const scenario of spec.scenarios) {
+    for (const behaviour of scenario.behaviours) {
+      if (same(behaviour.name, name)) return behaviour
+      const edge = behaviour.edges.find((e) => same(e.name, name))
+      if (edge) return edge
+    }
+  }
+  return spec.questions.find((q) => same(q.name, name))
+}
+
+/** A proposal is a rule's new text, written with the `**Name**:` lead-in the spec line has; the card names the rule itself. */
+function rewrittenRule(proposal: string, decision: Decision, plan: PlanState): { name: string; text: string } | undefined {
+  const lead = /^\*\*([^*]+?)\*\*\s*:?\s*([\s\S]*)$/.exec(proposal.trim())
+  if (!lead) return undefined
+  const name = lead[1]!.trim().replace(/:$/, '').trim()
+  const known = decision.on.some((n) => same(n, name)) || (plan.spec !== undefined && itemNamed(plan.spec, name) !== undefined)
+  return known ? { name, text: lead[2]!.trim() } : undefined
+}
+
 function rulingText(decision: Decision): string {
   return decision.ruling !== undefined && same(decision.ruling, KEEP_RULING) ? 'keep the spec; the code changes' : (decision.ruling ?? '')
 }
@@ -647,10 +695,12 @@ function named(name: string, text: string): HTMLElement {
   return span
 }
 
-/** A labelled line: what the mapper found, what the user ruled. */
+/** A labelled line: what the mapper found, what the user ruled. The text is one line of markdown, as the file has it. */
 function labelled(className: string, kind: string, text: string): HTMLElement {
   const line = el('div', className)
-  line.append(el('span', 'kind', kind), el('span', 'text', text))
+  const body = el('span', 'text')
+  renderMarkdownInline(text, body)
+  line.append(el('span', 'kind', kind), body)
   return line
 }
 

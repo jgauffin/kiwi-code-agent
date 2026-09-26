@@ -74,8 +74,10 @@ describe('reconcile prompt', () => {
     expect(prompt).toContain('The finding is one or two sentences')
     expect(prompt).toContain('at the one path and symbol that shows it')
     expect(prompt).toContain('not what the spec should say instead, not the task')
+    // The decision card shows the rule verbatim beside the finding, so restating it is duplication.
+    expect(prompt).toContain('Do not quote or restate a rule')
     // The example is at the target length, since the example is what gets copied.
-    expect(prompt).toContain('- finding: `Order.cancel` in src/orders/order.ts refuses a shipped order; the spec cancels one and refunds it.')
+    expect(prompt).toContain('- finding: `Order.cancel` in src/orders/order.ts refuses a shipped order outright, so neither rule can hold as written.')
     expect(prompt).not.toContain('what the task would be')
     expect(prompt).not.toContain('what the spec should say instead)')
   })

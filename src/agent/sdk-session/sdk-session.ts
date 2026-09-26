@@ -105,7 +105,6 @@ export class SdkSession implements CodeSession {
   }
 
   send(text: string): void {
-    this.output.push({ type: 'user_message', text })
     this.input.push({
       type: 'user',
       message: { role: 'user', content: text },
