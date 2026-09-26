@@ -88,6 +88,10 @@
         "title": "KiwiAgent: Build Repo Map"
       },
       {
+        "command": "kiwiAgent.buildDocsMap",
+        "title": "KiwiAgent: Build Docs Map"
+      },
+      {
         "command": "kiwiAgent.reconnectMcp",
         "title": "KiwiAgent: Reload MCP Servers"
       }

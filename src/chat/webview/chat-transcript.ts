@@ -11,7 +11,15 @@ import { isQuestionTool, QuestionCard } from './question-card'
 
 type AssistantBubble = { element: HTMLElement; text: HTMLElement; thinking: HTMLElement; streamed: string; finalParts: string[] }
 
+/** What is being waited on, and whether the one to act is the user. */
+type Activity = { label: string; needsUser: boolean }
+
 const WAITING_ON_MODEL = 'Waiting on model'
+const NEEDS_APPROVAL = 'Waiting for you to allow or deny'
+const NEEDS_ANSWER = 'Waiting for your answer'
+
+const atWork = (label: string): Activity => ({ label, needsUser: false })
+const awaitingUser = (label: string): Activity => ({ label, needsUser: true })
 
 /**
  * The conversation as an append-only stream. Events patch the DOM directly:
@@ -25,13 +33,15 @@ export class ChatTranscript extends HTMLElement {
   private readonly questions = new Map<string, QuestionCard>()
   /** Tool calls of the question tool: the card says what they ask, so their own rows say nothing. */
   private readonly questionCalls = new Set<string>()
-  /** The newest successful edit, the one edit step left open. */
+  /** Tool calls the user allowed at a prompt: they have read what the call would do. */
+  private readonly approvedByHand = new Set<string>()
+  /** The newest edit the user has not seen, the one edit step left open. */
   private openEdit: HTMLDetailsElement | undefined
   private statusLine!: HTMLElement
   /** Tool calls still without a result, by id, each named as its row is. */
   private readonly pendingTools = new Map<string, string>()
-  /** What the session is doing right now; nothing when it waits on the user or is idle. */
-  private activity: string | undefined
+  /** What the session is doing right now, or what it needs from the user; nothing when idle. */
+  private activity: Activity | undefined
   private working: { element: HTMLElement; label: string; startedAt: number; stop: () => void } | undefined
 
   connectedCallback(): void {
@@ -49,6 +59,7 @@ export class ChatTranscript extends HTMLElement {
     this.permissions.clear()
     this.questions.clear()
     this.questionCalls.clear()
+    this.approvedByHand.clear()
     this.pendingTools.clear()
     this.openEdit = undefined
     this.working?.stop()
@@ -77,20 +88,20 @@ export class ChatTranscript extends HTMLElement {
       case 'user_message':
         // A test-run handoff quotes the command's output, colours and all.
         this.insert(block('user', event.text, renderAnsi))
-        this.activity = WAITING_ON_MODEL
+        this.activity = atWork(WAITING_ON_MODEL)
         break
       case 'assistant_text': {
         const bubble = this.bubble(event.messageId, event.parentToolUseId)
         bubble.streamed += event.delta
         if (live && bubble.finalParts.length === 0) renderMarkdown(bubble.streamed, bubble.text, false)
-        this.activity = 'Writing'
+        this.activity = atWork('Writing')
         break
       }
       case 'assistant_thinking': {
         const bubble = this.bubble(event.messageId, event.parentToolUseId)
         bubble.thinking.hidden = false
         bubble.thinking.textContent += event.delta
-        this.activity = 'Thinking'
+        this.activity = atWork('Thinking')
         break
       }
       case 'assistant_message': {
@@ -98,7 +109,7 @@ export class ChatTranscript extends HTMLElement {
         bubble.finalParts.push(event.text)
         renderMarkdown(bubble.finalParts.join(''), bubble.text, true)
         // The tool calls the message carries, if any, follow right after and take over.
-        this.activity = WAITING_ON_MODEL
+        this.activity = atWork(WAITING_ON_MODEL)
         break
       }
       case 'tool_call': {
@@ -110,28 +121,34 @@ export class ChatTranscript extends HTMLElement {
         const details = this.toolCall(event)
         this.insert(details, event.parentToolUseId)
         this.pendingTools.set(event.toolUseId, `Running ${details.querySelector('summary')?.textContent ?? event.name}`)
-        this.activity = this.pendingActivity()
+        this.activity = this.currentActivity()
         break
       }
       case 'tool_result': {
         if (this.questionCalls.has(event.toolUseId)) break
         this.pendingTools.delete(event.toolUseId)
-        this.activity = this.pendingActivity()
+        this.dropAnsweredPrompt(event.toolUseId)
+        this.activity = this.currentActivity()
         const details = this.tools.get(event.toolUseId)
         const result = document.createElement('pre')
         result.className = event.isError ? 'result error' : 'result'
         renderAnsi(event.text, result)
         if (details) {
+          details.classList.add('done')
           details.classList.toggle('failed', event.isError)
           // A written file speaks through its diff; the tool's confirmation says nothing more.
           if (event.edit && !event.isError) {
-            showEdit(details, event.edit)
-            // Only the newest edit stays open, so a run of edits does not bury the conversation.
-            if (this.openEdit) this.openEdit.open = false
-            this.openEdit = details
+            // An edit the user allowed at a prompt has already been read; one that ran on its own has not.
+            const unread = !this.approvedByHand.has(event.toolUseId)
+            showEdit(details, event.edit, unread)
+            // Only the newest unread edit stays open, so a run of edits does not bury the conversation.
+            if (unread) {
+              if (this.openEdit) this.openEdit.open = false
+              this.openEdit = details
+            }
             break
           }
-          if (event.edit) showEdit(details, event.edit)
+          if (event.edit) showEdit(details, event.edit, true)
           details.appendChild(result)
         } else {
           this.insert(result, event.parentToolUseId)
@@ -144,32 +161,33 @@ export class ChatTranscript extends HTMLElement {
         this.insert(card)
         card.show(event)
         this.permissions.set(event.requestId, card)
-        // The card is the indicator now; a ticking clock would say the model is at work.
-        this.activity = undefined
+        this.activity = this.currentActivity()
         break
       }
-      case 'permission_resolved':
-        this.permissions.get(event.requestId)?.resolve(event.decision)
-        this.activity = this.pendingActivity()
+      case 'permission_resolved': {
+        const card = this.permissions.get(event.requestId)
+        card?.resolve(event.decision)
+        if (event.decision === 'allow' && card?.toolUseId) this.approvedByHand.add(card.toolUseId)
+        this.activity = this.currentActivity()
         break
+      }
       case 'question_request': {
         const card = new QuestionCard()
         card.className = 'question-card'
         this.insert(card)
         card.show(event)
         this.questions.set(event.requestId, card)
-        // The card is waiting on the user, not the model; a ticking clock would say otherwise.
-        this.activity = undefined
+        this.activity = this.currentActivity()
         break
       }
       case 'question_resolved':
         this.questions.get(event.requestId)?.resolve(event.outcome)
-        this.activity = this.pendingActivity()
+        this.activity = this.currentActivity()
         break
       case 'status':
         // 'idle' also arrives mid-turn (after compaction, between requests); only the turn's end clears the activity.
-        if (event.status === 'requesting') this.activity = WAITING_ON_MODEL
-        if (event.status === 'compacting') this.activity = 'Compacting context'
+        if (event.status === 'requesting') this.activity = atWork(WAITING_ON_MODEL)
+        if (event.status === 'compacting') this.activity = atWork('Compacting context')
         break
       case 'turn_done': {
         this.activity = undefined
@@ -200,9 +218,28 @@ export class ChatTranscript extends HTMLElement {
     }
   }
 
-  /** The newest tool call still running, or the model's turn once every call has its result. */
-  private pendingActivity(): string {
-    return [...this.pendingTools.values()].at(-1) ?? WAITING_ON_MODEL
+  /**
+   * A call is shown once. The prompt stands for the call until the call's own
+   * step reports what it did, and then goes: what the user allowed is the step
+   * they see. A refused call has no step to speak for it, so its prompt stays.
+   */
+  private dropAnsweredPrompt(toolUseId: string): void {
+    if (!this.approvedByHand.has(toolUseId)) return
+    for (const [requestId, card] of this.permissions) {
+      if (card.toolUseId !== toolUseId) continue
+      card.remove()
+      this.permissions.delete(requestId)
+    }
+  }
+
+  /**
+   * Who the turn is waiting on: the user while a card of theirs is open, else
+   * the newest tool call still running, else the model.
+   */
+  private currentActivity(): Activity {
+    if ([...this.permissions.values()].some((card) => !card.isResolved)) return awaitingUser(NEEDS_APPROVAL)
+    if (this.hasOpenQuestion) return awaitingUser(NEEDS_ANSWER)
+    return atWork([...this.pendingTools.values()].at(-1) ?? WAITING_ON_MODEL)
   }
 
   /** A pulsing row naming the current activity, with the time spent in it, kept last while the session is at work. */
@@ -222,11 +259,13 @@ export class ChatTranscript extends HTMLElement {
       }, 1000)
       this.working = working
     }
-    if (this.working.label !== this.activity) {
-      this.working.label = this.activity
+    if (this.working.label !== this.activity.label) {
+      this.working.label = this.activity.label
       this.working.startedAt = Date.now()
-      this.working.element.textContent = `${this.activity}…`
+      this.working.element.textContent = `${this.activity.label}…`
     }
+    // A row that only fades reads as progress; the wait for the user has to stand out as a wait.
+    this.working.element.classList.toggle('needs-user', this.activity.needsUser)
     this.appendChild(this.working.element)
   }
 
@@ -284,14 +323,15 @@ export class ChatTranscript extends HTMLElement {
 }
 
 /**
- * An edit step shows what it did, open, where every other step shows only its
- * name: the edit is the session's output, not its plumbing, and the diff is
- * capped so it cannot swallow the transcript. The arguments it was called with
- * say nothing the diff does not, so they give way to it.
+ * An edit step shows what it did, where every other step shows only its name:
+ * the edit is the session's output, not its plumbing, and the diff is capped so
+ * it cannot swallow the transcript. It opens for an edit the user has not read
+ * yet. The arguments it was called with say nothing the diff does not, so they
+ * give way to it.
  */
-function showEdit(details: HTMLDetailsElement, change: Parameters<typeof editDiffView>[0]): void {
+function showEdit(details: HTMLDetailsElement, change: Parameters<typeof editDiffView>[0], open: boolean): void {
   details.classList.add('edit-step')
-  details.open = true
+  details.open = open
   const summary = details.querySelector('summary')
   if (summary) {
     const name = summary.textContent?.split(' ')[0] ?? ''

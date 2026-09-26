@@ -428,7 +428,7 @@ describe('OpenAiSession', () => {
         if (e.type === 'turn_done') break
       }
       expect(events).toContainEqual({ type: 'mcp_servers', servers: [{ name: 'docs', status: 'connected' }] })
-      expect(events).toContainEqual({ type: 'permission_request', requestId: 'c1', toolName: 'mcp__docs__echo', input: { value: 'x' } })
+      expect(events).toContainEqual({ type: 'permission_request', requestId: 'c1', toolUseId: 'c1', toolName: 'mcp__docs__echo', input: { value: 'x' } })
       expect(events).toContainEqual({ type: 'tool_result', toolUseId: 'c1', text: 'docs:echo:{"value":"x"}', isError: false })
       expect(model.requests[0]!.tools.map((t) => t.name)).toEqual(['Echo', 'mcp__docs__echo'])
       expect(model.requests[0]!.tools[1]).toEqual({ name: 'mcp__docs__echo', description: 'Echoes', parameters: echoInfo.inputSchema })

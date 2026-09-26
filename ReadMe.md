@@ -11,10 +11,13 @@ VS Code extension that runs coding sessions with a choice of engine per session:
 
 Both engines get the workspace's `.mcp.json` servers and the extension's JSON tools, which stream a file and return its shape or the rows an expression selects, so a large JSON file never has to be read whole.
 
-Two session modes:
+Three session modes:
 
 - **Chat**: work in the code with the full tool set.
 - **Plan**: blind planning of one feature. The planner reads docs and earlier specs, never the code, and writes a spec of named rules; the spec is then mapped against the code, every disagreement is ruled on by you, and the tasks are implemented and verified by the test suite. See [docs/plan-sessions.md](docs/plan-sessions.md); `docs/intent/agent.md` says why.
+- **Evaluate docs**: the docs decide how good a blind plan can be, so this reads them as the planner does and says where their arrangement would cost one, then changes what you pick, one confirmed write at a time.
+
+A planner starts with a generated map of the docs: every doc, what it is for, and one line per heading, so it opens one file instead of the tree and cites the heading exactly. Only the docs that changed are re-read when the map is rebuilt.
 
 ## Get started
 

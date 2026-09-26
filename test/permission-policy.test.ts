@@ -128,6 +128,15 @@ describe('PermissionPolicy', () => {
     expect(await use(policy({ allow: ['Write'] }), 'Write', { file_path: 'anything' })).toEqual({ allow: true })
   })
 
+  it('a_shell_call_passes_when_the_rules_together_cover_every_command_not_only_when_one_rule_does', async () => {
+    const p = policy({ allow: ['Bash(npm install:*)', 'Bash(node:*)'] })
+    expect(await use(p, 'Bash', { command: 'npm install 2>&1 | tail -6\nnode -p "1" 2>&1\ngrep -ril x .' })).toEqual({ allow: true })
+    expect(await use(p, 'Bash', { command: 'npm install && node -p "1" && rm x' })).toBeUndefined()
+    // What the prompt shows line by line and what lets the call through are the same judgement.
+    const lines = commandLines('Bash', 'npm install && node -p "1" && ls', ['Bash(npm install:*)', 'Bash(node:*)'])
+    expect(lines.every((l) => l.passes)).toBe(true)
+  })
+
   it('an_exact_bash_rule_matches_only_that_command', async () => {
     const p = policy({ allow: ['Bash(npm test)'] })
     expect(await use(p, 'Bash', { command: 'npm test' })).toEqual({ allow: true })

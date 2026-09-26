@@ -267,13 +267,13 @@ export class OpenAiSession implements CodeSession {
     return context.length ? { ...output, text: `${output.text}\n\n${context.join('\n\n')}` } : output
   }
 
-  private askPermission(requestId: string, toolName: string, input: unknown, signal: AbortSignal): Promise<PermissionDecision> {
+  private askPermission(toolUseId: string, toolName: string, input: unknown, signal: AbortSignal): Promise<PermissionDecision> {
     return new Promise((resolve) => {
-      this.pending.set(requestId, resolve)
+      this.pending.set(toolUseId, resolve)
       signal.addEventListener('abort', () => {
-        if (this.pending.delete(requestId)) resolve({ kind: 'deny', message: 'Interrupted' })
+        if (this.pending.delete(toolUseId)) resolve({ kind: 'deny', message: 'Interrupted' })
       })
-      this.emit({ type: 'permission_request', requestId, toolName, input })
+      this.emit({ type: 'permission_request', requestId: toolUseId, toolUseId, toolName, input })
     })
   }
 

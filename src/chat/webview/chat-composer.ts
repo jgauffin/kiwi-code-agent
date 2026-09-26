@@ -1,12 +1,7 @@
 import { compileTemplate } from '@relax.js/core/html'
 import type { McpServerState } from '../../agent/session/code-session'
-import {
-  AllowWritesToggledEvent,
-  InterruptRequestedEvent,
-  LinkOpenFileRequestedEvent,
-  McpReconnectRequestedEvent,
-  PromptSubmittedEvent,
-} from './events'
+import { LinkedFilesRow } from './linked-files-row'
+import { AllowWritesToggledEvent, InterruptRequestedEvent, McpReconnectRequestedEvent, PromptSubmittedEvent } from './events'
 
 /** The composer's per-session switches; `undefined` hides a switch the session has no use for. */
 type Switches = { allowWrites: boolean | undefined; mcp: McpServerState[] | undefined }
@@ -23,18 +18,12 @@ export class ChatComposer extends HTMLElement {
   private readonly template = compileTemplate(`
     <form r-submit="submit(event)">
       <textarea name="prompt" rows="3" placeholder="{{placeholder}}" disabled="{{held}}" r-keydown="keydown(event)"></textarea>
-      <div class="linked-files" if="anyLinked">
-        <span loop="f in linked" class="file" title="{{f.path}}">
-          {{f.name}}
-          <button type="button" class="unlink" title="Unlink {{f.path}}" r-click="unlink(f)">✕</button>
-        </span>
-      </div>
+      <linked-files-row class="linked-files"></linked-files-row>
       <div class="actions">
         <span class="switches">
           <label class="allow-writes" if="allowWritesAvailable" title="Let this session write files without asking. Bash and other tools still ask; deny rules still block.">
             <input type="checkbox" name="allowWrites" checked="{{allowWrites}}" r-change="toggleAllowWrites(event)"> Allow writes
           </label>
-          <button type="button" class="link-file" title="Link the file open in the editor; the next prompt asks the agent to read it." r-click="linkOpenFile()">Link open file</button>
         </span>
         <button type="button" class="stop" r-click="stop()">Stop</button>
         <button type="submit" class="send" disabled="{{held}}">Send</button>
@@ -49,8 +38,6 @@ export class ChatComposer extends HTMLElement {
   `)
   private switches: Switches = { allowWrites: undefined, mcp: undefined }
   private held = false
-  /** Paths as the prompt will name them, in the order they were linked. */
-  private linked: string[] = []
 
   connectedCallback(): void {
     if (this.childElementCount > 0) return
@@ -74,13 +61,6 @@ export class ChatComposer extends HTMLElement {
     if (!this.held) this.textarea.focus()
   }
 
-  /** Links a file the host resolved; the same file twice stays one chip. */
-  linkFile(path: string): void {
-    if (this.linked.includes(path)) return
-    this.linked = [...this.linked, path]
-    this.render()
-  }
-
   private render(): void {
     const { allowWrites, mcp } = this.switches
     this.template.render(
@@ -91,16 +71,9 @@ export class ChatComposer extends HTMLElement {
         allowWrites: allowWrites ?? false,
         mcpAvailable: mcp !== undefined && mcp.length > 0,
         servers: (mcp ?? []).map((s) => ({ ...s, title: s.error ?? s.status })),
-        anyLinked: this.linked.length > 0,
-        linked: this.linked.map((path) => ({ path, name: path.split('/').pop() ?? path })),
       },
       {
         reconnect: (s: McpServerState) => this.dispatchEvent(new McpReconnectRequestedEvent(s.name)),
-        linkOpenFile: () => this.dispatchEvent(new LinkOpenFileRequestedEvent()),
-        unlink: (file: { path: string }) => {
-          this.linked = this.linked.filter((path) => path !== file.path)
-          this.render()
-        },
         submit: (event: SubmitEvent) => {
           event.preventDefault()
           this.send()
@@ -123,13 +96,16 @@ export class ChatComposer extends HTMLElement {
     return this.querySelector('textarea')!
   }
 
+  private get linkedFiles(): LinkedFilesRow {
+    return this.querySelector('linked-files-row') as LinkedFilesRow
+  }
+
   private send(): void {
     const text = this.textarea.value.trim()
     if (text === '' || this.held) return
-    const files = this.linked
+    const files = this.linkedFiles.paths
     this.textarea.value = ''
-    this.linked = []
-    this.render()
+    this.linkedFiles.clear()
     this.dispatchEvent(new PromptSubmittedEvent(text, files))
   }
 }

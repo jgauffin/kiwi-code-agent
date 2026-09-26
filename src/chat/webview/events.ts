@@ -56,6 +56,8 @@ export class NewSessionRequestedEvent extends Event {
     public readonly mode: SessionMode,
     public readonly feature: string | undefined,
     public readonly prompt: string | undefined,
+    /** Files linked on the card; the first prompt tells the session to read them. */
+    public readonly files: string[] = [],
   ) {
     super(NewSessionRequestedEvent.type, { bubbles: true })
   }

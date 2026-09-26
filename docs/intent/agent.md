@@ -48,8 +48,8 @@ A session that is picked up after its engine stopped is set up afresh: it carrie
 
 ## Phase 1: Blind plan
 
-Sees: feature description, domain brief (ubiquitous language, stack, constraints), `docs/**`, the workspace README, every feature's spec under `plan/*.spec.md`, one work item closure when ADO is connected.
-Never sees: source, PRs, build output, generated context such as the repo map, another feature's review, tasks or decisions.
+Sees: feature description, domain brief (ubiquitous language, stack, constraints), `docs/**`, the workspace README, every feature's spec under `plan/*.spec.md`, the docs map, one work item closure when ADO is connected.
+Never sees: source, PRs, build output, generated context drawn from the code such as the repo map, another feature's review, tasks or decisions. The docs map is the exception that proves the rule: generated, but from the docs alone, so it carries nothing the planner could not read itself.
 
 Until ADO is connected the feature description is typed by the user or picked from the docs. The agent plans the user story itself; the tasks file is the source for the ADO tasks created under the story once ADO is connected (write-back, not read-only).
 
@@ -89,6 +89,12 @@ Hand-coded, read-only, Azure DevOps. Server-side filtering is the enforcement.
 The whole of `docs/**` and every spec is phase 1 scope. What phase 1 is kept from is the code and what travels with it: source, PRs, build output, generated context, the mapper's files. Those drift with the code in the same direction and arrive labelled as authority.
 
 `docs/**` holds what no spec holds: the domain brief, the constraints, the features not yet planned. Once a spec is approved it is the feature's definition, and the doc it was planned from may say less, or otherwise. Nobody trims that by hand unprompted, so on approval the plan session lists in chat, per doc section, what now reads differently from the spec or is covered by it and can go. The user edits, or tells the planner to, and each of its writes into `docs/**` is confirmed.
+
+### Finding the way in
+
+Scope is not the same as access. A planner that may read everything under `docs/**` still has to guess which file holds the answer, and reads whole documents to find a paragraph. So it starts with the docs map: every doc, what it is for, and one line per heading. Generated context, like the repo map, and blind-safe because it is derived from the docs and nothing else. It also fixes the citations: a rule cites `path#Heading`, and the map spells every heading out, so the planner cites what exists rather than what it remembers reading.
+
+How the docs are arranged is therefore part of how well the product can be planned, and it is nobody's job by default. The docs evaluation is that job: a session with the planner's own read scope that says where the arrangement costs a planner, and changes the docs when the user says which. It judges discovery, never correctness: whether the docs are right is settled against the code, in phase 2, on one feature at a time.
 
 ## Phase 2: Map against code
 
@@ -194,7 +200,7 @@ Channels, non-blocking: `send(session, text)` returns immediately; notification 
 
 ## Observability
 
-Run id, per-phase transcript, tool calls, token spend, checkpoint reasons under `.agent/runs/<id>/`.
+Run id, per-phase transcript, tool calls, token spend, checkpoint reasons under `.agent/runs/<id>/`. Generated context sits beside it: the repo map under `.agent/repo-map/`, the docs map under `.agent/docs-map/`. A build of either has a run log like any other.
 
 ## Per-phase model
 

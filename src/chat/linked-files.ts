@@ -14,5 +14,6 @@ export function linkedFilePath(workspaceRoot: string, file: string): string {
 export function withLinkedFiles(text: string, files: string[]): string {
   if (files.length === 0) return text
   const list = files.map((file) => `- ${file}`).join('\n')
-  return `${text}\n\nRead these files first; the request is about them:\n${list}`
+  const instruction = `Read these files first; the request is about them:\n${list}`
+  return text === '' ? instruction : `${text}\n\n${instruction}`
 }

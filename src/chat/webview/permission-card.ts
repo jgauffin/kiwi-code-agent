@@ -39,6 +39,11 @@ export class PermissionCard extends HTMLElement {
     return this.decision !== undefined
   }
 
+  /** The call this prompt is about, when the engine named it. */
+  get toolUseId(): string | undefined {
+    return this.request?.toolUseId
+  }
+
   private render(): void {
     const r = this.request
     if (!r) return
@@ -80,18 +85,9 @@ export class PermissionCard extends HTMLElement {
 
   private body(r: PermissionRequest): HTMLElement {
     if (isShellTool(r.toolName) && this.lines.length) return this.commandList()
-    // A file edit is asked about as the change it would make; once decided, the edit step shows what it did, or nothing changed.
-    const change = this.decision === undefined ? r.edit : undefined
-    if (change) {
-      const wrapper = document.createElement('div')
-      wrapper.append(editDiffView(change), this.wholeCallActions(r))
-      return wrapper
-    }
-    const input = document.createElement('pre')
-    input.className = 'input'
-    fillCode(input, JSON.stringify(r.input, null, 2), 'json')
     const wrapper = document.createElement('div')
-    wrapper.append(input, this.wholeCallActions(r))
+    // A file edit is asked about as the change it would make, decided or not: its arguments are never what the user answers.
+    wrapper.append(r.edit ? editDiffView(r.edit) : jsonInput(r.input), this.wholeCallActions(r))
     return wrapper
   }
 
@@ -199,6 +195,13 @@ export class PermissionCard extends HTMLElement {
     ]
     return kept.length ? `Allowed (${kept.join(', ')})` : 'Allowed'
   }
+}
+
+function jsonInput(input: unknown): HTMLElement {
+  const pre = document.createElement('pre')
+  pre.className = 'input'
+  fillCode(pre, JSON.stringify(input, null, 2), 'json')
+  return pre
 }
 
 function passesText(passes: string): string {

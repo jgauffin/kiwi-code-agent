@@ -1,19 +1,25 @@
 import { buildRepoMap, mapIsStale, readSummary } from './build-map'
 import { MAP_ROOT } from './map-files'
+import {
+  CONTEXT_TIME_BOUND_MS,
+  generatedContext,
+  type ContextOptions,
+  type GeneratedContext,
+  type GeneratedSource,
+} from '../session/generated-context'
 
 /**
- * What a session start does about the map: the reconcile run and the implement
- * session are given its summary, the map is brought up to date first if it is
- * behind, and a build that cannot deliver never holds the start hostage — the
- * session begins on the map as it last stood, or on none, and is told which.
- *
- * The result is a string handed to the engine at its creation, so the map a
- * session works from is fixed for the life of that engine: another build
- * rewriting the files underneath changes nothing it holds.
+ * The repo map as a session start uses it: the reconcile run and the implement
+ * session are given its summary, brought up to date first if it is behind.
+ * Building and degrading are the shared rules in `session/generated-context`;
+ * what lives here is what the repo map in particular is and says.
  */
 
 /** How long a session start waits for a build before going ahead without it. */
-export const REPO_MAP_TIME_BOUND_MS = 60_000
+export const REPO_MAP_TIME_BOUND_MS = CONTEXT_TIME_BOUND_MS
+
+/** The map in the product's words; every note about it is written from this. */
+const REPO_MAP = 'repo map'
 
 /**
  * The modes that start with the map. Chat has no feature to place, and a plan
@@ -24,12 +30,9 @@ export const REPO_MAP_TIME_BOUND_MS = 60_000
  */
 export const wantsRepoMap = (mode: string): boolean => mode === 'reconcile' || mode === 'implement'
 
-/** The map as a session start uses it; the workspace is one implementation, a test another. */
-export type RepoMapSource = {
-  isStale(): Promise<boolean>
-  build(onProgress: (line: string) => void): Promise<unknown>
-  read(): Promise<string | undefined>
-}
+export type RepoMapSource = GeneratedSource
+export type RepoMapContext = GeneratedContext
+export type RepoMapOptions = ContextOptions
 
 export const workspaceRepoMap = (cwd: string): RepoMapSource => ({
   isStale: () => mapIsStale(cwd),
@@ -37,77 +40,8 @@ export const workspaceRepoMap = (cwd: string): RepoMapSource => ({
   read: () => readSummary(cwd),
 })
 
-/** The summary the session starts with, and the one line saying where it came from. */
-export type RepoMapContext = {
-  summary?: string
-  note: string
-}
-
-export type RepoMapOptions = {
-  onProgress?: (line: string) => void
-  timeoutMs?: number
-}
-
-const REBUILT = "The repo map was rebuilt at this session's start."
-const CURRENT = "The repo map was current at this session's start."
-
-/**
- * Brings the map up to date if it is behind and reads the summary. A failed or
- * overlong build is not an error here: it becomes the note the session reads.
- */
-export async function repoMapContext(source: RepoMapSource, options: RepoMapOptions = {}): Promise<RepoMapContext> {
-  const onProgress = options.onProgress ?? (() => {})
-  const timeoutMs = options.timeoutMs ?? REPO_MAP_TIME_BOUND_MS
-  let built = false
-  let failure: string | undefined
-  // Not stale is the common case: nothing is built and nothing is waited on.
-  const stale = await source.isStale().catch((error: unknown) => {
-    failure = reason(error)
-    return false
-  })
-  if (stale) {
-    onProgress('Building the repo map…')
-    failure = await withinBound(() => source.build(onProgress), timeoutMs)
-    built = failure === undefined
-  }
-  const summary = await source.read().catch(() => undefined)
-  return { ...(summary ? { summary } : {}), note: noteFor(summary, failure, built) }
-}
-
-function noteFor(summary: string | undefined, failure: string | undefined, built: boolean): string {
-  if (failure === undefined) return summary ? (built ? REBUILT : CURRENT) : 'No repo map is available for this workspace.'
-  if (summary) return `The repo map could not be rebuilt (${failure}); this is the map as it last stood, so it may be behind the source.`
-  return `No repo map is available: it could not be built (${failure}).`
-}
-
-const reason = (error: unknown): string => (error instanceof Error ? error.message : String(error))
-
-/** The reason a call failed, or undefined when it did not; a thrown value never reaches the caller. */
-async function attempt(run: () => Promise<unknown>): Promise<string | undefined> {
-  try {
-    await run()
-    return undefined
-  } catch (error) {
-    return reason(error)
-  }
-}
-
-/**
- * The build's time bound. A build that passes it is left running — it is shared,
- * so the next start joins it rather than beginning again — and the session
- * starts on what is already on disk.
- */
-async function withinBound(run: () => Promise<unknown>, timeoutMs: number): Promise<string | undefined> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const bound = new Promise<string>((resolve) => {
-    timer = setTimeout(() => resolve('the build passed its time bound'), timeoutMs)
-  })
-  try {
-    return await Promise.race([attempt(run), bound])
-  } finally {
-    if (timer) clearTimeout(timer)
-  }
-}
+export const repoMapContext = (source: RepoMapSource, options: RepoMapOptions = {}): Promise<RepoMapContext> =>
+  generatedContext(REPO_MAP, source, options)
 
 /** The map as it goes into a system prompt: the note, the summary, and how to reach what the summary names. */
 export function repoMapSection(context: RepoMapContext): string {

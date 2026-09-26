@@ -1182,6 +1182,15 @@ chat-app {
         border-left-color: var(--vscode-errorForeground);
       }
 
+      /* A finished step is plumbing: muting it leaves the conversation itself standing out. One that failed, or that is open to be read, stays at full strength. */
+      &.done:not([open]):not(.failed) {
+        opacity: 0.55;
+
+        &:hover {
+          opacity: 1;
+        }
+      }
+
       & summary {
         cursor: pointer;
         font-family: var(--vscode-editor-font-family);
@@ -1312,7 +1321,7 @@ chat-app {
         gap: 0.4rem;
       }
 
-      /* A shell call: one row per command, its answer or its buttons beside it. */
+      /* A shell call: one row per command, its answer beside it and its buttons under it. */
       & .commands {
         list-style: none;
         margin: 0.3rem 0;
@@ -1338,8 +1347,11 @@ chat-app {
           }
         }
 
+        /* Under the command at the left edge: on a wide window buttons trailing the command sit far from the eye and get missed. */
         & .line-actions {
+          flex: 1 1 100%;
           display: flex;
+          flex-wrap: wrap;
           gap: 0.4rem;
         }
 
@@ -1488,6 +1500,13 @@ chat-app {
       opacity: 0.7;
       font-size: 0.9em;
       animation: pulse 1.2s ease-in-out infinite;
+
+      /* The turn is stalled on the user, not running: it reads as a warning, not as background progress. */
+      &.needs-user {
+        opacity: 1;
+        font-weight: 600;
+        color: var(--vscode-editorWarning-foreground, var(--vscode-charts-orange));
+      }
     }
 
     /* Terminal output keeps its colours, in the theme's own terminal palette. */
@@ -1566,36 +1585,6 @@ chat-app {
       padding: 0.4rem;
     }
 
-    & .linked-files {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.3rem;
-      font-size: 0.85em;
-
-      & .file {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.2rem;
-        padding: 0.1rem 0.2rem 0.1rem 0.4rem;
-        border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
-        border-radius: 3px;
-        background: var(--vscode-input-background);
-
-        & .unlink {
-          background: none;
-          color: inherit;
-          padding: 0 0.2rem;
-          line-height: 1;
-          opacity: 0.7;
-
-          &:hover {
-            background: none;
-            opacity: 1;
-          }
-        }
-      }
-    }
-
     & .actions {
       display: flex;
       justify-content: flex-end;
@@ -1612,17 +1601,6 @@ chat-app {
 
         & label {
           cursor: pointer;
-        }
-
-        & .link-file {
-          background: var(--vscode-button-secondaryBackground);
-          color: var(--vscode-button-secondaryForeground);
-          font-size: 1em;
-          padding: 0.2rem 0.5rem;
-
-          &:hover {
-            background: var(--vscode-button-secondaryHoverBackground);
-          }
         }
       }
     }
@@ -1651,6 +1629,54 @@ chat-app {
           padding: 0 0.2rem;
           line-height: 1;
         }
+      }
+    }
+  }
+}
+
+/* The linked files under a prompt box: the composer's and the new-session card's. */
+linked-files-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.85em;
+
+  & .link-file {
+    background: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+    padding: 0.2rem 0.5rem;
+
+    &:hover {
+      background: var(--vscode-button-secondaryHoverBackground);
+    }
+  }
+
+  & .files {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+
+  & .file {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    padding: 0.1rem 0.2rem 0.1rem 0.4rem;
+    border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+    border-radius: 3px;
+    background: var(--vscode-input-background);
+
+    & .unlink {
+      background: none;
+      color: inherit;
+      padding: 0 0.2rem;
+      line-height: 1;
+      opacity: 0.7;
+
+      &:hover {
+        background: none;
+        opacity: 1;
       }
     }
   }

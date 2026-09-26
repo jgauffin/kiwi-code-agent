@@ -14,7 +14,9 @@ The keys, for settings.json:
 - `kiwiAgent.nodePath`: Node executable for the Claude engine; empty uses VS Code's executable.
 - `kiwiAgent.traceEngine`: one line per Claude engine message in the KiwiAgent output channel, to see what the engine sends (thinking deltas, status) when the UI shows nothing.
 - `kiwiAgent.verify`: test commands run once every task of a feature is marked tested, over the files the tasks name, in the directory of the nearest `project` file; a repo with a backend and a frontend runs each suite once, and only the suites the feature touched. A failure is handed to the implement session, up to `kiwiAgent.verifyFailureBudget` consecutive failures. Default: `dotnet test` of the `.csproj` owning a `.cs` file, `npm test` in the `package.json` folder owning a `.ts` file.
+- `kiwiAgent.planIgnore`: globs under `docs/` a blind planner must not see. The docs map does not describe them and the docs evaluation does not judge them.
 - Command *KiwiAgent: Set API Key for Profile* stores keys for profiles that declare `apiKeySecret`.
+- Command *KiwiAgent: Build Docs Map* describes the docs that changed since the last build. A plan session and a docs evaluation do it themselves when the map is behind.
 
 ## Instruction files and skills
 
@@ -26,4 +28,4 @@ Claude Code's layout, at the user level and in the workspace. On the own-loop en
 
 ## Logs
 
-Session events are logged to `.agent/runs/<session id>/events.jsonl` in the workspace; add `.agent/` to the workspace's `.gitignore`.
+Session events are logged to `.agent/runs/<session id>/events.jsonl` in the workspace; add `.agent/` to the workspace's `.gitignore`. Generated context lives beside the logs: the repo map under `.agent/repo-map/` and the docs map under `.agent/docs-map/`, both rebuilt from the workspace and safe to delete.

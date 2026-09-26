@@ -449,6 +449,27 @@ describe('SessionManager', () => {
     }
   })
 
+  it('a_docs_session_and_a_docs_map_build_are_named_without_a_feature_because_neither_stands_on_one', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+    try {
+      const manager = new SessionManager(
+        memoryStore(),
+        async (r) => new FakeSession(r.id, r.profile, r.engineSessionId),
+        (id) => RunLog.forSession(dir, id),
+        () => {},
+      )
+      const evaluation = await manager.create(profile, 'docs')
+      expect(evaluation).toMatchObject({ title: 'Docs evaluation' })
+      expect(evaluation.feature).toBeUndefined()
+      // The build is handed the docs it may read, the way a cleanup is handed the files it may split.
+      const build = await manager.create(profile, 'docs-map', undefined, { files: ['docs/intent/agent.md'] })
+      expect(build).toMatchObject({ title: 'Docs map', files: ['docs/intent/agent.md'] })
+      expect(build.feature).toBeUndefined()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   describe('continuing a conversation', () => {
     const berget: ModelProfile = { name: 'GLM', engine: 'openai-compatible', model: 'glm', baseUrl: 'https://b', apiKeySecret: 'k' }
 

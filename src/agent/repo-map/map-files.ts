@@ -133,19 +133,5 @@ async function removeEmptyDirs(dir: string): Promise<void> {
   }
 }
 
-const inFlight = new Map<string, Promise<unknown>>()
-
-/**
- * One build per workspace at a time: a second caller asking while a build runs
- * — another session start, or the command during one — waits on that build and
- * takes its result rather than starting a second.
- */
-export function sharedBuild<T>(key: string, run: () => Promise<T>): Promise<T> {
-  const running = inFlight.get(key)
-  if (running !== undefined) return running as Promise<T>
-  const started = run().finally(() => {
-    if (inFlight.get(key) === started) inFlight.delete(key)
-  })
-  inFlight.set(key, started)
-  return started
-}
+/** One build per workspace at a time; the rule is shared with the docs map. */
+export { sharedBuild } from '../session/generated-context'

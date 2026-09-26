@@ -1,8 +1,16 @@
 import * as vscode from 'vscode'
-import type { SessionManager, SessionMode, SessionRecord } from '../agent/session/session-manager'
+import { isBuild, type SessionManager, type SessionMode, type SessionRecord } from '../agent/session/session-manager'
 import type { SessionStatus } from '../agent/session/session-status'
 
-const MODE_LABEL: Record<SessionMode, string> = { chat: 'Chat', plan: 'Plan', reconcile: 'Map against code', implement: 'Implement', cleanup: 'Cleanup' }
+const MODE_LABEL: Record<SessionMode, string> = {
+  chat: 'Chat',
+  plan: 'Plan',
+  reconcile: 'Map against code',
+  implement: 'Implement',
+  cleanup: 'Cleanup',
+  docs: 'Evaluate docs',
+  'docs-map': 'Docs map',
+}
 
 const STATUS_ICON: Record<SessionStatus, { icon: string; color?: string }> = {
   idle: { icon: 'circle-outline' },
@@ -29,9 +37,9 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionRecord> {
     this.changed.fire()
   }
 
-  /** A run under another session (a check) shows on its parent, not as an entry of its own. */
+  /** A run under another session (a check) shows on its parent, and a build shows nowhere: neither is an entry of its own. */
   getChildren(): SessionRecord[] {
-    return this.sessions.list().filter((r) => !r.parentId)
+    return this.sessions.list().filter((r) => !r.parentId && !isBuild(r.mode))
   }
 
   getTreeItem(record: SessionRecord): vscode.TreeItem {

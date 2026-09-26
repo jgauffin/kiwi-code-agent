@@ -73,6 +73,7 @@ describe('SdkSession', () => {
     expect(request).toEqual({
       type: 'permission_request',
       requestId: 'tu_9',
+      toolUseId: 'tu_9',
       toolName: 'Bash',
       input: { command: 'ls' },
     })

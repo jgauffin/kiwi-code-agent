@@ -31,6 +31,15 @@ function answered(requestId: string, label: string): SessionEvent {
   return { type: 'question_resolved', requestId, outcome }
 }
 
+/** The prompt a write raises and how the user answered it, carrying the change it asks about. */
+function prompt(toolUseId: string, path: string, decision: 'allow' | 'deny'): SessionEvent[] {
+  const change = { path, label: path, diffs: ['@@ -1 +1 @@\n-a\n+b'], omitted: 0 }
+  return [
+    { type: 'permission_request', requestId: `p-${toolUseId}`, toolUseId, toolName: 'Write', input: { file_path: path }, edit: change },
+    { type: 'permission_resolved', requestId: `p-${toolUseId}`, decision },
+  ]
+}
+
 /** What the card would send if it still took input. */
 function submitted(card: Element): unknown {
   let sent: unknown
@@ -68,6 +77,30 @@ describe('terminal output in the transcript', () => {
   })
 })
 
+describe('finished steps in the transcript', () => {
+  const step = (view: Transcript) => view.querySelector<HTMLDetailsElement>('details.tool')!
+
+  it('a_step_is_marked_done_only_once_its_result_arrives_so_a_running_one_stays_visible', () => {
+    const view = transcript()
+
+    view.apply({ type: 'tool_call', toolUseId: 't1', name: 'Bash', input: { command: 'npm test' } })
+    expect(step(view).classList.contains('done')).toBe(false)
+    view.apply({ type: 'tool_result', toolUseId: 't1', text: 'ok', isError: false })
+    expect(step(view).classList.contains('done')).toBe(true)
+  })
+
+  it('a_failed_step_is_marked_failed_so_it_is_not_muted_with_the_steps_that_worked', () => {
+    const view = transcript()
+
+    view.reset([
+      { type: 'tool_call', toolUseId: 't1', name: 'Bash', input: { command: 'npm test' } },
+      { type: 'tool_result', toolUseId: 't1', text: 'boom', isError: true },
+    ])
+
+    expect(step(view).classList.contains('failed')).toBe(true)
+  })
+})
+
 describe('file edits in the transcript', () => {
   const edit = (path: string) => ({ path, label: path, diffs: ['@@ -1 +1 @@\n-a\n+b'], omitted: 0 })
   const write = (id: string, path: string, isError = false): SessionEvent[] => [
@@ -102,10 +135,62 @@ describe('file edits in the transcript', () => {
 
     expect(steps(view).map((s) => s.open)).toEqual([false, false, true])
   })
+
+  it('an_edit_the_user_allowed_at_a_prompt_is_collapsed_since_they_have_read_it', () => {
+    const view = transcript()
+    const [call, result] = write('t1', 'src/a.ts')
+
+    view.reset([call!, ...prompt('t1', 'src/a.ts', 'allow'), result!])
+
+    expect(steps(view)[0]?.open).toBe(false)
+    expect(steps(view)[0]?.querySelector('.edit')).not.toBeNull()
+  })
+
+  it('an_edit_allowed_at_a_prompt_leaves_an_earlier_unread_edit_open', () => {
+    const view = transcript()
+    const [call, result] = write('t2', 'src/b.ts')
+
+    view.reset([...write('t1', 'src/a.ts'), call!, ...prompt('t2', 'src/b.ts', 'allow'), result!])
+
+    expect(steps(view).map((s) => s.open)).toEqual([true, false])
+  })
+})
+
+describe('a permission prompt in the transcript', () => {
+  const edit = (path: string) => ({ path, label: path, diffs: ['@@ -1 +1 @@\n-a\n+b'], omitted: 0 })
+  const cards = (view: Transcript) => [...view.querySelectorAll('permission-card')]
+
+  it('goes_once_the_call_it_allowed_reports_what_it_did_so_the_call_is_shown_once', () => {
+    const view = transcript()
+
+    view.reset([
+      { type: 'tool_call', toolUseId: 't1', name: 'Write', input: { file_path: 'src/a.ts' } },
+      ...prompt('t1', 'src/a.ts', 'allow'),
+      { type: 'tool_result', toolUseId: 't1', text: 'File written', isError: false, edit: edit('src/a.ts') },
+    ])
+
+    expect(cards(view)).toHaveLength(0)
+    expect(view.querySelectorAll('.edit')).toHaveLength(1)
+  })
+
+  it('stays_when_the_call_was_denied_since_nothing_else_records_the_refusal', () => {
+    const view = transcript()
+
+    view.reset([
+      { type: 'tool_call', toolUseId: 't1', name: 'Write', input: { file_path: 'src/a.ts' } },
+      ...prompt('t1', 'src/a.ts', 'deny'),
+      { type: 'tool_result', toolUseId: 't1', text: 'Denied by user', isError: true },
+    ])
+
+    expect(cards(view)).toHaveLength(1)
+    expect(cards(view)[0]?.querySelector('.edit')).not.toBeNull()
+  })
 })
 
 describe('the activity row', () => {
   const activity = (view: Transcript) => view.querySelector('.working')?.textContent ?? null
+  /** The row marked as stalled on the user, which the stylesheet colours as a warning. */
+  const waitsOnUser = (view: Transcript) => view.querySelector('.working')?.classList.contains('needs-user') ?? false
 
   it('a_sent_prompt_waits_on_the_model_until_it_starts_thinking_or_writing', () => {
     const view = transcript()
@@ -150,9 +235,46 @@ describe('the activity row', () => {
     view.apply({ type: 'user_message', text: 'go' })
     view.apply({ type: 'tool_call', toolUseId: 't1', name: 'Write', input: { file_path: 'src/x.ts' } })
     view.apply({ type: 'permission_request', requestId: 'p1', toolName: 'Write', input: { file_path: 'src/x.ts' } })
-    expect(activity(view)).toBeNull()
     view.apply({ type: 'permission_resolved', requestId: 'p1', decision: 'allow' })
     expect(activity(view)).toBe('Running Write src/x.ts…')
+    expect(waitsOnUser(view)).toBe(false)
+  })
+
+  it('a_pending_permission_says_the_turn_is_stalled_on_the_user_rather_than_reading_as_progress', () => {
+    const view = transcript()
+
+    view.apply({ type: 'user_message', text: 'go' })
+    view.apply({ type: 'tool_call', toolUseId: 't1', name: 'Write', input: { file_path: 'src/x.ts' } })
+    view.apply({ type: 'permission_request', requestId: 'p1', toolName: 'Write', input: { file_path: 'src/x.ts' } })
+
+    expect(activity(view)).toBe('Waiting for you to allow or deny…')
+    expect(waitsOnUser(view)).toBe(true)
+  })
+
+  it('answering_one_of_two_open_permissions_keeps_the_row_on_the_one_still_open', () => {
+    const view = transcript()
+
+    view.apply({ type: 'user_message', text: 'go' })
+    view.apply({ type: 'permission_request', requestId: 'p1', toolName: 'Write', input: { file_path: 'src/x.ts' } })
+    view.apply({ type: 'permission_request', requestId: 'p2', toolName: 'Write', input: { file_path: 'src/y.ts' } })
+    view.apply({ type: 'permission_resolved', requestId: 'p1', decision: 'allow' })
+
+    expect(waitsOnUser(view)).toBe(true)
+    view.apply({ type: 'permission_resolved', requestId: 'p2', decision: 'allow' })
+    expect(waitsOnUser(view)).toBe(false)
+  })
+
+  it('an_open_question_says_the_answer_is_the_users_to_give', () => {
+    const view = transcript()
+
+    view.apply({ type: 'user_message', text: 'go' })
+    view.apply(ask('r1', 'Storage'))
+    expect(activity(view)).toBe('Waiting for your answer…')
+    expect(waitsOnUser(view)).toBe(true)
+
+    view.apply(answered('r1', 'Yes'))
+    expect(activity(view)).toBe('Waiting on model…')
+    expect(waitsOnUser(view)).toBe(false)
   })
 })
 
@@ -196,8 +318,8 @@ describe('questions in a replayed transcript', () => {
     option.checked = true
     option.dispatchEvent(new Event('change', { bubbles: true }))
     expect(submitted(card!)).toEqual({ kind: 'answered', answers: [{ chosen: ['No'] }] })
-    // Nobody is working while the card waits, so no clock runs.
-    expect(view.querySelector('.working')).toBeNull()
+    // A replayed session that stopped on a question still says so.
+    expect(view.querySelector('.working')?.textContent).toBe('Waiting for your answer…')
   })
 
   it('skipping_a_card_leaves_the_question_unanswered_rather_than_choosing_for_the_user', () => {

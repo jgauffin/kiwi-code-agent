@@ -41,6 +41,10 @@ import { CLEANUP_TOOLS, cleanupPrompt, cleanupScope } from './agent/phases/clean
 import type { Thresholds } from './agent/cleanup/oversized'
 import { SpecContract } from './agent/phases/spec-model'
 import { withRepoMap, workspaceRepoMap } from './agent/repo-map/session-context'
+import { withDocsMap, workspaceDocsMap } from './agent/docs-map/session-context'
+import { DOCS_MAP_TOOLS, docsMapPrompt, docsMapScope } from './agent/phases/docs-map'
+import { DocsMapContract } from './agent/docs-map/entry'
+import { DOCS_EVALUATION_TOOLS, docsEvaluationPrompt, docsEvaluationScope } from './agent/phases/docs-evaluation'
 import type { VerifyRule } from './agent/phases/verification'
 import {
   CHAT_PANEL_TYPE,
@@ -130,6 +134,26 @@ export function activate(context: vscode.ExtensionContext): void {
       withRepoMap(record.mode, systemPrompt, workspaceRepoMap(workspaceRoot), { onProgress: (line) => progress.report({ message: line }) }),
     )
 
+  /** Docs the blind planner must not see, so neither the map nor the evaluation may describe them. */
+  const planIgnore = (): string[] => vscode.workspace.getConfiguration('kiwiAgent').get<string[]>('planIgnore', [])
+
+  /**
+   * The docs map as a session working in the intent carries it. Describing a
+   * doc costs a turn, so only the docs that changed are read, and a build that
+   * cannot deliver leaves the session on the map as it last stood.
+   */
+  const withDocs = async (record: SessionRecord, systemPrompt: string): Promise<string> => {
+    const ignored = planIgnore()
+    return await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'KiwiAgent: docs map' }, (progress) =>
+      withDocsMap(
+        record.mode,
+        systemPrompt,
+        workspaceDocsMap(workspaceRoot, ignored, (onProgress) => chat.buildDocsMap(ignored, onProgress)),
+        { onProgress: (line) => progress.report({ message: line }) },
+      ),
+    )
+  }
+
   /** What a session's mode dictates, independent of engine: hooks, prompt, tool set. */
   const setupFor = async (record: SessionRecord): Promise<{ hooks?: SessionHooks; systemPrompt?: string; toolNames?: string[] }> => {
     const setup = await modeSetup(record)
@@ -154,12 +178,27 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       case 'plan': {
         if (!record.feature) throw new Error('A plan session needs a feature name')
-        const ignored = vscode.workspace.getConfiguration('kiwiAgent').get<string[]>('planIgnore', [])
+        const ignored = planIgnore()
         return {
           // The contract answers on the write that broke it, so the planner fixes the spec in the same turn.
           hooks: composeHooks(new ScopeGuard(workspaceRoot, blindPlanScope(record.feature, ignored)), new SpecContract(workspaceRoot)),
-          systemPrompt: blindPlanPrompt(record.feature, workspaceRoot),
+          systemPrompt: await withDocs(record, blindPlanPrompt(record.feature, workspaceRoot)),
           toolNames: BLIND_PLAN_TOOLS,
+        }
+      }
+      case 'docs': {
+        return {
+          hooks: new ScopeGuard(workspaceRoot, docsEvaluationScope(planIgnore())),
+          systemPrompt: await withDocs(record, docsEvaluationPrompt(workspaceRoot)),
+          toolNames: DOCS_EVALUATION_TOOLS,
+        }
+      }
+      case 'docs-map': {
+        return {
+          // The entry contract answers on the write that broke it, so a bad anchor never reaches a planner's prompt.
+          hooks: composeHooks(new ScopeGuard(workspaceRoot, docsMapScope(record.files ?? [])), new DocsMapContract(workspaceRoot)),
+          systemPrompt: docsMapPrompt(workspaceRoot),
+          toolNames: DOCS_MAP_TOOLS,
         }
       }
       case 'reconcile': {
@@ -326,6 +365,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('kiwiAgent.setApiKey', () => setApiKey(settings)),
     vscode.commands.registerCommand('kiwiAgent.migratePlans', () => chat.migratePlans()),
     vscode.commands.registerCommand('kiwiAgent.buildRepoMap', () => chat.buildRepoMap()),
+    vscode.commands.registerCommand('kiwiAgent.buildDocsMap', () => chat.buildDocsMapCommand(planIgnore())),
     vscode.commands.registerCommand('kiwiAgent.reconnectMcp', () => mcp.reconnectAll()),
     watchMcpConfig(workspaceRoot, () => mcp.refresh()),
     openDraftPlanAction(chat, sessions, workspaceRoot, output),

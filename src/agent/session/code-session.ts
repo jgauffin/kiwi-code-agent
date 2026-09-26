@@ -53,6 +53,8 @@ export type SessionEvent =
   | {
       type: 'permission_request'
       requestId: string
+      /** The call being asked about, so the prompt and that call's own step are never shown as two things. */
+      toolUseId?: string
       toolName: string
       input: unknown
       title?: string

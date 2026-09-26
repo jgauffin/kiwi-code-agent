@@ -8,6 +8,7 @@ import { PlanBar } from './plan-bar'
 import { PlanTabs } from './plan-tabs'
 import { PlanView } from './plan-view'
 import { planStep, tabFor, type Step, type Tab } from './plan-step'
+import { LinkedFilesRow } from './linked-files-row'
 import { SessionTabs } from './session-tabs'
 import {
   AllowWritesToggledEvent,
@@ -62,6 +63,8 @@ export class ChatApp extends HTMLElement {
   private planTab: Tab = 'spec'
   /** The step the plan tab was last chosen for; a new step opens its own tab, otherwise the reader's choice holds. */
   private step: Step | undefined
+  /** The row waiting for the host to name the open file. */
+  private linkTarget: LinkedFilesRow | undefined
 
   connectedCallback(): void {
     if (this.childElementCount > 0) return
@@ -96,7 +99,10 @@ export class ChatApp extends HTMLElement {
     this.addEventListener(PromptSubmittedEvent.type, (e) =>
       post({ type: 'send', text: e.text, ...(e.files.length > 0 ? { files: e.files } : {}) }),
     )
-    this.addEventListener(LinkOpenFileRequestedEvent.type, () => post({ type: 'link_open_file' }))
+    this.addEventListener(LinkOpenFileRequestedEvent.type, (e) => {
+      this.linkTarget = e.target instanceof LinkedFilesRow ? e.target : undefined
+      post({ type: 'link_open_file' })
+    })
     this.addEventListener(InterruptRequestedEvent.type, () => post({ type: 'interrupt' }))
     this.addEventListener(PermissionDecidedEvent.type, (e) =>
       post({ type: 'permission', requestId: e.requestId, decision: e.decision }),
@@ -120,6 +126,7 @@ export class ChatApp extends HTMLElement {
         mode: e.mode,
         ...(e.feature ? { feature: e.feature } : {}),
         ...(e.prompt ? { prompt: e.prompt } : {}),
+        ...(e.files.length > 0 ? { files: e.files } : {}),
       }),
     )
 
@@ -157,7 +164,8 @@ export class ChatApp extends HTMLElement {
         this.follow(message.event)
         break
       case 'linked_file':
-        this.composer.linkFile(message.path)
+        // The answer belongs to the row that asked: the composer's, or the new-session card's.
+        if (this.linkTarget?.isConnected) this.linkTarget.link(message.path)
         break
       case 'show_new_session':
         this.showCreating(true)

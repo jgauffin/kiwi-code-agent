@@ -6,11 +6,20 @@ import { answerText, UNANSWERED_RESULT, type QuestionOutcome, type UserQuestionR
 /**
  * `plan` writes a feature's spec blind, `reconcile` checks it against the code
  * (together: planning), `implement` builds the approved spec, `cleanup` splits
- * what the implementation left oversized.
+ * what the implementation left oversized. `docs` judges how the docs a blind
+ * planner reads are arranged, and `docs-map` describes them so it can find its
+ * way; neither belongs to a feature.
  */
-export type SessionMode = 'chat' | 'plan' | 'reconcile' | 'implement' | 'cleanup'
+export type SessionMode = 'chat' | 'plan' | 'reconcile' | 'implement' | 'cleanup' | 'docs' | 'docs-map'
 
-export const isPlanning = (mode: SessionMode): boolean => mode === 'plan' || mode === 'reconcile'
+/** Work in the intent rather than the code: the plan profile, and no blanket allow for writes. */
+export const isPlanning = (mode: SessionMode): boolean => mode === 'plan' || mode === 'reconcile' || mode === 'docs'
+
+/** The modes that stand on their own rather than on a feature's plan files. */
+export const isFeatureless = (mode: SessionMode): boolean => mode === 'chat' || mode === 'docs' || mode === 'docs-map'
+
+/** A build, not a conversation: it has no tab and no entry of its own, and nobody prompts it. */
+export const isBuild = (mode: SessionMode): boolean => mode === 'docs-map'
 
 export type SessionRecord = {
   id: string
@@ -21,7 +30,7 @@ export type SessionRecord = {
   feature?: string
   /** The session whose tab this one runs under: a check runs under its plan session and never gets a tab of its own. */
   parentId?: string
-  /** Workspace-relative paths a cleanup run was given to split; what it may write, beside new files next to them. */
+  /** The workspace-relative paths a run was handed: what a cleanup may write, what a docs map build may read. */
   files?: string[]
   /**
    * Engine-side conversation id, what lets a closed session continue. For the
@@ -39,6 +48,9 @@ export interface SessionStore {
 }
 
 function titleFor(mode: SessionMode, feature: string | undefined): string {
+  // Named before the feature is looked at: neither stands on one.
+  if (mode === 'docs') return 'Docs evaluation'
+  if (mode === 'docs-map') return 'Docs map'
   if (!feature) return 'New session'
   switch (mode) {
     case 'plan':

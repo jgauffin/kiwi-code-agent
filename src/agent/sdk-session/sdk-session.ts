@@ -292,6 +292,7 @@ export class SdkSession implements CodeSession {
       this.output.push({
         type: 'permission_request',
         requestId,
+        toolUseId: ctx.toolUseID,
         toolName: bareToolName(toolName),
         input,
         ...(ctx.title ? { title: ctx.title } : {}),

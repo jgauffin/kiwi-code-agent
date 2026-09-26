@@ -158,14 +158,15 @@ describe('a call that is not a shell command', () => {
     expect(labels(c)).toEqual(['Allow', 'Deny'])
   })
 
-  it('an_allowed_edit_leaves_its_diff_to_the_edit_step_so_it_is_shown_once', () => {
+  it('an_answered_edit_keeps_showing_the_change_it_asked_about_never_its_raw_arguments', () => {
     const change = { path: 'a.ts', label: 'a.ts', diffs: ['@@ -1 +1 @@\n-a\n+b'], omitted: 0 }
     const { card: c } = card({ type: 'permission_request', requestId: 'e1', toolName: 'Edit', input: { file_path: 'a.ts' }, edit: change })
     expect(c.querySelector('.edit')).not.toBeNull()
 
     c.resolve('allow')
 
-    expect(c.querySelector('.edit')).toBeNull()
+    expect(c.querySelector('.edit')).not.toBeNull()
+    expect(c.querySelector('pre.input')).toBeNull()
     expect(c.querySelector('.decision')?.textContent).toBe('Allowed')
   })
 })

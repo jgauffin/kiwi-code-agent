@@ -138,8 +138,8 @@ export type FromWebview =
   | { type: 'switch_session'; sessionId: string }
   /** Stops the engine; the session stays in the list and resumes on the next prompt. */
   | { type: 'close_session'; sessionId: string }
-  /** `prompt`, when given, is sent as the first message. */
-  | { type: 'new_session'; mode: SessionMode; feature?: string; prompt?: string }
+  /** `prompt`, when given, is sent as the first message; `files` are linked files it should read. */
+  | { type: 'new_session'; mode: SessionMode; feature?: string; prompt?: string; files?: string[] }
   /** Sets the profile new sessions of that kind run on; `plan` with an empty name follows `work`. */
   | { type: 'set_default_profile'; role: 'work' | 'plan'; name: string }
   /** Opens the plan session behind a spec on disk, or starts one on it when none remains; what it offers follows the spec's status. */

@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 ;(globalThis as Record<string, unknown>).acquireVsCodeApi = () => ({ postMessage: () => {} })
 
 const { ChatComposer } = await import('../src/chat/webview/chat-composer')
+const { LinkedFilesRow } = await import('../src/chat/webview/linked-files-row')
 const { LinkOpenFileRequestedEvent, McpReconnectRequestedEvent, PromptSubmittedEvent } = await import('../src/chat/webview/events')
 
 function composer(): InstanceType<typeof ChatComposer> {
@@ -44,61 +45,28 @@ describe('ChatComposer linked files', () => {
     node.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }))
   }
 
-  it('the_button_asks_the_host_which_file_is_open_rather_than_guessing', () => {
+  it('the_files_linked_under_the_prompt_go_out_with_it_and_are_let_go_once_it_is_sent', () => {
+    const node = composer()
+    const sent: string[][] = []
+    node.addEventListener(PromptSubmittedEvent.type, (e) => sent.push(e.files))
+    const row = node.querySelector('linked-files-row') as InstanceType<typeof LinkedFilesRow>
+    row.link('src/chat/protocol.ts')
+    row.link('src/chat/webview/style.css')
+
+    submit(node, 'rename it')
+    expect(sent).toEqual([['src/chat/protocol.ts', 'src/chat/webview/style.css']])
+    expect(row.paths).toEqual([])
+
+    submit(node, 'and again')
+    expect(sent).toEqual([['src/chat/protocol.ts', 'src/chat/webview/style.css'], []])
+  })
+
+  it('the_link_button_sits_under_the_prompt_box', () => {
     const node = composer()
     let asked = 0
     node.addEventListener(LinkOpenFileRequestedEvent.type, () => asked++)
     node.querySelector<HTMLButtonElement>('button.link-file')!.click()
     expect(asked).toBe(1)
-    // Nothing is linked until the host answers with a path.
-    expect(node.querySelector('.linked-files')).toBeNull()
-  })
-
-  it('every_linked_file_rides_along_with_the_next_prompt_and_is_named_by_its_file_name', () => {
-    const node = composer()
-    const sent: string[][] = []
-    node.addEventListener(PromptSubmittedEvent.type, (e) => sent.push(e.files))
-    node.linkFile('src/chat/protocol.ts')
-    node.linkFile('src/chat/webview/style.css')
-
-    const chips = [...node.querySelectorAll('.linked-files .file')]
-    expect(chips.map((c) => c.textContent!.replace(/\s+/g, ' ').trim())).toEqual(['protocol.ts ✕', 'style.css ✕'])
-    expect(chips[0]!.getAttribute('title')).toBe('src/chat/protocol.ts')
-
-    submit(node, 'rename it')
-    expect(sent).toEqual([['src/chat/protocol.ts', 'src/chat/webview/style.css']])
-  })
-
-  it('the_same_file_linked_twice_stays_one_link', () => {
-    const node = composer()
-    node.linkFile('src/chat/protocol.ts')
-    node.linkFile('src/chat/protocol.ts')
-    expect(node.querySelectorAll('.linked-files .file').length).toBe(1)
-  })
-
-  it('the_x_unlinks_only_the_file_it_sits_on', () => {
-    const node = composer()
-    const sent: string[][] = []
-    node.addEventListener(PromptSubmittedEvent.type, (e) => sent.push(e.files))
-    node.linkFile('a/one.ts')
-    node.linkFile('b/two.ts')
-    node.querySelectorAll<HTMLButtonElement>('.linked-files .file .unlink')[0]!.click()
-
-    expect([...node.querySelectorAll('.linked-files .file')].map((c) => c.getAttribute('title'))).toEqual(['b/two.ts'])
-    submit(node, 'go')
-    expect(sent).toEqual([['b/two.ts']])
-  })
-
-  it('links_are_let_go_once_the_prompt_they_were_meant_for_is_sent', () => {
-    const node = composer()
-    const sent: string[][] = []
-    node.addEventListener(PromptSubmittedEvent.type, (e) => sent.push(e.files))
-    node.linkFile('a/one.ts')
-    submit(node, 'first')
-    expect(node.querySelector('.linked-files')).toBeNull()
-
-    submit(node, 'second')
-    expect(sent).toEqual([['a/one.ts'], []])
   })
 })
 

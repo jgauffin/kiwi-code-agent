@@ -16,3 +16,5 @@ One file per feature, in rough build order. Each says what the feature does; `do
 12. [own-loop-compaction.md](own-loop-compaction.md)
 13. [mcp-servers.md](mcp-servers.md)
 14. [instructions-and-skills.md](instructions-and-skills.md)
+15. [docs-map.md](docs-map.md)
+16. [docs-evaluation.md](docs-evaluation.md)

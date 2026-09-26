@@ -34,10 +34,10 @@ export class PermissionPolicy implements SessionHooks {
 
   async preToolUse(tool: ToolUse): Promise<PreToolUseOutcome> {
     const { allow, deny } = this.rules()
-    const denied = deny.find((rule) => this.matches(parseRule(rule), tool, 'any'))
+    const denied = deny.find((rule) => this.denies(parseRule(rule), tool))
     if (denied) return { deny: `Blocked by the project's permission rule ${denied} (kiwiAgent.permissions.deny).` }
     if (this.isReadOnly(tool)) return { allow: true }
-    if (allow.some((rule) => this.matches(parseRule(rule), tool, 'all'))) return { allow: true }
+    if (this.allows(allow, tool)) return { allow: true }
     return undefined
   }
 
@@ -52,27 +52,34 @@ export class PermissionPolicy implements SessionHooks {
     return isShellTool(tool.toolName) && isReadOnlyCommand(this.command(tool), this.readOnlyContext)
   }
 
-  /**
-   * For a shell tool, `all` requires the rule to cover every segment (an
-   * allow), while `any` fires on one (a deny). A substitution hides a command,
-   * so no allow rule can cover it.
-   */
-  private matches(rule: PermissionRule, tool: ToolUse, segments: 'all' | 'any'): boolean {
+  /** One part is enough: a segment of a shell call, or either end of a move. */
+  private denies(rule: PermissionRule, tool: ToolUse): boolean {
     if (!ruleCoversTool(rule.tool, tool.toolName)) return false
-    if (rule.pattern === undefined) return !isShellTool(tool.toolName) || segments === 'any' || !splitShellCommand(this.command(tool)).substitutes
+    if (rule.pattern === undefined) return true
+    if (isShellTool(tool.toolName)) return splitShellCommand(this.command(tool)).segments.some((s) => bashPatternMatches(rule.pattern!, s.tokens))
+    if (FILE_TOOLS.has(tool.toolName)) return this.relativePaths(tool).some((path) => matchesGlob(path, rule.pattern!))
+    return false
+  }
+
+  /**
+   * Every segment of a shell call has to be let through, but not by the same
+   * rule: rules allowed one at a time add up, which is what the prompt shows
+   * line by line. A substitution hides a command, so no rule can cover it. A
+   * move touches both its ends, so one rule must cover both.
+   */
+  private allows(allow: string[], tool: ToolUse): boolean {
+    const rules = allow.map(parseRule).filter((rule) => ruleCoversTool(rule.tool, tool.toolName))
     if (isShellTool(tool.toolName)) {
       const parsed = splitShellCommand(this.command(tool))
-      if (segments === 'all' && parsed.substitutes) return false
-      const covered = (s: ShellSegment) => bashPatternMatches(rule.pattern!, s.tokens) || (segments === 'all' && isReadOnlySegment(s, this.readOnlyContext))
-      return segments === 'all' ? parsed.segments.every(covered) : parsed.segments.some(covered)
+      if (parsed.substitutes) return false
+      const covered = (s: ShellSegment) => isReadOnlySegment(s, this.readOnlyContext) || rules.some((r) => r.pattern === undefined || bashPatternMatches(r.pattern, s.tokens))
+      return parsed.segments.every(covered)
     }
-    if (FILE_TOOLS.has(tool.toolName)) {
-      // A move touches both its ends: a deny on either blocks it, an allow must cover both.
-      const paths = this.relativePaths(tool)
-      const covered = (path: string) => matchesGlob(path, rule.pattern!)
-      return paths.length > 0 && (segments === 'all' ? paths.every(covered) : paths.some(covered))
-    }
-    return false
+    const paths = this.relativePaths(tool)
+    return rules.some((rule) => {
+      if (rule.pattern === undefined) return true
+      return FILE_TOOLS.has(tool.toolName) && paths.length > 0 && paths.every((path) => matchesGlob(path, rule.pattern!))
+    })
   }
 
   private command(tool: { input: unknown }): string {

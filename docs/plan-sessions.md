@@ -4,6 +4,12 @@ Blind planning of one feature. The session can read `docs/**`, the root README a
 
 `docs/intent/agent.md` says why planning is blind and how the phases fit together.
 
+## Finding the way around the docs
+
+The session starts with the docs map: every doc it may read, what that doc is for, and one line per heading. It opens one file instead of the tree, and cites a section as `path#Heading` with the heading spelled as the map spells it. The map is built from the docs alone, so a blind session reading it stays blind, and a rebuild re-reads only the docs whose content changed. *KiwiAgent: Build Docs Map* builds it on demand; a plan session builds it first when it is behind.
+
+*Evaluate docs*, on the new-session screen, is the other side of that: a session with the planner's own read scope that says in chat where the docs' arrangement costs a planner (what has to be read whole, what cannot be cited, what nothing links to) and changes what you pick, one confirmed write at a time. It never proposes renaming a heading an approved spec cites without naming the citations that would have to follow.
+
 ## The view
 
 A bar above the transcript switches between the plan (Plan) and the conversation (Chat), names the feature's stage and offers the next step; the view follows the work: Chat while the planner responds, Plan when its turn ends.

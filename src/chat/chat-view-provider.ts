@@ -1,5 +1,5 @@
 import * as vscode from 'vscode'
-import { isPlanning, type SessionManager, type SessionMode, type SessionRecord } from '../agent/session/session-manager'
+import { isBuild, isFeatureless, isPlanning, type SessionManager, type SessionMode, type SessionRecord } from '../agent/session/session-manager'
 import type { ModelProfile } from '../agent/session/model-profile'
 import type { McpServerState, SessionEvent } from '../agent/session/code-session'
 import { nextStatus, type SessionStatus } from '../agent/session/session-status'
@@ -53,6 +53,9 @@ import {
 import { submitReview, type ReviewCourier } from '../agent/phases/review-handoff'
 import { editDiffTitle, editLine, isRunSnapshot, runsRoot } from '../agent/edits/open-edit'
 import { buildRepoMap } from '../agent/repo-map/build-map'
+import { finishDocsMap, planDocsMap, readDocsSummary, type DocsMapResult } from '../agent/docs-map/build'
+import { docsMapKickoff } from '../agent/phases/docs-map'
+import { sharedBuild } from '../agent/session/generated-context'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative } from 'node:path'
 import { linkedFilePath, withLinkedFiles } from './linked-files'
@@ -122,6 +125,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private readonly reviewingDocs = new Set<string>()
   /** Per running session, its MCP servers as the engine last reported them. */
   private readonly mcpServers = new Map<string, McpServerState[]>()
+  /** The docs map build in flight: the run's session, where its progress goes, and the turn its caller waits on. */
+  private docsMapRun: { sessionId: string; progress: (line: string) => void; done: (errors: string[]) => void } | undefined
   private readonly changed = new vscode.EventEmitter<void>()
   /** Fires when the active session, a status or the session list changed. */
   readonly onDidChange = this.changed.event
@@ -178,7 +183,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   /** `continues` names the session whose conversation the new one carries on, where the engine resumes. */
   async newSession(mode: SessionMode, feature?: string, prompt?: string, continues?: SessionRecord): Promise<SessionRecord> {
-    if (mode !== 'chat' && !feature) throw new Error(`A ${mode} session needs a feature name`)
+    if (!isFeatureless(mode) && !feature) throw new Error(`A ${mode} session needs a feature name`)
     const record = await this.sessions.create(this.profileFor(mode), mode, feature, { continues })
     this.setActive(record.id)
     await this.sendState()
@@ -254,6 +259,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         void this.sendState()
         this.changed.fire()
       }
+    }
+    // A build has no tab and nobody prompts it: its events are progress for whoever is waiting.
+    if (record && isBuild(record.mode)) {
+      this.followDocsMap(record, event)
+      return
     }
     if (record?.parentId) {
       if (record.mode === 'cleanup') this.followCleanup(record, event)
@@ -556,6 +566,95 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /**
+   * The `KiwiAgent: Build Docs Map` command. Unlike the repo map this one
+   * spends a turn, so it says up front how many docs it has to read and
+   * nothing at all when the map is already current.
+   */
+  async buildDocsMapCommand(ignored: string[]): Promise<void> {
+    const plan = await planDocsMap(this.workspaceRoot, ignored)
+    if (plan.current && (await this.docsMapIsComposed())) {
+      void vscode.window.showInformationMessage('KiwiAgent: the docs map is current.')
+      return
+    }
+    try {
+      const result = await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: 'KiwiAgent: building the docs map' },
+        (progress) => this.buildDocsMap(ignored, (line) => progress.report({ message: line })),
+      )
+      const described = result.described.length
+      const left = result.undescribed.length
+      const tail = left === 0 ? '' : `, ${left} still to describe`
+      void vscode.window.showInformationMessage(`KiwiAgent: docs map built: ${described} doc${described === 1 ? '' : 's'}${tail}.`)
+    } catch (error) {
+      void vscode.window.showWarningMessage(`KiwiAgent: the docs map could not be built: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  /**
+   * Describes the docs that changed and composes the map. Two callers asking
+   * at once (a session start and the command, or two starts) share the one
+   * build rather than spending the turn twice.
+   */
+  buildDocsMap(ignored: string[], onProgress: (line: string) => void = () => {}): Promise<DocsMapResult> {
+    return sharedBuild(`docs-map:${this.workspaceRoot}`, () => this.runDocsMap(ignored, onProgress))
+  }
+
+  private async runDocsMap(ignored: string[], onProgress: (line: string) => void): Promise<DocsMapResult> {
+    const plan = await planDocsMap(this.workspaceRoot, ignored)
+    if (plan.changed.length > 0) await this.describeDocs(plan.changed, onProgress)
+    onProgress('Composing the map…')
+    // Composed whatever the run did: what it wrote is kept, what it did not is the next build's work.
+    return finishDocsMap(this.workspaceRoot, ignored)
+  }
+
+  /** One run for the whole build: it reads the changed docs, writes an entry each, and is gone when its turn ends. */
+  private async describeDocs(docs: string[], onProgress: (line: string) => void): Promise<void> {
+    // The docs it was handed are its whole read scope: an unchanged doc costs nothing, and the code is out of reach.
+    const record = await this.sessions.create(this.profileFor('docs-map'), 'docs-map', undefined, { files: docs })
+    const finished = new Promise<string[]>((resolve) => {
+      this.docsMapRun = { sessionId: record.id, progress: onProgress, done: resolve }
+    })
+    let errors: string[]
+    try {
+      onProgress(`Describing ${docs.length} doc${docs.length === 1 ? '' : 's'}…`)
+      await this.sessions.send(record.id, docsMapKickoff(docs))
+      errors = await finished
+    } finally {
+      this.docsMapRun = undefined
+      // The record is the build's, not a session anyone returns to; the run log stays for inspection.
+      await this.sessions.remove(record.id)
+      this.statuses.delete(record.id)
+    }
+    if (errors.length > 0) throw new Error(errors.join('; '))
+  }
+
+  /** A build run has no transcript in the UI: its events are the progress line the caller shows. */
+  private followDocsMap(record: SessionRecord, event: SessionEvent): void {
+    const run = this.docsMapRun
+    if (!run || run.sessionId !== record.id) return
+    if (event.type === 'turn_done') {
+      run.done(event.isError ? (event.errors.length > 0 ? event.errors : ['the run ended with an error']) : [])
+      return
+    }
+    if (event.type === 'error' && event.fatal) {
+      run.done([event.message])
+      return
+    }
+    // An engine that died without finishing a turn still ends the build: a wait nobody
+    // resolves would be joined by every later build and never come back.
+    if (event.type === 'ended') {
+      run.done(['the run ended before it finished'])
+      return
+    }
+    const line = progressLine(event, 'Docs map')
+    if (line !== undefined) run.progress(line)
+  }
+
+  private async docsMapIsComposed(): Promise<boolean> {
+    return (await readDocsSummary(this.workspaceRoot)) !== undefined
+  }
+
   /** Every plan under `plan/`, the command's entry point; one summary at the end. */
   async migratePlans(): Promise<void> {
     const plans = await listPlans(this.workspaceRoot)
@@ -653,9 +752,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       case 'close_session':
         await this.close(message.sessionId)
         return
-      case 'new_session':
-        await this.newSession(message.mode, message.feature, message.prompt)
+      case 'new_session': {
+        const prompt = withLinkedFiles(message.prompt ?? '', message.files ?? [])
+        await this.newSession(message.mode, message.feature, prompt === '' ? undefined : prompt)
         return
+      }
       case 'resume_plan':
         await this.resumePlan(message.feature)
         return
@@ -923,11 +1024,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /** Tabs: live sessions plus the active one, in creation order (list is newest first). A run under a session has no tab. */
+  /** Tabs: live sessions plus the active one, in creation order (list is newest first). A run under a session, and a build, have no tab. */
   private tabs(): SessionTab[] {
     return this.sessions
       .list()
-      .filter((r) => !r.parentId && (this.sessions.isLive(r.id) || r.id === this.activeSessionId))
+      .filter((r) => !r.parentId && !isBuild(r.mode) && (this.sessions.isLive(r.id) || r.id === this.activeSessionId))
       .reverse()
       .map((r) => this.tab(r))
   }

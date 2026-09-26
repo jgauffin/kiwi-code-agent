@@ -68,6 +68,7 @@ export class ScopeGuard implements SessionHooks {
     // `plan/` beside the specs gives away nothing but the other plan files' names.
     const allowed = globs.some((g) => matchesGlob(rel, g) || (directory && (matchesGlob(`${rel}/x`, g) || g.startsWith(`${rel}/`))))
     if (allowed) return undefined
+    if (globs.length === 0) return { deny: `Cannot ${verb} ${raw}: this phase writes nothing.` }
     return { deny: `Cannot ${verb} ${raw}: this phase is limited to ${globs.join(', ')}.` }
   }
 }
