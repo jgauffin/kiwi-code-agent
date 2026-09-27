@@ -1,44 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import { planStep, presentTabs, tabFor, tabLabel } from '../src/chat/webview/plan-step'
-import type { CleanupUnit, PlanState } from '../src/chat/protocol'
+import type { CleanupUnit } from '../src/chat/protocol'
 import type { Decision } from '../src/agent/phases/decisions'
 import type { Task } from '../src/agent/phases/tasks-file'
 import type { ReviewRound } from '../src/agent/phases/plan-review'
-
-function plan(over: Partial<PlanState> = {}): PlanState {
-  return {
-    specPath: 'plan/orders.spec.md',
-    tasksPath: 'plan/orders.tasks.md',
-    decisionsPath: 'plan/orders.decisions.md',
-    stage: 'created',
-    status: 'draft',
-    body: '# Orders',
-    spec: { title: 'Orders', goal: '', scenarios: [], questions: [], problems: [] },
-    stale: false,
-    repairable: false,
-    mappable: true,
-    remappable: false,
-    implementable: false,
-    verifiable: false,
-    tasks: [],
-    review: { rounds: [] },
-    commentable: true,
-    approvable: false,
-    decisions: [],
-    pendingDecisions: 0,
-    applyingRulings: false,
-    reviewingDocs: false,
-    atWork: true,
-    ...over,
-  }
-}
+import { planState as plan } from './plan-state-fixture'
 
 function decision(over: Partial<Decision>): Decision {
   return { title: 'Shipped orders', on: [], finding: 'code', proposals: [], state: 'open', line: 0, end: 0, ...over }
 }
 
 function task(state: Task['state'], group?: string): Task {
-  return { name: 'Cancel', text: '', delivers: [], ...(group ? { group } : {}), files: [], context: [], how: '', proves: [], state, removed: false }
+  return { name: 'Cancel', text: '', delivers: [], ...(group ? { group } : {}), files: [], newFiles: [], context: [], how: '', proves: [], note: '', built: '', state, removed: false }
 }
 
 const round = (over: Partial<ReviewRound>): ReviewRound => ({ number: 1, comments: [], strikes: [], ...over })
@@ -221,6 +194,12 @@ describe('whose turn it is', () => {
     expect(step.next).toMatchObject({ kind: 'action', action: 'implement', label: 'Continue implementing' })
     expect(step.goto).toMatchObject({ tab: 'chat' })
     expect(step.yours).toBe(true)
+  })
+
+  it('an_implementer_whose_turn_failed_offers_to_try_again_and_says_why', () => {
+    const step = planStep(plan({ ...building, atWork: false, implementable: true, failure: { mode: 'implement', message: 'API error 401: invalid_token' } }))
+    expect(step.next).toMatchObject({ kind: 'action', action: 'implement', label: 'Try again' })
+    expect(step.next.kind === 'action' && step.next.hint).toContain('API error 401: invalid_token')
   })
 
   it('a_run_that_stopped_with_nothing_to_restart_it_points_at_the_chat', () => {

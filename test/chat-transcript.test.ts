@@ -112,6 +112,18 @@ describe('finished steps in the transcript', () => {
     expect(summary({ file_path: 'src/x.ts', offset: 300 })).toBe('Read src/x.ts:300–')
     expect(summary({ file_path: 'src/x.ts' })).toBe('Read src/x.ts')
   })
+
+  it('a_collapsed_search_names_the_folder_it_searched_since_the_pattern_alone_is_ambiguous', () => {
+    const view = transcript()
+    const summary = (name: string, input: unknown) => {
+      view.reset([{ type: 'tool_call', toolUseId: 't1', name, input }])
+      return step(view).querySelector('summary')!.textContent
+    }
+
+    expect(summary('Glob', { pattern: '**/*', path: 'src/chat' })).toBe('Glob **/* in src/chat')
+    expect(summary('Grep', { pattern: 'toolCall', path: 'src' })).toBe('Grep toolCall in src')
+    expect(summary('Glob', { pattern: '**/*.ts' })).toBe('Glob **/*.ts')
+  })
 })
 
 describe('file edits in the transcript', () => {
@@ -222,6 +234,19 @@ describe('the activity row', () => {
     view.apply({ type: 'user_message', text: 'go' })
     view.apply({ type: 'status', status: 'starting' })
     expect(activity(view)).toBe('Starting the session…')
+    view.apply({ type: 'session_started', engineSessionId: 'e1', model: 'opus' })
+    expect(activity(view)).toBe('Waiting on model…')
+  })
+
+  it('a_start_up_phase_names_the_row_until_the_engine_reports_in', () => {
+    const view = transcript()
+
+    view.apply({ type: 'user_message', text: 'go' })
+    view.apply({ type: 'status', status: 'starting' })
+    view.apply({ type: 'status', status: 'starting', detail: 'Indexing kiwi-agent…' })
+    expect(activity(view)).toBe('Indexing kiwi-agent…')
+    view.apply({ type: 'status', status: 'starting', detail: 'Starting Claude Code' })
+    expect(activity(view)).toBe('Starting Claude Code…')
     view.apply({ type: 'session_started', engineSessionId: 'e1', model: 'opus' })
     expect(activity(view)).toBe('Waiting on model…')
   })

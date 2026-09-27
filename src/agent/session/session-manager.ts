@@ -2,6 +2,7 @@ import { permissionResolved, type CodeSession, type PermissionDecision, type Ses
 import type { ModelProfile } from './model-profile'
 import type { RunLog } from '../runs/run-log'
 import { answerText, UNANSWERED_RESULT, type QuestionOutcome, type UserQuestionRequest } from './user-question'
+import { nextStatus, underWay, type SessionStatus } from './session-status'
 
 /**
  * `plan` writes a feature's spec blind, `reconcile` checks it against the code
@@ -47,6 +48,8 @@ export type SessionRecord = {
   parentId?: string
   /** The workspace-relative paths a run was handed: what a cleanup may write, what a docs map build may read. */
   files?: string[]
+  /** The board task an implement run builds; absent on a run that fixes a failed test sweep. */
+  task?: string
   /**
    * Engine-side conversation id, what lets a closed session continue. For the
    * Claude SDK it is the engine's own, inherited from the session this one
@@ -54,6 +57,8 @@ export type SessionRecord = {
    * this conversation starts in.
    */
   engineSessionId?: string
+  /** The host went away while the turn was under way and not waiting on the user: the next host carries it on. */
+  cutOff?: true
   createdAt: string
 }
 
@@ -84,6 +89,7 @@ function titleFor(mode: SessionMode, feature: string | undefined): string {
 export type CreateOptions = {
   parentId?: string
   files?: string[]
+  task?: string
   /**
    * The session whose conversation the new one carries on, so what it read is
    * not read again. Honoured on the same engine; across engines the session
@@ -103,7 +109,8 @@ export function continuationOf(previous: SessionRecord, profile: ModelProfile): 
   }
 }
 
-export type EngineFactory = (record: SessionRecord) => Promise<CodeSession>
+/** Brings a session's engine up, reporting each phase of the start-up as it enters it. */
+export type EngineFactory = (record: SessionRecord, onProgress: (line: string) => void) => Promise<CodeSession>
 
 export type SessionListener = (sessionId: string, event: SessionEvent) => void
 
@@ -128,6 +135,8 @@ export class SessionManager {
   private readonly preapproved = new Map<string, { toolName: string; input: string }>()
   /** One log per session: the write chain that keeps entries in emission order belongs to the instance. */
   private readonly logs = new Map<string, RunLog>()
+  /** Per session, what its events say it is doing: what a shutdown needs to know which turns it cuts off. */
+  private readonly statuses = new Map<string, SessionStatus>()
 
   constructor(
     private readonly store: SessionStore,
@@ -173,16 +182,17 @@ export class SessionManager {
   }
 
   async create(profile: ModelProfile, mode: SessionMode = 'chat', feature?: string, options: CreateOptions = {}): Promise<SessionRecord> {
-    const { parentId, files, continues } = options
+    const { parentId, files, task, continues } = options
     const continued = continues ? continuationOf(continues, profile) : undefined
     const record: SessionRecord = {
       id: crypto.randomUUID(),
-      title: titleFor(mode, feature),
+      title: task ? `Implement: ${task}` : titleFor(mode, feature),
       profile,
       mode,
       ...(feature ? { feature } : {}),
       ...(parentId ? { parentId } : {}),
       ...(files ? { files } : {}),
+      ...(task ? { task } : {}),
       ...(continued ? { engineSessionId: continued } : {}),
       createdAt: new Date().toISOString(),
     }
@@ -191,17 +201,40 @@ export class SessionManager {
     return record
   }
 
+  /**
+   * A chat that carries a session's conversation on with the full tool set, for
+   * work past what that session's mode allows. It keeps the profile so the engine
+   * resumes, and the session it continues stops: one engine per conversation.
+   */
+  async continueInChat(id: string): Promise<SessionRecord> {
+    const previous = this.require(id)
+    await this.close(id)
+    return await this.create(previous.profile, 'chat', undefined, { continues: previous })
+  }
+
   async send(id: string, text: string): Promise<void> {
     const record = this.require(id)
     if (record.title === 'New session') {
       record.title = text.length > 60 ? text.slice(0, 57) + '...' : text
       await this.store.save(this.records)
     }
+    if (record.cutOff) {
+      delete record.cutOff
+      await this.store.save(this.records)
+    }
     // Echoed here rather than by the engine, and the start-up said out loud: bringing an
     // engine up can take a repo or docs map build, and the wait is the user's to see.
     await this.emit(record, { type: 'user_message', text })
     if (!this.live.has(id)) await this.emit(record, { type: 'status', status: 'starting' })
-    ;(await this.ensureLive(record)).send(text)
+    let session: CodeSession
+    try {
+      session = await this.ensureLive(record)
+    } catch (error) {
+      // The start-up is over either way; the chat must stop showing it as under way.
+      await this.emit(record, { type: 'error', message: error instanceof Error ? error.message : String(error), fatal: true })
+      throw error
+    }
+    session.send(text)
   }
 
   /**
@@ -273,6 +306,7 @@ export class SessionManager {
     await this.close(id)
     this.records = this.records.filter((r) => r.id !== id && r.parentId !== id)
     this.logs.delete(id)
+    this.statuses.delete(id)
     await this.store.save(this.records)
   }
 
@@ -304,8 +338,20 @@ export class SessionManager {
     return previous ? [...(await this.conversation(previous.id)), ...own] : own
   }
 
+  /** The host is going away: a turn it cuts off is marked before its engine stops, so the next host can carry it on. */
   async disposeAll(): Promise<void> {
+    const cut = this.records.filter((r) => this.live.has(r.id) && underWay(this.statuses.get(r.id) ?? 'idle'))
+    for (const record of cut) record.cutOff = true
+    if (cut.length > 0) await this.store.save(this.records)
     await Promise.all([...this.live.keys()].map((id) => this.close(id)))
+  }
+
+  /** The runs the last host cut off mid-turn, each handed out once: a later reload does not carry them on again. */
+  async takeCutOff(): Promise<SessionRecord[]> {
+    const cut = this.records.filter((r) => r.cutOff)
+    for (const record of cut) delete record.cutOff
+    if (cut.length > 0) await this.store.save(this.records)
+    return cut
   }
 
   private require(id: string): SessionRecord {
@@ -317,14 +363,13 @@ export class SessionManager {
   private async ensureLive(record: SessionRecord): Promise<CodeSession> {
     const existing = this.live.get(record.id)
     if (existing) return existing
-    const session = await this.createEngine(record)
+    const session = await this.createEngine(record, (line) => this.publish(record, { type: 'status', status: 'starting', detail: line }))
     this.live.set(record.id, session)
     void this.pump(record, session)
     return session
   }
 
   private async pump(record: SessionRecord, session: CodeSession): Promise<void> {
-    const log = this.logFor(record.id)
     for await (const raw of session.events()) {
       // A decoration that fails must not cost the event itself.
       const event = await this.decorate(record.id, raw).catch(() => raw)
@@ -332,14 +377,26 @@ export class SessionManager {
         record.engineSessionId = event.engineSessionId
         await this.store.save(this.records)
       }
-      log.append(event).catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error)
-        this.listener(record.id, { type: 'error', message: `Run log write failed: ${message}`, fatal: false })
-      })
-      this.listener(record.id, event)
+      this.publish(record, event)
       this.answerPreapproved(record.id, session, event)
     }
     if (this.live.get(record.id) === session) this.live.delete(record.id)
+  }
+
+  /** Shown at once and logged in emission order, without waiting on the write: what follows may not overtake it on screen. */
+  private publish(record: SessionRecord, event: SessionEvent): void {
+    this.logFor(record.id)
+      .append(event)
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error)
+        this.listener(record.id, { type: 'error', message: `Run log write failed: ${message}`, fatal: false })
+      })
+    this.notify(record, event)
+  }
+
+  private notify(record: SessionRecord, event: SessionEvent): void {
+    this.statuses.set(record.id, nextStatus(this.statuses.get(record.id) ?? 'idle', record.mode, event))
+    this.listener(record.id, event)
   }
 
   /** The allow given after a restart covers one call, in the turn it resumed; anything else is the user's to decide. */
@@ -359,7 +416,7 @@ export class SessionManager {
   /** An event of the session's own, outside its engine: logged and shown like the engine's. */
   private async emit(record: SessionRecord, event: SessionEvent): Promise<void> {
     await this.logFor(record.id).append(event)
-    this.listener(record.id, event)
+    this.notify(record, event)
   }
 
   /** The request as logged, if nothing has decided it since. */
@@ -385,14 +442,16 @@ export class SessionManager {
 
 /**
  * Of a tab's runs (oldest first), the one free text typed there is for: the
- * newest still live among the ones with a tab of their own, else the newest
- * of those. A child run (a mapping, a cleanup) is never a candidate: it has
- * no transcript in the UI, so a person typing at the tab can never mean it,
- * live or not.
+ * newest still live among the ones a person talks to, else the newest with a
+ * tab of its own. An implementer under the plan session is talked to while it
+ * builds its task, since its section is the one at work; a closed one is
+ * history. A mapping or a cleanup never is: it is scoped to its own job.
  */
 export function pickConversationalRun(runs: SessionRecord[], isLive: (id: string) => boolean): SessionRecord | undefined {
-  const newestFirst = [...runs].reverse().filter((r) => !r.parentId)
-  return newestFirst.find((r) => isLive(r.id)) ?? newestFirst.at(0)
+  const newestFirst = [...runs].reverse()
+  const building = (r: SessionRecord) => r.parentId !== undefined && r.mode === 'implement'
+  const own = newestFirst.filter((r) => !r.parentId)
+  return newestFirst.find((r) => (!r.parentId || building(r)) && isLive(r.id)) ?? own.at(0)
 }
 
 type PermissionRequest = Extract<SessionEvent, { type: 'permission_request' }>

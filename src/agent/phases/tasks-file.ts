@@ -1,13 +1,14 @@
-import { readFile, writeFile } from 'node:fs/promises'
+import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { z } from 'zod'
+import { readOptional } from '../workspace-files'
 import { WORK_DIR, featureSlug } from './blind-plan'
-import { bodyOf, frontMatterValue, withFrontMatterValue } from './spec-file'
 
 /**
- * The feature's task board, `.agent/plan/<slug>.tasks.md`: what to build and where,
- * written by the mapping run once the spec is settled, and marked by the
- * implementer as it goes. The file is the only state: markers survive a fresh
- * session and the plan view reads them as they are.
+ * The feature's task board, `.agent/plan/<slug>.tasks.json`: what to build and
+ * where, written by the mapping run through its tool once the spec is settled,
+ * and moved along by the implementer through its own. The file is the only
+ * state: it survives a fresh session and the plan view reads it as it is.
  */
 
 /** `blocked` is unfinished work with a reason; only `tested` is a finish. */
@@ -17,28 +18,36 @@ export type TaskState = 'open' | 'in_progress' | 'done' | 'tested' | 'blocked'
 export type Proof = { item: string; file: string; test: string }
 
 export type Task = {
-  /** The bold lead-in; unique in the file, stable across re-runs. */
+  /** Unique on the board, stable across re-runs. */
   name: string
-  /** The line's text after the name, markers included, as written. */
+  /** One sentence for the person: what the task does. */
   text: string
   /** Names of the spec rules the task delivers. */
   delivers: string[]
-  /** The `##` heading the task sits under, the scenario it delivers; absent on a flat board. */
+  /** The scenario the task delivers, as the board groups it; absent on a flat board. */
   group?: string
   /** Workspace-relative paths the task touches; what verification runs over. */
   files: string[]
+  /** Of `files`, those the mapping said the task creates. */
+  newFiles: string[]
   /** Paths the mapping run read to reach the task: what the implementer starts from and does not have to find again. */
   context: string[]
   /** The mapper's note to the implementer, markdown: what reading the files would not tell (the pattern to follow, a constraint the code imposes, what not to touch). Empty when the board carries none. */
   how: string
   /** What the implementer proved, item by item. */
   proves: Proof[]
+  /** The implementer's note: where the build departed from `how` and why, or a choice the spec left open. */
+  note: string
+  /** What the task left that a later task builds on, by name and file: the hand-off to the next task's session, which starts without this one's conversation. */
+  built: string
   state: TaskState
+  /** Why a blocked task cannot be finished; present only while it is blocked. */
+  blockedReason?: string
   /** The mapping run says the task is gone. */
   removed: boolean
 }
 
-/** One run of the test commands, newest first in the file. */
+/** One run of the test commands. */
 export type VerificationRecord = { at: string; ok: boolean; text: string }
 
 /**
@@ -48,194 +57,126 @@ export type VerificationRecord = { at: string; ok: boolean; text: string }
  */
 export type CleanupDecision = 'postponed' | 'skipped' | 'done'
 
-const CLEANUP_DECISIONS: CleanupDecision[] = ['postponed', 'skipped', 'done']
+export type TaskBoard = {
+  /** Fingerprint of the spec the board was mapped from; absent on a board migrated from before the stamp existed. */
+  spec?: string
+  cleanup?: CleanupDecision
+  tasks: Task[]
+  /** Newest first. */
+  verification: VerificationRecord[]
+}
 
 export type TasksState =
   | { exists: false }
   | {
       exists: true
       tasks: Task[]
+      /** The newest test run. */
       verification: VerificationRecord | undefined
-      /** Fingerprint of the spec the board was mapped from; absent on a board written before the stamp existed. */
       spec: string | undefined
       /** What the user said about the cleanup offer; absent while it stands open. */
       cleanup: CleanupDecision | undefined
     }
 
-export const VERIFICATION_SECTION = 'Verification'
-const SPEC_KEY = 'spec'
-const CLEANUP_KEY = 'cleanup'
+export const TASKS_SUFFIX = '.tasks.json'
 
 export function tasksPath(cwd: string, feature: string): string {
   return join(cwd, tasksFile(feature))
 }
 
-/** Workspace-relative path of the tasks file, the form used in prompts and scopes. */
+/** Workspace-relative path of the board, the form used in prompts and scopes. */
 export function tasksFile(feature: string): string {
-  return `${WORK_DIR}/${featureSlug(feature)}.tasks.md`
+  return `${WORK_DIR}/${featureSlug(feature)}${TASKS_SUFFIX}`
 }
 
-/** `- **Name** (Rule a, Rule b): text`; the delivered rules ride between the name and the colon. */
-const TASK = /^-\s+\*\*([^*]+?)\*\*\s*(?:\(([^)]*)\))?\s*:?\s*(.*)$/
-const FILES = /^\s+-\s+files\s*:\s*(.*)$/i
-const CONTEXT = /^\s+-\s+context\s*:\s*(.*)$/i
-const PROVES = /^\s+-\s+proves\s*:\s*(.*)$/i
-/** `- how:` opens a block: the rest of its line, then every line indented deeper than it, until the next key, task or heading. */
-const HOW = /^(\s+)-\s+how\s*:\s*(.*)$/i
-/** `Rule name → test/file.ts test_name`; the arrow keeps a name with spaces apart from the path. */
-const PROOF = /^(.+?)\s*(?:→|->)\s*(\S+)\s+(.+)$/
-const HEADING = /^#{1,6}\s+(.*)$/
-const GROUP = /^##\s+(.*)$/
-const RECORD = /^-\s+(\S+)\s*:\s*(passed|failed)\b\s*,?\s*(.*)$/i
-const REMOVED = /\[removed\]/i
-const BLOCKED = /\[blocked\b/i
-const TESTED = /\[tested\]/i
-const DONE = /\[done\]/i
-const IN_PROGRESS = /\[in progress\]/i
+const TASK_STATES = ['open', 'in_progress', 'done', 'tested', 'blocked'] as const
 
-/** Blocked wins over any finish: a task marked tested and then blocked on a re-run is not finished. */
-function stateOf(text: string): TaskState {
-  if (BLOCKED.test(text)) return 'blocked'
-  if (TESTED.test(text)) return 'tested'
-  if (DONE.test(text)) return 'done'
-  if (IN_PROGRESS.test(text)) return 'in_progress'
-  return 'open'
-}
+const boardSchema = z.object({
+  spec: z.string().optional(),
+  cleanup: z.enum(['postponed', 'skipped', 'done']).optional(),
+  tasks: z.array(
+    z.object({
+      name: z.string().min(1),
+      text: z.string(),
+      delivers: z.array(z.string()),
+      group: z.string().optional(),
+      files: z.array(z.string()),
+      newFiles: z.array(z.string()),
+      context: z.array(z.string()),
+      how: z.string(),
+      proves: z.array(z.object({ item: z.string(), file: z.string(), test: z.string() })),
+      note: z.string(),
+      built: z.string().default(''),
+      state: z.enum(TASK_STATES),
+      blockedReason: z.string().optional(),
+      removed: z.boolean(),
+    }),
+  ),
+  verification: z.array(z.object({ at: z.string(), ok: z.boolean(), text: z.string() })),
+})
 
-const list = (text: string): string[] =>
-  text
-    .split(',')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0)
-
-/** `src/a.ts (new)` names a file the task creates; the path is what matters downstream. */
-const pathOf = (entry: string): string => entry.replace(/\s*\(new\)\s*$/i, '').trim()
-
-/** `Cancel command → test/a.test.ts a_rule_holds`; an entry that does not parse is kept out, not guessed at. */
-function proofs(text: string): Proof[] {
-  return list(text).flatMap((entry) => {
-    const match = PROOF.exec(entry)
-    return match ? [{ item: match[1]!, file: match[2]!, test: match[3]!.trim() }] : []
-  })
-}
-
-export function parseTasks(text: string): {
-  tasks: Task[]
-  verification: VerificationRecord | undefined
-  spec: string | undefined
-  cleanup: CleanupDecision | undefined
-} {
-  const tasks: Task[] = []
-  let task: Task | undefined
-  let group: string | undefined
-  let inVerification = false
-  let verification: VerificationRecord | undefined
-  let how: HowBlock | undefined
-  for (const raw of bodyOf(text).split(/\r?\n/)) {
-    const line = raw.trimEnd()
-    if (how && task) {
-      if (continues(how, line)) continue
-      task.how = how.lines.join('\n').trimEnd()
-      how = undefined
-    }
-    const heading = HEADING.exec(line.trim())
-    if (heading) {
-      inVerification = heading[1]!.trim() === VERIFICATION_SECTION
-      const section = GROUP.exec(line.trim())
-      if (section && !inVerification) group = section[1]!.trim()
-      task = undefined
-      continue
-    }
-    if (inVerification) {
-      const record = RECORD.exec(line.trim())
-      // Newest first: the first record under the heading is the one that counts.
-      if (record && !verification) {
-        verification = { at: record[1]!, ok: record[2]!.toLowerCase() === 'passed', text: record[3]!.trim() }
-      }
-      continue
-    }
-    const files = FILES.exec(line)
-    if (files && task) {
-      task.files = list(files[1]!).map(pathOf)
-      continue
-    }
-    const context = CONTEXT.exec(line)
-    if (context && task) {
-      task.context = list(context[1]!)
-      continue
-    }
-    const proves = PROVES.exec(line)
-    if (proves && task) {
-      task.proves = proofs(proves[1]!)
-      continue
-    }
-    const opens = HOW.exec(line)
-    if (opens && task) {
-      how = { indent: opens[1]!.length, lines: opens[2]!.trim() ? [opens[2]!.trim()] : [] }
-      continue
-    }
-    const match = TASK.exec(line.trim())
-    if (!match) continue
-    const body = match[3]!.trim()
-    task = {
-      name: match[1]!.trim().replace(/:$/, '').trim(),
-      text: body,
-      delivers: list(match[2] ?? ''),
+/** A board that does not fit the shape is refused with the field that broke it, never read half. */
+export function parseBoard(text: string, path = 'tasks board'): TaskBoard {
+  const result = boardSchema.safeParse(JSON.parse(text))
+  if (!result.success) {
+    const issue = result.error.issues[0]!
+    throw new Error(`${path} is malformed at ${issue.path.join('.') || '(root)'}: ${issue.message}`)
+  }
+  const { spec, cleanup, tasks, verification } = result.data
+  return {
+    ...(spec !== undefined ? { spec } : {}),
+    ...(cleanup !== undefined ? { cleanup } : {}),
+    tasks: tasks.map(({ group, blockedReason, ...task }) => ({
+      ...task,
       ...(group !== undefined ? { group } : {}),
-      files: [],
-      context: [],
-      how: '',
-      proves: [],
-      state: stateOf(body),
-      removed: REMOVED.test(body),
-    }
-    tasks.push(task)
+      ...(blockedReason !== undefined ? { blockedReason } : {}),
+    })),
+    verification,
   }
-  if (how && task) task.how = how.lines.join('\n').trimEnd()
-  return { tasks, verification, spec: frontMatterValue(text, SPEC_KEY), cleanup: cleanupDecision(text) }
 }
 
-/** A `how:` block being read: the indent of its key line, and its body dedented to the first body line. */
-type HowBlock = { indent: number; lines: string[]; dedent?: number }
+export const renderBoard = (board: TaskBoard): string => `${JSON.stringify(board, null, 2)}\n`
 
-/** A blank line or one indented deeper than the key belongs to the block; anything else ends it. */
-function continues(how: HowBlock, line: string): boolean {
-  if (line.trim() === '') {
-    how.lines.push('')
-    return true
-  }
-  const indent = line.length - line.trimStart().length
-  if (indent <= how.indent) return false
-  how.dedent ??= indent
-  how.lines.push(line.slice(Math.min(how.dedent, indent)))
-  return true
+export const emptyBoard = (): TaskBoard => ({ tasks: [], verification: [] })
+
+export async function readBoard(path: string): Promise<TaskBoard | undefined> {
+  const text = await readOptional(path)
+  return text === undefined ? undefined : parseBoard(text, path)
+}
+
+export async function writeBoard(path: string, board: TaskBoard): Promise<void> {
+  await writeFile(path, renderBoard(board), 'utf8')
+}
+
+export function stateOfBoard(board: TaskBoard | undefined): TasksState {
+  if (!board) return { exists: false }
+  return { exists: true, tasks: board.tasks, verification: board.verification[0], spec: board.spec, cleanup: board.cleanup }
 }
 
 export async function readTasks(path: string): Promise<TasksState> {
-  try {
-    return { exists: true, ...parseTasks(await readFile(path, 'utf8')) }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { exists: false }
-    throw error
-  }
+  return stateOfBoard(await readBoard(path))
 }
 
 export const liveTasks = (tasks: Task[]): Task[] => tasks.filter((t) => !t.removed)
 
-/** Work has started: some task carries a marker. */
+/** The task to build next: the first live one that is neither tested nor blocked. */
+export const nextTask = (board: TaskBoard): Task | undefined =>
+  liveTasks(board.tasks).find((t) => t.state !== 'tested' && t.state !== 'blocked')
+
+/** Work has started: some task has moved from open. */
 export const started = (tasks: Task[]): boolean => liveTasks(tasks).some((t) => t.state !== 'open')
 
 /**
- * Nothing is left to build. Derived from the markers rather than held anywhere
- * else, so it cannot go stale: a task added later makes the feature unfinished
- * again by itself.
+ * Nothing is left to build. Derived from the task states rather than held
+ * anywhere else, so it cannot go stale: a task added later makes the feature
+ * unfinished again by itself.
  */
 export function tasksDone(tasks: Task[]): boolean {
   const live = liveTasks(tasks)
   return live.length > 0 && live.every((t) => t.state === 'tested')
 }
 
-/** Every file the live tasks name, once each, in file order. */
+/** Every file the live tasks name, once each, in board order. */
 export function taskFiles(tasks: Task[]): string[] {
   return [...new Set(liveTasks(tasks).flatMap((t) => t.files))]
 }
@@ -243,7 +184,7 @@ export function taskFiles(tasks: Task[]): string[] {
 /** Names match as the planner wrote them, whatever the case. */
 export const sameName = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase()
 
-/** The live task that delivers a rule, first in file order. */
+/** The live task that delivers a rule, first in board order. */
 export function deliveredBy(tasks: Task[], item: string): Task | undefined {
   return liveTasks(tasks).find((t) => t.delivers.some((d) => sameName(d, item)))
 }
@@ -270,46 +211,123 @@ export function tasksFresh(tasks: Extract<TasksState, { exists: true }>, fingerp
   return tasks.spec === undefined || tasks.spec === fingerprint
 }
 
-export const withSpecFingerprint = (text: string, fingerprint: string): string => withFrontMatterValue(text, SPEC_KEY, fingerprint)
+/** What the implementer may change on a task; everything else is the mapper's. */
+export type TaskProgress = {
+  state?: TaskState
+  blockedReason?: string
+  files?: string[]
+  proves?: Proof[]
+  note?: string
+  built?: string
+}
+
+/**
+ * Moves one task along. A blocked task needs its reason, and leaving blocked
+ * drops it. `files` replaces the list; a file the mapping planned to create
+ * stays marked new while the task still names it.
+ */
+export function updateTask(board: TaskBoard, name: string, change: TaskProgress): TaskBoard {
+  const index = board.tasks.findIndex((t) => sameName(t.name, name))
+  if (index === -1) throw new Error(`No task named "${name}". The board has: ${board.tasks.map((t) => t.name).join(', ') || 'no tasks'}.`)
+  const current = board.tasks[index]!
+  const state = change.state ?? current.state
+  const reason = change.blockedReason?.trim() || (change.state === undefined ? current.blockedReason : undefined)
+  if (state === 'blocked' && !reason) throw new Error(`A blocked task needs a reason: say what stands in the way of "${current.name}".`)
+  const { blockedReason: _, ...rest } = current
+  const files = change.files ?? current.files
+  const next: Task = {
+    ...rest,
+    state,
+    ...(state === 'blocked' ? { blockedReason: reason! } : {}),
+    files,
+    newFiles: current.newFiles.filter((f) => files.includes(f)),
+    proves: change.proves ?? current.proves,
+    note: change.note ?? current.note,
+    built: change.built ?? current.built,
+  }
+  return { ...board, tasks: board.tasks.map((t, i) => (i === index ? next : t)) }
+}
+
+/** What the mapper says about a task; the implementer's progress on it is not the mapper's to write. */
+export type MappedTask = {
+  name: string
+  text: string
+  delivers: string[]
+  group?: string
+  files: string[]
+  newFiles: string[]
+  context: string[]
+  how: string
+}
+
+export type Upsert = { board: TaskBoard; added: string[]; updated: string[]; removed: string[]; unknown: string[] }
+
+/**
+ * Writes the mapper's tasks onto the board by name. A task already there keeps
+ * its state, proofs, note and hand-off, so a re-map never undoes work; a new one goes at
+ * the end of its group, or of the board when its group is new. A removed task
+ * stays on the board marked removed, so the implementer's record of it is kept.
+ */
+export function upsertTasks(board: TaskBoard, mapped: MappedTask[], remove: string[] = []): Upsert {
+  const seen = new Set<string>()
+  for (const task of mapped) {
+    const key = task.name.trim().toLowerCase()
+    if (seen.has(key)) throw new Error(`Task "${task.name}" is given twice: a name is unique on the board.`)
+    seen.add(key)
+  }
+  const result: Upsert = { board, added: [], updated: [], removed: [], unknown: [] }
+  let tasks = [...board.tasks]
+  for (const task of mapped) {
+    const index = tasks.findIndex((t) => sameName(t.name, task.name))
+    const { group, ...fields } = task
+    if (index !== -1) {
+      const { group: _, ...current } = tasks[index]!
+      tasks[index] = { ...current, ...fields, ...(group !== undefined ? { group } : {}), removed: false }
+      result.updated.push(task.name)
+      continue
+    }
+    const created: Task = { ...fields, ...(group !== undefined ? { group } : {}), proves: [], note: '', built: '', state: 'open', removed: false }
+    const last = tasks.map((t) => t.group).lastIndexOf(group)
+    tasks = last === -1 ? [...tasks, created] : [...tasks.slice(0, last + 1), created, ...tasks.slice(last + 1)]
+    result.added.push(task.name)
+  }
+  for (const name of remove) {
+    const index = tasks.findIndex((t) => sameName(t.name, name))
+    if (index === -1) {
+      result.unknown.push(name)
+      continue
+    }
+    tasks[index] = { ...tasks[index]!, removed: true }
+    result.removed.push(tasks[index]!.name)
+  }
+  result.board = { ...board, tasks }
+  return result
+}
+
+export const withSpecFingerprint = (board: TaskBoard, fingerprint: string): TaskBoard => ({ ...board, spec: fingerprint })
+
+export const withCleanupDecision = (board: TaskBoard, decision: CleanupDecision): TaskBoard => ({ ...board, cleanup: decision })
+
+/** The newest record goes first. */
+export const withRecord = (board: TaskBoard, record: VerificationRecord): TaskBoard => ({ ...board, verification: [record, ...board.verification] })
+
+/** Reads, changes and writes the board in one go, so a change never lands on a copy another writer has since replaced. */
+export async function changeBoard(path: string, change: (board: TaskBoard) => TaskBoard): Promise<TaskBoard> {
+  const board = await readBoard(path)
+  if (!board) throw new Error(`No tasks board at ${path}.`)
+  const next = change(board)
+  await writeBoard(path, next)
+  return next
+}
 
 export async function stampSpecFingerprint(path: string, fingerprint: string): Promise<void> {
-  const text = await readFile(path, 'utf8')
-  await writeFile(path, withSpecFingerprint(text, fingerprint), 'utf8')
+  await changeBoard(path, (board) => withSpecFingerprint(board, fingerprint))
 }
-
-/** A value the extension did not write is no decision: the offer stands. */
-function cleanupDecision(text: string): CleanupDecision | undefined {
-  const value = frontMatterValue(text, CLEANUP_KEY)
-  return CLEANUP_DECISIONS.find((d) => d === value)
-}
-
-export const withCleanupDecision = (text: string, decision: CleanupDecision): string => withFrontMatterValue(text, CLEANUP_KEY, decision)
 
 export async function recordCleanupDecision(path: string, decision: CleanupDecision): Promise<void> {
-  const text = await readFile(path, 'utf8')
-  await writeFile(path, withCleanupDecision(text, decision), 'utf8')
-}
-
-export function renderRecord(record: VerificationRecord): string {
-  return `- ${record.at}: ${record.ok ? 'passed' : 'failed'}${record.text ? `, ${record.text}` : ''}`
-}
-
-/** Prepends the record under the Verification heading, adding the section when the file has none. */
-export function withRecord(text: string, record: VerificationRecord): string {
-  const lines = text.split(/\r?\n/)
-  const index = lines.findIndex((l) => {
-    const heading = HEADING.exec(l.trim())
-    return heading !== null && heading[1]!.trim() === VERIFICATION_SECTION
-  })
-  if (index === -1) {
-    const body = text.replace(/\s+$/, '')
-    return `${body}\n\n## ${VERIFICATION_SECTION}\n${renderRecord(record)}\n`
-  }
-  lines.splice(index + 1, 0, renderRecord(record))
-  return lines.join('\n')
+  await changeBoard(path, (board) => withCleanupDecision(board, decision))
 }
 
 export async function recordVerification(path: string, record: VerificationRecord): Promise<void> {
-  const text = await readFile(path, 'utf8')
-  await writeFile(path, withRecord(text, record), 'utf8')
+  await changeBoard(path, (board) => withRecord(board, record))
 }

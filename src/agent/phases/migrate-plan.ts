@@ -1,10 +1,12 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { readOptional } from '../workspace-files'
 import { WORK_DIR, specPath } from './blind-plan'
 import { decisions, decisionsPath } from './decisions'
 import { reviewPath } from './plan-review'
 import { LEGACY_DECISIONS_SECTION, parseSpecText, specFingerprint } from './spec-model'
-import { readTasks, stampSpecFingerprint, tasksPath } from './tasks-file'
+import { readBoard, readTasks, stampSpecFingerprint, tasksPath, writeBoard, type TaskBoard } from './tasks-file'
+import { boardFromMarkdown, convertLegacyBoard, legacyTasksPath, modernizeTasks } from './legacy-tasks'
 
 /**
  * Brings a feature's plan files to the contract. What can be done by rule is
@@ -39,9 +41,6 @@ const TRAILING_WAS = new RegExp(`^(.*?)\\s*\\(was\\s+(${ID})\\)\\s*$`)
 const MARKERS = /^(.*?)((?:\s*\[[^\]]*\])*)$/
 const FINDING_ROW = /^\|\s*(F\d+)\s*(?:\(([^)]*)\))?\s*:?\s*([^|]*)\|([^|]*)\|/
 const KINDS = ['contradiction', 'breakage', 'naive']
-const ID_TASK = new RegExp(`^-\\s+(T\\d+)\\b\\s*(?:\\(([^)]*)\\))?\\s*:\\s*(.*)$`)
-const PROVES = /^(\s+-\s+proves\s*:\s*)(.*)$/i
-const ID_PROOF = new RegExp(`^(${ID})\\s+(?!→|->)(\\S+)\\s+(.+)$`)
 const ID_COMMENT = /^-\s+C\d+\s*\(([^)]*)\)\s*:\s*(.*)$/
 const STRUCK = /^-\s+struck\s*:\s*(.*)$/i
 const ACCEPTED = /^(\s+-\s+)accepted\b(.*)$/i
@@ -145,21 +144,6 @@ export function modernizeFindings(text: string): string {
   return out.join('\n')
 }
 
-/** `- T1 (B1): text` becomes `- **T1** (B1): text`; a proof `B1 file test` becomes `B1 → file test`. */
-export function modernizeTasks(text: string): string {
-  return mapLines(text, (line) => {
-    const task = ID_TASK.exec(line.trimEnd())
-    if (task) return `- **${task[1]}**${task[2] !== undefined ? ` (${task[2]})` : ''}: ${task[3]!.trim()}`
-    const proves = PROVES.exec(line.trimEnd())
-    if (!proves) return line
-    const entries = proves[2]!.split(',').map((entry) => {
-      const proof = ID_PROOF.exec(entry.trim())
-      return proof ? `${proof[1]} → ${proof[2]} ${proof[3]}` : entry.trim()
-    })
-    return `${proves[1]}${entries.join(', ')}`
-  })
-}
-
 /** `- C1 (B3): text` becomes `- on B3: text`, `struck` becomes `remove`, `accepted` becomes `resolved`. */
 export function modernizeReview(text: string): string {
   return mapLines(text, (raw) => {
@@ -208,15 +192,6 @@ export function applyRenames(text: string, renames: Map<string, string>): string
   return result
 }
 
-async function readIfThere(path: string): Promise<string | undefined> {
-  try {
-    return await readFile(path, 'utf8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
-    throw error
-  }
-}
-
 /**
  * Follows the planner's `(was X)` notes into the review, the tasks and the
  * decisions, and strips them from the spec. Returns the renames as `old → new`,
@@ -224,18 +199,30 @@ async function readIfThere(path: string): Promise<string | undefined> {
  */
 export async function followRenames(cwd: string, feature: string): Promise<string[]> {
   const spec = specPath(cwd, feature)
-  const text = await readIfThere(spec)
+  const text = await readOptional(spec)
   if (text === undefined) return []
   const { spec: cleaned, renames } = collectRenames(text)
   if (renames.size === 0) return []
   await writeFile(spec, applyRenames(cleaned, renames), 'utf8')
-  for (const path of [reviewPath(cwd, feature), tasksPath(cwd, feature), decisionsPath(cwd, feature)]) {
-    const current = await readIfThere(path)
+  for (const path of [reviewPath(cwd, feature), decisionsPath(cwd, feature)]) {
+    const current = await readOptional(path)
     if (current === undefined) continue
     const next = applyRenames(current, renames)
     if (next !== current) await writeFile(path, next, 'utf8')
   }
+  const tasks = tasksPath(cwd, feature)
+  const board = await readBoard(tasks)
+  if (board) await writeBoard(tasks, renameRules(board, renames))
   return [...renames].map(([from, to]) => `${from} → ${to}`)
+}
+
+/** A rule is named on the board where a task delivers it and where a test proves it. */
+function renameRules(board: TaskBoard, renames: Map<string, string>): TaskBoard {
+  const rename = (name: string): string => applyRenames(name, renames)
+  return {
+    ...board,
+    tasks: board.tasks.map((t) => ({ ...t, delivers: t.delivers.map(rename), proves: t.proves.map((p) => ({ ...p, item: rename(p.item) })) })),
+  }
 }
 
 /** The mechanical part, safe to run any number of times. */
@@ -245,7 +232,7 @@ export async function migratePlan(cwd: string, feature: string): Promise<Migrati
   const tasks = tasksPath(cwd, feature)
   const review = reviewPath(cwd, feature)
   const decisionsFile = decisionsPath(cwd, feature)
-  let specText = await readIfThere(spec)
+  let specText = await readOptional(spec)
   if (specText === undefined) {
     report.problems.push('no spec file.')
     return report
@@ -253,13 +240,17 @@ export async function migratePlan(cwd: string, feature: string): Promise<Migrati
   const before = specText
   await mkdir(join(cwd, WORK_DIR), { recursive: true })
 
+  let boardChanged = false
+  if (await convertLegacyBoard(legacyTasksPath(cwd, feature))) {
+    boardChanged = true
+    report.steps.push('converted the tasks file to JSON.')
+  }
+
   const legacy = extractLegacyTasks(specText)
   if (legacy.tasks.length > 0) {
     specText = legacy.spec
-    const existing = await readIfThere(tasks)
-    if (existing === undefined) {
-      const title = /^#\s+(.*)$/m.exec(specText)?.[1]?.trim() ?? feature
-      await writeFile(tasks, `# Tasks for ${title}\n\n${legacy.tasks.join('\n')}\n`, 'utf8')
+    if ((await readBoard(tasks)) === undefined) {
+      await writeBoard(tasks, boardFromMarkdown(modernizeTasks(legacy.tasks.join('\n'))))
       report.steps.push(`moved ${legacy.tasks.length} task line(s) from the spec into the tasks file.`)
     } else report.steps.push('dropped the spec’s task section; the tasks file already holds the board.')
   }
@@ -273,7 +264,7 @@ export async function migratePlan(cwd: string, feature: string): Promise<Migrati
   const lifted = extractDecisions(specText)
   if (lifted.spec !== specText) {
     specText = lifted.spec
-    const existing = await readIfThere(decisionsFile)
+    const existing = await readOptional(decisionsFile)
     // A decisions file already there keeps what it has; the spec's section adds only the titles it lacks.
     const known = new Set(decisions(existing ?? '').map((d) => d.title.toLowerCase()))
     const added = decisions(lifted.decisions).filter((d) => !known.has(d.title.toLowerCase()))
@@ -295,19 +286,10 @@ export async function migratePlan(cwd: string, feature: string): Promise<Migrati
     report.steps.push(`renamed ${renamed.join(', ')} across the plan files.`)
   }
 
-  let boardChanged = false
-  const modernized: [string, (text: string) => string, string][] = [
-    [tasks, modernizeTasks, 'the tasks file'],
-    [review, modernizeReview, 'the review'],
-  ]
-  for (const [path, modernize, what] of modernized) {
-    const text = await readIfThere(path)
-    if (text === undefined) continue
-    const next = modernize(text)
-    if (next === text) continue
-    await writeFile(path, next, 'utf8')
-    if (path === tasks) boardChanged = true
-    report.steps.push(`rewrote ${what} to the named-rule contract.`)
+  const reviewText = await readOptional(review)
+  if (reviewText !== undefined && modernizeReview(reviewText) !== reviewText) {
+    await writeFile(review, modernizeReview(reviewText), 'utf8')
+    report.steps.push('rewrote the review to the named-rule contract.')
   }
 
   const parsed = parseSpecText(specText)

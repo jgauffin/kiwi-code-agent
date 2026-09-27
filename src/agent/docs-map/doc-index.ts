@@ -32,15 +32,19 @@ export const hashDoc = (text: string): string =>
 
 /** Every doc the map covers, with the hash of what it now says, sorted by path. */
 export async function scanDocs(cwd: string, ignored: string[] = []): Promise<ScannedDoc[]> {
-  const paths = [...(await readmePaths(cwd)), ...(await markdownUnder(cwd, DOCS_DIR))]
-  const kept = paths.filter((path) => !ignored.some((glob) => matchesGlob(path, glob))).sort(byPath)
   const docs: ScannedDoc[] = []
-  for (const path of kept) {
+  for (const path of await docPaths(cwd, ignored)) {
     const text = await readFile(join(cwd, ...path.split('/')), 'utf8').catch(() => undefined)
     if (text === undefined) continue
     docs.push({ path, hash: hashDoc(text) })
   }
   return docs
+}
+
+/** Every doc the map covers, workspace-relative and sorted by path. */
+export async function docPaths(cwd: string, ignored: string[] = []): Promise<string[]> {
+  const paths = [...(await readmePaths(cwd)), ...(await markdownUnder(cwd, DOCS_DIR))]
+  return paths.filter((path) => !ignored.some((glob) => matchesGlob(path, glob))).sort(byPath)
 }
 
 /** The docs to describe and the entries to drop. A doc whose hash still stands is left alone. */

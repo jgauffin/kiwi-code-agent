@@ -1,7 +1,5 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { withWorkspace } from './workspace-fixture'
 import { blindPlanScope } from '../src/agent/phases/blind-plan'
 import { reconcileScope } from '../src/agent/phases/reconcile'
 import { ScopeGuard } from '../src/agent/phases/scope-guard'
@@ -19,19 +17,6 @@ function fixedSource(summary: string | undefined): RepoMapSource {
   }
 }
 
-async function withWorkspace<T>(files: Record<string, string>, fn: (dir: string) => Promise<T>): Promise<T> {
-  const dir = await mkdtemp(join(tmpdir(), 'repo-map-session-'))
-  try {
-    for (const [path, text] of Object.entries(files)) {
-      const full = join(dir, ...path.split('/'))
-      await mkdir(join(full, '..'), { recursive: true })
-      await writeFile(full, text, 'utf8')
-    }
-    return await fn(dir)
-  } finally {
-    await rm(dir, { recursive: true, force: true })
-  }
-}
 
 describe('repo map at session start', () => {
   it('a_reconcile_run_and_an_implement_session_get_the_summary_while_a_chat_or_plan_session_does_not', async () => {
@@ -72,6 +57,12 @@ describe('repo map at session start', () => {
       const again = await withRepoMap('implement', BASE, workspaceRepoMap(dir))
       expect(again).toContain("The repo map was current at this session's start.")
     }))
+
+  it('the_staleness_check_is_reported_before_it_runs_since_it_scans_the_whole_workspace', async () => {
+    const seen: string[] = []
+    await withRepoMap('implement', BASE, fixedSource('- Core'), { onProgress: (line) => seen.push(line) })
+    expect(seen).toEqual(['Checking the repo map…'])
+  })
 
   it('a_build_that_fails_or_passes_its_time_bound_still_starts_the_session_saying_which_map_it_has', async () => {
     const previous = '- Core (dotnet) `src/Core/Core.csproj` — 7 public types, index `.agent/repo-map/types/Core.md`'

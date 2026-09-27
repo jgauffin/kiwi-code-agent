@@ -14,6 +14,7 @@ import {
   AllowWritesToggledEvent,
   CleanupDecidedEvent,
   CleanupStoppedEvent,
+  ContinueInChatRequestedEvent,
   DefaultProfileChangedEvent,
   ImplementRequestedEvent,
   InterruptRequestedEvent,
@@ -128,6 +129,7 @@ export class ChatApp extends HTMLElement {
     })
     this.addEventListener(AllowWritesToggledEvent.type, (e) => post({ type: 'set_allow_writes', enabled: e.enabled }))
     this.addEventListener(SessionModelChangedEvent.type, (e) => post({ type: 'set_session_model', name: e.name }))
+    this.addEventListener(ContinueInChatRequestedEvent.type, () => post({ type: 'continue_in_chat' }))
     this.addEventListener(McpReconnectRequestedEvent.type, (e) => post({ type: 'reconnect_mcp', server: e.server }))
     this.addEventListener(SessionSelectedEvent.type, (e) => {
       this.showCreating(false)
@@ -163,8 +165,11 @@ export class ChatApp extends HTMLElement {
           allowWrites: message.allowWrites,
           mcp: message.mcp,
           model: active?.mode === 'chat' ? { current: active.profileName, options: message.models.map((m) => m.name) } : undefined,
+          continueInChat: active?.mode === 'docs',
         })
         this.plan = message.plan
+        const current = message.currentRun ? this.sections.get(message.currentRun) : undefined
+        if (current) this.makeCurrent(current)
         this.followStep()
         this.layout()
         break
@@ -238,8 +243,13 @@ export class ChatApp extends HTMLElement {
     return section
   }
 
-  /** One section at a time is the conversation in play; the rest are history until the reader opens one. */
+  /**
+   * One section at a time is the conversation in play, the one what the user
+   * types reaches; the rest fold away when the floor changes hands, and stay
+   * as the reader leaves them while it holds.
+   */
   private makeCurrent(current: RunSectionView): void {
+    if (current.details.classList.contains('current')) return
     for (const section of this.sections.values()) {
       const isCurrent = section === current
       section.details.classList.toggle('current', isCurrent)

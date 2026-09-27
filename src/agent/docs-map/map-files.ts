@@ -1,5 +1,6 @@
-import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { readOptional, replaceFile } from '../workspace-files'
 
 /**
  * Where the docs map lives and how it is put on disk. Everything under
@@ -44,14 +45,8 @@ export const byPath = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 
 export const mapText = (text: string): string => `${text.replace(/\r\n/g, '\n').replace(/\s+$/, '')}\n`
 
 /** Reads one file of the map by its path relative to the root; undefined when no build has produced it. */
-export async function readMapFile(cwd: string, path: string): Promise<string | undefined> {
-  try {
-    return await readFile(join(docsMapRoot(cwd), ...path.split('/')), 'utf8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
-    throw error
-  }
-}
+export const readMapFile = (cwd: string, path: string): Promise<string | undefined> =>
+  readOptional(join(docsMapRoot(cwd), ...path.split('/')))
 
 /**
  * Lands the file in one step, so a session start reading the summary while a
@@ -62,7 +57,7 @@ export async function writeMapFile(cwd: string, path: string, text: string): Pro
   await mkdir(dirname(target), { recursive: true })
   const staged = `${target}.tmp`
   await writeFile(staged, mapText(text), 'utf8')
-  await replace(staged, target)
+  await replaceFile(staged, target)
 }
 
 /** The docs the map has an entry for, whatever the index says, sorted by path. */
@@ -84,23 +79,4 @@ async function walk(dir: string, prefix: string): Promise<string[]> {
 /** Drops a doc's entry: the doc is gone, or is no longer the map's to describe. */
 export async function removeEntry(cwd: string, doc: string): Promise<void> {
   await rm(join(docsMapRoot(cwd), ...entryPath(doc).split('/')), { force: true })
-}
-
-const BUSY = new Set(['EPERM', 'EBUSY', 'EACCES'])
-
-/**
- * Windows refuses the rename while a reader holds the old file open, which is a
- * moment, not a failure: the build waits it out rather than falling back to a
- * partial in-place write.
- */
-async function replace(from: string, to: string, attempts = 50): Promise<void> {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      return await rename(from, to)
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code ?? ''
-      if (attempt >= attempts || !BUSY.has(code)) throw error
-      await new Promise((resolve) => setTimeout(resolve, 10))
-    }
-  }
 }

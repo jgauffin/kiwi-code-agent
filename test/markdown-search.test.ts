@@ -1,24 +1,11 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { withWorkspace } from './workspace-fixture'
 import { markdownSearchTool } from '../src/agent/openai-session/tools/markdown-search'
 import { ReadTracker } from '../src/agent/openai-session/tools/read-tracker'
 import type { ToolContext } from '../src/agent/openai-session/tools/tool'
 
-async function withDocs<T>(files: Record<string, string>, fn: (ctx: ToolContext) => Promise<T>): Promise<T> {
-  const dir = await mkdtemp(join(tmpdir(), 'markdown-search-'))
-  try {
-    for (const [path, text] of Object.entries(files)) {
-      const full = join(dir, ...path.split('/'))
-      await mkdir(join(full, '..'), { recursive: true })
-      await writeFile(full, text, 'utf8')
-    }
-    return await fn({ cwd: dir, signal: new AbortController().signal, files: new ReadTracker() })
-  } finally {
-    await rm(dir, { recursive: true, force: true })
-  }
-}
+const withDocs = <T>(files: Record<string, string>, fn: (ctx: ToolContext) => Promise<T>): Promise<T> =>
+  withWorkspace(files, (dir) => fn({ cwd: dir, signal: new AbortController().signal, files: new ReadTracker() }))
 
 const ORDERS = `Orders may be cancelled, says the intro.
 

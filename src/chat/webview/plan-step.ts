@@ -1,4 +1,4 @@
-import type { CleanupUnit, PlanState } from '../protocol'
+import type { CleanupUnit, PlanState, RunFailure } from '../protocol'
 import type { SessionMode } from '../../agent/session/session-manager'
 import type { RunBlock } from '../../agent/session/session-status'
 
@@ -108,9 +108,15 @@ function stopped(current: Step, plan: PlanState): Derived {
   if (plan.implementable) {
     return {
       current,
-      next: { kind: 'action', action: 'implement', label: 'Continue implementing', hint: 'Nothing is building the tasks: hand the board back to the implementer, which carries on where it stopped.' },
+      next: plan.failure
+        ? tryAgain(plan.failure)
+        : { kind: 'action', action: 'implement', label: 'Continue implementing', hint: 'Nothing is building the tasks: hand the board back to the implementer, which carries on where it stopped.' },
       goto: chat,
     }
+  }
+  if (plan.failure) {
+    const who = RUN_NOUN[plan.failure.mode]
+    return { current, next: { kind: 'goto', tab: 'chat', label: `${capitalized(who)} failed`, hint: failureText(plan.failure) } }
   }
   if (current === 'map' && plan.status === 'draft') {
     return { current, next: { kind: 'action', action: 'map', label: 'Map again', hint: 'The board predates the spec and no mapping is running: map the spec as it stands.' } }
@@ -121,6 +127,16 @@ function stopped(current: Step, plan: PlanState): Derived {
     next: { kind: 'goto', tab: 'chat', label: `The ${who} stopped`, hint: `Nothing is at work on this step: read what the ${who} said in the chat and answer there.` },
   }
 }
+
+/** A failed turn is retried by the same act that starts the build; the reason rides along so the dev fixes it first. */
+function tryAgain(failure: RunFailure): NextStep {
+  return { kind: 'action', action: 'implement', label: 'Try again', hint: `${failureText(failure)}. Fix the cause, then hand the board back to the implementer.` }
+}
+
+const capitalized = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1)
+
+/** What the bar says about a run whose last turn failed. */
+export const failureText = (failure: RunFailure): string => `${capitalized(RUN_NOUN[failure.mode])} failed: ${failure.message}`
 
 function derive(plan: PlanState): Derived {
   if (plan.status === 'missing') return { current: 'plan', next: { kind: 'waiting', text: 'the planner is writing the spec' } }
@@ -172,6 +188,7 @@ function derive(plan: PlanState): Derived {
     if (plan.reviewingDocs) return { current: 'approve', next: { kind: 'waiting', text: 'the planner is listing what the docs should now say; the implementation starts after it' } }
     if (plan.implementable) {
       // Approval starts the build: this is the way back in when nothing is building the tasks.
+      if (plan.failure) return { current: 'implement', next: tryAgain(plan.failure) }
       return { current: 'implement', next: { kind: 'action', action: 'implement', label: 'Implement', hint: 'Nothing is building the tasks: pick the board up in a session that builds them one by one.' } }
     }
     return { current: 'implement', next: { kind: 'waiting', text: 'the implementer is starting' } }

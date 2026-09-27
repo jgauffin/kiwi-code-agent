@@ -76,7 +76,7 @@ describe('the docs map at session start', () => {
       read: async () => (built ? SUMMARY : undefined),
     }
     const prompt = await withDocsMap('plan', BASE, source, { onProgress: (line) => seen.push(line) })
-    expect(seen).toEqual(['Building the docs map…', 'Describing docs/intent/orders.md…'])
+    expect(seen).toEqual(['Checking the docs map…', 'Building the docs map…', 'Describing docs/intent/orders.md…'])
     expect(prompt).toContain("The docs map was rebuilt at this session's start.")
     expect(await withDocsMap('plan', BASE, source)).toContain("The docs map was current at this session's start.")
   })

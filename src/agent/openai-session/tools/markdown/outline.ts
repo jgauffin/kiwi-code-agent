@@ -37,23 +37,9 @@ export function markdownLines(text: string): string[] {
 export function parseSections(text: string): Section[] {
   const lines = markdownLines(text)
   const sections: Section[] = []
-  let fence: string | undefined
-  let start = 0
-  if (lines[0]?.trim() === '---') {
-    const close = lines.findIndex((line, i) => i > 0 && (line.trim() === '---' || line.trim() === '...'))
-    if (close > 0) start = close + 1
-  }
-  for (let i = start; i < lines.length; i++) {
-    const raw = lines[i]!
-    const marker = FENCE.exec(raw)?.[1]
-    if (marker) {
-      if (fence === undefined) fence = marker[0]
-      else if (marker[0] === fence) fence = undefined
-      continue
-    }
-    if (fence !== undefined) continue
+  for (const { index, text: raw } of structuralLines(lines)) {
     const match = HEADING.exec(raw)
-    if (match) sections.push({ level: match[1]!.length, heading: match[2]!.trim(), line: i + 1, endLine: lines.length })
+    if (match) sections.push({ level: match[1]!.length, heading: match[2]!.trim(), line: index + 1, endLine: lines.length })
   }
   for (let i = 0; i < sections.length; i++) {
     const next = sections.slice(i + 1).find((s) => s.level <= sections[i]!.level)
@@ -61,6 +47,31 @@ export function parseSections(text: string): Section[] {
   }
   return sections
 }
+
+/** A line of the doc's own structure, with its 0-based index into the file's lines. */
+export type StructuralLine = { index: number; text: string }
+
+/** The lines outside front matter and fenced blocks, fence markers included in what is skipped. */
+export function* structuralLines(lines: string[]): Generator<StructuralLine> {
+  let fence: string | undefined
+  let start = 0
+  if (lines[0]?.trim() === '---') {
+    const close = lines.findIndex((line, i) => i > 0 && (line.trim() === '---' || line.trim() === '...'))
+    if (close > 0) start = close + 1
+  }
+  for (let i = start; i < lines.length; i++) {
+    const text = lines[i]!
+    const marker = FENCE.exec(text)?.[1]
+    if (marker) {
+      if (fence === undefined) fence = marker[0]
+      else if (marker[0] === fence) fence = undefined
+      continue
+    }
+    if (fence === undefined) yield { index: i, text }
+  }
+}
+
+export const isHeading = (line: string): boolean => HEADING.test(line)
 
 /** The section a line falls under: the closest heading above it, or undefined before the first. */
 export function sectionAt(sections: Section[], line: number): Section | undefined {

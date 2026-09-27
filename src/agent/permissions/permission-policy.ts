@@ -11,9 +11,13 @@ export type PermissionRules = { allow: string[]; deny: string[] }
 /**
  * Tools that only look; their calls never prompt unless a deny rule names them.
  * `AskUser` changes nothing either: the person answers the question itself
- * rather than first being asked whether it may be put to them.
+ * rather than first being asked whether it may be put to them. The task board
+ * tools write only the session's own board, never the code.
  */
-const READ_ONLY_TOOLS = new Set(['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'MarkdownSearch', 'CodeOutline', 'CodeSearch', 'LS', 'NotebookRead', 'TodoRead', 'TodoWrite', 'AskUser', 'RunScript'])
+const READ_ONLY_TOOLS = new Set([
+  'Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'MarkdownSearch', 'CodeOutline', 'CodeSearch', 'LS', 'NotebookRead', 'TodoRead', 'TodoWrite', 'AskUser', 'RunScript',
+  'ReadTasks', 'UpdateTask', 'WriteTasks',
+])
 
 const FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'NotebookRead', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'MarkdownSearch', 'CodeOutline', 'CodeSearch', 'LS', ...TRANSFER_TOOLS])
 

@@ -1,4 +1,5 @@
 import type { PlanState } from '../protocol'
+import { el } from './dom'
 import {
   CleanupStoppedEvent,
   ImplementRequestedEvent,
@@ -14,7 +15,7 @@ import {
   SweepRequestedEvent,
   VerifyRequestedEvent,
 } from './events'
-import { STEPS, STEP_LABEL, planStep, type NextAction, type Step } from './plan-step'
+import { STEPS, STEP_LABEL, failureText, planStep, type NextAction, type Step } from './plan-step'
 
 /**
  * The feature session's header, one row: the flow as steps with the current
@@ -100,6 +101,13 @@ export class PlanBar extends HTMLElement {
       if (cleaning) nodes.push(button('Stop', () => this.dispatchEvent(new CleanupStoppedEvent()), 'stop', 'Stop the cleanup.'))
       return nodes
     }
+    // A failed turn is retried by nobody, so it outranks how an earlier run ended.
+    if (plan.failure) {
+      const text = failureText(plan.failure)
+      const node = el('span', 'ran failed', text)
+      node.title = text
+      return [node]
+    }
     // A cleanup outcome carries its test run's, so it comes first; a new test run clears it.
     const ran = plan.mapping?.text ?? plan.cleanup?.text ?? plan.verification?.text
     if (!ran) return []
@@ -169,13 +177,6 @@ function eventFor(action: NextAction): Event {
     case 'sweep':
       return new SweepRequestedEvent()
   }
-}
-
-function el(tag: string, className: string, text?: string): HTMLElement {
-  const node = document.createElement(tag)
-  node.className = className
-  if (text !== undefined) node.textContent = text
-  return node
 }
 
 function button(label: string, onClick: () => void, className: string, title: string): HTMLButtonElement {

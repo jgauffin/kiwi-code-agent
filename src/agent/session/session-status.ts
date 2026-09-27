@@ -11,6 +11,9 @@ export type SessionStatus = 'idle' | 'planning' | 'implementing' | 'needs_human'
 
 const working = (mode: SessionMode): SessionStatus => (isPlanning(mode) ? 'planning' : 'implementing')
 
+/** The engine is at work on a turn, not stopped on the user. */
+export const underWay = (status: SessionStatus): boolean => status === 'planning' || status === 'implementing'
+
 /** Statuses that are the user's turn: engine noise does not take them away. */
 const waiting = (status: SessionStatus): boolean => status === 'needs_human' || status === 'needs_approval' || status === 'needs_answer'
 
@@ -34,6 +37,31 @@ export function blockOf(runs: { mode: SessionMode; status: SessionStatus }[]): R
   if (asking) return { on: 'answer', mode: asking.mode }
   const approving = runs.find((r) => r.status === 'needs_approval')
   return approving ? { on: 'approval', mode: approving.mode } : undefined
+}
+
+/** What a turn the user stopped reports as its error; stopping is not a failure. */
+const INTERRUPTED = 'interrupted'
+
+/**
+ * Why the session's last turn failed, if it did: a turn that ended in error,
+ * or an engine that never came up. Nothing retries either, so the dev must be
+ * told. The next prompt starts over.
+ */
+export function lastFailure(current: string | undefined, event: SessionEvent): string | undefined {
+  switch (event.type) {
+    case 'user_message':
+      return undefined
+    case 'error':
+      return event.fatal ? event.message : current
+    case 'turn_done': {
+      if (!event.isError) return undefined
+      const errors = event.errors.filter((e) => e !== INTERRUPTED)
+      if (event.errors.length > 0 && errors.length === 0) return undefined
+      return errors.join('; ') || 'the turn ended with an error'
+    }
+    default:
+      return current
+  }
 }
 
 /** Derives the next status from an event. Pure, so both the extension host and tests share it. */

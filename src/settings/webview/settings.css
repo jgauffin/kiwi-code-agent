@@ -259,11 +259,22 @@ settings-app {
       gap: 0.3rem;
     }
 
+    /* Facts about the card, not actions: neutral, so only buttons carry the button colour. */
     & .chip {
       padding: 0.1rem 0.4rem;
       border-radius: 3px;
-      background: var(--vscode-badge-background);
-      color: var(--vscode-badge-foreground);
+      border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+      color: var(--vscode-descriptionForeground);
+
+      &.stored {
+        border-color: var(--vscode-testing-iconPassed);
+        color: var(--vscode-testing-iconPassed);
+      }
+
+      &.missing {
+        border-color: var(--vscode-errorForeground);
+        color: var(--vscode-errorForeground);
+      }
     }
 
     & .controls {
@@ -276,8 +287,8 @@ settings-app {
   & .badge {
     padding: 0.05rem 0.4rem;
     border-radius: 3px;
-    border: 1px solid var(--vscode-focusBorder);
-    color: var(--vscode-focusBorder);
+    border: 1px solid var(--vscode-foreground);
+    color: var(--vscode-foreground);
 
     &.stored {
       border-color: var(--vscode-testing-iconPassed);

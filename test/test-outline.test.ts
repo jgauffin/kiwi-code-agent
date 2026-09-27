@@ -1,7 +1,6 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { withWorkspace } from './workspace-fixture'
 import { countTests, outlineTests } from '../src/agent/test-outline/scan'
 import { renderNodes } from '../src/agent/test-outline/render'
 import { renderFiles } from '../src/agent/code-outline/render'
@@ -353,19 +352,6 @@ describe('outline of one file', () => {
   })
 })
 
-async function withWorkspace<T>(files: Record<string, string>, fn: (dir: string) => Promise<T>): Promise<T> {
-  const dir = await mkdtemp(join(tmpdir(), 'test-outline-'))
-  try {
-    for (const [path, text] of Object.entries(files)) {
-      const full = join(dir, ...path.split('/'))
-      await mkdir(join(full, '..'), { recursive: true })
-      await writeFile(full, text, 'utf8')
-    }
-    return await fn(dir)
-  } finally {
-    await rm(dir, { recursive: true, force: true })
-  }
-}
 
 const SPEC = "describe('a', () => {\n  it('b', () => {})\n})\n"
 

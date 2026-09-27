@@ -35,6 +35,7 @@ export class OpenAiClient implements ChatCompletionClient {
             type: 'function',
             function: { name: t.name, description: t.description, parameters: t.parameters },
           })),
+          max_tokens: request.maxTokens,
           stream: true,
           stream_options: { include_usage: true },
         }),

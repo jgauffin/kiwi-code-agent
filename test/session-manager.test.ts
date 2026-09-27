@@ -166,9 +166,14 @@ describe('SessionManager', () => {
       const started = new Promise<void>((r) => {
         release = r
       })
+      let entered = () => {}
+      const bringingUp = new Promise<void>((r) => {
+        entered = r
+      })
       const manager = new SessionManager(
         memoryStore(),
         async (r) => {
+          entered()
           await started
           return new FakeSession(r.id, r.profile, r.engineSessionId)
         },
@@ -177,7 +182,7 @@ describe('SessionManager', () => {
       )
       const record = await manager.create(profile)
       const sending = manager.send(record.id, 'go')
-      await tick()
+      await bringingUp
       // Building a repo or docs map can hold the start up for a while; the chat has to show the wait.
       expect(seen).toEqual([
         { type: 'user_message', text: 'go' },
@@ -189,6 +194,51 @@ describe('SessionManager', () => {
       await manager.send(record.id, 'again')
       expect(seen.filter((e) => e.type === 'status')).toHaveLength(1)
       await manager.disposeAll()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('a_start_up_phase_the_factory_reports_is_logged_and_shown_as_a_starting_status', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+    try {
+      const seen: SessionEvent[] = []
+      const manager = new SessionManager(
+        memoryStore(),
+        async (r, onProgress) => {
+          onProgress('Indexing kiwi-agent…')
+          return new FakeSession(r.id, r.profile, r.engineSessionId)
+        },
+        (id) => RunLog.forSession(dir, id),
+        (_, e) => seen.push(e),
+      )
+      const record = await manager.create(profile)
+      await manager.send(record.id, 'go')
+      const phase = { type: 'status', status: 'starting', detail: 'Indexing kiwi-agent…' }
+      expect(seen).toContainEqual(phase)
+      // Logged, so a slow start can be traced to its phase afterwards.
+      expect(await manager.transcript(record.id)).toContainEqual(phase)
+      await manager.disposeAll()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('an_engine_that_fails_to_start_ends_the_wait_with_a_fatal_error', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+    try {
+      const seen: SessionEvent[] = []
+      const manager = new SessionManager(
+        memoryStore(),
+        async () => {
+          throw new Error('No API key stored')
+        },
+        (id) => RunLog.forSession(dir, id),
+        (_, e) => seen.push(e),
+      )
+      const record = await manager.create(profile)
+      await expect(manager.send(record.id, 'go')).rejects.toThrow('No API key stored')
+      expect(seen.at(-1)).toEqual({ type: 'error', message: 'No API key stored', fatal: true })
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -220,6 +270,82 @@ describe('SessionManager', () => {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+
+  describe('a shutdown that cuts a turn off', () => {
+    async function withManager(run: (manager: SessionManager, engines: FakeSession[], store: SessionStore) => Promise<void>) {
+      const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+      try {
+        const engines: FakeSession[] = []
+        const store = memoryStore()
+        const manager = new SessionManager(
+          store,
+          async (r) => {
+            const s = new FakeSession(r.id, r.profile, r.engineSessionId)
+            engines.push(s)
+            return s
+          },
+          (id) => RunLog.forSession(dir, id),
+          () => {},
+        )
+        await run(manager, engines, store)
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    }
+
+    const reopened = (store: SessionStore) => new SessionManager(store, async () => { throw new Error('not started') }, () => { throw new Error('no log') }, () => {})
+
+    it('a_run_the_shutdown_cuts_off_mid_turn_is_marked_cut_off_for_the_next_host', async () => {
+      await withManager(async (manager, _engines, store) => {
+        const record = await manager.create(profile, 'implement', 'Locks', { task: 'Period lock' })
+        await manager.send(record.id, 'Your task: …')
+        await tick()
+        await manager.disposeAll()
+        expect(reopened(store).get(record.id)?.cutOff).toBe(true)
+      })
+    })
+
+    it('a_run_whose_turn_ended_or_that_waits_on_the_user_is_not_marked_cut_off', async () => {
+      await withManager(async (manager, engines, store) => {
+        const ended = await manager.create(profile, 'implement', 'Locks', { task: 'A' })
+        const asking = await manager.create(profile, 'implement', 'Locks', { task: 'B' })
+        const approving = await manager.create(profile, 'implement', 'Locks', { task: 'C' })
+        for (const record of [ended, asking, approving]) await manager.send(record.id, 'go')
+        engines[0]!.out.push({ type: 'turn_done', usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, durationMs: 1, isError: false, errors: [] })
+        engines[1]!.ask('q-1', { questions: [{ header: 'Scope', question: 'How far?', options: [{ label: 'Small' }, { label: 'Large' }] }] })
+        engines[2]!.out.push({ type: 'permission_request', requestId: 'req-1', toolName: 'Bash', input: { command: 'npm test' } })
+        await tick()
+        await manager.disposeAll()
+        const next = reopened(store)
+        expect([ended, asking, approving].map((r) => next.get(r.id)?.cutOff)).toEqual([undefined, undefined, undefined])
+      })
+    })
+
+    it('the_next_prompt_clears_the_cut_off_mark', async () => {
+      await withManager(async (manager) => {
+        const record = await manager.create(profile, 'implement', 'Locks', { task: 'Period lock' })
+        await manager.send(record.id, 'go')
+        await tick()
+        await manager.disposeAll()
+        await manager.send(record.id, 'Carry on')
+        expect(manager.get(record.id)?.cutOff).toBeUndefined()
+        await manager.disposeAll()
+      })
+    })
+
+    it('cut_off_runs_are_handed_out_once_so_a_later_reload_does_not_resume_them_again', async () => {
+      await withManager(async (manager, _engines, store) => {
+        const record = await manager.create(profile, 'implement', 'Locks', { task: 'Period lock' })
+        await manager.send(record.id, 'go')
+        await tick()
+        await manager.disposeAll()
+        const next = reopened(store)
+        expect((await next.takeCutOff()).map((r) => r.id)).toEqual([record.id])
+        expect(await next.takeCutOff()).toEqual([])
+        expect(await reopened(store).takeCutOff()).toEqual([])
+      })
+    })
   })
 
   it('a_decision_on_a_request_the_stopped_engine_let_go_of_resumes_the_session_with_the_decision_as_the_next_turn', async () => {
@@ -589,6 +715,30 @@ describe('SessionManager', () => {
       }
     })
 
+    it('a_docs_evaluation_continued_in_chat_keeps_its_model_and_conversation_and_stops_its_own_engine', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+      try {
+        const { manager, engines } = setup(dir)
+        const docs = await manager.create(berget, 'docs')
+        await manager.send(docs.id, 'evaluate')
+        engines[0]!.out.push({ type: 'session_started', engineSessionId: docs.id, model: 'glm' })
+        await tick()
+
+        const chat = await manager.continueInChat(docs.id)
+        expect(chat).toMatchObject({ mode: 'chat', profile: berget, engineSessionId: docs.id })
+        expect(manager.isLive(docs.id)).toBe(false)
+        await manager.send(chat.id, 'move docs/external out')
+        await tick()
+        expect((await manager.conversation(chat.id)).filter((e) => e.type === 'user_message').map((e) => e.text)).toEqual([
+          'evaluate',
+          'move docs/external out',
+        ])
+        await manager.disposeAll()
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
+
     it('a_conversation_is_not_continued_across_engines_or_from_a_session_that_never_ran', async () => {
       const dir = await mkdtemp(join(tmpdir(), 'sm-'))
       try {
@@ -825,6 +975,20 @@ describe('pickConversationalRun', () => {
     const cleanup = rec('cleanup', { mode: 'cleanup', parentId: implementer.id })
     const isLive = () => false
     expect(pickConversationalRun([plan, implementer, cleanup], isLive)?.id).toBe(implementer.id)
+  })
+
+  it('a_live_task_run_takes_what_the_user_types_over_its_live_plan_session', () => {
+    const plan = rec('plan')
+    const done = rec('task-a', { mode: 'implement', parentId: plan.id, task: 'A' })
+    const building = rec('task-b', { mode: 'implement', parentId: plan.id, task: 'B' })
+    const isLive = (id: string) => id === plan.id || id === building.id
+    expect(pickConversationalRun([plan, done, building], isLive)?.id).toBe(building.id)
+  })
+
+  it('a_closed_task_run_gives_the_floor_back_to_the_plan_session', () => {
+    const plan = rec('plan')
+    const done = rec('task-a', { mode: 'implement', parentId: plan.id, task: 'A' })
+    expect(pickConversationalRun([plan, done], () => false)?.id).toBe(plan.id)
   })
 
   it('no_conversational_run_at_all_yields_undefined', () => {

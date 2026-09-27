@@ -28,6 +28,7 @@ async function collect(client: OpenAiClient): Promise<{ deltas: CompletionDelta[
       { role: 'tool', toolCallId: 'c1', content: 'file content' },
     ],
     tools: [{ name: 'Read', description: 'reads', parameters: { type: 'object' } }],
+    maxTokens: 4096,
     signal: new AbortController().signal,
   })) {
     deltas.push(d)
@@ -78,6 +79,7 @@ describe('OpenAiClient', () => {
     const { request } = await collect(client)
     const body = JSON.parse(request!.body as string)
     expect(body.stream).toBe(true)
+    expect(body.max_tokens).toBe(4096)
     expect(body.messages[2]).toEqual({
       role: 'assistant',
       content: '',

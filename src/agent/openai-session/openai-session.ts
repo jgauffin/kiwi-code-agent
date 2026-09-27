@@ -11,6 +11,13 @@ import { ReadTracker } from './tools/read-tracker'
 import { toDefinition, type Tool, type ToolContext, type ToolOutput } from './tools/tool'
 import { UNANSWERED_TOOL_RESULT } from './history'
 
+/**
+ * Room for a reasoning model to think through a task and then write a whole
+ * file. Provider defaults are lower, and GLM can spend them on reasoning
+ * alone and stop without acting.
+ */
+const MAX_OUTPUT_TOKENS = 32768
+
 export type OpenAiSessionOptions = {
   id: string
   profile: ModelProfile
@@ -161,8 +168,12 @@ export class OpenAiSession implements CodeSession {
           return this.finishTurn(usage, started, true, ['max tool rounds'])
         }
         this.emit({ type: 'status', status: 'requesting' })
-        const assistant = await this.complete(`${turn}.${round}`, signal, usage)
+        const { assistant, finishReason } = await this.complete(`${turn}.${round}`, signal, usage)
         this.messages.push(assistant)
+        // A reply cut mid-thought has not decided anything, and a tool call cut mid-arguments is not the call the model meant.
+        if (finishReason === 'length') {
+          throw new Error(`The model hit its output limit of ${MAX_OUTPUT_TOKENS} tokens before it finished its reply`)
+        }
         if (assistant.toolCalls.length === 0) return this.finishTurn(usage, started, false, [])
         for (const call of assistant.toolCalls) {
           if (signal.aborted) throw new InterruptedError()
@@ -188,14 +199,16 @@ export class OpenAiSession implements CodeSession {
     messageId: string,
     signal: AbortSignal,
     usage: TurnUsage,
-  ): Promise<Extract<ChatMessage, { role: 'assistant' }>> {
+  ): Promise<{ assistant: Extract<ChatMessage, { role: 'assistant' }>; finishReason: string | undefined }> {
     let text = ''
     let reasoning = ''
+    let finishReason: string | undefined
     const calls = new Map<number, ToolCall>()
     for await (const delta of this.options.client.stream({
       model: this.options.profile.model,
       messages: this.messages,
       tools: this.definitions,
+      maxTokens: MAX_OUTPUT_TOKENS,
       signal,
     })) {
       switch (delta.type) {
@@ -217,6 +230,7 @@ export class OpenAiSession implements CodeSession {
         }
         case 'done':
           if (delta.usage) addUsage(usage, delta.usage)
+          finishReason = delta.finishReason
           break
       }
     }
@@ -231,7 +245,7 @@ export class OpenAiSession implements CodeSession {
         ...(input === undefined ? { input: call.arguments, malformed: true } : { input }),
       })
     }
-    return { role: 'assistant', content: text, ...(reasoning ? { reasoning } : {}), toolCalls }
+    return { assistant: { role: 'assistant', content: text, ...(reasoning ? { reasoning } : {}), toolCalls }, finishReason }
   }
 
   private async runTool(call: ToolCall, signal: AbortSignal): Promise<ToolOutput> {

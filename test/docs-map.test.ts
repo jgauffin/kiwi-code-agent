@@ -1,7 +1,5 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { withWorkspace } from './workspace-fixture'
 import { DocsMapContract } from '../src/agent/docs-map/entry'
 import { entryFile } from '../src/agent/docs-map/map-files'
 import { DOCS_MAP_TOOLS, docsMapKickoff, docsMapPrompt, docsMapScope } from '../src/agent/phases/docs-map'
@@ -11,19 +9,6 @@ const cwd = process.platform === 'win32' ? 'D:\\work\\repo' : '/work/repo'
 const guard = new ScopeGuard(cwd, docsMapScope(['docs/intent/orders.md', 'ReadMe.md']))
 const use = (toolName: string, input: unknown) => guard.preToolUse({ toolName, input, toolUseId: 't' })
 
-async function withWorkspace<T>(files: Record<string, string>, fn: (dir: string) => Promise<T>): Promise<T> {
-  const dir = await mkdtemp(join(tmpdir(), 'docs-map-run-'))
-  try {
-    for (const [path, text] of Object.entries(files)) {
-      const full = join(dir, ...path.split('/'))
-      await mkdir(join(full, '..'), { recursive: true })
-      await writeFile(full, text, 'utf8')
-    }
-    return await fn(dir)
-  } finally {
-    await rm(dir, { recursive: true, force: true })
-  }
-}
 
 const ORDERS = '# Orders\n\n## Cancellation\n\nText.\n'
 

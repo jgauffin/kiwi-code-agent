@@ -126,6 +126,40 @@ describe('OpenAiSession', () => {
     await s.dispose()
   })
 
+  it('a_reply_cut_off_at_the_output_limit_ends_the_turn_as_an_error_instead_of_a_silent_stop', async () => {
+    const model = new ScriptedModel([
+      { type: 'reasoning', text: 'still weighing the design' },
+      { type: 'done', finishReason: 'length', usage: { promptTokens: 5, completionTokens: 32768, cachedTokens: 0 } },
+    ])
+    const s = session(model)
+    s.send('go')
+    const events = await untilTurnDone(s)
+    expect(model.requests[0]!.maxTokens).toBeGreaterThan(16384)
+    expect(events).toContainEqual(expect.objectContaining({ type: 'error', message: expect.stringContaining('output limit') }))
+    expect(events.at(-1)).toMatchObject({ type: 'turn_done', isError: true })
+    await s.dispose()
+  })
+
+  it('a_tool_call_cut_off_at_the_output_limit_is_not_run_and_is_answered_before_the_next_turn', async () => {
+    const model = new ScriptedModel(
+      [
+        { type: 'tool_call_start', index: 0, id: 'c1', name: 'Danger' },
+        { type: 'tool_call_arguments', index: 0, text: '{"value":"hal' },
+        { type: 'done', finishReason: 'length', usage: { promptTokens: 5, completionTokens: 32768, cachedTokens: 0 } },
+      ],
+      text('ok'),
+    )
+    const s = session(model)
+    s.send('go')
+    const first = await untilTurnDone(s)
+    expect(first.filter((e) => e.type === 'tool_result')).toEqual([])
+    expect(first.at(-1)).toMatchObject({ type: 'turn_done', isError: true })
+    s.send('carry on')
+    await untilTurnDone(s)
+    expect(model.requests[1]!.messages.at(-2)).toMatchObject({ role: 'tool', toolCallId: 'c1' })
+    await s.dispose()
+  })
+
   it('a_resumed_session_carries_its_conversation_on_and_reports_the_id_it_resumed', async () => {
     const model = new ScriptedModel(text('and more'))
     const s = new OpenAiSession({

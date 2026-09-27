@@ -43,7 +43,8 @@ export async function generatedContext(name: string, source: GeneratedSource, op
   const timeoutMs = options.timeoutMs ?? CONTEXT_TIME_BOUND_MS
   let built = false
   let failure: string | undefined
-  // Not stale is the common case: nothing is built and nothing is waited on.
+  // Not stale is the common case: nothing is built and nothing is waited on. The check still scans the workspace, unbounded.
+  onProgress(`Checking the ${name}…`)
   const stale = await source.isStale().catch((error: unknown) => {
     failure = reason(error)
     return false

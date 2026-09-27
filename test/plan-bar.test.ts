@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import type { PlanState } from '../src/chat/protocol'
 import type { Decision } from '../src/agent/phases/decisions'
+import { planState as plan } from './plan-state-fixture'
 
 // The webview talks to the host through this handle, acquired when its modules load.
 ;(globalThis as Record<string, unknown>).acquireVsCodeApi = () => ({ postMessage: () => {} })
@@ -9,34 +10,6 @@ import type { Decision } from '../src/agent/phases/decisions'
 const { PlanBar } = await import('../src/chat/webview/plan-bar')
 const { PlanTabs } = await import('../src/chat/webview/plan-tabs')
 const events = await import('../src/chat/webview/events')
-
-function plan(over: Partial<PlanState> = {}): PlanState {
-  return {
-    specPath: 'plan/orders.spec.md',
-    tasksPath: 'plan/orders.tasks.md',
-    decisionsPath: 'plan/orders.decisions.md',
-    stage: 'created',
-    status: 'draft',
-    body: '# Orders',
-    spec: { title: 'Orders', goal: '', scenarios: [], questions: [], problems: [] },
-    stale: false,
-    repairable: false,
-    mappable: true,
-    remappable: false,
-    implementable: false,
-    verifiable: false,
-    tasks: [],
-    review: { rounds: [] },
-    commentable: true,
-    approvable: false,
-    decisions: [],
-    pendingDecisions: 0,
-    applyingRulings: false,
-    reviewingDocs: false,
-    atWork: true,
-    ...over,
-  }
-}
 
 const decision = (over: Partial<Decision>): Decision => ({ title: 'Shipped orders', on: [], finding: 'code', proposals: ['drop'], state: 'open', line: 0, end: 0, ...over })
 
@@ -114,6 +87,11 @@ describe('PlanBar next step', () => {
     const node = bar(plan({ stage: 'mapped', approvable: true, mapping: { live: false, text: 'Mapped: 6 tasks, the code is clear' } }))
     expect(node.querySelector('.ran')!.textContent).toBe('Mapped: 6 tasks, the code is clear')
     expect(node.querySelector('.running')).toBeNull()
+  })
+
+  it('a_run_that_failed_says_so_beside_the_steps_with_the_reason', () => {
+    const node = bar(plan({ stage: 'mapped', implementable: true, failure: { mode: 'implement', message: 'API error 401: invalid_token' } }))
+    expect(node.querySelector('.failed')!.textContent).toBe('The implementer failed: API error 401: invalid_token')
   })
 
   it('repair_shows_beside_the_next_step_while_the_spec_is_off_contract', () => {

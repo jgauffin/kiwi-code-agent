@@ -41,17 +41,19 @@ const IMPLEMENT = 's2'
 const planRun = (current = true): RunRef => ({ sessionId: SESSION, mode: 'plan', title: 'Plan: Orders', current })
 const implementRun = (current = true): RunRef => ({ sessionId: IMPLEMENT, mode: 'implement', title: 'Implement: Orders', current })
 
+const state = (): Extract<ToWebview, { type: 'state' }> => ({
+  type: 'state',
+  tabs: [{ id: SESSION, title: 'Orders', mode: 'plan', profileName: 'Claude', status: 'idle', active: true }],
+  plan: plan(),
+  plans: [],
+  profiles: { names: ['Claude'], active: 'Claude' },
+  models: [],
+})
+
 function app(runs: RunSection[] = [{ ...planRun(), events: [] }]) {
   const node = new ChatApp()
   document.body.appendChild(node)
-  send({
-    type: 'state',
-    tabs: [{ id: SESSION, title: 'Orders', mode: 'plan', profileName: 'Claude', status: 'idle', active: true }],
-    plan: plan(),
-    plans: [],
-    profiles: { names: ['Claude'], active: 'Claude' },
-    models: [],
-  })
+  send(state())
   send({ type: 'transcript', sessionId: SESSION, runs })
   return node
 }
@@ -140,6 +142,35 @@ describe('the runs of one feature under one tab', () => {
     expect(sections(node).map((s) => s.dataset.session)).toEqual([SESSION, IMPLEMENT])
     expect(section(node, IMPLEMENT).open).toBe(true)
     expect(section(node, SESSION).open).toBe(false)
+    node.remove()
+  })
+
+  it('the_run_the_host_says_takes_typing_is_the_only_one_open', () => {
+    const node = app([
+      { ...planRun(false), events: [] },
+      { ...implementRun(), events: [] },
+    ])
+    tab(node, 'Chat').click()
+
+    // The task run closed without a last word: the state alone says the planner has the floor again.
+    send({ ...state(), currentRun: SESSION })
+
+    expect(sections(node).map((s) => s.open)).toEqual([true, false])
+    expect(section(node, SESSION).classList.contains('current')).toBe(true)
+    node.remove()
+  })
+
+  it('reading_an_earlier_run_is_not_folded_away_while_the_current_one_streams', () => {
+    const node = app([
+      { ...planRun(false), events: [] },
+      { ...implementRun(), events: [] },
+    ])
+    tab(node, 'Chat').click()
+    section(node, SESSION).open = true
+
+    event(speaking, implementRun())
+
+    expect(section(node, SESSION).open).toBe(true)
     node.remove()
   })
 

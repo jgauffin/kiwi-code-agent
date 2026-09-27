@@ -11,6 +11,7 @@ import {
   type UserQuestionRequest,
 } from '../../agent/session/user-question'
 import { ASK_USER_TOOL } from '../../agent/openai-session/tools/ask-user'
+import { el } from './dom'
 import { QuestionAnsweredEvent } from './events'
 
 type QuestionRequest = Extract<SessionEvent, { type: 'question_request' }>
@@ -54,12 +55,12 @@ export class QuestionCard extends HTMLElement {
     this.request.questions.forEach((question, index) => {
       const row = document.createElement('section')
       row.className = 'question'
-      row.append(text('strong', 'header', question.header), text('p', 'ask', question.question))
-      if (outcome.kind === 'answered') row.appendChild(text('p', 'answer', answerLine(question, outcome.answers[index])))
+      row.append(el('strong', 'header', question.header), el('p', 'ask', question.question))
+      if (outcome.kind === 'answered') row.appendChild(el('p', 'answer', answerLine(question, outcome.answers[index])))
       summary.appendChild(row)
     })
     if (outcome.kind === 'answered') return this.replaceChildren(summary)
-    const reason = text('p', 'unanswered', `Not answered${outcome.reason ? ` (${outcome.reason.toLowerCase()})` : ''}.`)
+    const reason = el('p', 'unanswered', `Not answered${outcome.reason ? ` (${outcome.reason.toLowerCase()})` : ''}.`)
     this.replaceChildren(summary, reason)
   }
 
@@ -74,13 +75,13 @@ export class QuestionCard extends HTMLElement {
     body.append(...this.groups)
     const actions = document.createElement('div')
     actions.className = 'actions'
-    this.step = text('span', 'step')
+    this.step = el('span', 'step')
     this.back = button('back', 'Back', () => this.goTo(this.current - 1))
     this.next = button('next', 'Next', () => this.goTo(this.current + 1))
     this.submit = button('submit', 'Submit', () => this.answer())
     const skip = button('skip', 'Skip', () => this.leaveUnanswered())
     skip.title = 'Give no answer; the model is told to ask again or work on something else.'
-    this.hint = text('span', 'missing')
+    this.hint = el('span', 'missing')
     actions.append(this.back, this.next, this.submit, skip, this.hint)
     if (this.groups.length > 1) actions.prepend(this.step)
     this.replaceChildren(body, actions)
@@ -98,7 +99,7 @@ export class QuestionCard extends HTMLElement {
   private group(question: Question, index: number): HTMLElement {
     const group = document.createElement('section')
     group.className = 'question'
-    group.append(text('strong', 'header', question.header), text('p', 'ask', question.question))
+    group.append(el('strong', 'header', question.header), el('p', 'ask', question.question))
     const options = question.options ?? []
     if (options.length > 0) {
       const list = document.createElement('ul')
@@ -111,9 +112,9 @@ export class QuestionCard extends HTMLElement {
         input.name = `${this.requestId}-${index}`
         input.value = option.label
         input.addEventListener('change', () => this.chose(question, index, option.label, input.checked))
-        label.append(input, text('span', 'label', option.label))
+        label.append(input, el('span', 'label', option.label))
         item.appendChild(label)
-        if (option.explanation) item.appendChild(text('span', 'explanation', option.explanation))
+        if (option.explanation) item.appendChild(el('span', 'explanation', option.explanation))
         list.appendChild(item)
       }
       group.appendChild(list)
@@ -125,7 +126,7 @@ export class QuestionCard extends HTMLElement {
     field.rows = 2
     field.className = 'other-text'
     field.addEventListener('input', () => this.typed(question, index, field.value))
-    other.append(text('span', '', options.length > 0 ? `${OTHER_LABEL}:` : 'Your answer:'), field)
+    other.append(el('span', '', options.length > 0 ? `${OTHER_LABEL}:` : 'Your answer:'), field)
     group.appendChild(other)
     return group
   }
@@ -180,13 +181,6 @@ function answerLine(question: Question, answer: QuestionAnswer | undefined): str
   const { chosen, other } = normalizeAnswer(question, answer ?? { chosen: [] })
   const parts = [...chosen, ...(other ? [other] : [])]
   return parts.length ? parts.join(', ') : 'Not answered.'
-}
-
-function text(tag: string, className: string, content?: string): HTMLElement {
-  const element = document.createElement(tag)
-  if (className) element.className = className
-  if (content !== undefined) element.textContent = content
-  return element
 }
 
 function button(className: string, label: string, onClick: () => void): HTMLButtonElement {

@@ -1,22 +1,9 @@
-import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, utimes } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { withWorkspace } from './workspace-fixture'
 import { parseGitignore, scanWorkspace } from '../src/agent/repo-map/workspace-scan'
 
-async function withWorkspace<T>(files: Record<string, string>, fn: (dir: string) => Promise<T>): Promise<T> {
-  const dir = await mkdtemp(join(tmpdir(), 'repo-map-scan-'))
-  try {
-    for (const [path, text] of Object.entries(files)) {
-      const full = join(dir, ...path.split('/'))
-      await mkdir(join(full, '..'), { recursive: true })
-      await writeFile(full, text, 'utf8')
-    }
-    return await fn(dir)
-  } finally {
-    await rm(dir, { recursive: true, force: true })
-  }
-}
 
 const tree = {
   'src/Api/Endpoint.cs': 'public class Endpoint {}',

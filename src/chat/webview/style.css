@@ -115,6 +115,11 @@ chat-app {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+
+      &.failed {
+        opacity: 1;
+        color: var(--vscode-errorForeground);
+      }
     }
 
     & .stop {
@@ -849,7 +854,7 @@ chat-app {
     }
 
     & .awaiting {
-      opacity: 0.65;
+      color: var(--vscode-editorWarning-foreground, var(--vscode-charts-orange));
     }
 
     & .strikes {
@@ -1923,7 +1928,8 @@ button {
   &.deny,
   &.skip,
   &.back,
-  &.link-file {
+  &.link-file,
+  &.continue-in-chat {
     background: var(--vscode-button-secondaryBackground, var(--vscode-input-background));
     color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
     border: 1px solid var(--vscode-button-border, var(--vscode-input-border, transparent));

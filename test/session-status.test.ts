@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { blockOf, mostUrgent, nextStatus, type SessionStatus } from '../src/agent/session/session-status'
+import { blockOf, lastFailure, mostUrgent, nextStatus, type SessionStatus } from '../src/agent/session/session-status'
 import type { SessionEvent } from '../src/agent/session/code-session'
 import type { SessionMode } from '../src/agent/session/session-manager'
 
@@ -103,5 +103,27 @@ describe('session status', () => {
       'needs_human',
       'needs_human',
     ])
+  })
+})
+
+describe('why the last turn failed', () => {
+  const fold = (events: SessionEvent[]): string | undefined => events.reduce<string | undefined>((failure, e) => lastFailure(failure, e), undefined)
+  const failedTurn = (errors: string[]): SessionEvent => ({ type: 'turn_done', isError: true, errors })
+  const prompt: SessionEvent = { type: 'user_message', text: 'go' }
+
+  it('a_turn_that_ended_in_error_is_a_failure_with_its_reasons', () => {
+    expect(fold([prompt, failedTurn(['API error 401: invalid_token'])])).toBe('API error 401: invalid_token')
+  })
+
+  it('an_engine_that_failed_to_start_is_a_failure_though_no_turn_ended', () => {
+    expect(fold([prompt, { type: 'error', message: 'No API key stored for "berget"', fatal: true }])).toBe('No API key stored for "berget"')
+  })
+
+  it('a_turn_the_user_stopped_is_not_a_failure', () => {
+    expect(fold([prompt, failedTurn(['interrupted'])])).toBeUndefined()
+  })
+
+  it('the_next_prompt_clears_the_failure', () => {
+    expect(fold([prompt, failedTurn(['API error 500']), prompt])).toBeUndefined()
   })
 })

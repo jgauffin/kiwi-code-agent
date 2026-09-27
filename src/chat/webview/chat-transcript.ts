@@ -202,7 +202,8 @@ export class ChatTranscript extends HTMLElement {
         break
       case 'status':
         // 'idle' also arrives mid-turn (after compaction, between requests); only the turn's end clears the activity.
-        if (event.status === 'starting') this.activity = atWork(STARTING)
+        // The row adds its own ellipsis to whatever phase it names.
+        if (event.status === 'starting') this.activity = atWork(event.detail?.replace(/…$/, '') ?? STARTING)
         if (event.status === 'requesting') this.activity = atWork(WAITING_ON_MODEL)
         if (event.status === 'compacting') this.activity = atWork('Compacting context')
         break
@@ -391,7 +392,7 @@ function summarizeInput(input: unknown): string {
   if (typeof record['source'] === 'string' && typeof record['destination'] === 'string') return `${record['source']} → ${record['destination']}`
   const key =['command', 'file_path', 'pattern', 'path', 'query', 'description'].find((k) => typeof record[k] === 'string')
   if (!key) return ''
-  const value = record[key] as string
+  const value = key === 'pattern' && typeof record['path'] === 'string' ? `${record[key]} in ${record['path']}` : (record[key] as string)
   return value.length > 80 ? value.slice(0, 77) + '...' : value
 }
 

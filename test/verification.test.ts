@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { commandsFor, findUpward, runVerification, verificationDue, verificationHandoffPrompt, type VerifyRule } from '../src/agent/phases/verification'
-import { parseTasks } from '../src/agent/phases/tasks-file'
+import { readTasks, stateOfBoard, writeBoard, type Task } from '../src/agent/phases/tasks-file'
+import { board as boardOf, task } from './task-board-fixture'
 
 let dir: string
 const runs: { command: string; cwd: string }[] = []
@@ -19,7 +20,9 @@ const run = async (command: string, cwd: string) => {
   return outcome
 }
 
-const board = (...lines: string[]) => writeFile(join(dir, '.agent', 'plan', 'order-cancellation.tasks.md'), `# Tasks\n\n${lines.join('\n')}\n`)
+const boardPath = () => join(dir, '.agent', 'plan', 'order-cancellation.tasks.json')
+const board = (...tasks: Task[]) => writeBoard(boardPath(), boardOf(...tasks))
+const tested = (name: string, ...files: string[]) => task(name, { state: 'tested', files })
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'verify-'))
@@ -70,37 +73,37 @@ describe('findUpward', () => {
 
 describe('runVerification', () => {
   it('runs_the_suites_the_tasks_files_select_and_records_a_pass_on_the_board', async () => {
-    await board('- **T1**: a [tested]', '  - files: src/Api/Orders/Order.cs', '- **T2**: b [tested]', '  - files: src/app/orders.ts (new)')
+    await board(tested('T1', 'src/Api/Orders/Order.cs'), tested('T2', 'src/app/orders.ts'))
     const result = await runVerification({ cwd: dir, feature: 'Order cancellation', rules, run, now: '2026-09-14T10:00:00Z' })
     expect(runs).toHaveLength(2)
     expect(result.failures).toEqual([])
-    const tasks = parseTasks(await readFile(join(dir, '.agent', 'plan', 'order-cancellation.tasks.md'), 'utf8'))
-    expect(tasks.verification).toMatchObject({ at: '2026-09-14T10:00:00Z', ok: true })
-    expect(tasks.verification?.text).toContain('`npm test` in .')
+    const tasks = await readTasks(boardPath())
+    expect(tasks.exists && tasks.verification).toMatchObject({ at: '2026-09-14T10:00:00Z', ok: true })
+    expect(tasks.exists && tasks.verification?.text).toContain('`npm test` in .')
   })
 
   it('a_removed_tasks_files_do_not_select_a_suite', async () => {
-    await board('- **T1**: a [tested]', '  - files: src/app/orders.ts', '- **T2**: gone [removed]', '  - files: src/Api/Orders/Order.cs')
+    await board(tested('T1', 'src/app/orders.ts'), task('T2', { removed: true, files: ['src/Api/Orders/Order.cs'] }))
     await runVerification({ cwd: dir, feature: 'Order cancellation', rules, run })
     expect(runs).toEqual([{ command: 'npm test', cwd: dir }])
   })
 
   it('records_a_failure_naming_the_command_and_hands_the_output_tail_to_the_implementer', async () => {
     outcome = { ok: false, output: 'x'.repeat(100) + 'THE ERROR' }
-    await board('- **T1**: a [tested]', '  - files: src/app/orders.ts')
+    await board(tested('T1', 'src/app/orders.ts'))
     const result = await runVerification({ cwd: dir, feature: 'Order cancellation', rules, run, maxOutputChars: 20 })
     expect(result.record.ok).toBe(false)
     expect(result.record.text).toBe('`npm test` in .')
     expect(result.failures[0]?.output).toBe('[...]\n' + 'x'.repeat(11) + 'THE ERROR')
     const prompt = verificationHandoffPrompt('Order cancellation', result.failures, dir)
-    expect(prompt).toContain('.agent/plan/order-cancellation.tasks.md')
+    expect(prompt).toContain('UpdateTask')
     expect(prompt).toContain('`npm test` in .')
     expect(prompt).toContain('THE ERROR')
     expect(prompt).toContain('runs again as soon as you stop')
   })
 
   it('a_failure_handoff_asks_for_a_narrowed_reproduction_before_the_sweep_is_paid_for_again', async () => {
-    await board('- **T1**: a [tested]', '  - files: src/a.ts')
+    await board(tested('T1', 'src/a.ts'))
     outcome = { ok: false, output: 'THE ERROR' }
     const result = await runVerification({ cwd: dir, feature: 'Order cancellation', rules, run })
     const prompt = verificationHandoffPrompt('Order cancellation', result.failures, dir)
@@ -110,7 +113,7 @@ describe('runVerification', () => {
   })
 
   it('nothing_to_run_is_recorded_as_such_rather_than_leaving_the_board_stuck', async () => {
-    await board('- **T1**: a [tested]', '  - files: docs/intent/orders.md')
+    await board(tested('T1', 'docs/intent/orders.md'))
     const result = await runVerification({ cwd: dir, feature: 'Order cancellation', rules, run })
     expect(runs).toEqual([])
     expect(result.record).toMatchObject({ ok: true, text: 'nothing to run' })
@@ -122,23 +125,24 @@ describe('runVerification', () => {
 })
 
 describe('verificationDue', () => {
-  const tasks = (text: string) => ({ exists: true as const, ...parseTasks(text) })
+  const tasks = (list: Task[], ok?: boolean) =>
+    stateOfBoard({ tasks: list, verification: ok === undefined ? [] : [{ at: '2026-09-14T21:19:46Z', ok, text: '`npm test` in .' }] })
 
   it('an_all_tested_board_whose_last_run_failed_is_verified_again_without_the_implementer_re_marking_a_task', () => {
-    expect(verificationDue(tasks('- **T1**: a [tested]\n\n## Verification\n- 2026-09-14T21:19:46Z: failed, `npm test` in .\n'))).toBe(true)
+    expect(verificationDue(tasks([tested('T1')], false))).toBe(true)
   })
 
   it('an_all_tested_board_never_run_is_due', () => {
-    expect(verificationDue(tasks('- **T1**: a [tested]\n'))).toBe(true)
+    expect(verificationDue(tasks([tested('T1')]))).toBe(true)
   })
 
   it('a_board_that_already_passed_is_not_run_again', () => {
-    expect(verificationDue(tasks('- **T1**: a [tested]\n\n## Verification\n- 2026-09-14T21:19:46Z: passed, `npm test` in .\n'))).toBe(false)
+    expect(verificationDue(tasks([tested('T1')], true))).toBe(false)
   })
 
   it('a_board_with_open_or_blocked_work_is_not_due', () => {
-    expect(verificationDue(tasks('- **T1**: a [tested]\n- **T2**: b [blocked: no db]\n'))).toBe(false)
-    expect(verificationDue(tasks('- **T1**: a [tested]\n- **T2**: b [done]\n'))).toBe(false)
+    expect(verificationDue(tasks([tested('T1'), task('T2', { state: 'blocked', blockedReason: 'no db' })]))).toBe(false)
+    expect(verificationDue(tasks([tested('T1'), task('T2', { state: 'done' })]))).toBe(false)
     expect(verificationDue({ exists: false })).toBe(false)
   })
 })

@@ -40,7 +40,7 @@ describe('ScopeGuard for blind planning', () => {
     const readable = readableIn(blindPlanScope('Order cancellation', ['docs/api/**']))
     expect(readable('docs/intent/orders.md')).toBe(true)
     expect(readable('docs/api/orders.md')).toBe(false)
-    expect(readable('.agent/plan/order-cancellation.tasks.md')).toBe(false)
+    expect(readable('.agent/plan/order-cancellation.tasks.json')).toBe(false)
   })
 
   it('only_the_spec_file_its_review_and_its_decisions_are_writable_and_writing_them_needs_no_permission_prompt', async () => {
@@ -51,7 +51,7 @@ describe('ScopeGuard for blind planning', () => {
     // The planner proposes on the decisions in their own file; the mapper's other file, the tasks, is not its to read.
     expect(await use('Edit', { file_path: '.agent/plan/order-cancellation.decisions.md' })).toEqual({ allow: true })
     expect(await use('Read', { file_path: '.agent/plan/order-cancellation.decisions.md' })).toBeUndefined()
-    expect(await use('Read', { file_path: '.agent/plan/order-cancellation.tasks.md' })).toMatchObject({ deny: expect.any(String) })
+    expect(await use('Read', { file_path: '.agent/plan/order-cancellation.tasks.json' })).toMatchObject({ deny: expect.any(String) })
   })
 
   it('the_docs_are_the_users_so_a_write_there_is_neither_allowed_outright_nor_denied_but_asked', async () => {
@@ -65,7 +65,7 @@ describe('ScopeGuard for blind planning', () => {
     expect(await use('Read', { file_path: 'plan/refunds.spec.md' })).toBeUndefined()
     expect(await use('Glob', { pattern: '*.spec.md', path: 'plan' })).toBeUndefined()
     expect(await use('Read', { file_path: '.agent/plan/refunds.review.md' })).toMatchObject({ deny: expect.any(String) })
-    expect(await use('Read', { file_path: '.agent/plan/refunds.tasks.md' })).toMatchObject({ deny: expect.any(String) })
+    expect(await use('Read', { file_path: '.agent/plan/refunds.tasks.json' })).toMatchObject({ deny: expect.any(String) })
     expect(await use('Read', { file_path: '.agent/plan/refunds.decisions.md' })).toMatchObject({ deny: expect.any(String) })
   })
 

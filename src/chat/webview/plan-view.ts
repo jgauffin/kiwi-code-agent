@@ -4,6 +4,7 @@ import { KEEP_RULING } from '../../agent/phases/ruling'
 import type { CommentRef, Review, ReviewComment, ReviewRound } from '../../agent/phases/plan-review'
 import type { Item, Scenario, Spec } from '../../agent/phases/spec-model'
 import type { Task, TaskState } from '../../agent/phases/tasks-file'
+import { el } from './dom'
 import { CleanupDecidedEvent, PlanFocusRequestedEvent, ReviewActionEvent, type PlanFocus } from './events'
 import { renderMarkdown, renderMarkdownInline } from './markdown'
 import { offeredUnits, presentTabs, type Tab } from './plan-step'
@@ -250,7 +251,7 @@ export class PlanView extends HTMLElement {
     const task = live.find((t) => t.delivers.some((d) => same(d, name)))
     if (task) {
       const chip = el('span', 'chip task', task.name)
-      chip.title = `Delivered by ${task.name}: ${task.text.replace(MARKER, '').trim()}`
+      chip.title = `Delivered by ${task.name}: ${task.text}`
       marks.push(chip)
     } else marks.push(el('span', 'badge gap', 'no task'))
     if (plan.stage === 'under_development' || plan.stage === 'verification' || plan.stage === 'verified') {
@@ -619,7 +620,7 @@ export class PlanView extends HTMLElement {
     const started = plan.stage !== 'mapped'
     const row = el('li', `task ${task.state}${task.removed ? ' removed' : ''}`)
     const line = el('div', 'line')
-    line.append(named(task.name, task.text.replace(MARKER, '').trim()))
+    line.append(named(task.name, task.text))
     if (task.removed) line.append(el('span', 'badge removed', 'removed'))
     else if (started) {
       line.append(el('span', `badge state ${task.state}`, blockedReason(task) ?? TASK_STATE[task.state]))
@@ -781,13 +782,6 @@ function commentsOn(review: Review, target: string): PlacedComment[] {
 
 const sameRef = (a: CommentRef, b: CommentRef): boolean => a.round === b.round && a.index === b.index
 
-function el(tag: string, className: string, text?: string): HTMLElement {
-  const node = document.createElement(tag)
-  node.className = className
-  if (text !== undefined) node.textContent = text
-  return node
-}
-
 /** `Name: text`, the name as the lead-in it is in the file. */
 function named(name: string, text: string): HTMLElement {
   const span = el('span', 'text')
@@ -834,12 +828,10 @@ function staleNote(pendingDecisions: string[]): string {
   return `The tasks predate the last change to the spec; they are re-mapped once ${pendingDecisions.map((t) => `"${t}"`).join(', ')} ${pendingDecisions.length === 1 ? 'is' : 'are'} ruled on and applied.`
 }
 
-/** `[blocked: reason]` as written; the reason is what the badge should say. */
+/** The reason is what the badge should say. */
 function blockedReason(task: Task): string | undefined {
-  const match = /\[blocked\s*:?\s*([^\]]*)\]/i.exec(task.text)
-  if (!match) return undefined
-  const reason = match[1]!.trim()
-  return reason ? `blocked: ${reason}` : 'blocked'
+  if (task.state !== 'blocked') return undefined
+  return task.blockedReason ? `blocked: ${task.blockedReason}` : 'blocked'
 }
 
 /** A task's paths under what they are to it: the files it changes, the ones it reads to get there. */

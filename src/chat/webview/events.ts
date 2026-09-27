@@ -246,6 +246,14 @@ export class SessionModelChangedEvent extends Event {
   }
 }
 
+/** The composer's "Continue in chat", on a docs evaluation only: carry its conversation into a chat with the full tool set. */
+export class ContinueInChatRequestedEvent extends Event {
+  static readonly type = 'continue-in-chat-requested'
+  constructor() {
+    super(ContinueInChatRequestedEvent.type, { bubbles: true })
+  }
+}
+
 /** The composer's reconnect on one of the active session's MCP servers. */
 export class McpReconnectRequestedEvent extends Event {
   static readonly type = 'mcp-reconnect-requested'
@@ -300,6 +308,7 @@ declare global {
     [SessionRemovedEvent.type]: SessionRemovedEvent
     [AllowWritesToggledEvent.type]: AllowWritesToggledEvent
     [SessionModelChangedEvent.type]: SessionModelChangedEvent
+    [ContinueInChatRequestedEvent.type]: ContinueInChatRequestedEvent
     [McpReconnectRequestedEvent.type]: McpReconnectRequestedEvent
     [DefaultProfileChangedEvent.type]: DefaultProfileChangedEvent
   }

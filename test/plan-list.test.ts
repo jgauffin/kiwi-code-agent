@@ -3,6 +3,11 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { listDraftPlans, listPlans } from '../src/agent/phases/plan-list'
+import { renderBoard, withCleanupDecision, withRecord, type TaskBoard } from '../src/agent/phases/tasks-file'
+import { board, task } from './task-board-fixture'
+
+const allTested = (name: string): TaskBoard => board(task(name, { state: 'tested' }))
+const passed = (b: TaskBoard): TaskBoard => withRecord(b, { at: '2026-09-14T10:00:00Z', ok: true, text: '' })
 
 /** Specs go under `plan/`, every other plan file among the working files. */
 async function workspace(files: Record<string, string>): Promise<string> {
@@ -20,9 +25,9 @@ describe('plan list', () => {
     const dir = await workspace({
       'orders.spec.md': '---\nfeature: Orders\nstatus: draft\n---\n# Orders\n',
       'billing.spec.md': '---\nfeature: Billing\nstatus: approved\n---\n# Billing\n',
-      'billing.tasks.md': '# Tasks for Billing\n\n- **Bill**: bill [tested]\n',
+      'billing.tasks.json': renderBoard(allTested('Bill')),
       'audit.spec.md': '---\nfeature: Audit\nstatus: approved\n---\n# Audit\n',
-      'audit.tasks.md': '# Tasks for Audit\n\n- **Log**: log [tested]\n\n## Verification\n- 2026-09-14T10:00:00Z: passed\n',
+      'audit.tasks.json': renderBoard(passed(allTested('Log'))),
       'orders.review.md': '# not a spec\n',
     })
     try {
@@ -39,12 +44,11 @@ describe('plan list', () => {
   })
 
   it('a_postponed_cleanup_keeps_the_feature_on_the_list_until_it_is_settled', async () => {
-    const passed = '\n## Verification\n- 2026-09-14T10:00:00Z: passed\n'
     const dir = await workspace({
       'audit.spec.md': '---\nfeature: Audit\nstatus: approved\n---\n# Audit\n',
-      'audit.tasks.md': `---\ncleanup: postponed\n---\n# Tasks for Audit\n\n- **Log**: log [tested]\n${passed}`,
+      'audit.tasks.json': renderBoard(withCleanupDecision(passed(allTested('Log')), 'postponed')),
       'billing.spec.md': '---\nfeature: Billing\nstatus: approved\n---\n# Billing\n',
-      'billing.tasks.md': `---\ncleanup: skipped\n---\n# Tasks for Billing\n\n- **Bill**: bill [tested]\n${passed}`,
+      'billing.tasks.json': renderBoard(withCleanupDecision(passed(allTested('Bill')), 'skipped')),
     })
     try {
       expect(await listPlans(dir)).toMatchObject([

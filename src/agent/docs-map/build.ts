@@ -8,7 +8,7 @@ import { renderDocsSummary } from './summary'
 /**
  * The build in two halves, because the middle of it is a model turn.
  *
- * `planDocsMap` says what the run has to describe and what is to be forgotten;
+ * `startDocsMap` says what the run has to describe and clears the way for it;
  * the run writes one entry per changed doc. `finishDocsMap` then reads what is
  * on disk, composes the summary and stamps the index. A doc is stamped only
  * when its entry is there and on contract, so a run that stopped halfway costs
@@ -30,6 +30,18 @@ export type DocsMapResult = {
 export async function planDocsMap(cwd: string, ignored: string[] = []): Promise<DocsMapPlan> {
   const diff = diffDocs(await scanDocs(cwd, ignored), await readDocsIndex(cwd))
   return { ...diff, current: diff.changed.length === 0 && diff.removed.length === 0 }
+}
+
+/**
+ * The plan, with the entries of the changed docs dropped before the run. The
+ * run may not read an entry, and Write will not overwrite a file the session
+ * has not read, so an entry left in place could never be rewritten. Dropped, it
+ * also cannot be stamped as current for a doc it no longer describes.
+ */
+export async function startDocsMap(cwd: string, ignored: string[] = []): Promise<DocsMapPlan> {
+  const plan = await planDocsMap(cwd, ignored)
+  for (const doc of plan.changed) await removeEntry(cwd, doc)
+  return plan
 }
 
 /** Stale when a doc changed, a doc was dropped, or no summary has been composed yet. */

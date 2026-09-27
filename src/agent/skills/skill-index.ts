@@ -1,7 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { readOptional } from '../instructions/instruction-files'
+import { readOptional } from '../workspace-files'
 
 export type SkillEntry = {
   name: string

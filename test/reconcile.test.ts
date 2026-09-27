@@ -15,10 +15,10 @@ describe('ScopeGuard for reconciling', () => {
     expect(await use('Glob', { pattern: '**/*.cs' })).toBeUndefined()
   })
 
-  it('only_the_decisions_and_the_tasks_are_writable_so_the_spec_stays_the_planners_and_nothing_leaks_into_code_or_docs', async () => {
+  it('only_the_decisions_are_writable_so_the_spec_stays_the_planners_the_board_goes_through_its_tool_and_nothing_leaks_into_code_or_docs', async () => {
     expect(await use('Write', { file_path: '.agent/plan/order-cancellation.decisions.md' })).toEqual({ allow: true })
     expect(await use('Edit', { file_path: '.agent/plan/order-cancellation.decisions.md' })).toEqual({ allow: true })
-    expect(await use('Write', { file_path: '.agent/plan/order-cancellation.tasks.md' })).toEqual({ allow: true })
+    expect(await use('Write', { file_path: '.agent/plan/order-cancellation.tasks.json' })).toMatchObject({ deny: expect.any(String) })
     expect(await use('Edit', { file_path: 'src/Orders/OrderService.cs' })).toMatchObject({ deny: expect.any(String) })
     expect(await use('Edit', { file_path: 'plan/order-cancellation.spec.md' })).toMatchObject({ deny: expect.any(String) })
     expect(await use('Edit', { file_path: 'docs/intent/orders.md' })).toMatchObject({ deny: expect.any(String) })
@@ -50,7 +50,10 @@ describe('reconcile prompt', () => {
     // The kind of a finding is nothing the user acts on, so it is not written into the file.
     expect(prompt).not.toContain('- kind:')
     expect(prompt).not.toContain('amendment')
-    expect(RECONCILE_TOOLS).toEqual(['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'MarkdownSearch', 'CodeOutline', 'CodeSearch', 'Edit', 'Write', 'Skill'])
+    expect(RECONCILE_TOOLS).toEqual([
+      'Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'MarkdownSearch', 'CodeOutline', 'CodeSearch', 'Edit', 'Write', 'Skill',
+      'ReadTasks', 'WriteTasks',
+    ])
   })
 
   it('a_run_continuing_the_last_mapping_is_told_the_spec_changed_and_keeps_what_it_read', () => {
@@ -95,37 +98,35 @@ describe('reconcile prompt', () => {
   it('the_proposals_and_the_ruling_belong_to_others_and_the_run_ends_silently', () => {
     expect(prompt).toContain('The `proposed`, `recommended` and `because` lines are the planner\'s and the `ruling` line is the user\'s')
     expect(prompt).toContain('The spec is not yours to write')
-    expect(prompt).toContain('When both files are written, stop.')
+    expect(prompt).toContain('When both outputs are written, stop.')
     expect(prompt).not.toContain('summarise')
   })
 
-  it('writes_the_task_board_with_files_after_the_decisions_and_leaves_the_implementers_markers_alone', () => {
-    expect(prompt).toContain('.agent/plan/order-cancellation.tasks.md')
-    expect(prompt).toContain('- files:')
-    expect(prompt).toContain('(new)')
-    expect(prompt).toContain('[in progress]')
-    expect(prompt).toContain('[tested]')
+  it('writes_the_task_board_through_its_tool_after_the_decisions', () => {
+    expect(prompt).toContain('written with WriteTasks')
+    expect(prompt).not.toContain('.tasks.')
+    expect(RECONCILE_TOOLS).toEqual(expect.arrayContaining(['ReadTasks', 'WriteTasks']))
+    expect(RECONCILE_TOOLS).not.toContain('UpdateTask')
     // A task under an unruled decision would pre-empt the ruling.
     expect(prompt).toContain('No task for what a pending decision puts in question')
   })
 
-  it('a_re_map_keeps_the_note_saying_why_the_build_departed_from_its_how_block', () => {
-    expect(prompt).toContain('Never touch a marker, a `proves:` line or a `note:` line')
-    expect(prompt).toContain('survives a rewrite of the task and goes only when the task does')
+  it('a_re_map_sends_tasks_by_name_and_the_tool_keeps_the_implementers_progress', () => {
+    expect(prompt).toContain('send a task that still holds under its name with what changed')
+    expect(prompt).toContain("The implementer's progress on a task is kept by the tool")
   })
 
-  it('starts_from_one_task_per_scenario_under_its_heading_and_covers_every_rule', () => {
+  it('starts_from_one_task_per_scenario_in_its_group_and_covers_every_rule', () => {
     expect(prompt).toContain('One task per scenario is the default')
-    expect(prompt).toContain('## Cancelling an order\n- **Cancel command** (Cancel command, Shipped order, Refund)')
-    expect(prompt).toContain('`## Foundation`')
+    expect(prompt).toContain('a task in the group "Cancelling an order"')
+    expect(prompt).toContain('a group "Foundation"')
     expect(prompt).toContain('Every rule and edge case of the spec is delivered by some task')
-    expect(prompt).toContain('proves:')
     // The reading the run did is handed on, so the implementer does not do it again.
     expect(prompt).toContain('- context:')
     expect(prompt).toContain('would otherwise have to find again')
   })
 
-  it('a_how_block_holds_only_what_reading_the_files_would_not_tell', () => {
+  it('a_how_holds_only_what_reading_the_files_would_not_tell', () => {
     expect(prompt).toContain('- how:')
     expect(prompt).toContain('what the implementer would not learn from reading its files and context')
     // The implementer reads the same code and designs the signatures; spelling them out plans the work twice.
@@ -208,6 +209,13 @@ describe('progress line', () => {
     expect(progressLine({ type: 'tool_call', toolUseId: 't', name: 'Glob', input: { pattern: '**/*.cs' } })).toBe('Glob **/*.cs in .')
     expect(progressLine({ type: 'tool_call', toolUseId: 't', name: 'Skill', input: { name: 'csharp-style' } })).toBe('Skill csharp-style')
     expect(progressLine({ type: 'tool_call', toolUseId: 't', name: 'Other', input: 'x' })).toBe('Other')
+  })
+
+  it('a_board_update_names_the_task_and_where_it_moved', () => {
+    expect(progressLine({ type: 'tool_call', toolUseId: 't', name: 'UpdateTask', input: { task: 'Cancel command', state: 'in_progress' } })).toBe(
+      'Cancel command: in progress',
+    )
+    expect(progressLine({ type: 'tool_call', toolUseId: 't', name: 'WriteTasks', input: { tasks: [] } })).toBe('Writing the tasks')
   })
 
   it('an_assistant_message_shows_its_first_line_clipped', () => {

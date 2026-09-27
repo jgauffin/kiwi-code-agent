@@ -1,5 +1,6 @@
 import type { FileEditChange } from '../../agent/session/code-session'
 import { omittedNotice } from '../../agent/edits/file-edit-diff'
+import { el } from './dom'
 import { fillCode, languageForPath } from './highlight'
 import { post } from './vscode-api'
 
@@ -13,7 +14,7 @@ export function editDiffView(change: FileEditChange): HTMLElement {
   box.className = 'edit'
   if (change.summary !== undefined) {
     // Nothing to diff: a sentence says more than an empty diff block, and there is nothing to open.
-    box.append(line('p', 'edit-summary', change.summary))
+    box.append(el('p', 'edit-summary', change.summary))
     return box
   }
   const lang = languageForPath(change.path)
@@ -39,8 +40,8 @@ export function fileLink(change: FileEditChange): HTMLElement {
 /** What the cap left out, and where the whole edit can be read. */
 function omission(change: FileEditChange): HTMLElement {
   const text = omittedNotice(change.omitted)
-  if (change.snapshot === undefined) return line('p', 'omitted', text)
-  const paragraph = line('p', 'omitted')
+  if (change.snapshot === undefined) return el('p', 'omitted', text)
+  const paragraph = el('p', 'omitted')
   const link = document.createElement('button')
   link.type = 'button'
   link.className = 'link'
@@ -63,11 +64,11 @@ function diffBlock(diff: string, lang: string | undefined): HTMLElement {
   block.className = 'diff'
   for (const text of diff.split('\n')) {
     const kind = kindOf(text)
-    const row = line('span', `diff-line ${kind}`)
+    const row = el('span', `diff-line ${kind}`)
     if (kind === 'hunk') {
       row.textContent = text
     } else {
-      const code = line('span', 'code')
+      const code = el('span', 'code')
       fillCode(code, text.slice(1), lang)
       row.append(text.slice(0, 1), code)
     }
@@ -81,11 +82,4 @@ function kindOf(text: string): string {
   if (text.startsWith('+')) return 'add'
   if (text.startsWith('-')) return 'del'
   return 'ctx'
-}
-
-function line(tag: string, className: string, text?: string): HTMLElement {
-  const node = document.createElement(tag)
-  node.className = className
-  if (text !== undefined) node.textContent = text
-  return node
 }

@@ -21,6 +21,7 @@ The keys, for settings.json:
 - `kiwiAgent.verify`: test commands run once every task of a feature is marked tested, over the files the tasks name, in the directory of the nearest `project` file; a repo with a backend and a frontend runs each suite once, and only the suites the feature touched. A failure is handed to the implement session, up to `kiwiAgent.verifyFailureBudget` consecutive failures. Default: `dotnet test` of the `.csproj` owning a `.cs` file, `npm test` in the `package.json` folder owning a `.ts` file.
 - `kiwiAgent.planIgnore`: globs under `docs/` a blind planner must not see. The docs map does not describe them and the docs evaluation does not judge them.
 - Command *KiwiAgent: Build Docs Map* describes the docs that changed since the last build. A plan session and a docs evaluation do it themselves when the map is behind.
+- `kiwiAgent.docsMap.style`: `described` (default) has a model write one line per section; `outline` gives headings with line ranges and each doc's opening paragraph, read at session start at no model cost. Set it to compare the two.
 
 ## Instruction files and skills
 
@@ -32,4 +33,4 @@ Claude Code's layout, at the user level and in the workspace. On the own-loop en
 
 ## Logs
 
-Session events are logged to `.agent/runs/<session id>/events.jsonl` in the workspace; add `.agent/` to the workspace's `.gitignore`. Generated context lives beside the logs: the repo map under `.agent/repo-map/` and the docs map under `.agent/docs-map/`, both rebuilt from the workspace and safe to delete. A feature's review, decisions and tasks live under `.agent/plan/` until the feature is finished (see [plan-sessions.md](plan-sessions.md)).
+Session events are logged to `.agent/runs/<session id>/events.jsonl` in the workspace, and a session's system prompt, when its mode composes one, to `system-prompt.md` beside it; add `.agent/` to the workspace's `.gitignore`. Generated context lives beside the logs: the repo map under `.agent/repo-map/` and the docs map under `.agent/docs-map/`, both rebuilt from the workspace and safe to delete. A feature's review, decisions and tasks live under `.agent/plan/` until the feature is finished (see [plan-sessions.md](plan-sessions.md)).

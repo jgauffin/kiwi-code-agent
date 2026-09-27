@@ -1,23 +1,10 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { readFile, readdir, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { withWorkspace } from './workspace-fixture'
 import { buildRepoMap, mapIsStale, readSummary } from '../src/agent/repo-map/build-map'
 import { listMap, mapRoot, readMapFile } from '../src/agent/repo-map/map-files'
 
-async function withWorkspace<T>(files: Record<string, string>, fn: (dir: string) => Promise<T>): Promise<T> {
-  const dir = await mkdtemp(join(tmpdir(), 'repo-map-build-'))
-  try {
-    for (const [path, text] of Object.entries(files)) {
-      const full = join(dir, ...path.split('/'))
-      await mkdir(join(full, '..'), { recursive: true })
-      await writeFile(full, text, 'utf8')
-    }
-    return await fn(dir)
-  } finally {
-    await rm(dir, { recursive: true, force: true })
-  }
-}
 
 const workspace = {
   'Shop.sln': 'Microsoft Visual Studio Solution File',

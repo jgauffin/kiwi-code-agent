@@ -133,3 +133,21 @@ describe('ChatComposer model switch', () => {
     expect(seen).toBe('Kimi')
   })
 })
+
+describe('ChatComposer continue in chat', () => {
+  it('a_session_not_offered_the_handover_shows_no_button', () => {
+    const node = composer()
+    node.setSwitches({ allowWrites: undefined, mcp: undefined, model: undefined })
+    expect(node.querySelector('.continue-in-chat')).toBeNull()
+  })
+
+  it('the_button_asks_to_carry_the_conversation_into_a_chat', async () => {
+    const { ContinueInChatRequestedEvent } = await import('../src/chat/webview/events')
+    const node = composer()
+    node.setSwitches({ allowWrites: undefined, mcp: undefined, model: undefined, continueInChat: true })
+    let asked = false
+    node.addEventListener(ContinueInChatRequestedEvent.type, () => (asked = true))
+    node.querySelector<HTMLButtonElement>('.continue-in-chat')!.click()
+    expect(asked).toBe(true)
+  })
+})

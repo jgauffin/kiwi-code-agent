@@ -1,6 +1,6 @@
-import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { readOptional } from '../workspace-files'
 
 export type InstructionFile = {
   /** Absolute path, named in the prompt so the model knows where a rule came from. */
@@ -32,14 +32,4 @@ export async function readInstructionFiles(cwd: string, home = homedir()): Promi
     if (text?.trim()) files.push({ path, text })
   }
   return files
-}
-
-/** The file's text, or nothing when there is no such file. Any other failure propagates. */
-export async function readOptional(path: string): Promise<string | undefined> {
-  try {
-    return await readFile(path, 'utf8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
-    throw error
-  }
 }

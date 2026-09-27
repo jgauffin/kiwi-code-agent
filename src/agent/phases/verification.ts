@@ -1,7 +1,8 @@
 import { readdirSync } from 'node:fs'
 import { dirname, isAbsolute, join, matchesGlob, relative, resolve } from 'node:path'
 import { CODE_OUTLINE_TOOL } from '../code-outline/code-outline-tool'
-import { readTasks, recordVerification, taskFiles, tasksDone, tasksFile, tasksPath, type TasksState, type VerificationRecord } from './tasks-file'
+import { readTasks, recordVerification, taskFiles, tasksDone, tasksPath, type TasksState, type VerificationRecord } from './tasks-file'
+import { UPDATE_TASK_TOOL } from '../openai-session/tools/task-board'
 
 /**
  * A rule says which files, when touched, make which command run, and where.
@@ -70,7 +71,7 @@ function safeReaddir(dir: string): string[] {
 /**
  * The test run is owed: every task is tested and no run has passed since. Read
  * from the board when an implement turn ends, so the fix after a failure is
- * verified again whether or not the implementer moved a marker to get there.
+ * verified again whether or not the implementer moved a task to get there.
  */
 export function verificationDue(tasks: TasksState): boolean {
   return tasks.exists && tasksDone(tasks.tasks) && tasks.verification?.ok !== true
@@ -119,14 +120,14 @@ export async function runVerification(options: {
 /** The message the implementer gets when the test run failed: the commands, their output, and what to do about it. */
 export function verificationHandoffPrompt(feature: string, failures: VerificationFailure[], cwd: string): string {
   const lines = [
-    `The test run for "${feature}" failed after every task in \`${tasksFile(feature)}\` was marked tested.`,
+    `The test run for "${feature}" failed after every task on its board was marked tested.`,
     '',
   ]
   for (const failure of failures) {
     lines.push(`${describeCommand(failure, cwd)}:`, '```', failure.output.trim(), '```', '')
   }
   lines.push(
-    'Fix what the output names. Mark the tasks it touches ` [in progress]` while you work and ` [tested]` once their tests pass; leave the rest of the board as it is.',
+    `Fix what the output names. Move the tasks it touches to in_progress with ${UPDATE_TASK_TOOL} while you work and to tested once their tests pass; leave the rest of the board as it is.`,
     '',
     'Reproduce the failure with a run narrowed to the test the output names, fix it, then run that test again and build its project. The whole sweep runs again as soon as you stop with every task tested, so stopping on a fix you have not run costs another one.',
     '',

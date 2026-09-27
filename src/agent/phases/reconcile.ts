@@ -6,21 +6,24 @@ import { CODE_OUTLINE_TOOL } from '../code-outline/code-outline-tool'
 import { CODE_READING } from '../code-outline/code-outline-gate'
 import { CODE_SEARCH_TOOL } from '../code-outline/code-search'
 import type { Scope } from './scope-guard'
-import { tasksFile } from './tasks-file'
+import { READ_TASKS_TOOL, UPDATE_TASK_TOOL, WRITE_TASKS_TOOL } from '../openai-session/tools/task-board'
 import { MAP_ROOT } from '../repo-map/map-files'
 import type { SessionEvent } from '../session/code-session'
 
-/** The mapping run sees everything and may change nothing but its own two outputs; the spec is the planner's and the user's. */
+/** The mapping run sees everything and may change nothing but its own two outputs, the board through its tool; the spec is the planner's and the user's. */
 export function reconcileScope(feature: string): Scope {
   return {
     // `**` does not match a dot-prefixed segment, so the map's root is named:
     // the run is given the type indexes the summary points it at.
     readable: ['**', `${MAP_ROOT}/**`],
-    writable: [decisionsFile(feature), tasksFile(feature)],
+    writable: [decisionsFile(feature)],
   }
 }
 
-export const RECONCILE_TOOLS = ['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', MARKDOWN_SEARCH_TOOL, CODE_OUTLINE_TOOL, CODE_SEARCH_TOOL, 'Edit', 'Write', 'Skill']
+export const RECONCILE_TOOLS = [
+  'Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', MARKDOWN_SEARCH_TOOL, CODE_OUTLINE_TOOL, CODE_SEARCH_TOOL, 'Edit', 'Write', 'Skill',
+  READ_TASKS_TOOL, WRITE_TASKS_TOOL,
+]
 
 /**
  * The first prompt of a mapping run; the system prompt carries the
@@ -47,7 +50,6 @@ export function reconcileKickoff(continued: boolean, note?: string): string {
 export function reconcilePrompt(feature: string, cwd: string): string {
   const spec = `${PLAN_DIR}/${featureSlug(feature)}.spec.md`
   const decisions = decisionsFile(feature)
-  const tasks = tasksFile(feature)
   return `You are mapping the spec for the feature "${feature}" against the source code it will be built in.
 
 The spec at \`${spec}\` under ${cwd} was written blind, from product intent alone, so that the code's mistakes would not become requirements. Your job is the other half, in two parts: find what in the code stands in the feature's way before implementation starts, then say what to do and where. You are not grading the spec. A rule the code accommodates without incident is not mentioned. An empty list of decisions is a valid result.
@@ -84,38 +86,24 @@ Rules:
 - Do not paste code.
 - The spec is not yours to write: its rules are the planner's and the user's.
 
-Your second output: the task board, \`${tasks}\`, written with Write. Start from one task per scenario of the spec, in build order, under a \`##\` heading with that scenario's title, each task naming the rules it delivers and the files it touches. Structure:
-
-\`\`\`markdown
-# Tasks for ${feature}
-
-## Cancelling an order
-- **Cancel command** (Cancel command, Shipped order, Refund): the scenario, as work: what to do, in one line
-  - files: src/orders/cancel.ts, src/orders/cancel.test.ts (new)
-  - context: src/orders/order.ts, src/orders/ship.test.ts
-  - how:
-    - follow src/orders/ship.ts and its test: the guard sits on \`Order\`, the handler only parses, loads, calls and saves
-    - leave \`OrderStatus\` alone: the reports switch on it
-
-## Releasing the reservation
-- **Reservation release** (Release on cancel): ...
-  - files: src/orders/reservation.ts
-  - context: src/orders/order.ts, src/billing/invoice.ts
-  - how:
-    - ...
-\`\`\`
+Your second output: the task board, written with ${WRITE_TASKS_TOOL} (${READ_TASKS_TOOL} shows it as it stands). Start from one task per scenario of the spec, in build order, grouped under that scenario's title, each task naming the rules it delivers and the files it touches. For example, a task in the group "Cancelling an order":
+- name: Cancel command
+- delivers: Cancel command, Shipped order, Refund
+- text: the scenario, as work: what to do, in one sentence
+- files: src/orders/cancel.ts, src/orders/cancel.test.ts
+- context: src/orders/order.ts, src/orders/ship.test.ts
+- how: "- follow src/orders/ship.ts and its test: the guard sits on \`Order\`, the handler only parses, loads, calls and saves\\n- leave \`OrderStatus\` alone: the reports switch on it"
 
 Rules:
-- One task per scenario is the default; depart from it only for a reason you name in the task text: a scenario too big to build and test in one sitting is split in build order under the same heading (a group of rules is not a reason to split), a foundation every scenario needs (a contract module, a schema) is one task under a \`## Foundation\` heading first in the file, delivering the rules it serves.
-- Every rule and edge case of the spec is delivered by some task. A rule no task delivers is a gap the user sees.
-- The task's own line is one sentence, for the person: what the task does, no more. The detail goes in \`how:\`.
-- The files are workspace-relative paths that exist, or paths to create marked \`(new)\`, placed where the code around them says such a file belongs. The tests that prove a task's rules are files of that task.
+- One task per scenario is the default; depart from it only for a reason you name in the task text: a scenario too big to build and test in one sitting is split in build order in the same group (a group of rules is not a reason to split), a foundation every scenario needs (a contract module, a schema) is one task in a group "Foundation", written first, delivering the rules it serves.
+- Every rule and edge case of the spec is delivered by some task. A rule no task delivers is a gap the user sees; the tool's result names any, so write the tasks that close them.
+- The text is one sentence, for the person: what the task does, no more. The detail goes in how.
+- The files are workspace-relative paths that exist, or paths to create, placed where the code around them says such a file belongs. The tests that prove a task's rules are files of that task.
 - The context is what you read to arrive at the task and the implementer would otherwise have to find again: the modules the task's files lean on, the test that shows the pattern to follow, the place the term already lives. Existing paths only, the few that matter; a task starts from its files and its context and searches beyond them only when those do not answer.
-- The \`how:\` block holds what the implementer would not learn from reading its files and context: the existing code that shows the pattern to follow, a constraint the code imposes that those files do not show, what not to touch. Not the steps, signatures, fields or columns: the implementer reads the same code and designs them. A few lines. No code pasted.
-- A task's name is the bold lead-in of its line, a few words, unique in the file and stable across re-runs: keep a task that still holds and update its text, files, context and how, append \` [removed]\` to one that no longer applies, add new ones. Never touch a marker, a \`proves:\` line or a \`note:\` line the implementer left on a task (\`[in progress]\`, \`[done]\`, \`[tested]\`, \`[blocked: ...]\`): a note says where the build departed from the \`how:\` it was given and why, so it survives a rewrite of the task and goes only when the task does.
+- The how holds what the implementer would not learn from reading its files and context: the existing code that shows the pattern to follow, a constraint the code imposes that those files do not show, what not to touch. Not the steps, signatures, fields or columns: the implementer reads the same code and designs them. A few lines of markdown. No code pasted.
+- A task's name is a few words, unique on the board and stable across re-runs: send a task that still holds under its name with what changed, remove one that no longer applies, add new ones. The implementer's progress on a task is kept by the tool.
 - No task for what a pending decision puts in question: the user rules first.
-- The file's front matter and a \`## Verification\` section at its end are the extension's; leave them alone.
-- When both files are written, stop. Say nothing more: decisions and tasks are read from the files.`
+- When both outputs are written, stop. Say nothing more: decisions and tasks are read from where you wrote them.`
 }
 
 /** What a run under a session is doing right now, as the plan bar shows it; undefined when the event says nothing worth showing. */
@@ -152,6 +140,12 @@ function toolLine(name: string, raw: unknown): string {
       return clip(`CodeSearch "${text('query') ?? ''}" in ${text('path') ?? '.'}`)
     case 'Skill':
       return clip(`Skill ${text('name') ?? text('skill') ?? ''}`)
+    case UPDATE_TASK_TOOL:
+      return clip(`${text('task') ?? ''}${text('state') ? `: ${text('state')!.replace('_', ' ')}` : ''}`)
+    case WRITE_TASKS_TOOL:
+      return 'Writing the tasks'
+    case READ_TASKS_TOOL:
+      return 'Reading the tasks'
     default:
       return name
   }

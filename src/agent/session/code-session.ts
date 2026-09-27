@@ -78,8 +78,11 @@ export type SessionEvent =
   | { type: 'question_request'; requestId: string; request: UserQuestionRequest }
   /** How the request ended: the answers the user gave, or that it went unanswered. Exactly one per request. */
   | { type: 'question_resolved'; requestId: string; outcome: QuestionOutcome }
-  /** `starting` is the host's own: the engine is being brought up and cannot yet speak for itself. */
-  | { type: 'status'; status: 'starting' | 'requesting' | 'compacting' | 'idle' }
+  /**
+   * `starting` is the host's own: the engine is being brought up and cannot yet
+   * speak for itself. Its `detail` names the phase the start-up is in.
+   */
+  | { type: 'status'; status: 'starting' | 'requesting' | 'compacting' | 'idle'; detail?: string }
   /** The session's MCP servers as of now; the newest replaces the last. */
   | { type: 'mcp_servers'; servers: McpServerState[] }
   | { type: 'turn_done'; usage?: TurnUsage; durationMs?: number; isError: boolean; errors: string[] }

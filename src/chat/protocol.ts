@@ -81,7 +81,11 @@ export type PlanState = {
   atWork: boolean
   /** A run of the feature is stopped mid-turn on the dev: a question to answer or a call to allow or deny. */
   blocked?: RunBlock
+  /** A run of the feature whose last turn failed, and why: nothing retries it, so the dev has to be told. */
+  failure?: RunFailure
 }
+
+export type RunFailure = { mode: SessionMode; message: string }
 
 /** One line on a run under the plan: its current step while it runs, its outcome once it ended. */
 export type RunState = { live: boolean; text: string }
@@ -114,6 +118,8 @@ export type ToWebview =
       mcp?: McpServerState[]
       /** Present when the active session is a plan session. */
       plan?: PlanState
+      /** The run under the active tab that what the user types reaches; its section is the one open. */
+      currentRun?: string
       /** Plans under `plan/` still in progress, for the new-session screen. */
       plans: ResumablePlan[]
       /** The profiles by name and which of them new sessions get, for the new-session screen's pickers. */
@@ -165,6 +171,8 @@ export type FromWebview =
   | { type: 'set_allow_writes'; enabled: boolean }
   /** Switches the active chat session to a model named as `models` on `state` lists it. */
   | { type: 'set_session_model'; name: string }
+  /** Carries the active docs evaluation's conversation into a new chat with the full tool set. */
+  | { type: 'continue_in_chat' }
   /** Tries one of the active session's MCP servers again. */
   | { type: 'reconnect_mcp'; server: string }
   | { type: 'switch_session'; sessionId: string }

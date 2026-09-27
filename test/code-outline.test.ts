@@ -1,7 +1,5 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { withWorkspace } from './workspace-fixture'
 import { CodeOutlineGate } from '../src/agent/code-outline/code-outline-gate'
 import { codeOutlineTool } from '../src/agent/code-outline/code-outline-tool'
 import { codeSearchTool } from '../src/agent/code-outline/code-search'
@@ -85,19 +83,6 @@ describe('rendering outlines of several files', () => {
   })
 })
 
-async function withWorkspace<T>(files: Record<string, string>, fn: (dir: string) => Promise<T>): Promise<T> {
-  const dir = await mkdtemp(join(tmpdir(), 'code-outline-'))
-  try {
-    for (const [path, text] of Object.entries(files)) {
-      const full = join(dir, ...path.split('/'))
-      await mkdir(join(full, '..'), { recursive: true })
-      await writeFile(full, text, 'utf8')
-    }
-    return await fn(dir)
-  } finally {
-    await rm(dir, { recursive: true, force: true })
-  }
-}
 
 const ctx = (cwd: string): ToolContext => ({ cwd, signal: new AbortController().signal }) as ToolContext
 

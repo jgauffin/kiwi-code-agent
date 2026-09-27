@@ -4,6 +4,7 @@ import type { PlanState } from '../src/chat/protocol'
 import type { Spec } from '../src/agent/phases/spec-model'
 import type { ReviewRound } from '../src/agent/phases/plan-review'
 import type { Task } from '../src/agent/phases/tasks-file'
+import { planState } from './plan-state-fixture'
 
 // The webview talks to the host through this handle, acquired when its modules load.
 ;(globalThis as Record<string, unknown>).acquireVsCodeApi = () => ({ postMessage: () => {} })
@@ -29,36 +30,10 @@ const spec: Spec = {
   problems: [],
 }
 
-function plan(over: Partial<PlanState> = {}): PlanState {
-  return {
-    specPath: 'plan/orders.spec.md',
-    tasksPath: 'plan/orders.tasks.md',
-    decisionsPath: 'plan/orders.decisions.md',
-    stage: 'created',
-    status: 'draft',
-    body: '# Orders',
-    spec,
-    stale: false,
-    repairable: false,
-    mappable: true,
-    remappable: false,
-    implementable: false,
-    verifiable: false,
-    tasks: [],
-    review: { rounds: [] },
-    commentable: true,
-    approvable: false,
-    decisions: [],
-    pendingDecisions: 0,
-    applyingRulings: false,
-    reviewingDocs: false,
-    atWork: true,
-    ...over,
-  }
-}
+const plan = (over: Partial<PlanState> = {}): PlanState => planState({ spec, ...over })
 
 const round = (over: Partial<ReviewRound>): ReviewRound => ({ number: 1, comments: [], strikes: [], ...over })
-const task = (over: Partial<Task> = {}): Task => ({ name: 'Cancel', text: 'add it', delivers: ['Cancel command'], files: [], context: [], how: '', proves: [], state: 'open', removed: false, ...over })
+const task = (over: Partial<Task> = {}): Task => ({ name: 'Cancel', text: 'add it', delivers: ['Cancel command'], files: [], newFiles: [], context: [], how: '', proves: [], note: '', built: '', state: 'open', removed: false, ...over })
 
 function view(state: PlanState, tab: Tab = 'spec'): InstanceType<typeof PlanView> {
   const node = new PlanView()
@@ -82,7 +57,7 @@ describe('PlanView', () => {
     task({
       group: 'Cancelling an order',
       state: 'in_progress',
-      text: 'add the cancel command [in progress]',
+      text: 'add the cancel command',
       files: ['src/orders/cancel.ts', 'src/orders/cancel.test.ts'],
       context: ['src/orders/order.ts'],
       how: '- add `cancel()` beside `ship()`',
@@ -93,13 +68,18 @@ describe('PlanView', () => {
     expect(node.querySelector('.group > .heading')?.textContent).toBe('Cancelling an order')
     expect(node.querySelector('.task .name')?.textContent).toBe('Cancel')
     expect(node.querySelector('.task .badge.state')?.textContent).toBe('in progress')
-    // The mapper's sentence is what the task does; its state is the badge, not the marker it wrote in the line.
     expect(node.querySelector('.task .line > .text')?.textContent).toBe('Cancel: add the cancel command')
     const paths = [...node.querySelectorAll<HTMLElement>('.task .paths')]
     expect(paths.map((p) => p.querySelector('.kind')?.textContent)).toEqual(['changes', 'reads'])
     expect([...node.querySelectorAll('.task ul.files > li')].map((li) => li.textContent)).toEqual(['src/orders/cancel.ts', 'src/orders/cancel.test.ts'])
     expect([...node.querySelectorAll('.task ul.context > li')].map((li) => li.textContent)).toEqual(['src/orders/order.ts'])
     expect(node.querySelector('.task .delivers')).toBeNull()
+  })
+
+  it('a_blocked_task_says_what_stands_in_its_way', () => {
+    const blocked = task({ state: 'blocked', blockedReason: 'the API moved' })
+    const node = view(plan({ stage: 'under_development', status: 'approved', commentable: false, tasks: [blocked] }), 'tasks')
+    expect(node.querySelector('.task .badge.state')?.textContent).toBe('blocked: the API moved')
   })
 
   const verified = () => ({ stage: 'verified' as const, status: 'approved' as const, commentable: false, tasks: [task({ state: 'tested' })] })

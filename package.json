@@ -141,10 +141,6 @@
         {
           "command": "kiwiAgent.openDraftPlan",
           "when": "false"
-        },
-        {
-          "command": "kiwiAgent.openSettings",
-          "when": "false"
         }
       ]
     },
@@ -168,6 +164,19 @@
           },
           "default": [],
           "description": "Workspace-relative globs a Plan session must not read, carved out of docs/**, the root README and plan/*.spec.md. Example: docs/api/**."
+        },
+        "kiwiAgent.docsMap.style": {
+          "type": "string",
+          "enum": [
+            "described",
+            "outline"
+          ],
+          "enumDescriptions": [
+            "A model run writes one line per section; rebuilt when a doc changes.",
+            "Headings with line ranges and each doc's opening paragraph, read at session start at no model cost."
+          ],
+          "default": "described",
+          "description": "The docs map Plan and Docs sessions start with. Each session's prompt is kept in its run folder as system-prompt.md, so the two can be compared."
         },
         "kiwiAgent.permissions.allow": {
           "type": "array",

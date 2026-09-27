@@ -28,6 +28,8 @@ export type CompletionRequest = {
   model: string
   messages: ChatMessage[]
   tools: ToolDefinition[]
+  /** Output tokens per reply, reasoning included. */
+  maxTokens: number
   signal: AbortSignal
 }
 

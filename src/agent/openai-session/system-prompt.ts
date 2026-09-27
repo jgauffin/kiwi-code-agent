@@ -1,6 +1,7 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { readInstructionFiles, readOptional } from '../instructions/instruction-files'
+import { readInstructionFiles } from '../instructions/instruction-files'
+import { readOptional } from '../workspace-files'
 import { DOC_READING } from './tools/markdown/outline-gate'
 import { CODE_READING } from '../code-outline/code-outline-gate'
 

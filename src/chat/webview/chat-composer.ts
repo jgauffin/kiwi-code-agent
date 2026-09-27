@@ -1,13 +1,23 @@
 import { compileTemplate } from '@relax.js/core/html'
 import type { McpServerState } from '../../agent/session/code-session'
 import { LinkedFilesRow } from './linked-files-row'
-import { AllowWritesToggledEvent, InterruptRequestedEvent, McpReconnectRequestedEvent, PromptSubmittedEvent, SessionModelChangedEvent } from './events'
+import {
+  AllowWritesToggledEvent,
+  ContinueInChatRequestedEvent,
+  InterruptRequestedEvent,
+  McpReconnectRequestedEvent,
+  PromptSubmittedEvent,
+  SessionModelChangedEvent,
+} from './events'
 
 /** The chat session's own model switch: every model on offer, and the one it runs on now. */
 type ModelSwitch = { current: string; options: string[] }
 
-/** The composer's per-session switches; `undefined` hides a switch the session has no use for. */
-type Switches = { allowWrites: boolean | undefined; mcp: McpServerState[] | undefined; model: ModelSwitch | undefined }
+/**
+ * The composer's per-session switches; `undefined` hides a switch the session has no use for.
+ * `continueInChat` offers to carry a restricted session's conversation into a chat.
+ */
+type Switches = { allowWrites: boolean | undefined; mcp: McpServerState[] | undefined; model: ModelSwitch | undefined; continueInChat?: boolean }
 
 /**
  * Prompt input. Enter sends, Shift+Enter breaks the line. Held while the
@@ -31,6 +41,7 @@ export class ChatComposer extends HTMLElement {
               <option loop="m in models" value="{{m.name}}" selected="{{m.selected}}">{{m.name}}</option>
             </select>
           </label>
+          <button type="button" class="continue-in-chat" if="continueInChat" title="Carry this conversation into a chat with the full tool set." r-click="continueInChat()">Continue in chat</button>
           <linked-files-row class="linked-files"></linked-files-row>
         </span>
         <button type="button" class="stop" r-click="stop()">Stop</button>
@@ -70,7 +81,7 @@ export class ChatComposer extends HTMLElement {
   }
 
   private render(): void {
-    const { allowWrites, mcp, model } = this.switches
+    const { allowWrites, mcp, model, continueInChat } = this.switches
     this.template.render(
       {
         held: this.held,
@@ -81,6 +92,7 @@ export class ChatComposer extends HTMLElement {
         servers: (mcp ?? []).map((s) => ({ ...s, title: s.error ?? s.status })),
         modelAvailable: model !== undefined,
         models: (model?.options ?? []).map((name) => ({ name, selected: name === model?.current })),
+        continueInChat: continueInChat ?? false,
       },
       {
         reconnect: (s: McpServerState) => this.dispatchEvent(new McpReconnectRequestedEvent(s.name)),
@@ -95,6 +107,7 @@ export class ChatComposer extends HTMLElement {
           }
         },
         changeModel: (event: Event) => this.dispatchEvent(new SessionModelChangedEvent((event.target as HTMLSelectElement).value)),
+        continueInChat: () => this.dispatchEvent(new ContinueInChatRequestedEvent()),
         stop: () => this.dispatchEvent(new InterruptRequestedEvent()),
         toggleAllowWrites: (event: Event) => {
           this.dispatchEvent(new AllowWritesToggledEvent((event.target as HTMLInputElement).checked))

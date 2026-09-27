@@ -1,9 +1,11 @@
-import { access, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { access, mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { readOptional } from '../workspace-files'
 import { PLAN_DIR, WORK_DIR } from './blind-plan'
 import { finished } from './plan-list'
 import { statusOf, withStatus } from './spec-file'
-import { readTasks } from './tasks-file'
+import { readTasks, TASKS_SUFFIX } from './tasks-file'
+import { convertLegacyBoard, LEGACY_TASKS_SUFFIX } from './legacy-tasks'
 
 /**
  * A feature's working files are kept this long after they were last touched,
@@ -13,10 +15,12 @@ import { readTasks } from './tasks-file'
  */
 export const WORKING_FILES_KEPT_MS = 7 * 24 * 60 * 60 * 1000
 
-const WORKING_FILE = /^(.+)\.(review|decisions|tasks)\.md$/
+const WORKING_FILE = /^(.+)\.(review\.md|decisions\.md|tasks\.md|tasks\.json)$/
 
 /** Workspace-relative paths, by what happened to them. */
 export type SweepReport = {
+  /** Markdown task boards converted to JSON. */
+  converted: string[]
   /** Working files moved out of `plan/`, where they lived before they had a directory of their own. */
   moved: string[]
   /** Working files left in `plan/` because the working directory already holds one of that name. */
@@ -34,29 +38,31 @@ export type SweepReport = {
  * from. A draft or a feature under development is never touched, however old.
  */
 export async function sweepPlans(cwd: string, now: Date): Promise<SweepReport> {
-  const report: SweepReport = { moved: [], blocked: [], implemented: [], removed: [] }
+  const report: SweepReport = { converted: [], moved: [], blocked: [], implemented: [], removed: [] }
   await moveLegacyFiles(cwd, report)
   const workDir = join(cwd, WORK_DIR)
+  for (const name of (await namesIn(workDir)).filter((n) => n.endsWith(LEGACY_TASKS_SUFFIX))) {
+    if (await convertLegacyBoard(join(workDir, name))) report.converted.push(`${WORK_DIR}/${name}`)
+  }
   for (const [slug, files] of bySlug(await namesIn(workDir))) {
     const touched = await Promise.all(files.map(async (f) => (await stat(join(workDir, f))).mtimeMs))
     if (now.getTime() - Math.max(...touched) < WORKING_FILES_KEPT_MS) continue
     const spec = join(cwd, PLAN_DIR, `${slug}.spec.md`)
-    const text = await readIfThere(spec)
+    const text = await readOptional(spec)
     if (text !== undefined && statusOf(text) !== 'implemented') {
-      if (!finished(statusOf(text), await readTasks(join(workDir, `${slug}.tasks.md`)))) continue
+      if (!finished(statusOf(text), await readTasks(join(workDir, `${slug}${TASKS_SUFFIX}`)))) continue
       await writeFile(spec, withStatus(text, 'implemented'), 'utf8')
       report.implemented.push(`${PLAN_DIR}/${slug}.spec.md`)
     }
     for (const file of files) {
       await rm(join(workDir, file))
       report.removed.push(`${WORK_DIR}/${file}`)
-      // A copy the move could not take, such as one an older branch brought back, goes with the file it duplicates.
-      const copy = `${PLAN_DIR}/${file}`
-      if (report.blocked.includes(copy)) {
-        await rm(join(cwd, PLAN_DIR, file))
-        report.blocked.splice(report.blocked.indexOf(copy), 1)
-        report.removed.push(copy)
-      }
+    }
+    // A copy the move could not take, such as one an older branch brought back, goes with the feature it duplicates.
+    for (const copy of report.blocked.filter((b) => WORKING_FILE.exec(b.slice(PLAN_DIR.length + 1))?.[1] === slug)) {
+      await rm(join(cwd, copy))
+      report.blocked.splice(report.blocked.indexOf(copy), 1)
+      report.removed.push(copy)
     }
   }
   return report
@@ -91,15 +97,6 @@ async function namesIn(dir: string): Promise<string[]> {
     return await readdir(dir)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
-    throw error
-  }
-}
-
-async function readIfThere(path: string): Promise<string | undefined> {
-  try {
-    return await readFile(path, 'utf8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
     throw error
   }
 }

@@ -12,13 +12,13 @@ import {
   modernizeFindings,
   modernizeReview,
   modernizeSpecItems,
-  modernizeTasks,
 } from '../src/agent/phases/migrate-plan'
 import { migrateSpecPrompt } from '../src/agent/phases/blind-plan'
 import { decisions } from '../src/agent/phases/decisions'
 import { parseReview } from '../src/agent/phases/plan-review'
 import { parseSpecText, specFingerprint } from '../src/agent/phases/spec-model'
-import { parseTasks } from '../src/agent/phases/tasks-file'
+import { readBoard, writeBoard, type TaskBoard } from '../src/agent/phases/tasks-file'
+import { board as boardOf, task } from './task-board-fixture'
 
 const legacy = `---
 feature: Orders
@@ -112,17 +112,6 @@ describe('ids become names', () => {
     expect(extractDecisions(lifted.spec)).toEqual({ spec: lifted.spec, decisions: '' })
   })
 
-  it('a_migrated_board_names_its_tasks_and_pairs_each_proof_with_an_arrow', () => {
-    const old = '# Tasks for X\n\n- T1 (B1, E1): a [tested]\n  - files: src/a.ts\n  - proves: B1 test/a.test.ts b1_holds, E1 test/a.test.ts e1_holds\n- T2: b\n'
-    const text = modernizeTasks(old)
-    expect(text).toBe('# Tasks for X\n\n- **T1** (B1, E1): a [tested]\n  - files: src/a.ts\n  - proves: B1 → test/a.test.ts b1_holds, E1 → test/a.test.ts e1_holds\n- **T2**: b\n')
-    expect(parseTasks(text).tasks.map((t) => [t.name, t.delivers, t.proves.length])).toEqual([
-      ['T1', ['B1', 'E1'], 2],
-      ['T2', [], 0],
-    ])
-    expect(modernizeTasks(text)).toBe(text)
-  })
-
   it('a_migrated_review_loses_its_ids_and_keeps_its_resolutions', () => {
     const old =
       '# Review\n\nComments and strikes are the human’s; resolutions are the agent’s. A submitted comment keeps its id.\n\n## Round 1 — submitted t\n- C1 (B3): hm\n  - item: B3: a rule\n  - addressed: ok\n  - accepted\n- C2 (plan): thin\n- struck: B2, E1\n\n## Round 2 — pending\n- C3 (B1): no\n'
@@ -168,16 +157,22 @@ describe('migratePlan', () => {
   })
   afterEach(() => rm(dir, { recursive: true, force: true }))
 
+  const boardPath = () => join(dir, '.agent', 'plan', 'orders.tasks.json')
+  const theBoard = async (): Promise<TaskBoard> => {
+    const read = await readBoard(boardPath())
+    if (!read) throw new Error('no board written')
+    return read
+  }
+
   it('moves_the_task_section_into_a_new_tasks_file_and_reports_what_the_planner_has_left_to_do', async () => {
     await writeFile(join(dir, 'plan', 'orders.spec.md'), legacy)
     const report = await migratePlan(dir, 'Orders')
     expect(report.steps).toEqual([
       'moved 2 task line(s) from the spec into the tasks file.',
       'rewrote the spec to the named-rule contract.',
-      'rewrote the tasks file to the named-rule contract.',
       'stamped the tasks file with the spec it was mapped from.',
     ])
-    const board = parseTasks(await readFile(join(dir, '.agent', 'plan', 'orders.tasks.md'), 'utf8'))
+    const board = await theBoard()
     expect(board.tasks.map((t) => [t.name, t.delivers, t.state])).toEqual([
       ['T1', ['B1', 'E1'], 'done'],
       ['T2', ['B2'], 'open'],
@@ -193,11 +188,11 @@ describe('migratePlan', () => {
 
   it('a_spec_the_planner_still_has_to_arrange_is_not_stamped_onto_its_board', async () => {
     await writeFile(join(dir, 'plan', 'orders.spec.md'), '# Orders\n\n## Goal\ng\n\n## S\n- **A**: a\n- a rule without a name\n')
-    await writeFile(join(dir, '.agent', 'plan', 'orders.tasks.md'), '# Tasks for Orders\n\n- **T1** (A): x\n')
+    await writeBoard(boardPath(), boardOf(task('T1', { delivers: ['A'] })))
     const report = await migratePlan(dir, 'Orders')
     expect(report.steps).toEqual([])
     expect(report.problems).toEqual(['line 8: "- a rule without a name": a rule without a name; a rule is `- **Name**: text`.'])
-    expect(parseTasks(await readFile(join(dir, '.agent', 'plan', 'orders.tasks.md'), 'utf8')).spec).toBeUndefined()
+    expect((await theBoard()).spec).toBeUndefined()
   })
 
   it('a_current_format_plan_is_rewritten_in_every_file_and_the_board_is_restamped', async () => {
@@ -210,9 +205,9 @@ describe('migratePlan', () => {
     const report = await migratePlan(dir, 'Orders')
     expect(report.problems).toEqual([])
     expect(report.steps).toEqual([
+      'converted the tasks file to JSON.',
       'rewrote the spec to the named-rule contract.',
       'moved 1 decision(s) from the spec into the decisions file.',
-      'rewrote the tasks file to the named-rule contract.',
       'rewrote the review to the named-rule contract.',
       'stamped the tasks file with the spec it was mapped from.',
     ])
@@ -223,7 +218,7 @@ describe('migratePlan', () => {
     const ruled = await readFile(join(dir, '.agent', 'plan', 'orders.decisions.md'), 'utf8')
     expect(ruled).toBe('# Decisions for Orders\n\n### F1 [applied]\n- on: B1\n- finding: x\n- proposed: y\n')
     expect(decisions(ruled).map((d) => d.state)).toEqual(['applied'])
-    const board = parseTasks(await readFile(join(dir, '.agent', 'plan', 'orders.tasks.md'), 'utf8'))
+    const board = await theBoard()
     expect(board.tasks[0]).toMatchObject({ name: 'T1', delivers: ['B1', 'E1'], proves: [{ item: 'B1' }] })
     expect(board.spec).toMatch(/^[0-9a-f]{8}$/)
     expect(board.spec).not.toBe('00000000')
@@ -254,12 +249,13 @@ describe('migratePlan', () => {
     const report = await migratePlan(dir, 'Orders')
     expect(report.problems).toEqual([])
     expect(report.steps).toEqual([
+      'converted the tasks file to JSON.',
       'renamed I1 → The invariant across the plan files.',
       'stamped the tasks file with the spec it was mapped from.',
     ])
     expect(await readFile(join(dir, 'plan', 'orders.spec.md'), 'utf8')).toContain('- **The invariant**: the invariant, now a rule\n')
     expect(await readFile(join(dir, '.agent', 'plan', 'orders.review.md'), 'utf8')).toContain('- on The invariant: hm')
-    const board = parseTasks(await readFile(join(dir, '.agent', 'plan', 'orders.tasks.md'), 'utf8'))
+    const board = await theBoard()
     expect(board.tasks[0]!.delivers).toEqual(['B1', 'The invariant'])
     expect(board.spec).toMatch(/^[0-9a-f]{8}$/)
     // Running it again changes nothing.
@@ -270,11 +266,12 @@ describe('migratePlan', () => {
     const spec = '# Orders\n\n## Goal\ng\n\n## Cancelling\n- **Refund on cancel** (was Refund): a\n'
     await writeFile(join(dir, 'plan', 'orders.spec.md'), spec)
     await writeFile(join(dir, '.agent', 'plan', 'orders.decisions.md'), '# Decisions for Orders\n\n### X\n- on: Cancel, Refund\n- finding: x\n')
-    await writeFile(join(dir, '.agent', 'plan', 'orders.tasks.md'), '# Tasks for Orders\n\n- **T1** (Refund): x\n')
+    await writeBoard(boardPath(), boardOf(task('T1', { delivers: ['Refund'], state: 'tested', proves: [{ item: 'Refund', file: 't.ts', test: 'refunds' }] })))
     expect(await followRenames(dir, 'Orders')).toEqual(['Refund → Refund on cancel'])
     expect(await readFile(join(dir, 'plan', 'orders.spec.md'), 'utf8')).toContain('- **Refund on cancel**: a\n')
     expect(decisions(await readFile(join(dir, '.agent', 'plan', 'orders.decisions.md'), 'utf8'))[0]!.on).toEqual(['Cancel', 'Refund on cancel'])
-    expect(parseTasks(await readFile(join(dir, '.agent', 'plan', 'orders.tasks.md'), 'utf8')).tasks[0]!.delivers).toEqual(['Refund on cancel'])
+    // A rule is named where a task delivers it and where a test proves it.
+    expect((await theBoard()).tasks[0]).toMatchObject({ delivers: ['Refund on cancel'], proves: [{ item: 'Refund on cancel' }] })
     // What the board was mapped from reads the same without the note, so following a rename does not force a re-map.
     expect(specFingerprint(parseSpecText(await readFile(join(dir, 'plan', 'orders.spec.md'), 'utf8')))).toBe(specFingerprint(parseSpecText(spec)))
     expect(await followRenames(dir, 'Orders')).toEqual([])

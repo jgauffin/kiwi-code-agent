@@ -1,28 +1,11 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { finishDocsMap, planDocsMap, readDocsSummary } from '../src/agent/docs-map/build'
+import { withWorkspace, writeFiles } from './workspace-fixture'
+import { finishDocsMap, planDocsMap, readDocsSummary, startDocsMap } from '../src/agent/docs-map/build'
 import { diffDocs, readDocsIndex, scanDocs, writeDocsIndex } from '../src/agent/docs-map/doc-index'
 import { entryPath, listEntries, readMapFile, writeMapFile } from '../src/agent/docs-map/map-files'
 
-async function withWorkspace<T>(files: Record<string, string>, fn: (dir: string) => Promise<T>): Promise<T> {
-  const dir = await mkdtemp(join(tmpdir(), 'docs-map-'))
-  try {
-    await write(dir, files)
-    return await fn(dir)
-  } finally {
-    await rm(dir, { recursive: true, force: true })
-  }
-}
-
-async function write(dir: string, files: Record<string, string>): Promise<void> {
-  for (const [path, text] of Object.entries(files)) {
-    const full = join(dir, ...path.split('/'))
-    await mkdir(join(full, '..'), { recursive: true })
-    await writeFile(full, text, 'utf8')
-  }
-}
 
 const ORDERS = '# Orders\n\n## Cancellation\n\nText.\n'
 const ORDERS_ENTRY = '---\ndoc: docs/intent/orders.md\n---\nHow orders work.\n\n- `#Cancellation`: when an order may be cancelled\n'
@@ -51,7 +34,7 @@ describe('what a docs map build has to do', () => {
       await buildWith(dir, { 'docs/intent/orders.md': ORDERS_ENTRY, 'ReadMe.md': README_ENTRY })
       expect((await planDocsMap(dir)).current).toBe(true)
 
-      await write(dir, { 'docs/intent/orders.md': `${ORDERS}\n## Refunds\n\nText.\n` })
+      await writeFiles(dir,{ 'docs/intent/orders.md': `${ORDERS}\n## Refunds\n\nText.\n` })
       const plan = await planDocsMap(dir)
       expect(plan.changed).toEqual(['docs/intent/orders.md'])
       expect(plan.removed).toEqual([])
@@ -61,16 +44,16 @@ describe('what a docs map build has to do', () => {
     withWorkspace(FILES, async (dir) => {
       await buildWith(dir, { 'docs/intent/orders.md': ORDERS_ENTRY, 'ReadMe.md': README_ENTRY })
       // Describing a doc is a model turn, so the key is what the doc says, not when it was written.
-      await write(dir, { 'docs/intent/orders.md': `${ORDERS}\n## Refunds\n` })
+      await writeFiles(dir,{ 'docs/intent/orders.md': `${ORDERS}\n## Refunds\n` })
       expect((await planDocsMap(dir)).changed).toEqual(['docs/intent/orders.md'])
-      await write(dir, { 'docs/intent/orders.md': ORDERS })
+      await writeFiles(dir,{ 'docs/intent/orders.md': ORDERS })
       expect((await planDocsMap(dir)).current).toBe(true)
     }))
 
   it('a_line_ending_change_alone_is_not_a_change_to_describe', async () =>
     withWorkspace(FILES, async (dir) => {
       await buildWith(dir, { 'docs/intent/orders.md': ORDERS_ENTRY, 'ReadMe.md': README_ENTRY })
-      await write(dir, { 'docs/intent/orders.md': ORDERS.replace(/\n/g, '\r\n') })
+      await writeFiles(dir,{ 'docs/intent/orders.md': ORDERS.replace(/\n/g, '\r\n') })
       expect((await planDocsMap(dir)).current).toBe(true)
     }))
 
@@ -78,7 +61,7 @@ describe('what a docs map build has to do', () => {
     withWorkspace(FILES, async (dir) => {
       await buildWith(dir, { 'docs/intent/orders.md': ORDERS_ENTRY, 'ReadMe.md': README_ENTRY })
       await rm(join(dir, 'docs', 'intent', 'orders.md'))
-      await write(dir, { 'docs/settings.md': '# Settings\n\n## Keys\n\nText.\n' })
+      await writeFiles(dir,{ 'docs/settings.md': '# Settings\n\n## Keys\n\nText.\n' })
 
       const plan = await planDocsMap(dir)
       expect(plan.changed).toEqual(['docs/settings.md'])
@@ -87,6 +70,28 @@ describe('what a docs map build has to do', () => {
       await finishDocsMap(dir)
       expect(await listEntries(dir)).toEqual(['ReadMe.md'])
       expect(await readDocsIndex(dir)).toEqual({ 'ReadMe.md': expect.any(String) })
+    }))
+
+  it('a_changed_doc_loses_its_old_entry_before_the_run_so_the_run_writes_it_fresh', async () =>
+    withWorkspace(FILES, async (dir) => {
+      await buildWith(dir, { 'docs/intent/orders.md': ORDERS_ENTRY, 'ReadMe.md': README_ENTRY })
+      await writeFiles(dir,{ 'docs/intent/orders.md': `${ORDERS}\n## Refunds\n\nText.\n` })
+
+      const plan = await startDocsMap(dir)
+      expect(plan.changed).toEqual(['docs/intent/orders.md'])
+      expect(await listEntries(dir)).toEqual(['ReadMe.md'])
+    }))
+
+  it('a_run_that_wrote_nothing_never_gets_the_old_entry_stamped_as_current', async () =>
+    withWorkspace(FILES, async (dir) => {
+      await buildWith(dir, { 'docs/intent/orders.md': ORDERS_ENTRY, 'ReadMe.md': README_ENTRY })
+      // Same headings, new content: the old entry would still pass the contract.
+      await writeFiles(dir,{ 'docs/intent/orders.md': ORDERS.replace('Text.', 'Other text.') })
+
+      await startDocsMap(dir)
+      const result = await finishDocsMap(dir)
+      expect(result.undescribed).toEqual(['docs/intent/orders.md'])
+      expect((await planDocsMap(dir)).changed).toEqual(['docs/intent/orders.md'])
     }))
 
   it('a_doc_the_plan_ignore_setting_hides_is_never_described', async () =>

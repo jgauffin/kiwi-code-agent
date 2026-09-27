@@ -29,7 +29,15 @@ export const wantsDocsMap = (mode: string): boolean => mode === 'plan' || mode =
 
 export type DocsMapSource = GeneratedSource
 export type DocsMapContext = GeneratedContext
-export type DocsMapOptions = ContextOptions
+
+/**
+ * `described`: a model turn writes one line per section, rebuilt when a doc
+ * changes. `outline`: headings, line ranges and each doc's opening, read at
+ * session start. Both exist so their effect on a planner can be compared.
+ */
+export type DocsMapStyle = 'described' | 'outline'
+
+export type DocsMapOptions = ContextOptions & { style?: DocsMapStyle }
 
 /**
  * The workspace's map. Describing a doc is a model turn, so the build is the
@@ -45,21 +53,32 @@ export const workspaceDocsMap = (
   read: () => readDocsSummary(cwd),
 })
 
+/** The map read from the docs themselves at session start: nothing to build, never behind. */
+export const outlineDocsMap = (read: () => Promise<string | undefined>): DocsMapSource => ({
+  isStale: async () => false,
+  build: async () => undefined,
+  read,
+})
+
 export const docsMapContext = (source: DocsMapSource, options: DocsMapOptions = {}): Promise<DocsMapContext> =>
   generatedContext(DOCS_MAP, source, options)
 
 /** The map as it goes into a system prompt: the note, the map, and what it is for. */
-export function docsMapSection(context: DocsMapContext): string {
+export function docsMapSection(context: DocsMapContext, style: DocsMapStyle = 'described'): string {
   const lines = ['## The docs map', '', context.note]
   if (context.summary) {
     lines.push(
       '',
-      'Every doc you may read, what it is for, and one line per section. Nothing in it comes from anywhere but the docs themselves.',
+      style === 'described'
+        ? 'Every doc you may read, what it is for, and one line per section. Nothing in it comes from anywhere but the docs themselves.'
+        : 'Every doc you may read, its opening paragraph, and its sections with their line ranges, taken from the docs as they stand.',
       '',
       context.summary.trim(),
       '',
       'Use it to open the one doc that answers your question instead of reading the tree, and to cite a section as `path#Heading` with the heading spelled as the map spells it.',
-      `The map is generated output under \`${DOCS_MAP_ROOT}/\`; it is not yours to read or write, and it says nothing the docs do not.`,
+      style === 'described'
+        ? `The map is generated output under \`${DOCS_MAP_ROOT}/\`; it is not yours to read or write, and it says nothing the docs do not.`
+        : 'A range is the lines of that section: Read just those with offset and limit.',
     )
   }
   return lines.join('\n')
@@ -77,5 +96,5 @@ export async function withDocsMap(
 ): Promise<string> {
   if (!wantsDocsMap(mode)) return systemPrompt
   const context = await docsMapContext(source, options)
-  return `${systemPrompt}\n\n${docsMapSection(context)}`
+  return `${systemPrompt}\n\n${docsMapSection(context, options.style)}`
 }

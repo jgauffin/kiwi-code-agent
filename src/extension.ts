@@ -1,5 +1,6 @@
 import * as vscode from 'vscode'
 import { mkdirSync } from 'node:fs'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { SessionManager, type SessionMode, type SessionRecord, type SessionStore } from './agent/session/session-manager'
 import { SessionsTree } from './chat/sessions-tree'
@@ -22,6 +23,7 @@ import { grepTool } from './agent/openai-session/tools/grep'
 import { bashTool } from './agent/openai-session/tools/bash'
 import { askUserTool } from './agent/openai-session/tools/ask-user'
 import { redoMappingTool } from './agent/openai-session/tools/redo-mapping'
+import { TaskBoardGuard, taskBoardTools } from './agent/openai-session/tools/task-board'
 import { jsonQueryTool, jsonSchemaTool } from './agent/openai-session/tools/json'
 import { skillTool } from './agent/openai-session/tools/skill'
 import { copyTool, moveTool } from './agent/openai-session/tools/move-copy'
@@ -51,7 +53,8 @@ import { CLEANUP_TOOLS, cleanupPrompt, cleanupScope } from './agent/phases/clean
 import { sweepPlans } from './agent/phases/plan-housekeeping'
 import { SpecContract } from './agent/phases/spec-model'
 import { withRepoMap, workspaceRepoMap } from './agent/repo-map/session-context'
-import { withDocsMap, workspaceDocsMap } from './agent/docs-map/session-context'
+import { outlineDocsMap, withDocsMap, workspaceDocsMap, type DocsMapStyle } from './agent/docs-map/session-context'
+import { renderOutlineMap } from './agent/docs-map/outline-map'
 import { DOCS_MAP_TOOLS, docsMapPrompt, docsMapScope } from './agent/phases/docs-map'
 import { DocsMapContract } from './agent/docs-map/entry'
 import { DOCS_EVALUATION_TOOLS, docsEvaluationPrompt, docsEvaluationScope } from './agent/phases/docs-evaluation'
@@ -97,6 +100,7 @@ export function activate(context: vscode.ExtensionContext): void {
   mkdirSync(workspaceRoot, { recursive: true })
   void sweepPlans(workspaceRoot, new Date()).then(
     (report) => {
+      for (const path of report.converted) output.appendLine(`plan housekeeping: converted ${path} to JSON`)
       for (const path of report.moved) output.appendLine(`plan housekeeping: moved ${path} to the working files`)
       for (const path of report.blocked) output.appendLine(`plan housekeeping: left ${path}, the working files already hold one of that name`)
       for (const path of report.implemented) output.appendLine(`plan housekeeping: marked ${path} implemented`)
@@ -164,15 +168,23 @@ export function activate(context: vscode.ExtensionContext): void {
     return policy
   }
 
+  /** A start-up phase, reported in the status bar and in the session's own chat. */
+  type StartProgress = (line: string) => void
+
   /**
    * The repo map as the session's system prompt carries it: built first when it
    * is behind, with the progress of the build visible while the start waits.
    * Taken here, at engine creation, so the map a session works from is fixed
    * for the life of that engine.
    */
-  const withMap = async (record: SessionRecord, systemPrompt: string): Promise<string> =>
+  const withMap = async (record: SessionRecord, systemPrompt: string, onProgress: StartProgress): Promise<string> =>
     await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'KiwiAgent: repo map' }, (progress) =>
-      withRepoMap(record.mode, systemPrompt, workspaceRepoMap(workspaceRoot), { onProgress: (line) => progress.report({ message: line }) }),
+      withRepoMap(record.mode, systemPrompt, workspaceRepoMap(workspaceRoot), {
+        onProgress: (line) => {
+          progress.report({ message: line })
+          onProgress(line)
+        },
+      }),
     )
 
   /** Docs the blind planner must not see, so neither the map nor the evaluation may describe them. */
@@ -183,25 +195,38 @@ export function activate(context: vscode.ExtensionContext): void {
    * doc costs a turn, so only the docs that changed are read, and a build that
    * cannot deliver leaves the session on the map as it last stood.
    */
-  const withDocs = async (record: SessionRecord, systemPrompt: string): Promise<string> => {
+  const withDocs = async (record: SessionRecord, systemPrompt: string, onProgress: StartProgress): Promise<string> => {
     const ignored = planIgnore()
+    const style = vscode.workspace.getConfiguration('kiwiAgent').get<DocsMapStyle>('docsMap.style', 'described')
+    const source =
+      style === 'outline'
+        ? outlineDocsMap(() => renderOutlineMap(workspaceRoot, ignored))
+        : workspaceDocsMap(workspaceRoot, ignored, (onProgress) => chat.buildDocsMap(ignored, onProgress))
     return await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'KiwiAgent: docs map' }, (progress) =>
-      withDocsMap(
-        record.mode,
-        systemPrompt,
-        workspaceDocsMap(workspaceRoot, ignored, (onProgress) => chat.buildDocsMap(ignored, onProgress)),
-        { onProgress: (line) => progress.report({ message: line }) },
-      ),
+      withDocsMap(record.mode, systemPrompt, source, {
+        style,
+        onProgress: (line) => {
+          progress.report({ message: line })
+          onProgress(line)
+        },
+      }),
     )
   }
 
   /** What a session's mode dictates, independent of engine: hooks, prompt, tool set, and the files a search may hand back. */
   type ModeSetup = { hooks?: SessionHooks; systemPrompt?: string; toolNames?: string[]; readable?: (relPath: string) => boolean }
 
-  const setupFor = async (record: SessionRecord): Promise<ModeSetup> => {
-    const setup = await modeSetup(record)
+  const setupFor = async (record: SessionRecord, onProgress: StartProgress): Promise<ModeSetup> => {
+    const setup = await modeSetup(record, onProgress)
+    const runDir = RunLog.forSession(workspaceRoot, record.id).dir
+    // What the session started from, so a run can be judged against it later (which docs map it had, for one).
+    if (setup.systemPrompt !== undefined) {
+      await mkdir(runDir, { recursive: true })
+        .then(() => writeFile(join(runDir, 'system-prompt.md'), setup.systemPrompt!, 'utf8'))
+        .catch((error: unknown) => output.appendLine(`could not record the system prompt: ${error instanceof Error ? error.message : String(error)}`))
+    }
     // Last in line, so a call another hook denies is never captured: nothing changed.
-    const recorder = new FileEditRecorder({ cwd: workspaceRoot, runDir: RunLog.forSession(workspaceRoot, record.id).dir })
+    const recorder = new FileEditRecorder({ cwd: workspaceRoot, runDir })
     editRecorders.set(record.id, recorder)
     // After the mode's scope, so a doc the session may not read is never outlined. The docs map
     // describes every section, so it reads docs whole; plan files are the work and are read whole too.
@@ -210,15 +235,15 @@ export function activate(context: vscode.ExtensionContext): void {
     return { ...setup, hooks: composeHooks(policyFor(record.id), ...(setup.hooks ? [setup.hooks] : []), ...gate, recorder) }
   }
 
-  const modeSetup = async (record: SessionRecord): Promise<ModeSetup> => {
+  const modeSetup = async (record: SessionRecord, onProgress: StartProgress): Promise<ModeSetup> => {
     switch (record.mode) {
       case 'chat':
         return switchableHooks(record)
       case 'implement': {
         if (!record.feature) throw new Error('An implement session needs a feature name')
         return {
-          ...switchableHooks(record),
-          systemPrompt: await withMap(record, implementPrompt(record.feature, workspaceRoot, verifier.rules())),
+          hooks: composeHooks(new TaskBoardGuard(workspaceRoot, record.feature), switchableHooks(record).hooks),
+          systemPrompt: await withMap(record, implementPrompt(record.feature, workspaceRoot, verifier.rules()), onProgress),
           toolNames: IMPLEMENT_TOOLS,
         }
       }
@@ -228,7 +253,7 @@ export function activate(context: vscode.ExtensionContext): void {
         return {
           // The contract answers on the write that broke it, so the planner fixes the spec in the same turn.
           hooks: composeHooks(new ScopeGuard(workspaceRoot, scope), new SpecContract(workspaceRoot)),
-          systemPrompt: await withDocs(record, blindPlanPrompt(record.feature, workspaceRoot)),
+          systemPrompt: await withDocs(record, blindPlanPrompt(record.feature, workspaceRoot), onProgress),
           toolNames: BLIND_PLAN_TOOLS,
           readable: readableIn(scope),
         }
@@ -237,7 +262,7 @@ export function activate(context: vscode.ExtensionContext): void {
         const scope = docsEvaluationScope(planIgnore())
         return {
           hooks: new ScopeGuard(workspaceRoot, scope),
-          systemPrompt: await withDocs(record, docsEvaluationPrompt(workspaceRoot)),
+          systemPrompt: await withDocs(record, docsEvaluationPrompt(workspaceRoot), onProgress),
           toolNames: DOCS_EVALUATION_TOOLS,
           readable: readableIn(scope),
         }
@@ -254,7 +279,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!record.feature) throw new Error('A reconcile session needs a feature name')
         return {
           hooks: composeHooks(new ScopeGuard(workspaceRoot, reconcileScope(record.feature)), new SpecContract(workspaceRoot)),
-          systemPrompt: await withMap(record, reconcilePrompt(record.feature, workspaceRoot)),
+          systemPrompt: await withMap(record, reconcilePrompt(record.feature, workspaceRoot), onProgress),
           toolNames: RECONCILE_TOOLS,
         }
       }
@@ -276,15 +301,56 @@ export function activate(context: vscode.ExtensionContext): void {
     (message) => void vscode.window.showWarningMessage(`KiwiAgent: ${message}`),
   )
 
-  const createEngine = async (record: SessionRecord): Promise<CodeSession> => {
+  /** An engine start-up step in the output channel, timed, so a start that stalls shows the step it stalled on. */
+  const traceStart = (record: SessionRecord, line: string): void =>
+    output.appendLine(`${new Date().toISOString()} [${record.id.slice(0, 8)} ${record.mode}] ${line}`)
+
+  /** The endpoint's requests in the output channel: sent, answered with a status, or failed, each timed. */
+  const tracedFetch =
+    (record: SessionRecord): typeof fetch =>
+    async (input, init) => {
+      const started = Date.now()
+      const size = typeof init?.body === 'string' ? `${init.body.length} chars` : 'no body'
+      traceStart(record, `${init?.method ?? 'GET'} ${String(input)} (${size})`)
+      try {
+        const response = await fetch(input, init)
+        traceStart(record, `${response.status} ${response.statusText} after ${Date.now() - started} ms`)
+        return response
+      } catch (error) {
+        traceStart(record, `request failed after ${Date.now() - started} ms: ${error instanceof Error ? error.message : String(error)}`)
+        throw error
+      }
+    }
+
+  const createEngine = async (record: SessionRecord, onProgress: StartProgress): Promise<CodeSession> => {
     const { profile } = record
-    const setup = await setupFor(record)
+    traceStart(record, `starting ${profile.engine} engine, profile "${profile.name}", model ${profile.model}${record.engineSessionId ? `, resuming ${record.engineSessionId}` : ''}`)
+    try {
+      const session = await startEngine(record, (line) => {
+        traceStart(record, line)
+        onProgress(line)
+      })
+      traceStart(record, 'engine up')
+      return session
+    } catch (error) {
+      traceStart(record, `engine failed to start: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`)
+      throw error
+    }
+  }
+
+  const startEngine = async (record: SessionRecord, onProgress: StartProgress): Promise<CodeSession> => {
+    const { profile } = record
+    const setup = await setupFor(record, onProgress)
+    traceStart(record, `mode set up: ${setup.systemPrompt?.length ?? 0} chars of system prompt, tools ${setup.toolNames?.join(', ') ?? 'all'}`)
     const allowed = (tools: Tool[]) => (setup.toolNames ? tools.filter((t) => setup.toolNames!.includes(t.name)) : tools)
-    const ownTools = [...OWN_TOOLS, markdownSearchTool(setup.readable), codeSearchTool(setup.readable)]
+    const ownTools = [...OWN_TOOLS, markdownSearchTool(setup.readable), codeSearchTool(setup.readable), ...(record.feature ? taskBoardTools(record.feature) : [])]
     // A mode with a tool set of its own names no MCP server; only a chat takes the workspace's.
+    if (!setup.toolNames) onProgress('Reading the MCP servers')
     const mcpServers = setup.toolNames ? undefined : await mcp.current()
     switch (profile.engine) {
       case 'claude-sdk':
+        // Until the engine reports in, the wait is on its own start-up.
+        onProgress('Starting Claude Code')
         return new SdkSession({
           ownTools: allowed(ownTools),
           scriptTools: [globTool, grepTool, bashTool(), jsonSchemaTool, jsonQueryTool, codeOutlineTool],
@@ -309,20 +375,25 @@ export function activate(context: vscode.ExtensionContext): void {
       case 'openai-compatible': {
         if (!profile.baseUrl) throw new Error(`Profile "${profile.name}" has no baseUrl`)
         if (!profile.apiKeySecret) throw new Error(`Profile "${profile.name}" has no apiKeySecret`)
+        traceStart(record, `reading the API key "${profile.apiKeySecret}"`)
         const apiKey = await context.secrets.get(secretKey(profile.apiKeySecret))
         if (!apiKey) throw new Error(`No API key stored for "${profile.apiKeySecret}". Set it on the provider in KiwiAgent settings.`)
+        onProgress(`Connecting to ${profile.name}`)
         // Indexed per session so a skill added to the workspace or the user profile shows up on the next one.
         const skills = await indexSkills(workspaceRoot, undefined, join(pluginPath, 'skills'))
+        traceStart(record, `${skills.length} skills indexed`)
         const allTools = [readTool, writeTool, editTool, globTool, grepTool, ...ownTools, bashTool(), ...(skills.length ? [skillTool(skills)] : [])]
         // A session that ran before, or continues one that did, picks its conversation up from the run log.
         const resume = record.engineSessionId
           ? { engineSessionId: record.engineSessionId, history: messagesFromEvents(await sessions.conversation(record.id)) }
           : undefined
+        if (resume) traceStart(record, `${resume.history.length} messages of history rebuilt`)
+        traceStart(record, `building the session: ${allowed(allTools).map((t) => t.name).join(', ')}`)
         return new OpenAiSession({
           id: record.id,
           profile,
           cwd: workspaceRoot,
-          client: new OpenAiClient({ baseUrl: profile.baseUrl, apiKey }),
+          client: new OpenAiClient({ baseUrl: profile.baseUrl, apiKey, fetch: tracedFetch(record) }),
           tools: allowed(allTools),
           systemPrompt: setup.systemPrompt ?? (await buildSystemPrompt(workspaceRoot, profile.systemPromptFile)),
           ...(resume ? { resume } : {}),
@@ -421,8 +492,17 @@ export function activate(context: vscode.ExtensionContext): void {
     watchMcpConfig(workspaceRoot, () => mcp.refresh()),
     openDraftPlanAction(chat, sessions, workspaceRoot, output),
     watchOwnBundle(context),
-    { dispose: () => void sessions.disposeAll() },
   )
+  stopSessions = () => sessions.disposeAll()
+  // A build the last window cut off mid-turn carries on without a prompt.
+  chat.resumeCutOffBuilds().catch((error: unknown) => output.appendLine(`resuming cut-off builds failed: ${error instanceof Error ? error.message : String(error)}`))
+}
+
+/** What deactivation waits on: the engines stopping, and which turns that cut off, saved for the next window. */
+let stopSessions: (() => Promise<void>) | undefined
+
+export function deactivate(): Promise<void> | undefined {
+  return stopSessions?.()
 }
 
 /** A save of the workspace's `.mcp.json` reaches the running sessions; so does deleting it. */

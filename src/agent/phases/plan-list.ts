@@ -2,7 +2,7 @@ import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { PLAN_DIR, WORK_DIR } from './blind-plan'
 import { statusOf, type SpecStatus } from './spec-file'
-import { readTasks, tasksDone, type TasksState } from './tasks-file'
+import { readTasks, TASKS_SUFFIX, tasksDone, type TasksState } from './tasks-file'
 
 /** `verified` is derived from the task board and its verification record, as the plan bar does. */
 export type PlanStatus = 'draft' | 'approved' | 'verified'
@@ -27,7 +27,7 @@ export async function listPlans(cwd: string): Promise<PlanSummary[]> {
     const slug = name.slice(0, -SPEC_SUFFIX.length)
     const text = await readFile(path, 'utf8')
     const status = statusOf(text)
-    const tasks = await readTasks(join(cwd, WORK_DIR, `${slug}.tasks.md`))
+    const tasks = await readTasks(join(cwd, WORK_DIR, `${slug}${TASKS_SUFFIX}`))
     plans.push({ feature: featureOf(text) ?? slug, path, status: status === 'implemented' || finished(status, tasks) ? 'verified' : status })
   }
   return plans

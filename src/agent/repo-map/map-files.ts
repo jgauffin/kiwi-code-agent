@@ -1,5 +1,6 @@
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { readOptional, replaceFile } from '../workspace-files'
 
 /**
  * Where the generated map lives and how it is put on disk. Everything under
@@ -61,7 +62,7 @@ export async function writeMap(cwd: string, files: MapFile[]): Promise<void> {
     for (const file of written) {
       const target = join(root, ...file.path.split('/'))
       await mkdir(dirname(target), { recursive: true })
-      await replace(join(staging, ...file.path.split('/')), target)
+      await replaceFile(join(staging, ...file.path.split('/')), target)
     }
     await prune(root, new Set(written.map((f) => f.path)))
   } finally {
@@ -69,34 +70,9 @@ export async function writeMap(cwd: string, files: MapFile[]): Promise<void> {
   }
 }
 
-const BUSY = new Set(['EPERM', 'EBUSY', 'EACCES'])
-
-/**
- * Puts the staged file in place in one step. Windows refuses the rename while a
- * reader holds the old file open, which is a moment, not a failure: the build
- * waits it out rather than falling back to a partial in-place write.
- */
-async function replace(from: string, to: string, attempts = 50): Promise<void> {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      return await rename(from, to)
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code ?? ''
-      if (attempt >= attempts || !BUSY.has(code)) throw error
-      await new Promise((resolve) => setTimeout(resolve, 10))
-    }
-  }
-}
-
 /** Reads one file of the map by its path relative to the root; undefined when the build has not produced it. */
-export async function readMapFile(cwd: string, path: string): Promise<string | undefined> {
-  try {
-    return await readFile(join(mapRoot(cwd), ...path.split('/')), 'utf8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
-    throw error
-  }
-}
+export const readMapFile = (cwd: string, path: string): Promise<string | undefined> =>
+  readOptional(join(mapRoot(cwd), ...path.split('/')))
 
 /** Every file under the map root, workspace-relative to it, sorted. */
 export async function listMap(root: string, prefix = ''): Promise<string[]> {
