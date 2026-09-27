@@ -15,7 +15,7 @@ function snapshot(): SettingsSnapshot {
     permissions: { allow: [], deny: [] },
     verify: [],
     verifyFailureBudget: 3,
-    cleanup: { functionLines: 25, typeLines: 200, fileLines: 400, ignore: [] },
+    cleanup: { functionLines: 25, typeLines: 200, fileLines: 400, tests: [], testFunctionLines: 60, testTypeLines: 600, testFileLines: 1200, ignore: [] },
     planIgnore: [],
     nodePath: '',
     traceEngine: false,

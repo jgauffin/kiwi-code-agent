@@ -1,10 +1,10 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { PLAN_DIR, featureSlug } from './blind-plan'
+import { WORK_DIR, featureSlug } from './blind-plan'
 import { bodyOf, frontMatterValue, withFrontMatterValue } from './spec-file'
 
 /**
- * The feature's task board, `plan/<slug>.tasks.md`: what to build and where,
+ * The feature's task board, `.agent/plan/<slug>.tasks.md`: what to build and where,
  * written by the mapping run once the spec is settled, and marked by the
  * implementer as it goes. The file is the only state: markers survive a fresh
  * session and the plan view reads them as they are.
@@ -67,12 +67,12 @@ const SPEC_KEY = 'spec'
 const CLEANUP_KEY = 'cleanup'
 
 export function tasksPath(cwd: string, feature: string): string {
-  return join(cwd, PLAN_DIR, `${featureSlug(feature)}.tasks.md`)
+  return join(cwd, tasksFile(feature))
 }
 
 /** Workspace-relative path of the tasks file, the form used in prompts and scopes. */
 export function tasksFile(feature: string): string {
-  return `${PLAN_DIR}/${featureSlug(feature)}.tasks.md`
+  return `${WORK_DIR}/${featureSlug(feature)}.tasks.md`
 }
 
 /** `- **Name** (Rule a, Rule b): text`; the delivered rules ride between the name and the colon. */

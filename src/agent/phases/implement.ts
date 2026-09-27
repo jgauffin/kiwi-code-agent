@@ -1,11 +1,16 @@
 import { DOCS_DIR, PLAN_DIR, featureSlug } from './blind-plan'
 import { ASK_USER_TOOL } from '../openai-session/tools/ask-user'
+import { MARKDOWN_SEARCH_TOOL } from '../openai-session/tools/markdown-search'
+import { DOC_READING } from '../openai-session/tools/markdown/outline-gate'
+import { CODE_OUTLINE_TOOL } from '../code-outline/code-outline-tool'
+import { CODE_READING } from '../code-outline/code-outline-gate'
+import { CODE_SEARCH_TOOL } from '../code-outline/code-search'
 import type { SpecState } from './spec-file'
 import { tasksDone, tasksFile, type TasksState } from './tasks-file'
 import type { VerifyRule } from './verification'
 
 /** AskUser is here so a fork the plan does not settle is ruled on by the user instead of blocking the task. */
-export const IMPLEMENT_TOOLS = ['Read', 'Write', 'Edit', 'Move', 'Copy', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'Bash', 'Skill', ASK_USER_TOOL]
+export const IMPLEMENT_TOOLS = ['Read', 'Write', 'Edit', 'Move', 'Copy', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', MARKDOWN_SEARCH_TOOL, CODE_OUTLINE_TOOL, CODE_SEARCH_TOOL, 'Bash', 'Skill', ASK_USER_TOOL]
 
 /** Whose conversation the implement session carries on, if any: the mapping run that wrote the board, or an earlier implementer. */
 export type Continued = 'mapping' | 'implement' | undefined
@@ -36,6 +41,7 @@ export function implementKickoff(continued: Continued): string {
  */
 export function assertImplementable(spec: SpecState, tasks: TasksState): void {
   if (!spec.exists) throw new Error('No spec to implement: plan the feature first.')
+  if (spec.status === 'implemented') throw new Error('The feature is implemented: plan the next change as its own feature.')
   if (spec.status !== 'approved') throw new Error('The spec is not approved: rule on the decisions and approve it first.')
   if (!tasks.exists) throw new Error('No tasks to implement: map the spec against the code first.')
   if (tasksDone(tasks.tasks)) {
@@ -101,6 +107,8 @@ Rules:
 - In the tasks file, only the markers, the \`files:\` line, the \`proves:\` line and the \`note:\` line under a task are yours; the \`how:\` block is the mapper's. The spec and the decisions file are not yours to change at all.
 - Never edit \`${DOCS_DIR}/\`: intent is the user's.
 - Read a file before editing it; read it again when a tool result says it changed underneath you. Do not re-explore what the context line already names.
+- ${DOC_READING}
+- ${CODE_READING} Before writing a test, outline the test file or folder it belongs in: the rule may already be proven, and the neighbouring tests show the pattern to follow.
 - A task marked tested is finished: its files are not read unless a later task names them, and a context file read for an earlier task is not read again unless a tool result says it changed.
 - Shell commands already run in ${cwd}; do not cd there.
 - Tested means you ran the task's tests and they passed, not that you stopped. A task you marked tested without a run of your own is a false marker.

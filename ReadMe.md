@@ -1,8 +1,8 @@
 # KiwiCodeAgent
 
-![KiwiAgent logo](https://raw.githubusercontent.com/jgauffin/kiwi-code-agent/main/docs/logo-square-transparent-500px.png)
+![KiwiAgent logo](https://raw.githubusercontent.com/jgauffin/kiwi-code-agent/main/docs/logos/logo-square-transparent-500px.png)
 
-[![Visual Studio Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/CoderrAB.kiwi-agent)](https://marketplace.visualstudio.com/items?itemName=CoderrAB.kiwi-agent)
+[![VS Code Marketplace](https://img.shields.io/badge/VS%20Code%20Marketplace-install-007ACC)](https://marketplace.visualstudio.com/items?itemName=CoderrAB.kiwi-agent)
 [![GitHub](https://img.shields.io/badge/GitHub-repo-181717?logo=github)](https://github.com/jgauffin/kiwi-code-agent)
 [![Homepage](https://img.shields.io/badge/homepage-coderr.io-blue)](https://coderr.io)
 
@@ -25,8 +25,8 @@ A VS Code coding agent that plans a feature before it reads your code, and calls
 
 ## Any model, per step
 
-- **Claude** on the login Claude Code already has. No API key.
-- **Any OpenAI-compatible endpoint** (GLM, Kimi via Berget AI, a local server) on KiwiAgent's own tool loop.
+- **Claude** through the Claude Agent SDK.
+- **Any OpenAI-compatible endpoint** on KiwiAgent's own tool loop.
 - A profile picks the model per step: the strongest reasoner for planning and mapping, a fast cheap one for implementation.
 - Your `.mcp.json` servers, `CLAUDE.md`/`AGENTS.md`, skills and permission rules work the same on both.
 

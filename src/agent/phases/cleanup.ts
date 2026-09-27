@@ -1,5 +1,5 @@
 import { dirname } from 'node:path'
-import type { Thresholds } from '../cleanup/oversized'
+import type { Limits, Thresholds } from '../cleanup/oversized'
 import type { Scope } from './scope-guard'
 
 /**
@@ -8,7 +8,7 @@ import type { Scope } from './scope-guard'
  * a split lands in a sibling, never further away. No shell: the tests run for
  * it once it stops.
  */
-export const CLEANUP_TOOLS = ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Skill']
+export const CLEANUP_TOOLS = ['Read', 'Glob', 'Grep', 'CodeOutline', 'CodeSearch', 'Edit', 'Write', 'Skill']
 
 export function cleanupScope(files: string[]): Scope {
   const writable = new Set<string>()
@@ -30,19 +30,24 @@ export function cleanupKickoff(report: string, continued: boolean): string {
   return `These units exceed the size limits${wrote}:\n\n${report}\n\nSplit them.`
 }
 
-export function cleanupPrompt(feature: string, cwd: string, thresholds: Thresholds): string {
-  const limits = [
+const describe = (thresholds: Thresholds): string =>
+  [
     thresholds.functionLines > 0 ? `a function ${thresholds.functionLines} code lines` : '',
     thresholds.typeLines > 0 ? `a type ${thresholds.typeLines}` : '',
     thresholds.fileLines > 0 ? `a file ${thresholds.fileLines}` : '',
   ]
     .filter((l) => l.length > 0)
     .join(', ')
-  return `You are cleaning up after the implementation of the feature "${feature}" under ${cwd}: the units listed in the first message grew past the size limits (${limits}), and you split them.
+
+export function cleanupPrompt(feature: string, cwd: string, limits: Limits): string {
+  const source = describe(limits.source)
+  const tests = describe(limits.tests)
+  const stated = [source, tests ? `in tests ${tests}` : ''].filter((l) => l.length > 0).join('; ')
+  return `You are cleaning up after the implementation of the feature "${feature}" under ${cwd}: the units listed in the first message grew past the size limits (${stated}), and you split them.
 
 The feature is built and its tests pass. Nothing about what the code does changes here: same behaviour, same public API, same test outcomes. The only change is shape.
 
-Split by responsibility: a function that does two things becomes two, a helper that does not need the enclosing state moves out, a type that has grown two roles becomes two types. A piece that belongs elsewhere goes into a new file beside the one it came from, named for what it holds. The pieces keep the names and the style of the code around them; a new export exists only because a split forced it.
+Split by responsibility: a function that does two things becomes two, a helper that does not need the enclosing state moves out, a type that has grown two roles becomes two types. A piece that belongs elsewhere goes into a new file beside the one it came from, named for what it holds. The pieces keep the names and the style of the code around them; a new export exists only because a split forced it. A test file stays one file per tested file: shorten it with shared setup and helpers, and move tests to another test file only when the code they test moved to another file.
 
 Rules:
 - Edit only the files listed and new files in their folders; everything else is read-only.

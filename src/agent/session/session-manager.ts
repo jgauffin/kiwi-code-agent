@@ -1,4 +1,4 @@
-import type { CodeSession, PermissionDecision, SessionEvent } from './code-session'
+import { permissionResolved, type CodeSession, type PermissionDecision, type SessionEvent } from './code-session'
 import type { ModelProfile } from './model-profile'
 import type { RunLog } from '../runs/run-log'
 import { answerText, UNANSWERED_RESULT, type QuestionOutcome, type UserQuestionRequest } from './user-question'
@@ -219,7 +219,7 @@ export class SessionManager {
     const record = this.require(id)
     const request = await this.openRequest(record, requestId)
     if (!request) throw new Error(`Permission request ${requestId} is no longer open`)
-    await this.emit(record, { type: 'permission_resolved', requestId, decision: decision.kind })
+    await this.emit(record, permissionResolved(requestId, decision))
     if (decision.kind === 'allow') this.preapproved.set(id, { toolName: request.toolName, input: JSON.stringify(request.input) })
     await this.send(id, decisionPrompt(request, decision))
   }

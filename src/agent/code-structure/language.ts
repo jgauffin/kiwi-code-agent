@@ -1,9 +1,8 @@
 import { extname } from 'node:path'
 
 /**
- * What the size measure needs to know about a language: how units are
- * delimited, and which literal syntaxes can hide a brace. Anything not listed
- * here is measured as a file only.
+ * What the code scanners need to know about a language: how blocks are
+ * delimited, and which literal syntaxes can hide a brace.
  */
 export type Language = {
   family: 'brace' | 'python'
@@ -27,6 +26,8 @@ export type Language = {
   preprocessor: boolean
   /** `#"…"#` and `\(…)` interpolation. */
   swiftStrings: boolean
+  /** `{…}` object literals and patterns: a brace inside a call's arguments is data (`f({ a })`), not a body as in Kotlin's `f({ … })`. */
+  objectLiterals: boolean
 }
 
 const BRACE: Language = {
@@ -42,9 +43,10 @@ const BRACE: Language = {
   cRawStrings: false,
   preprocessor: false,
   swiftStrings: false,
+  objectLiterals: false,
 }
 
-const JS: Language = { ...BRACE, singleQuoteStrings: true, backtick: 'template' }
+const JS: Language = { ...BRACE, singleQuoteStrings: true, backtick: 'template', objectLiterals: true }
 const CS: Language = { ...BRACE, csharpStrings: true, tripleQuotes: true }
 const JAVA: Language = { ...BRACE, tripleQuotes: true }
 const GO: Language = { ...BRACE, backtick: 'raw' }
@@ -66,6 +68,21 @@ const PYTHON: Language = {
   cRawStrings: false,
   preprocessor: false,
   swiftStrings: false,
+  objectLiterals: false,
+}
+
+/**
+ * For a file no profile names (Ruby, Elixir, Dart, Scala…): the union of the
+ * common comment and quote syntaxes. Good enough to keep a literal's braces
+ * out of the structure; not good enough to measure units by.
+ */
+export const GENERIC: Language = {
+  ...BRACE,
+  lineComments: ['//', '#'],
+  singleQuoteStrings: true,
+  backtick: 'template',
+  tripleQuotes: true,
+  objectLiterals: true,
 }
 
 const BY_EXTENSION: Record<string, Language> = {

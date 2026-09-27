@@ -310,10 +310,18 @@ export class ChatApp extends HTMLElement {
     this.layout()
   }
 
-  /** A step, the bar's next-step link or a link between tabs opens a plan tab and lands somewhere on it. */
-  private focusPlan(tab: Tab, where: PlanFocus = {}): void {
+  /** A step, the bar's next-step link or a link between tabs opens a tab and lands somewhere on it; in the chat, on the card waiting for the person. */
+  private focusPlan(tab: ViewTab, where: PlanFocus = {}): void {
     this.show(tab)
-    this.planView.land(where)
+    if (tab !== 'chat') {
+      this.planView.land(where)
+      return
+    }
+    const card = [...this.sections.values()].map((s) => s.transcript.openCard()).find((c) => c !== undefined)
+    if (!card) return
+    const details = card.closest('details')
+    if (details) details.open = true
+    card.scrollIntoView?.({ block: 'center' })
   }
 
   private layout(): void {

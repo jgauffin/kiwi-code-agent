@@ -7,7 +7,7 @@ plan/**
 scripts/**
 assets/**
 docs/**
-!docs/logo-square-transparent-500px.png
+!docs/logos/logo-square-transparent-500px.png
 articles/**
 node_modules/**
 **/*.map

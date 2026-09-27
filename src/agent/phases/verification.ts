@@ -1,5 +1,6 @@
 import { readdirSync } from 'node:fs'
 import { dirname, isAbsolute, join, matchesGlob, relative, resolve } from 'node:path'
+import { CODE_OUTLINE_TOOL } from '../code-outline/code-outline-tool'
 import { readTasks, recordVerification, taskFiles, tasksDone, tasksFile, tasksPath, type TasksState, type VerificationRecord } from './tasks-file'
 
 /**
@@ -128,6 +129,8 @@ export function verificationHandoffPrompt(feature: string, failures: Verificatio
     'Fix what the output names. Mark the tasks it touches ` [in progress]` while you work and ` [tested]` once their tests pass; leave the rest of the board as it is.',
     '',
     'Reproduce the failure with a run narrowed to the test the output names, fix it, then run that test again and build its project. The whole sweep runs again as soon as you stop with every task tested, so stopping on a fix you have not run costs another one.',
+    '',
+    `${CODE_OUTLINE_TOOL} on the failing test's file gives the line each test starts on: Read that test's range rather than the whole file.`,
   )
   return lines.join('\n')
 }

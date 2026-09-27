@@ -22,6 +22,8 @@ export class PermissionCard extends HTMLElement {
   private answers: (LineAnswer | undefined)[] = []
   private decision: PermissionDecision['kind'] | undefined
   private remembered: RememberedRules = { session: [], project: [] }
+  /** Why the user denies, typed before any Deny is pressed; it reaches the model so it need not guess what to do instead. */
+  private reason = ''
 
   show(request: PermissionRequest): void {
     this.request = request
@@ -30,8 +32,9 @@ export class PermissionCard extends HTMLElement {
     this.render()
   }
 
-  resolve(decision: PermissionDecision['kind']): void {
+  resolve(decision: PermissionDecision['kind'], message?: string): void {
     this.decision = decision
+    this.reason = message ?? ''
     this.render()
   }
 
@@ -69,6 +72,7 @@ export class PermissionCard extends HTMLElement {
       prompt.appendChild(description)
     }
     prompt.appendChild(this.body(r))
+    if (this.decision === undefined) prompt.appendChild(this.reasonField())
     const outcome = document.createElement('p')
     outcome.className = 'decision'
     outcome.hidden = this.decision === undefined
@@ -115,6 +119,16 @@ export class PermissionCard extends HTMLElement {
     }
     actions.appendChild(button('deny', 'Deny', () => this.decide({ kind: 'deny' })))
     return actions
+  }
+
+  private reasonField(): HTMLInputElement {
+    const input = document.createElement('input')
+    input.type = 'text'
+    input.className = 'deny-reason'
+    input.placeholder = 'Reason if denied (optional)'
+    input.value = this.reason
+    input.addEventListener('input', () => (this.reason = input.value))
+    return input
   }
 
   private commandList(): HTMLElement {
@@ -182,13 +196,15 @@ export class PermissionCard extends HTMLElement {
     const r = this.request
     if (!r || this.decision !== undefined) return
     const remember = this.remembered
-    const decided = remember.session.length || remember.project.length ? { ...decision, remember } : decision
+    const message = this.reason.trim()
+    const reasoned = decision.kind === 'deny' && message ? { ...decision, message } : decision
+    const decided = remember.session.length || remember.project.length ? { ...reasoned, remember } : reasoned
     this.dispatchEvent(new PermissionDecidedEvent(r.requestId, decided))
   }
 
   private outcomeText(): string {
     if (this.decision === undefined) return ''
-    if (this.decision === 'deny') return 'Denied'
+    if (this.decision === 'deny') return this.reason ? `Denied: ${this.reason}` : 'Denied'
     const kept = [
       ...this.remembered.session.map((rule) => `${ruleLabel(rule)} for session`),
       ...this.remembered.project.map((rule) => `${ruleLabel(rule)} for project`),

@@ -16,13 +16,13 @@ describe('ScopeGuard for reconciling', () => {
   })
 
   it('only_the_decisions_and_the_tasks_are_writable_so_the_spec_stays_the_planners_and_nothing_leaks_into_code_or_docs', async () => {
-    expect(await use('Write', { file_path: 'plan/order-cancellation.decisions.md' })).toEqual({ allow: true })
-    expect(await use('Edit', { file_path: 'plan/order-cancellation.decisions.md' })).toEqual({ allow: true })
-    expect(await use('Write', { file_path: 'plan/order-cancellation.tasks.md' })).toEqual({ allow: true })
+    expect(await use('Write', { file_path: '.agent/plan/order-cancellation.decisions.md' })).toEqual({ allow: true })
+    expect(await use('Edit', { file_path: '.agent/plan/order-cancellation.decisions.md' })).toEqual({ allow: true })
+    expect(await use('Write', { file_path: '.agent/plan/order-cancellation.tasks.md' })).toEqual({ allow: true })
     expect(await use('Edit', { file_path: 'src/Orders/OrderService.cs' })).toMatchObject({ deny: expect.any(String) })
     expect(await use('Edit', { file_path: 'plan/order-cancellation.spec.md' })).toMatchObject({ deny: expect.any(String) })
     expect(await use('Edit', { file_path: 'docs/intent/orders.md' })).toMatchObject({ deny: expect.any(String) })
-    expect(await use('Edit', { file_path: 'plan/order-cancellation.review.md' })).toMatchObject({ deny: expect.any(String) })
+    expect(await use('Edit', { file_path: '.agent/plan/order-cancellation.review.md' })).toMatchObject({ deny: expect.any(String) })
   })
 
   it('bash_and_paths_outside_the_workspace_are_denied', async () => {
@@ -36,7 +36,7 @@ describe('reconcile prompt', () => {
 
   it('names_the_spec_the_decisions_file_and_what_to_look_for', () => {
     expect(prompt).toContain('plan/order-cancellation.spec.md')
-    expect(prompt).toContain('plan/order-cancellation.decisions.md')
+    expect(prompt).toContain('.agent/plan/order-cancellation.decisions.md')
     expect(prompt).not.toContain('## Decisions')
     expect(prompt).toContain('- on: Cancel command, Shipped order')
     expect(prompt).toContain('- finding:')
@@ -50,7 +50,7 @@ describe('reconcile prompt', () => {
     // The kind of a finding is nothing the user acts on, so it is not written into the file.
     expect(prompt).not.toContain('- kind:')
     expect(prompt).not.toContain('amendment')
-    expect(RECONCILE_TOOLS).toEqual(['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'Edit', 'Write', 'Skill'])
+    expect(RECONCILE_TOOLS).toEqual(['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'MarkdownSearch', 'CodeOutline', 'CodeSearch', 'Edit', 'Write', 'Skill'])
   })
 
   it('a_run_continuing_the_last_mapping_is_told_the_spec_changed_and_keeps_what_it_read', () => {
@@ -100,7 +100,7 @@ describe('reconcile prompt', () => {
   })
 
   it('writes_the_task_board_with_files_after_the_decisions_and_leaves_the_implementers_markers_alone', () => {
-    expect(prompt).toContain('plan/order-cancellation.tasks.md')
+    expect(prompt).toContain('.agent/plan/order-cancellation.tasks.md')
     expect(prompt).toContain('- files:')
     expect(prompt).toContain('(new)')
     expect(prompt).toContain('[in progress]')
@@ -156,7 +156,7 @@ describe('the handoffs to the planner', () => {
   it('names_the_decisions_to_propose_on_and_forbids_ruling', () => {
     const prompt = decisionsHandoffPrompt('Order cancellation', ['Shipped orders cannot be cancelled', 'Refunds are asynchronous'])
     expect(prompt).toContain('- Shipped orders cannot be cancelled\n- Refunds are asynchronous')
-    expect(prompt).toContain('plan/order-cancellation.decisions.md')
+    expect(prompt).toContain('.agent/plan/order-cancellation.decisions.md')
     expect(prompt).toContain('one to three `- proposed: ...` lines')
     // A proposal is the rule's replacement text, so picking it is verbatim and the rule stays one sentence.
     expect(prompt).toContain("the rule's new text as it would stand in the spec, one sentence")
@@ -179,7 +179,7 @@ describe('the handoffs to the planner', () => {
       { title: 'Refunds are asynchronous', ruling: 'keep' },
     ])
     expect(prompt).toContain('- Shipped orders cannot be cancelled: a shipped order is refused\n- Refunds are asynchronous: keep')
-    expect(prompt).toContain('plan/order-cancellation.decisions.md')
+    expect(prompt).toContain('.agent/plan/order-cancellation.decisions.md')
     expect(prompt).toContain('`keep` keeps the rule as it stands')
     expect(prompt).toContain('the text of a proposal replaces the rule verbatim')
     expect(prompt).toContain('[applied]')

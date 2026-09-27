@@ -2,10 +2,12 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { anyLimit, oversized, oversizedFiles, sizeReport, type Thresholds } from '../src/agent/cleanup/oversized'
+import { anyLimit, oversized, oversizedFiles, sizeReport, type Limits, type Thresholds } from '../src/agent/cleanup/oversized'
 import type { Unit } from '../src/agent/cleanup/unit-size'
 
 const limits: Thresholds = { functionLines: 25, typeLines: 200, fileLines: 400 }
+const off: Thresholds = { functionLines: 0, typeLines: 0, fileLines: 0 }
+const sourceOnly: Limits = { source: limits, tests: off, testGlobs: [] }
 
 const units: Unit[] = [
   { kind: 'file', name: 'a.ts', line: 1, lines: 401 },
@@ -24,8 +26,9 @@ describe('oversized', () => {
 
   it('a_zero_limit_turns_that_kind_off', () => {
     expect(oversized('/w/a.ts', units, { ...limits, functionLines: 0, fileLines: 0 })).toEqual([])
-    expect(anyLimit({ functionLines: 0, typeLines: 0, fileLines: 0 })).toBe(false)
-    expect(anyLimit({ functionLines: 0, typeLines: 1, fileLines: 0 })).toBe(true)
+    expect(anyLimit({ source: off, tests: off, testGlobs: [] })).toBe(false)
+    expect(anyLimit({ source: { ...off, typeLines: 1 }, tests: off, testGlobs: [] })).toBe(true)
+    expect(anyLimit({ source: off, tests: { ...off, fileLines: 1 }, testGlobs: [] })).toBe(true)
   })
 
   it('the_report_names_path_line_name_kind_size_and_limit_relative_to_the_workspace', () => {
@@ -45,10 +48,28 @@ describe('oversized', () => {
       const found = await oversizedFiles(
         cwd,
         [join(cwd, 'big.ts'), join(cwd, 'big.test.ts'), join(cwd, 'blob.ts'), join(cwd, 'gone.ts')],
-        limits,
+        sourceOnly,
         ['**/*.test.*'],
       )
       expect(found).toEqual([{ kind: 'function', name: 'big', line: 1, lines: 32, path: join(cwd, 'big.ts'), threshold: 25 }])
+    } finally {
+      await rm(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it('a_test_file_is_held_to_the_larger_test_limits_since_it_stays_one_file_per_tested_file', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'oversized-'))
+    try {
+      const body = Array.from({ length: 30 }, (_, i) => `  a${i}()`).join('\n')
+      await writeFile(join(cwd, 'big.ts'), `function big() {\n${body}\n}\n`)
+      await writeFile(join(cwd, 'big.test.ts'), `function bigTest() {\n${body}\n}\n`)
+      const found = await oversizedFiles(
+        cwd,
+        [join(cwd, 'big.ts'), join(cwd, 'big.test.ts')],
+        { source: limits, tests: { ...limits, functionLines: 60 }, testGlobs: ['**/*.test.*'] },
+        [],
+      )
+      expect(found.map((u) => u.name)).toEqual(['big'])
     } finally {
       await rm(cwd, { recursive: true, force: true })
     }

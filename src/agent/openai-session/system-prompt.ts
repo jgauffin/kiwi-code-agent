@@ -1,6 +1,8 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { readInstructionFiles, readOptional } from '../instructions/instruction-files'
+import { DOC_READING } from './tools/markdown/outline-gate'
+import { CODE_READING } from '../code-outline/code-outline-gate'
 
 /**
  * System prompt for the own-loop engine. Short on purpose: judgment rules
@@ -12,6 +14,8 @@ export async function buildSystemPrompt(cwd: string, profilePromptFile?: string,
   const parts = [
     `You are a coding agent working in the directory ${cwd} on ${process.platform}.`,
     'Work through the tools: Read before Edit or Write, Grep and Glob to find things, JsonSchema and JsonQuery to look inside JSON files, Bash for builds, tests and git.',
+    DOC_READING,
+    CODE_READING,
     'Make the smallest change that does the job. Do not add abstractions, options or comments the task did not ask for.',
     'When a tool reports an error, read it and adjust; do not repeat the same call.',
     'When the task is done, say what changed in a few sentences. When something is unclear, ask instead of guessing.',

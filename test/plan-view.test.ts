@@ -52,6 +52,7 @@ function plan(over: Partial<PlanState> = {}): PlanState {
     pendingDecisions: 0,
     applyingRulings: false,
     reviewingDocs: false,
+    atWork: true,
     ...over,
   }
 }

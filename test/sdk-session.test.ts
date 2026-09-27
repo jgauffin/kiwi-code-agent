@@ -97,7 +97,9 @@ describe('SdkSession', () => {
     const resultPromise = fake.options!.canUseTool!('Bash', { command: 'rm -rf /' }, { signal: new AbortController().signal, toolUseID: 'tu_2' })
     await take(session, 1)
     session.respondToPermission('tu_2', { kind: 'deny', message: 'not that' })
-    expect(await resultPromise).toEqual({ behavior: 'deny', message: 'not that', decisionClassification: 'user_reject' })
+    expect(await resultPromise).toEqual({ behavior: 'deny', message: 'Denied by user: not that', decisionClassification: 'user_reject' })
+    const [resolved] = await take(session, 1)
+    expect(resolved).toEqual({ type: 'permission_resolved', requestId: 'tu_2', decision: 'deny', message: 'not that' })
     await session.dispose()
   })
 
@@ -163,6 +165,20 @@ describe('SdkSession', () => {
       includePartialMessages: true,
       settingSources: ['project', 'local'],
     })
+  })
+
+  it('a_session_without_a_prompt_of_its_own_appends_to_the_engines_default_prompt', () => {
+    const fake = fakeQuery()
+    const base = { id: 's', profile, cwd: '/w', cliPath: '/c', runtime: { command: 'node', args: [], env: {} }, query: fake.query }
+    new SdkSession({ ...base, appendSystemPrompt: 'Find before you read.' })
+    expect(fake.options!.systemPrompt).toEqual({ type: 'preset', preset: 'claude_code', append: 'Find before you read.' })
+  })
+
+  it('a_phase_prompt_replaces_the_default_and_the_append_is_not_used', () => {
+    const fake = fakeQuery()
+    const base = { id: 's', profile, cwd: '/w', cliPath: '/c', runtime: { command: 'node', args: [], env: {} }, query: fake.query }
+    new SdkSession({ ...base, systemPrompt: 'You are planning.', appendSystemPrompt: 'Find before you read.' })
+    expect(fake.options!.systemPrompt).toBe('You are planning.')
   })
 
   it('the_engines_built_in_question_tool_is_withheld_so_questions_take_the_own_tool_and_its_card', () => {

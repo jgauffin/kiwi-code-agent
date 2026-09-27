@@ -31,6 +31,7 @@ function plan(): PlanState {
     pendingDecisions: 0,
     applyingRulings: false,
     reviewingDocs: false,
+    atWork: true,
   }
 }
 

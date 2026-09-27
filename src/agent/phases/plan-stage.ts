@@ -6,7 +6,7 @@ import { parseSpec, specFingerprint } from './spec-model'
 import { started, tasksDone, tasksFresh, type TasksState } from './tasks-file'
 
 /**
- * Where a feature stands, derived from its files under `plan/` and held
+ * Where a feature stands, derived from its spec and working files and held
  * nowhere else: the spec's status, the review, the task board and its
  * verification record can never disagree with a stage that is computed from
  * them.
@@ -28,6 +28,8 @@ export type PlanStage =
 
 export function planStage(spec: SpecState, review: Review, tasks: TasksState): PlanStage {
   if (!spec.exists) return 'missing'
+  // The working files are swept once a feature is implemented; the spec alone says where it stands.
+  if (spec.status === 'implemented') return 'verified'
   const comments = review.rounds.flatMap((r) => r.comments)
   // A review in flight comes first: a re-review after mapping is a review like any other.
   if (comments.some((c) => !c.resolution)) return 'under_review'

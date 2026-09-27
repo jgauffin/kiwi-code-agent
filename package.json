@@ -4,7 +4,7 @@
   "description": "Coding sessions in VS Code with a choice of model engine per session.",
   "version": "0.1.0",
   "publisher": "CoderrAB",
-  "icon": "docs/logo-square-transparent-500px.png",
+  "icon": "docs/logos/logo-square-transparent-500px.png",
   "galleryBanner": {
     "color": "#1e1e1e",
     "theme": "dark"
@@ -253,7 +253,7 @@
           "default": 400,
           "description": "Code lines a file may have before the cleanup run splits it; 0 turns the limit off."
         },
-        "kiwiAgent.cleanup.ignore": {
+        "kiwiAgent.cleanup.tests": {
           "type": "array",
           "items": {
             "type": "string"
@@ -263,7 +263,30 @@
             "**/*.spec.*",
             "**/__tests__/**"
           ],
-          "description": "Workspace-relative globs of edited files the cleanup never measures: tests, generated code."
+          "description": "Workspace-relative globs of test files, measured against the test limits: a test file stays one file per tested file, so it may grow larger."
+        },
+        "kiwiAgent.cleanup.testFunctionLines": {
+          "type": "integer",
+          "default": 60,
+          "description": "Code lines a function in a test file may have before the cleanup run splits it; 0 turns the limit off."
+        },
+        "kiwiAgent.cleanup.testTypeLines": {
+          "type": "integer",
+          "default": 600,
+          "description": "Code lines a type in a test file may have before the cleanup run splits it; 0 turns the limit off."
+        },
+        "kiwiAgent.cleanup.testFileLines": {
+          "type": "integer",
+          "default": 1200,
+          "description": "Code lines a test file may have before the cleanup run shortens it; 0 turns the limit off."
+        },
+        "kiwiAgent.cleanup.ignore": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Workspace-relative globs of edited files the cleanup never measures: generated code."
         },
         "kiwiAgent.providers": {
           "type": "array",
@@ -409,6 +432,7 @@
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
+    "prompts": "esbuild scripts/prompts.ts --bundle --platform=node --format=cjs --target=node22 --external:vscode --log-level=warning --outfile=dist/prompts.cjs && node dist/prompts.cjs",
     "package": "npm run typecheck && npm run build && vsce package --no-dependencies",
     "link-dev": "node scripts/link-dev.mjs",
     "unlink-dev": "node scripts/link-dev.mjs --unlink",

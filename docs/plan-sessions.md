@@ -17,9 +17,11 @@ A bar above the transcript switches between the plan (Plan) and the conversation
 The Plan view is one card per scenario and follows the stage:
 
 - **Draft**: comment on and strike rules, resolve the planner's answers.
-- **Mapped**: once the review is closed (or from the bar on an uncommented spec) the spec is mapped against the code, which writes `plan/<feature>.decisions.md` (what the code says against what the spec says, with the planner's change options) and `plan/<feature>.tasks.md`, one task per scenario by default, with the files each touches; every rule shows which task delivers it.
+- **Mapped**: once the review is closed (or from the bar on an uncommented spec) the spec is mapped against the code, which writes `.agent/plan/<feature>.decisions.md` (what the code says against what the spec says, with the planner's change options) and `.agent/plan/<feature>.tasks.md`, one task per scenario by default, with the files each touches; every rule shows which task delivers it.
 - **Decisions**: ruled in a wizard, one at a time: change the spec one of the proposed ways, keep the spec so the code changes, or your own words. Send rulings hands them to the planner to revise the rules and the board is re-mapped.
 - **Approved**: Approve sets `status: approved`; the planner then lists in chat what the docs should now say differently, for you to change or ask it to. When that turn ends the implementation starts on its own: approving is the only act it takes.
 - **Implement**: works the tasks and marks each `[in progress]`, `[done]`, `[tested]` or `[blocked: reason]`, naming on a `proves:` line the test that proves each delivered rule, which the view shows on the rule. Once every task is tested the `kiwiAgent.verify` test commands run over the tasks' files and the outcome is recorded in the tasks file (see [settings.md](settings.md)).
+
+The spec is committed; the review, decisions and tasks are working files under `.agent/plan/`. A week after they were last touched, the working files of a verified feature, or of a spec that is gone, are deleted when the extension starts, and the verified feature's spec is marked `status: implemented` first. A draft or a feature still being built keeps them however old.
 
 *KiwiAgent: Migrate plans* brings plans written before the contract into it; old ids become names until the planner is asked to name them.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { languageOf } from '../src/agent/cleanup/language'
-import { stripLiterals } from '../src/agent/cleanup/strip-literals'
+import { languageOf } from '../src/agent/code-structure/language'
+import { stripLiterals } from '../src/agent/code-structure/strip-literals'
 
 const strip = (ext: string, text: string): string => stripLiterals(text, languageOf(`x.${ext}`)!)
 

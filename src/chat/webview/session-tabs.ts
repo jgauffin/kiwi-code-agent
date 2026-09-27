@@ -8,6 +8,7 @@ const STATUS: Record<SessionStatus, { icon: string; label: string }> = {
   planning: { icon: '📐', label: 'planning' },
   implementing: { icon: '🔧', label: 'implementing' },
   needs_human: { icon: '✋', label: 'needs you' },
+  needs_approval: { icon: '🔒', label: 'waiting for you to allow or deny' },
   needs_answer: { icon: '❓', label: 'waiting for your answer' },
   error: { icon: '⚠', label: 'error' },
 }

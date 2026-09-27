@@ -33,6 +33,7 @@ function plan(over: Partial<PlanState> = {}): PlanState {
     pendingDecisions: 0,
     applyingRulings: false,
     reviewingDocs: false,
+    atWork: true,
     ...over,
   }
 }
@@ -146,7 +147,25 @@ describe('PlanBar steps', () => {
   it('marks_the_current_step_and_the_ones_behind_it', () => {
     const node = bar(plan({ stage: 'mapped', approvable: true }))
     const classes = [...node.querySelectorAll<HTMLElement>('.step')].map((s) => `${s.textContent}:${s.className.replace('step ', '')}`)
-    expect(classes).toEqual(['Plan:done', 'Review:done', 'Map:done', 'Rule:done', 'Approve:current', 'Implement:future', 'Verify:future', 'Cleanup:future'])
+    expect(classes).toEqual(['Plan:done', 'Review:done', 'Map:done', 'Rule:done', 'Approve:current yours', 'Implement:future', 'Verify:future', 'Cleanup:future'])
+  })
+
+  it('the_current_step_is_marked_yours_only_while_the_act_is_the_devs', () => {
+    const running = bar(plan({ mapping: { live: true, text: 'reading src' } }))
+    expect(running.querySelector('.step.current')).not.toBeNull()
+    expect(running.querySelector('.step.yours')).toBeNull()
+    const offered = bar(plan({ stage: 'verified', status: 'approved', commentable: false, atWork: false, cleanupSweep: { units: [{ path: 'src/a.ts', line: 1, name: 'a', kind: 'function', lines: 60, threshold: 25 }] } }))
+    expect(offered.querySelector('.step.current.yours')!.textContent).toBe('Cleanup')
+  })
+
+  it('a_question_in_a_run_is_a_blocked_link_that_opens_the_chat', () => {
+    const node = bar(plan({ stage: 'under_development', status: 'approved', commentable: false, blocked: { on: 'answer', mode: 'implement' } }))
+    const link = node.querySelector<HTMLElement>('.next.goto.blocked')!
+    expect(link.textContent).toContain('Question from the implementer')
+    let tab: string | undefined
+    node.addEventListener(events.PlanFocusRequestedEvent.type, (e) => (tab = (e as InstanceType<typeof events.PlanFocusRequestedEvent>).tab))
+    link.click()
+    expect(tab).toBe('chat')
   })
 
   it('a_reached_step_is_a_button_that_names_itself', () => {
@@ -171,6 +190,18 @@ describe('PlanTabs', () => {
     expect(labels(node)).toEqual(['Spec*', 'Chat'])
     node.update(plan({ decisions: [decision({})], review: { rounds: [{ number: 1, submittedAt: 't', comments: [{ target: 'Cancel', text: 'no' }], strikes: [] }] } }), 'chat')
     expect(labels(node)).toEqual(['Spec', 'Review (1)', 'Decisions (1)', 'Chat*'])
+  })
+
+  it('the_tab_holding_the_devs_act_is_marked', () => {
+    const answered = { target: 'Cancel', text: 'no', resolution: { kind: 'addressed' as const, text: 'ok' } }
+    const node = new PlanTabs()
+    document.body.appendChild(node)
+    node.update(plan({ stage: 'final_draft', review: { rounds: [{ number: 1, submittedAt: 't', comments: [answered], strikes: [] }] } }), 'spec')
+    const marked = () => [...node.querySelectorAll<HTMLElement>('.tab.attention')].map((t) => t.textContent)
+    expect(marked()).toEqual(['Review (1)'])
+    node.update(plan({ blocked: { on: 'answer', mode: 'plan' } }), 'spec', true)
+    expect(marked()).toEqual(['Chat'])
+    expect(node.querySelector('.tab.moved')).toBeNull()
   })
 
   it('picking_a_tab_names_it', () => {

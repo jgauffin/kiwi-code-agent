@@ -4,3 +4,4 @@ dist/
 .agent/
 .env
 .articles
+PROMPTS.md

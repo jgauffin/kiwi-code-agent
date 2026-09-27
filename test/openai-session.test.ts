@@ -197,6 +197,7 @@ describe('OpenAiSession', () => {
       if (e.type === 'turn_done') break
     }
     expect(events).toContainEqual({ type: 'tool_result', toolUseId: 'c1', text: 'Denied by user: no', isError: true })
+    expect(events).toContainEqual({ type: 'permission_resolved', requestId: expect.any(String), decision: 'deny', message: 'no' })
     await s.dispose()
   })
 

@@ -208,6 +208,6 @@ describe('tasks file', () => {
   })
 
   it('names_the_file_by_the_feature_slug', () => {
-    expect(tasksFile('Order cancellation')).toBe('plan/order-cancellation.tasks.md')
+    expect(tasksFile('Order cancellation')).toBe('.agent/plan/order-cancellation.tasks.md')
   })
 })

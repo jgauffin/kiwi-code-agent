@@ -21,7 +21,7 @@ export function snapshot(over: Partial<SettingsSnapshot> = {}): SettingsSnapshot
     permissions: { allow: ['Edit'], deny: [] },
     verify: [{ match: 'src/**/*.ts', project: 'package.json', command: 'npm test' }],
     verifyFailureBudget: 3,
-    cleanup: { functionLines: 25, typeLines: 200, fileLines: 400, ignore: ['**/*.test.*'] },
+    cleanup: { functionLines: 25, typeLines: 200, fileLines: 400, tests: ['**/*.test.*'], testFunctionLines: 60, testTypeLines: 600, testFileLines: 1200, ignore: [] },
     planIgnore: [],
     nodePath: '',
     traceEngine: false,
@@ -138,8 +138,16 @@ describe('ProjectTab', () => {
   it('plan_ignore_globs_save_under_their_key', () => {
     const tab = new ProjectTab()
     tab.update(snapshot({ planIgnore: ['docs/intent/old/**'] }))
-    const lists = tab.querySelectorAll<HTMLElement>('rule-list')
-    const input = lists[1]!.querySelector<HTMLInputElement>('input')!
+    const input = tab.querySelector<HTMLInputElement>('.planning rule-list input')!
     expect(saved(tab, () => change(input, 'docs/intent/drafts/**'))).toEqual({ key: 'planIgnore', value: ['docs/intent/drafts/**'] })
+  })
+
+  it('test_file_globs_and_test_limits_save_under_their_own_keys', () => {
+    const tab = new ProjectTab()
+    tab.update(snapshot())
+    const glob = tab.querySelector<HTMLInputElement>('.cleanup rule-list input')!
+    expect(saved(tab, () => change(glob, '**/*.spec.*'))).toEqual({ key: 'cleanup.tests', value: ['**/*.spec.*'] })
+    const lines = tab.querySelector<HTMLInputElement>('input[name="cleanup.testFileLines"]')!
+    expect(saved(tab, () => change(lines, '900'))).toEqual({ key: 'cleanup.testFileLines', value: 900 })
   })
 })

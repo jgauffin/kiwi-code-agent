@@ -1,12 +1,12 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { PLAN_DIR, featureSlug } from './blind-plan'
+import { WORK_DIR, featureSlug } from './blind-plan'
 import { KEEP_RULING } from './ruling'
 
 export { KEEP_RULING }
 
 /**
- * The decisions file, `plan/<feature>.decisions.md`: what the mapping run
+ * The decisions file, `.agent/plan/<feature>.decisions.md`: what the mapping run
  * found in the code that the spec has to answer for, the planner's change
  * options, and what the user rules. A temporal state beside the spec, so the
  * spec holds rules only and never a path or a symbol. Rulings are written here
@@ -47,7 +47,7 @@ export type Decision = {
 export type DecisionProblem = { line: number; text: string }
 
 export function decisionsFile(feature: string): string {
-  return `${PLAN_DIR}/${featureSlug(feature)}.decisions.md`
+  return `${WORK_DIR}/${featureSlug(feature)}.decisions.md`
 }
 
 export function decisionsPath(cwd: string, feature: string): string {

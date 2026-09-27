@@ -88,6 +88,11 @@ export class ChatTranscript extends HTMLElement {
     return [...this.questions.values()].some((card) => !card.isResolved)
   }
 
+  /** The first card still waiting on the user, a permission prompt or a question. */
+  openCard(): HTMLElement | undefined {
+    return [...this.permissions.values(), ...this.questions.values()].find((card) => !card.isResolved)
+  }
+
   apply(event: SessionEvent, live = true): void {
     this.ensureStatusLine()
     switch (event.type) {
@@ -177,7 +182,7 @@ export class ChatTranscript extends HTMLElement {
       }
       case 'permission_resolved': {
         const card = this.permissions.get(event.requestId)
-        card?.resolve(event.decision)
+        card?.resolve(event.decision, event.message)
         if (event.decision === 'allow' && card?.toolUseId) this.approvedByHand.add(card.toolUseId)
         this.activity = this.currentActivity()
         break
@@ -310,7 +315,7 @@ export class ChatTranscript extends HTMLElement {
       summary.textContent = shell.description ?? summarizeInput(event.input)
       fillCode(input, shell.lines.join('\n'), 'bash')
     } else {
-      summary.textContent = `${event.name} ${summarizeInput(event.input)}`
+      summary.textContent = `${event.name} ${summarizeInput(event.input)}${lineRange(event.input)}`
       fillCode(input, JSON.stringify(event.input, null, 2), 'json')
     }
     details.append(summary, input)
@@ -388,6 +393,17 @@ function summarizeInput(input: unknown): string {
   if (!key) return ''
   const value = record[key] as string
   return value.length > 80 ? value.slice(0, 77) + '...' : value
+}
+
+/** The lines a partial read covered, as `:first–last` (1-based offset); a whole-file read has none. */
+function lineRange(input: unknown): string {
+  if (typeof input !== 'object' || input === null) return ''
+  const record = input as Record<string, unknown>
+  const offset = typeof record['offset'] === 'number' ? record['offset'] : undefined
+  const limit = typeof record['limit'] === 'number' ? record['limit'] : undefined
+  if (offset === undefined && limit === undefined) return ''
+  const first = offset ?? 1
+  return `:${first}–${limit === undefined ? '' : first + limit - 1}`
 }
 
 customElements.define('chat-transcript', ChatTranscript)

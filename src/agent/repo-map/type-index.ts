@@ -1,12 +1,12 @@
 import { extname } from 'node:path'
-import { languageOf } from '../cleanup/language'
-import { stripLiterals } from '../cleanup/strip-literals'
+import { languageOf } from '../code-structure/language'
+import { readStructure, type CodeBlock, type CodeItem } from '../code-structure/structure'
 import { byPath } from './map-files'
 
 /**
  * A project's public surface, read out of its source by the build itself: no
- * language service, no compiler, the same brace-and-literal reading the size
- * measure uses. C# calls it `public`, TypeScript calls it `export`; both come
+ * language service, no compiler, the same structure reading the size measure
+ * uses. C# calls it `public`, TypeScript calls it `export`; both come
  * out as one line per type and one line per member.
  *
  * A file the scan cannot make sense of — unbalanced braces once the literals
@@ -49,39 +49,55 @@ export function scanPublicTypes(path: string, text: string): PublicType[] | unde
   }
 }
 
-/** One open declaration: the type whose body the scan is inside. */
-type Open = { type: PublicType; depth: number; opened: boolean }
-
+/**
+ * Types anywhere in the file; a type's members are the declarations directly
+ * in its body. A declaration is read from the first line it starts on, as
+ * written there, so a one-line member keeps its accessors and a line holding
+ * two statements is read once. What shares the type's own line is not a member.
+ */
 function scan(path: string, text: string, csharp: boolean): PublicType[] | undefined {
-  const lang = languageOf(path)!
-  const lines = stripLiterals(text, lang).split(/\r?\n/)
+  const { items, code } = readStructure(path, text)
+  if (!balanced(code)) return undefined
+  const declared = (item: CodeItem): Declaration | undefined => {
+    const line = code[item.line - 1]!.trim()
+    return csharp ? csharpDeclaration(line) : typescriptDeclaration(line)
+  }
   const types: PublicType[] = []
-  const stack: Open[] = []
-  let depth = 0
-  for (let n = 0; n < lines.length; n++) {
-    const line = lines[n]!
-    const code = line.trim()
-    const enclosing = stack[stack.length - 1]
-    const declared = csharp ? csharpDeclaration(code) : typescriptDeclaration(code)
-    if (declared?.kind === 'type') {
-      const type: PublicType = { file: path, line: n + 1, name: declared.name, signature: declared.signature, members: [] }
-      types.push(type)
-      // A body that opens on the declaration's own line — `public enum Kind { A, B }` — is open from here.
-      stack.push({ type, depth, opened: line.includes('{') })
-    } else if (declared?.kind === 'member' && enclosing && depth === enclosing.depth + 1) {
-      enclosing.type.members.push(declared.signature)
-    }
-    depth += occurrences(line, '{') - occurrences(line, '}')
-    if (depth < 0) return undefined
-    for (const open of stack) if (depth > open.depth) open.opened = true
-    while (stack.length > 0 && (stack[stack.length - 1]!.opened ? depth <= stack[stack.length - 1]!.depth : depth < stack[stack.length - 1]!.depth)) {
-      stack.pop()
+  const typeLines = new Set<number>()
+  const visit = (list: CodeItem[]): void => {
+    for (const item of list) {
+      const found = typeLines.has(item.line) ? undefined : declared(item)
+      typeLines.add(item.line)
+      if (found?.kind === 'type') types.push({ file: path, line: item.line, name: found.name, signature: found.signature, members: item.kind === 'block' ? membersOf(item) : [] })
+      if (item.kind === 'block') visit(item.children)
     }
   }
-  return depth === 0 ? types : undefined
+  const membersOf = (type: CodeBlock): string[] => {
+    const read = new Set([type.line])
+    const members: string[] = []
+    for (const child of type.children) {
+      if (read.has(child.line)) continue
+      read.add(child.line)
+      const found = declared(child)
+      if (found?.kind === 'member') members.push(found.signature)
+    }
+    return members
+  }
+  visit(items)
+  return types
 }
 
-const occurrences = (line: string, ch: string): number => line.split(ch).length - 1
+/** Braces that never close more than they opened, and close all they open. */
+function balanced(code: string[]): boolean {
+  let depth = 0
+  for (const line of code) {
+    for (const ch of line) {
+      if (ch === '{') depth++
+      else if (ch === '}' && --depth < 0) return false
+    }
+  }
+  return depth === 0
+}
 
 type Declaration = { kind: 'type'; name: string; signature: string } | { kind: 'member'; signature: string }
 

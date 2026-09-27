@@ -1,8 +1,8 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { PLAN_DIR } from './blind-plan'
-import { statusOf } from './spec-file'
-import { readTasks, tasksDone } from './tasks-file'
+import { PLAN_DIR, WORK_DIR } from './blind-plan'
+import { statusOf, type SpecStatus } from './spec-file'
+import { readTasks, tasksDone, type TasksState } from './tasks-file'
 
 /** `verified` is derived from the task board and its verification record, as the plan bar does. */
 export type PlanStatus = 'draft' | 'approved' | 'verified'
@@ -27,13 +27,16 @@ export async function listPlans(cwd: string): Promise<PlanSummary[]> {
     const slug = name.slice(0, -SPEC_SUFFIX.length)
     const text = await readFile(path, 'utf8')
     const status = statusOf(text)
-    const tasks = await readTasks(join(dir, `${slug}.tasks.md`))
-    // A postponed cleanup is work the user asked to come back to, so the feature stays on the list until it is settled.
-    const verified =
-      status === 'approved' && tasks.exists && tasksDone(tasks.tasks) && tasks.verification?.ok === true && tasks.cleanup !== 'postponed'
-    plans.push({ feature: featureOf(text) ?? slug, path, status: verified ? 'verified' : status })
+    const tasks = await readTasks(join(cwd, WORK_DIR, `${slug}.tasks.md`))
+    plans.push({ feature: featureOf(text) ?? slug, path, status: status === 'implemented' || finished(status, tasks) ? 'verified' : status })
   }
   return plans
+}
+
+/** Built, proven and settled: nothing is left to do on the feature. */
+export function finished(status: SpecStatus, tasks: TasksState): boolean {
+  // A postponed cleanup is work the user asked to come back to, so the feature is not finished until it is settled.
+  return status === 'approved' && tasks.exists && tasksDone(tasks.tasks) && tasks.verification?.ok === true && tasks.cleanup !== 'postponed'
 }
 
 /** The specs still waiting for approval. */

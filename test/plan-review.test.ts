@@ -211,7 +211,7 @@ describe('the review file', () => {
     const dir = await mkdtemp(join(tmpdir(), 'review-'))
     try {
       const path = reviewPath(dir, 'Order cancellation')
-      expect(path).toBe(join(dir, 'plan', 'order-cancellation.review.md'))
+      expect(path).toBe(join(dir, '.agent', 'plan', 'order-cancellation.review.md'))
       expect(await readReview(path)).toEqual(emptyReview())
 
       const review = emptyReview()

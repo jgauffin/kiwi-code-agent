@@ -20,7 +20,8 @@ import { STEPS, STEP_LABEL, planStep, type NextAction, type Step } from './plan-
  * The feature session's header, one row: the flow as steps with the current
  * one lit, and at the right the one next thing. The next step is a button
  * when it moves the plan on, a link into the plan view when the act is on a
- * row there, and a line of text while someone else is at work. A run in
+ * row there or into the chat when a run waits on the person, and a line of
+ * text while someone else is at work. A run in
  * flight shows its progress and a Stop; Repair rides along while the spec is
  * off contract. A reached step is a button that opens the tab it works in.
  */
@@ -36,7 +37,8 @@ export class PlanBar extends HTMLElement {
     const steps = el('span', 'steps')
     const currentIndex = STEPS.indexOf(step.current)
     for (const [index, name] of STEPS.entries()) {
-      const state = name === step.current ? 'current' : index < currentIndex ? 'done' : step.reached.includes(name) ? 'reached' : 'future'
+      // The lit step says where the flow is; `yours` says it stands still until the person acts.
+      const state = name === step.current ? `current${step.yours ? ' yours' : ''}` : index < currentIndex ? 'done' : step.reached.includes(name) ? 'reached' : 'future'
       steps.append(this.stepNode(name, state))
     }
     this.append(steps, ...this.run(plan), ...this.repair(plan), ...this.remap(plan), ...this.next(plan))
@@ -123,8 +125,11 @@ export class PlanBar extends HTMLElement {
     const step = planStep(plan)
     const next = step.next
     const nodes: HTMLElement[] = []
-    const goto = next.kind === 'goto' ? next : step.goto ? { ...step.goto, hint: 'Rule on each decision in place.' } : undefined
-    if (goto) nodes.push(button(`${goto.label} ↓`, () => this.dispatchEvent(new PlanFocusRequestedEvent(goto.tab, { scroll: true })), 'next goto', goto.hint))
+    const goto = next.kind === 'goto' ? next : step.goto
+    if (goto) {
+      const className = `next goto${plan.blocked ? ' blocked' : ''}`
+      nodes.push(button(`${goto.label} ↓`, () => this.dispatchEvent(new PlanFocusRequestedEvent(goto.tab, { scroll: true })), className, goto.hint))
+    }
     switch (next.kind) {
       case 'action':
         nodes.push(button(next.label, () => this.dispatchEvent(eventFor(next.action)), `next ${next.action}`, next.hint))

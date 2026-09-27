@@ -13,9 +13,9 @@ export type PermissionRules = { allow: string[]; deny: string[] }
  * `AskUser` changes nothing either: the person answers the question itself
  * rather than first being asked whether it may be put to them.
  */
-const READ_ONLY_TOOLS = new Set(['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'LS', 'NotebookRead', 'TodoRead', 'TodoWrite', 'AskUser', 'RunScript'])
+const READ_ONLY_TOOLS = new Set(['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'MarkdownSearch', 'CodeOutline', 'CodeSearch', 'LS', 'NotebookRead', 'TodoRead', 'TodoWrite', 'AskUser', 'RunScript'])
 
-const FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'NotebookRead', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'LS', ...TRANSFER_TOOLS])
+const FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'NotebookRead', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'MarkdownSearch', 'CodeOutline', 'CodeSearch', 'LS', ...TRANSFER_TOOLS])
 
 /**
  * Decides tool calls before any permission prompt, on every engine: a deny

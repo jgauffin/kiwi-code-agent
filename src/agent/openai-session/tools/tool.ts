@@ -3,6 +3,7 @@ import type { ToolDefinition } from '../chat-messages'
 import type { ReadTracker } from './read-tracker'
 import type { QuestionOutcome, UserQuestionRequest } from '../../session/user-question'
 import type { FileEditChange } from '../../edits/file-edit-diff'
+import type { PermissionDecision } from '../../session/code-session'
 
 /**
  * How a tool reaches the person running the session. The engine supplies it;
@@ -21,8 +22,8 @@ export type ToolContext = {
   call?: (name: string, input: unknown) => Promise<ToolOutput>
   /** The reason a call is refused outright, by a deny rule; undefined when nothing forbids it. Never asks the user. */
   authorize?: (name: string, input: unknown) => Promise<string | undefined>
-  /** Puts changes to files to the user as one decision; true when they are to be applied. */
-  review?: (title: string, edits: FileEditChange[]) => Promise<boolean>
+  /** Puts changes to files to the user as one decision. */
+  review?: (title: string, edits: FileEditChange[]) => Promise<PermissionDecision>
 }
 
 export type ToolOutput = { text: string; isError: boolean }
@@ -49,6 +50,19 @@ export const fail = (text: string): ToolOutput => ({ text, isError: true })
 
 /** Tool output past this size is cut; the model can narrow its request. */
 export const MAX_OUTPUT_CHARS = 30_000
+
+/** One rendering of the same content at a level of detail, and the note saying what it leaves out. */
+export type Detail = { body: () => string; note: string }
+
+/** The most detailed rendering that fits the budget, or the least detailed when none does. */
+export function mostDetailFitting(levels: Detail[], budget: number): { body: string; note: string } {
+  let chosen = { body: '', note: '' }
+  for (const level of levels) {
+    chosen = { body: level.body(), note: level.note }
+    if (chosen.body.length <= budget) break
+  }
+  return chosen
+}
 
 export function truncate(text: string): string {
   if (text.length <= MAX_OUTPUT_CHARS) return text

@@ -1,10 +1,14 @@
 import type { CleanupUnit, PlanState } from '../protocol'
+import type { SessionMode } from '../../agent/session/session-manager'
+import type { RunBlock } from '../../agent/session/session-status'
 
 /**
  * The plan flow as the person walks it, read off the plan state: which step
  * they are at, which they may go back to, and the one thing to do next. The
  * stage says where the files stand; the step says what that asks of the
  * person, which is what the stepper and the bar's next-step slot show.
+ * Whose turn it is comes from the runs, not the stage: a step that expects
+ * an agent at work, with none at work, is the person's.
  */
 
 export type Step = 'plan' | 'review' | 'map' | 'rule' | 'approve' | 'implement' | 'verify' | 'cleanup'
@@ -25,13 +29,16 @@ export const STEP_LABEL: Record<Step, string> = {
 /** A tab of the plan view; each step works in one of them. */
 export type Tab = 'spec' | 'review' | 'decisions' | 'tasks' | 'cleanup'
 
+/** A tab of the strip: a plan tab, or the conversation. */
+export type ViewTab = Tab | 'chat'
+
 export type NextAction = 'map' | 'submit_review' | 'send_rulings' | 'approve' | 'implement' | 'verify' | 'sweep'
 
 export type NextStep =
   /** A button in the bar: the act moves the plan on. */
   | { kind: 'action'; action: NextAction; label: string; hint: string }
-  /** A link in the bar: the act is on a row of the named tab. */
-  | { kind: 'goto'; tab: Tab; label: string; hint: string }
+  /** A link in the bar: the act is on a row of the named tab, or in the chat. */
+  | { kind: 'goto'; tab: ViewTab; label: string; hint: string }
   /** Nothing to do; the text says who is at work. */
   | { kind: 'waiting'; text: string }
   | { kind: 'done'; text: string }
@@ -41,19 +48,83 @@ export type PlanStep = {
   /** Steps the person may open from the stepper: the ones passed, and Review on any draft. */
   reached: Step[]
   next: NextStep
-  /** Rows to act on beside a bar action, when there are some. */
-  goto?: { tab: Tab; label: string }
+  /** Where to read up beside a bar action, when there is somewhere. */
+  goto?: { tab: ViewTab; label: string; hint: string }
+  /** The next act is the person's: the flow stands still until they take it. */
+  yours: boolean
 }
+
+type Derived = Omit<PlanStep, 'reached' | 'yours'>
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`
 
-export function planStep(plan: PlanState): PlanStep {
-  const step = derive(plan)
-  return { ...step, reached: reached(step.current, plan) }
+const RUN_NOUN: Record<SessionMode, string> = {
+  chat: 'the session',
+  plan: 'the planner',
+  reconcile: 'the mapping',
+  implement: 'the implementer',
+  cleanup: 'the cleanup',
+  docs: 'the docs session',
+  'docs-map': 'the docs map',
 }
 
-function derive(plan: PlanState): Omit<PlanStep, 'reached'> {
+/** Who a step waits on while it is not the person's. */
+const STEP_AGENT: Record<Step, string> = {
+  plan: 'planner',
+  review: 'planner',
+  map: 'mapping',
+  rule: 'planner',
+  approve: 'planner',
+  implement: 'implementer',
+  verify: 'test run',
+  cleanup: 'cleanup',
+}
+
+export function planStep(plan: PlanState): PlanStep {
+  const derived = derive(plan)
+  const step = plan.blocked
+    ? { current: derived.current, next: blockedNext(plan.blocked) }
+    : derived.next.kind === 'waiting' && !plan.atWork
+      ? stopped(derived.current, plan)
+      : derived
+  return { ...step, reached: reached(step.current, plan), yours: step.next.kind === 'action' || step.next.kind === 'goto' }
+}
+
+/** A run stopped mid-turn on the person outranks every other act: nothing moves until it is answered. */
+function blockedNext(block: RunBlock): NextStep {
+  const who = RUN_NOUN[block.mode]
+  return block.on === 'answer'
+    ? { kind: 'goto', tab: 'chat', label: `Question from ${who}`, hint: `${who} asked a question and waits for the answer.` }
+    : { kind: 'goto', tab: 'chat', label: `Allow or deny: ${who}`, hint: `${who} waits for you to allow or deny a call.` }
+}
+
+/**
+ * The step says an agent is at work and none is: its turn ended short of
+ * what the step needs, usually with a question asked in prose. The person
+ * reads it in the chat, or restarts the work where the bar can.
+ */
+function stopped(current: Step, plan: PlanState): Derived {
+  const chat = { tab: 'chat' as const, label: 'Read the chat', hint: 'What the implementer said when it stopped.' }
+  if (plan.implementable) {
+    return {
+      current,
+      next: { kind: 'action', action: 'implement', label: 'Continue implementing', hint: 'Nothing is building the tasks: hand the board back to the implementer, which carries on where it stopped.' },
+      goto: chat,
+    }
+  }
+  if (current === 'map' && plan.status === 'draft') {
+    return { current, next: { kind: 'action', action: 'map', label: 'Map again', hint: 'The board predates the spec and no mapping is running: map the spec as it stands.' } }
+  }
+  const who = STEP_AGENT[current]
+  return {
+    current,
+    next: { kind: 'goto', tab: 'chat', label: `The ${who} stopped`, hint: `Nothing is at work on this step: read what the ${who} said in the chat and answer there.` },
+  }
+}
+
+function derive(plan: PlanState): Derived {
   if (plan.status === 'missing') return { current: 'plan', next: { kind: 'waiting', text: 'the planner is writing the spec' } }
+  if (plan.status === 'implemented') return { current: 'cleanup', next: { kind: 'done', text: 'implemented' } }
 
   const pending = pendingRound(plan)
   if (pending) {
@@ -103,7 +174,7 @@ function derive(plan: PlanState): Omit<PlanStep, 'reached'> {
       // Approval starts the build: this is the way back in when nothing is building the tasks.
       return { current: 'implement', next: { kind: 'action', action: 'implement', label: 'Implement', hint: 'Nothing is building the tasks: pick the board up in a session that builds them one by one.' } }
     }
-    return { current: 'implement', next: { kind: 'waiting', text: 'start the implementation from the plan session' } }
+    return { current: 'implement', next: { kind: 'waiting', text: 'the implementer is starting' } }
   }
 
   if (plan.stage === 'under_development') {
@@ -147,7 +218,7 @@ function cleanupNext(plan: PlanState): NextStep {
   return { kind: 'action', action: 'sweep', label: 'Check sizes', hint: 'Measure the files this feature touched against the size limits.' }
 }
 
-function mappedDraft(plan: PlanState): Omit<PlanStep, 'reached'> {
+function mappedDraft(plan: PlanState): Derived {
   const unproposed = plan.decisions.filter((d) => d.state === 'open' && d.proposals.length === 0).length
   if (unproposed > 0) return { current: 'rule', next: { kind: 'waiting', text: `the planner is proposing on ${plural(unproposed, 'decision')}` } }
   if (plan.applyingRulings) return { current: 'rule', next: { kind: 'waiting', text: `the planner is applying ${plural(plan.pendingDecisions, 'ruling')}` } }
@@ -239,8 +310,10 @@ export function tabFor(step: Step, plan: PlanState): Tab {
     case 'implement':
     case 'verify':
       return 'tasks'
-    case 'cleanup':
-      return presentTabs(plan).includes('cleanup') ? 'cleanup' : 'tasks'
+    case 'cleanup': {
+      const present = presentTabs(plan)
+      return present.includes('cleanup') ? 'cleanup' : present.includes('tasks') ? 'tasks' : 'spec'
+    }
     default:
       return 'spec'
   }

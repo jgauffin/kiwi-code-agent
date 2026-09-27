@@ -106,7 +106,7 @@ describe('submitting a review', () => {
       expect(post.delivered[0]).toMatchObject({ kind: 'start', feature: 'Order cancellation' })
       // The fresh session is told to read both files rather than a transcript it does not have.
       expect(post.delivered[0]!.text).toContain('plan/order-cancellation.spec.md')
-      expect(post.delivered[0]!.text).toContain('plan/order-cancellation.review.md')
+      expect(post.delivered[0]!.text).toContain('.agent/plan/order-cancellation.review.md')
       expect(post.delivered[0]!.text).toContain('from disk')
     } finally {
       await rm(dir, { recursive: true, force: true })
@@ -215,7 +215,7 @@ describe('closing a round', () => {
 describe('the plan session knows what a review asks of it', () => {
   it('the_conduct_is_in_the_system_prompt_too_so_a_fresh_session_does_not_wait_for_direction', () => {
     const prompt = blindPlanPrompt('Order cancellation', '/work/repo')
-    expect(prompt).toContain('plan/order-cancellation.review.md')
+    expect(prompt).toContain('.agent/plan/order-cancellation.review.md')
     expect(prompt).toContain('without renaming')
     expect(prompt).toContain('never bring a struck')
     expect(prompt).toContain('disagreed with a reason')
@@ -240,10 +240,10 @@ describe('the plan session knows what a review asks of it', () => {
   it('a_session_picking_up_a_spec_reads_the_files_reports_where_it_stands_and_leaves_an_approved_spec_alone', () => {
     const prompt = resumePlanPrompt('Order cancellation')
     expect(prompt).toContain('plan/order-cancellation.spec.md')
-    expect(prompt).toContain('plan/order-cancellation.review.md')
-    expect(prompt).toContain('plan/order-cancellation.decisions.md')
+    expect(prompt).toContain('.agent/plan/order-cancellation.review.md')
+    expect(prompt).toContain('.agent/plan/order-cancellation.decisions.md')
     expect(prompt).toContain('Do not start over')
-    expect(prompt).toContain('An approved spec is settled')
+    expect(prompt).toContain('An approved or implemented spec is settled')
     expect(prompt).toContain('Then stop')
   })
 })

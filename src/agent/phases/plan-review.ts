@@ -1,12 +1,12 @@
-import { readFile, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
-import { PLAN_DIR, featureSlug } from './blind-plan'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
+import { WORK_DIR, featureSlug } from './blind-plan'
 import type { SpecState } from './spec-file'
 import { parseSpec, specItems } from './spec-model'
 
 /**
  * A review of a draft plan artifact: the human's comments and strikes, the
- * agent's resolutions. It lives next to the spec as markdown so it survives a
+ * agent's resolutions. It lives in the working files as markdown so it survives a
  * reload, stays readable after approval, and can be written to by the agent
  * with the same tools it uses on the spec. Nothing in the file is synthetic:
  * a comment names the rule it is on, a strike names the rule to remove.
@@ -62,12 +62,12 @@ export type PlanItem = {
 export const emptyReview = (): Review => ({ rounds: [] })
 
 export function reviewPath(cwd: string, feature: string): string {
-  return join(cwd, PLAN_DIR, `${featureSlug(feature)}.review.md`)
+  return join(cwd, reviewFile(feature))
 }
 
 /** Workspace-relative path of the review file, the form used in prompts and scopes. */
 export function reviewFile(feature: string): string {
-  return `${PLAN_DIR}/${featureSlug(feature)}.review.md`
+  return `${WORK_DIR}/${featureSlug(feature)}.review.md`
 }
 
 const same = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase()
@@ -189,6 +189,7 @@ export async function readReview(path: string): Promise<Review> {
 }
 
 export async function writeReview(path: string, review: Review, title: string): Promise<void> {
+  await mkdir(dirname(path), { recursive: true })
   await writeFile(path, renderReview(review, title), 'utf8')
 }
 

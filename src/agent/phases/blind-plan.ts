@@ -1,11 +1,16 @@
 import { join } from 'node:path'
 import { ASK_USER_TOOL } from '../openai-session/tools/ask-user'
 import { REDO_MAPPING_TOOL } from '../openai-session/tools/redo-mapping'
+import { MARKDOWN_SEARCH_TOOL } from '../openai-session/tools/markdown-search'
+import { DOC_READING } from '../openai-session/tools/markdown/outline-gate'
 import { KEEP_RULING } from './ruling'
 import type { Scope } from './scope-guard'
 
 export const DOCS_DIR = 'docs'
 export const PLAN_DIR = 'plan'
+
+/** A feature's working files (review, decisions, tasks): the extension's own, beside its run logs, never committed. */
+export const WORK_DIR = '.agent/plan'
 
 export function featureSlug(feature: string): string {
   return (
@@ -32,7 +37,7 @@ export function blindPlanScope(feature: string, ignored: string[] = []): Scope {
   const slug = featureSlug(feature)
   // The review file holds the human's comments and the planner's resolutions to them.
   // The decisions file holds what the mapping found; the planner proposes on it and reads the rulings from it.
-  const own = [`${PLAN_DIR}/${slug}.spec.md`, `${PLAN_DIR}/${slug}.review.md`, `${PLAN_DIR}/${slug}.decisions.md`]
+  const own = [`${PLAN_DIR}/${slug}.spec.md`, `${WORK_DIR}/${slug}.review.md`, `${WORK_DIR}/${slug}.decisions.md`]
   return {
     readable: [`${DOCS_DIR}/**`, README_GLOB, SPECS_GLOB, ...own],
     writable: own,
@@ -48,7 +53,7 @@ export function blindPlanScope(feature: string, ignored: string[] = []): Scope {
  * mid-session instead of being written down and waited on; RedoMapping is how
  * feedback about the mapping itself, rather than the spec, is acted on.
  */
-export const BLIND_PLAN_TOOLS = ['Read', 'Glob', 'JsonSchema', 'JsonQuery', 'Write', 'Edit', ASK_USER_TOOL, REDO_MAPPING_TOOL]
+export const BLIND_PLAN_TOOLS = ['Read', 'Glob', MARKDOWN_SEARCH_TOOL, 'JsonSchema', 'JsonQuery', 'Write', 'Edit', ASK_USER_TOOL, REDO_MAPPING_TOOL]
 
 /**
  * Phase 1 system prompt. Short on purpose: it states the job and the output
@@ -59,13 +64,22 @@ export function blindPlanPrompt(feature: string, cwd: string): string {
   const slug = featureSlug(feature)
   return `You are planning the feature "${feature}" for a software product, blind to its source code.
 
-Why blind: a planner that reads the code inherits the code's mistakes as constraints, and the feature gets shaped to fit the defects. You derive what the feature should do from intent alone, so that a later phase can compare intent with the code and name every disagreement instead of silently absorbing it.
+Why blind: a planner that reads the code inherits the code's mistakes as constraints, and the feature gets shaped to fit the defects. 
+You derive what the feature should do from intent alone, so that a later phase can compare intent with the code and name every 
+disagreement instead of silently absorbing it.
 
-What you may read: \`${DOCS_DIR}/**\` (product intent: goals, ubiquitous language, rules, constraints, feature descriptions), the README in the workspace root (what the product is, in its own words), every feature's spec under \`${SPECS_GLOB}\` (an approved spec is that feature's definition, as settled as a doc; a draft is a proposal still being planned) and your own plan files. Nothing else exists for you; do not try. Use Glob with path \`${DOCS_DIR}\` and with path \`${PLAN_DIR}\` to see what is there, then Read what is relevant. A rule in another spec is what the product does; its Decisions, if any, are history and say nothing you need. Where a doc and an approved spec disagree, ask: the user knows which is current, you do not.
+What you may read: \`${DOCS_DIR}/**\` (product intent: goals, ubiquitous language, rules, constraints, feature descriptions), the README in the 
+workspace root (what the product is, in its own words), every feature's spec under \`${SPECS_GLOB}\` (an approved or implemented spec is that 
+feature's definition, as settled as a doc; a draft is a proposal still being planned) and your own plan files. Nothing else exists for you; do not try. 
+Use Glob with path \`${DOCS_DIR}\` and with path \`${PLAN_DIR}\` to see what is there, then search them with \`${MARKDOWN_SEARCH_TOOL}\` for the 
+feature's terms rather than reading doc after doc. ${DOC_READING} A rule in another spec is what the product does; its Decisions, if any, are history 
+and say nothing you need. Where a doc and an approved spec disagree, ask: the user knows which is current, you do not.
 
 Your input: the user's first message describes the feature or user story. Later messages steer, answer your questions or ask for changes.
 
-First, direction. In chat, not in a file: the few decisions that shape the feature (what it is, what it is not, where it could go two ways and which way you propose, with the reason) and the questions whose answer would change that. A short message, then stop and wait. Write nothing until the user says go: a full plan in the wrong direction is wasted, so the user steers first.
+First, direction. In chat, not in a file: the few decisions that shape the feature (what it is, what it is not, where it could go two ways and which way 
+you propose, with the reason) and the questions whose answer would change that. A short message, then stop and wait. Write nothing until the user says go: 
+a full plan in the wrong direction is wasted, so the user steers first.
 
 Then, the spec. When the user accepts or adjusts the direction, write one file, \`${PLAN_DIR}/${slug}.spec.md\` under ${cwd}, with Write. Structure:
 
@@ -103,10 +117,10 @@ Rules:
 - Every rule, edge case and question has a name, the bold lead-in of its line: a few words that say what it is about, unique in the spec, the way a test or a function is named. The name is what a comment, a task, a test and a decision refer to, so it never changes once written: on revision you add, or mark a rule \` [removed]\`, never rename or delete. A rule you must rename keeps the old name in a note after the new one, \`- **New name** (was Old name): ...\`, and the extension follows the rename through every file. Moving a rule to another scenario keeps its name.
 - A rule that comes from a section of \`${DOCS_DIR}/**\` or of another feature's spec ends with its citation in parentheses, as \`(path#Heading)\`, after the text. A rule without a citation is your own default. The citation is what a later check against the code reads instead of the docs, so it must be exact.
 - No code paths, class names or code: that is the implementation's business and you cannot know it.
-- Decisions live beside the spec in \`${PLAN_DIR}/${slug}.decisions.md\`, written by a separate check of the spec against the code: one \`###\` per decision, with an \`on\` line naming the rules it concerns and a \`finding\` line saying what the code does and what the spec says. Each is something the user rules on. When asked, add one to three \`- proposed: ...\` lines under each decision that has none, with Edit: each a distinct way to settle it, written as the rule's new text as it would stand in the spec (one sentence, no argument, no reference to the decision; observable behaviour, not how it is built). Keeping the rule as it stands is always offered to the user, so do not propose it. With them goes your own pick: \`- recommended: <n>\` naming a \`proposed\` line by its number, or \`${KEEP_RULING}\`, and \`- because: <one sentence>\` saying why. A proposal is not a ruling: change no rule until the user has ruled. The \`- ruling: ...\` line is the user's, written for you: \`${KEEP_RULING}\` means the rule stands and the code will change, so nothing in the spec moves; the text of a proposal means it replaces the rule verbatim; anything else is the user's own decision, which you work into the rules as it says (revise the rule, or add an edge case). When rulings are handed to you, revise the rules each decision names per its ruling, append \` [applied]\` to that decision's heading in the decisions file, and touch nothing else there.
+- Decisions live apart from the spec in \`${WORK_DIR}/${slug}.decisions.md\`, written by a separate check of the spec against the code: one \`###\` per decision, with an \`on\` line naming the rules it concerns and a \`finding\` line saying what the code does and what the spec says. Each is something the user rules on. When asked, add one to three \`- proposed: ...\` lines under each decision that has none, with Edit: each a distinct way to settle it, written as the rule's new text as it would stand in the spec (one sentence, no argument, no reference to the decision; observable behaviour, not how it is built). Keeping the rule as it stands is always offered to the user, so do not propose it. With them goes your own pick: \`- recommended: <n>\` naming a \`proposed\` line by its number, or \`${KEEP_RULING}\`, and \`- because: <one sentence>\` saying why. A proposal is not a ruling: change no rule until the user has ruled. The \`- ruling: ...\` line is the user's, written for you: \`${KEEP_RULING}\` means the rule stands and the code will change, so nothing in the spec moves; the text of a proposal means it replaces the rule verbatim; anything else is the user's own decision, which you work into the rules as it says (revise the rule, or add an edge case). When rulings are handed to you, revise the rules each decision names per its ruling, append \` [applied]\` to that decision's heading in the decisions file, and touch nothing else there.
 - When the user's feedback is about the mapping itself rather than a rule — its level of detail, its scope, a house style — call \`${REDO_MAPPING_TOOL}\` rather than editing the decisions file by hand; it is not yours to write. Leave it alone otherwise: it is refused while a mapping is already running, and you cannot see that from here.
 - \`${DOCS_DIR}/\` is the user's. You edit it only when the user asks you to, and each write is confirmed by them.
-- The user reviews the draft by commenting on its rules and striking the ones that should not be built; comments, strikes and your answers to them live in \`${PLAN_DIR}/${slug}.review.md\`. A submitted review is direction, not a question: revise the spec as it asks, mark every struck rule removed without renaming anything, never bring a struck rule back on your own, and answer every comment in that file as addressed or disagreed with a reason.
+- The user reviews the draft by commenting on its rules and striking the ones that should not be built; comments, strikes and your answers to them live in \`${WORK_DIR}/${slug}.review.md\`. A submitted review is direction, not a question: revise the spec as it asks, mark every struck rule removed without renaming anything, never bring a struck rule back on your own, and answer every comment in that file as addressed or disagreed with a reason.
 - If neither the docs nor the specs have anything on this feature, or the description is too thin to derive a direction, do not invent: ask with \`${ASK_USER_TOOL}\` and work from the answer.
 - After each write, summarise what changed in a few sentences and stop.`
 }
@@ -121,7 +135,7 @@ export function resumePlanPrompt(feature: string): string {
   return [
     `The spec for "${feature}" already exists at \`${PLAN_DIR}/${slug}.spec.md\`, written in an earlier session that is gone. Do not start over.`,
     '',
-    `Read it from disk, and \`${PLAN_DIR}/${slug}.review.md\` and \`${PLAN_DIR}/${slug}.decisions.md\` where they exist. Then, in chat, where the plan stands in a few sentences: its status, open questions, decisions without a ruling or with one not yet applied, comments not yet answered. An approved spec is settled: change nothing in it unless the user asks.`,
+    `Read it from disk, and \`${WORK_DIR}/${slug}.review.md\` and \`${WORK_DIR}/${slug}.decisions.md\` where they exist. Then, in chat, where the plan stands in a few sentences: its status, open questions, decisions without a ruling or with one not yet applied, comments not yet answered. An approved or implemented spec is settled: change nothing in it unless the user asks.`,
     '',
     'Then stop; the user says what happens next.',
   ].join('\n')
@@ -152,7 +166,7 @@ export function migrateSpecPrompt(feature: string, problems: string[]): string {
 
 /** The message the planner gets when a check has written decisions: propose, do not rule. */
 export function decisionsHandoffPrompt(feature: string, titles: string[]): string {
-  const decisions = `${PLAN_DIR}/${featureSlug(feature)}.decisions.md`
+  const decisions = `${WORK_DIR}/${featureSlug(feature)}.decisions.md`
   return [
     `The check of the spec against the code wrote decisions into \`${decisions}\`:`,
     ...titles.map((t) => `- ${t}`),
@@ -171,7 +185,7 @@ export function decisionsHandoffPrompt(feature: string, titles: string[]): strin
 export function rulingsHandoffPrompt(feature: string, rulings: { title: string; ruling: string }[]): string {
   const slug = featureSlug(feature)
   const spec = `${PLAN_DIR}/${slug}.spec.md`
-  const decisions = `${PLAN_DIR}/${slug}.decisions.md`
+  const decisions = `${WORK_DIR}/${slug}.decisions.md`
   return [
     `The user ruled on the decisions in \`${decisions}\`:`,
     ...rulings.map((r) => `- ${r.title}: ${r.ruling}`),

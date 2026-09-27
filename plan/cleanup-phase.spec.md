@@ -17,7 +17,7 @@ When a feature's tests pass, the person who planned it still has no idea whether
 The units measured and the limits they are held to.
 - **B3**: the files measured are the ones an implement session on this feature edited, taken from those sessions' run logs; a file changed through the shell is not among them. (docs/features/cleanup-phase.md#Cleanup phase)
   - **E2**: a file that is no longer there when the measure runs is passed over, not reported.
-- **B4**: a file matching `kiwiAgent.cleanup.ignore` (tests by default) is not measured. (docs/features/cleanup-phase.md#Cleanup phase)
+- **B4**: a file matching `kiwiAgent.cleanup.ignore` (generated code) is not measured; a file matching `kiwiAgent.cleanup.tests` is held to the larger `kiwiAgent.cleanup.test*Lines` limits, since a test file stays one file per tested file. (docs/features/cleanup-phase.md#Cleanup phase)
 - **B5**: a function is oversized when its cyclomatic complexity is over `kiwiAgent.cleanup.functionComplexity`; its branch points are the branching keywords and operators of the language the file is written in, drawn from the fixed set of languages the measure knows and found without parsing the file, and a nested function's branches count toward the function it sits in, not as a unit of their own.
 - **B6**: a file is oversized when its code lines, blank and comment lines excluded, are over `kiwiAgent.cleanup.fileLines`. (docs/features/cleanup-phase.md#Cleanup phase)
   - **E3**: when the functions of a file cannot be located — a file in a language the measure does not know among them — the file is measured as a file only and no function of it is ever flagged.

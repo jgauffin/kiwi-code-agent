@@ -18,7 +18,7 @@ Reading and searching, no prompt:
 - `read(path)`: the whole file as text, not numbered and not cut.
 - `glob({ pattern, path? })`, `grep({ pattern, path?, include?, case_insensitive?, output_mode? })`:
   the same as the Glob and Grep tools, returning their text.
-- `jsonQuery(args)`, `jsonSchema(args)`: the same as the tools of that name.
+- `jsonQuery(args)`, `jsonSchema(args)`, `codeOutline({ path, symbol })`: the same as the tools of that name.
 - `bash({ command, description? })`: the same as the Bash tool, asked per command as usual.
   A denied or failing call throws; catch it to carry on.
 

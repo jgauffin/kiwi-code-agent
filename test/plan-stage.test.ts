@@ -69,6 +69,11 @@ describe('plan stage', () => {
     expect(planStage(approved, noReview, passed)).toBe('verified')
   })
 
+  it('an_implemented_spec_is_verified_without_a_board_or_a_review', () => {
+    const implemented: SpecState = { exists: true, status: 'implemented', body }
+    expect(planStage(implemented, noReview, noTasks)).toBe('verified')
+  })
+
   it('a_board_is_stale_once_the_spec_changed_under_it', () => {
     const fresh: TasksState = { exists: true, ...parseTasks(withSpecFingerprint('- **A**: a', specFingerprint(parseSpec(body)))) }
     expect(tasksStale(draft, fresh)).toBe(false)

@@ -5,6 +5,12 @@ import { measureUnits, type Unit, type UnitKind } from './unit-size'
 /** Code lines a unit of each kind may have; 0 turns the limit off. */
 export type Thresholds = { functionLines: number; typeLines: number; fileLines: number }
 
+/**
+ * What a file is measured against. A test file gets its own, larger limits:
+ * it stays one file per tested file, so it grows with the code it covers.
+ */
+export type Limits = { source: Thresholds; tests: Thresholds; testGlobs: string[] }
+
 export type Oversized = Unit & { path: string; threshold: number }
 
 /** Beyond this a file is not measured: it is generated or data, not a unit anyone splits. */
@@ -13,8 +19,10 @@ const MAX_BYTES = 1_000_000
 const limitFor = (kind: UnitKind, thresholds: Thresholds): number =>
   kind === 'function' ? thresholds.functionLines : kind === 'type' ? thresholds.typeLines : thresholds.fileLines
 
-export const anyLimit = (thresholds: Thresholds): boolean =>
+const anyOf = (thresholds: Thresholds): boolean =>
   thresholds.functionLines > 0 || thresholds.typeLines > 0 || thresholds.fileLines > 0
+
+export const anyLimit = (limits: Limits): boolean => anyOf(limits.source) || anyOf(limits.tests)
 
 /** The units strictly over their kind's limit; a limit of 0 flags nothing. */
 export function oversized(path: string, units: Unit[], thresholds: Thresholds): Oversized[] {
@@ -27,16 +35,17 @@ export function oversized(path: string, units: Unit[], thresholds: Thresholds): 
 /**
  * The oversized units across files, in the order given. A file that is gone,
  * binary, too large or matched by an ignore glob is passed over: nothing to
- * split there, or nothing anyone wants split (tests, generated code).
+ * split there, or nothing anyone wants split (generated code).
  */
-export async function oversizedFiles(cwd: string, files: string[], thresholds: Thresholds, ignore: string[]): Promise<Oversized[]> {
+export async function oversizedFiles(cwd: string, files: string[], limits: Limits, ignore: string[]): Promise<Oversized[]> {
   const found: Oversized[] = []
   for (const path of files) {
     const rel = relative(cwd, path).split('\\').join('/')
-    if (ignore.some((glob) => matchesGlob(rel, glob))) continue
+    const matches = (globs: string[]) => globs.some((glob) => matchesGlob(rel, glob))
+    if (matches(ignore)) continue
     const text = await readText(path)
     if (text === undefined) continue
-    found.push(...oversized(path, measureUnits(path, text), thresholds))
+    found.push(...oversized(path, measureUnits(path, text), matches(limits.testGlobs) ? limits.tests : limits.source))
   }
   return found
 }

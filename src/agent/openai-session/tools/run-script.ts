@@ -17,6 +17,7 @@ const TOOL_FUNCTIONS: Record<string, string> = {
   bash: 'Bash',
   jsonQuery: 'JsonQuery',
   jsonSchema: 'JsonSchema',
+  codeOutline: 'CodeOutline',
 }
 
 const HOST_FUNCTIONS = ['read', 'write', 'edit', 'preview', ...Object.keys(TOOL_FUNCTIONS)]
@@ -167,7 +168,8 @@ async function applyStaged(ctx: ToolContext, staged: Map<string, Staged>): Promi
   if (!ctx.review) return { text: 'The script staged changes, but this session cannot put them to the user; nothing was written.', isError: true }
   const edits: FileEditChange[] = files.map(([path, s]) => fileEditChange({ path, label: label(ctx, path), states: [s.before, s.after] }))
   const title = `Apply changes to ${files.length} file${files.length === 1 ? '' : 's'}`
-  if (!(await ctx.review(title, edits))) return { text: 'The user declined the changes; nothing was written.', isError: true }
+  const decision = await ctx.review(title, edits)
+  if (decision.kind === 'deny') return { text: `The user declined the changes${decision.message ? `: ${decision.message}` : ''}; nothing was written.`, isError: true }
   for (const [path, s] of files) {
     await mkdir(dirname(path), { recursive: true })
     await writeFile(path, s.after, 'utf8')

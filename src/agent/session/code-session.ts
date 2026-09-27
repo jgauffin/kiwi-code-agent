@@ -33,6 +33,13 @@ export type TurnUsage = {
 /** What an engine is told about one call. Remembering a decision is the host's business, not the engine's. */
 export type PermissionDecision = { kind: 'allow' } | { kind: 'deny'; message?: string }
 
+/** The event that closes a prompt; a denial keeps the user's reason so the card can show it. */
+export function permissionResolved(requestId: string, decision: PermissionDecision): Extract<SessionEvent, { type: 'permission_resolved' }> {
+  return decision.kind === 'deny' && decision.message
+    ? { type: 'permission_resolved', requestId, decision: 'deny', message: decision.message }
+    : { type: 'permission_resolved', requestId, decision: decision.kind }
+}
+
 /**
  * What a session emits. One shape for every engine so the UI, the run log and
  * later the phase orchestration never see wire formats.
@@ -66,7 +73,7 @@ export type SessionEvent =
       /** A shell call as its commands, each with what already lets it through or the rule that would; shown in place of the raw arguments. */
       commands?: CommandLine[]
     }
-  | { type: 'permission_resolved'; requestId: string; decision: PermissionDecision['kind'] }
+  | { type: 'permission_resolved'; requestId: string; decision: PermissionDecision['kind']; message?: string }
   /** The model asks the user; the session makes no further progress until the request is resolved. */
   | { type: 'question_request'; requestId: string; request: UserQuestionRequest }
   /** How the request ended: the answers the user gave, or that it went unanswered. Exactly one per request. */

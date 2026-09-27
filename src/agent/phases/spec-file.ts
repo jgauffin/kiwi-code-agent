@@ -1,6 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises'
 
-export type SpecStatus = 'draft' | 'approved'
+/** `implemented` is written by the extension once the feature is verified, so the stage outlives the working files. */
+export type SpecStatus = 'draft' | 'approved' | 'implemented'
 
 /** `body` is the markdown after the front matter, what a reader should see. */
 export type SpecState = { exists: false } | { exists: true; status: SpecStatus; body: string }
@@ -47,7 +48,8 @@ export function bodyOf(text: string): string {
 }
 
 export function statusOf(text: string): SpecStatus {
-  return frontMatterValue(text, 'status') === 'approved' ? 'approved' : 'draft'
+  const value = frontMatterValue(text, 'status')
+  return value === 'approved' || value === 'implemented' ? value : 'draft'
 }
 
 export async function setSpecStatus(path: string, status: SpecStatus): Promise<void> {

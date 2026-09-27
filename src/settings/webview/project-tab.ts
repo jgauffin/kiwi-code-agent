@@ -1,7 +1,14 @@
 import type { VerifyRule } from '../../agent/phases/verification'
 import type { SettingsSnapshot } from '../protocol'
 
-type NumberKey = 'verifyFailureBudget' | 'cleanup.functionLines' | 'cleanup.typeLines' | 'cleanup.fileLines'
+type NumberKey =
+  | 'verifyFailureBudget'
+  | 'cleanup.functionLines'
+  | 'cleanup.typeLines'
+  | 'cleanup.fileLines'
+  | 'cleanup.testFunctionLines'
+  | 'cleanup.testTypeLines'
+  | 'cleanup.testFileLines'
 import { RuleListChangedEvent, SettingSavedEvent } from './events'
 import { button, el, field, heading, note, numberInput, onChange, settingsFileLink, textInput } from './fields'
 import { NO_WORKSPACE_NOTE } from './permissions-tab'
@@ -38,7 +45,12 @@ export class ProjectTab extends HTMLElement {
       this.number('Function lines', 'cleanup.functionLines', snapshot.cleanup.functionLines, disabled),
       this.number('Type lines', 'cleanup.typeLines', snapshot.cleanup.typeLines, disabled),
       this.number('File lines', 'cleanup.fileLines', snapshot.cleanup.fileLines, disabled),
-      this.globs('Never measured', 'cleanup.ignore', snapshot.cleanup.ignore, disabled, '**/*.test.*'),
+      this.globs('Test files', 'cleanup.tests', snapshot.cleanup.tests, disabled, '**/*.test.*'),
+      note('A test file stays one file per tested file, so tests get larger limits.'),
+      this.number('Test function lines', 'cleanup.testFunctionLines', snapshot.cleanup.testFunctionLines, disabled),
+      this.number('Test type lines', 'cleanup.testTypeLines', snapshot.cleanup.testTypeLines, disabled),
+      this.number('Test file lines', 'cleanup.testFileLines', snapshot.cleanup.testFileLines, disabled),
+      this.globs('Never measured', 'cleanup.ignore', snapshot.cleanup.ignore, disabled, '**/generated/**'),
     )
 
     const planning = el('section', 'planning')
@@ -65,7 +77,7 @@ export class ProjectTab extends HTMLElement {
     return field(label, input, hint ? { hint } : {})
   }
 
-  private globs(label: string, key: 'cleanup.ignore' | 'planIgnore', values: string[], disabled: boolean, placeholder: string): HTMLElement {
+  private globs(label: string, key: 'cleanup.tests' | 'cleanup.ignore' | 'planIgnore', values: string[], disabled: boolean, placeholder: string): HTMLElement {
     const wrap = el('div', 'field')
     wrap.append(el('span', 'label', label))
     const list = new RuleList()

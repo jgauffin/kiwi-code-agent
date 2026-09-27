@@ -2,7 +2,7 @@ import * as vscode from 'vscode'
 import { isBuild, isFeatureless, isPlanning, pickConversationalRun, type SessionManager, type SessionMode, type SessionRecord } from '../agent/session/session-manager'
 import type { ModelProfile } from '../agent/session/model-profile'
 import type { McpServerState, SessionEvent } from '../agent/session/code-session'
-import { mostUrgent, nextStatus, type SessionStatus } from '../agent/session/session-status'
+import { blockOf, mostUrgent, nextStatus, type SessionStatus } from '../agent/session/session-status'
 import { readSpecState, setSpecStatus, type SpecState } from '../agent/phases/spec-file'
 import {
   PLAN_DIR,
@@ -20,7 +20,7 @@ import { progressLine, reconcileKickoff } from '../agent/phases/reconcile'
 import { REDO_MAPPING_TOOL } from '../agent/openai-session/tools/redo-mapping'
 import { assertImplementable, implementKickoff, implementationStarts } from '../agent/phases/implement'
 import { cleanupKickoff } from '../agent/phases/cleanup'
-import { anyLimit, oversizedFiles, sizeReport, type Oversized, type Thresholds } from '../agent/cleanup/oversized'
+import { anyLimit, oversizedFiles, sizeReport, type Limits, type Oversized } from '../agent/cleanup/oversized'
 import { editedFiles } from '../agent/edits/edited-files'
 import { isApprovable, isMappable, planStage, remapDue, tasksStale } from '../agent/phases/plan-stage'
 import { parseSpec, specFingerprint } from '../agent/phases/spec-model'
@@ -56,6 +56,7 @@ import { editDiffTitle, editLine, isRunSnapshot, runsRoot } from '../agent/edits
 import { buildRepoMap } from '../agent/repo-map/build-map'
 import { finishDocsMap, planDocsMap, readDocsSummary, type DocsMapResult } from '../agent/docs-map/build'
 import { docsMapKickoff } from '../agent/phases/docs-map'
+import { docsEvaluationKickoff } from '../agent/phases/docs-evaluation'
 import { sharedBuild } from '../agent/session/generated-context'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative } from 'node:path'
@@ -80,8 +81,8 @@ export interface Verifier {
 
 /** The cleanup after a feature's tests pass: its size limits and what never gets measured, from settings, read when the run starts. */
 export interface SizeLimits {
-  thresholds(): Thresholds
-  /** Globs, workspace-relative, of files the measure passes over: tests, generated code. */
+  limits(): Limits
+  /** Globs, workspace-relative, of files the measure passes over: generated code. */
   ignore(): string[]
 }
 
@@ -221,7 +222,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const state = await readSpecState(path)
     if (!state.exists) throw new Error(`No spec for "${feature}" under ${PLAN_DIR}/.`)
     const tasks = await readTasks(tasksPath(this.workspaceRoot, feature))
-    if (state.status === 'approved' && tasks.exists && tasksDone(tasks.tasks) && tasks.verification?.ok) {
+    if (state.status === 'implemented' || (state.status === 'approved' && tasks.exists && tasksDone(tasks.tasks) && tasks.verification?.ok)) {
       throw new Error(`"${feature}" is verified: plan the next change as its own feature.`)
     }
     // The list is newest first; the latest session on the spec is the one that knows it best.
@@ -518,20 +519,28 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
    */
   private async sweepForCleanup(feature: string): Promise<void> {
     if (this.cleanups.get(feature)?.live) return
-    const thresholds = this.sizeLimits.thresholds()
-    if (!anyLimit(thresholds)) return
+    const limits = this.sizeLimits.limits()
+    // A sweep that cannot measure still settles the step: an offer never made would hold the Cleanup step open with nothing to act on.
+    if (!anyLimit(limits)) return this.sizesUnchecked(feature, 'no size limits are set')
     const tasks = await readTasks(tasksPath(this.workspaceRoot, feature))
     // Skipped is the user's word that this feature is finished; done is the split already carried out.
     if (tasks.exists && (tasks.cleanup === 'skipped' || tasks.cleanup === 'done')) return
     const implementers = this.sessions.list().filter((r) => r.mode === 'implement' && r.feature === feature)
-    if (implementers.length === 0) return
+    if (implementers.length === 0) return this.sizesUnchecked(feature, 'no implementer session is left to say which files it edited')
     const files: string[] = []
     for (const record of implementers) {
       for (const file of editedFiles(await this.sessions.transcript(record.id))) if (!files.includes(file)) files.push(file)
     }
-    const flagged = await oversizedFiles(this.workspaceRoot, files, thresholds, this.sizeLimits.ignore())
+    const flagged = await oversizedFiles(this.workspaceRoot, files, limits, this.sizeLimits.ignore())
     this.sweeps.set(feature, flagged)
     if (flagged.length === 0) this.cleanups.set(feature, { live: false, text: 'Sizes checked: nothing to split' })
+    await this.sendState()
+    this.changed.fire()
+  }
+
+  private async sizesUnchecked(feature: string, why: string): Promise<void> {
+    this.sweeps.set(feature, [])
+    this.cleanups.set(feature, { live: false, text: `Sizes not checked: ${why}` })
     await this.sendState()
     this.changed.fire()
   }
@@ -612,7 +621,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       return
     }
     const files = (child.files ?? []).map((f) => join(this.workspaceRoot, f))
-    const left = await oversizedFiles(this.workspaceRoot, files, this.sizeLimits.thresholds(), [])
+    const left = await oversizedFiles(this.workspaceRoot, files, this.sizeLimits.limits(), [])
     const split = left.length === 0 ? 'Cleaned: every unit is within its limit' : `Cleanup left ${left.length} unit${left.length === 1 ? '' : 's'} over the limit`
     // Written before the test run, whose pass sweeps again: the offer was answered, and what the split left is not a new one.
     await recordCleanupDecision(tasksPath(this.workspaceRoot, feature), 'done')
@@ -864,7 +873,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         return
       case 'new_session': {
         const prompt = withLinkedFiles(message.prompt ?? '', message.files ?? [])
-        await this.newSession(message.mode, message.feature, prompt === '' ? undefined : prompt)
+        // The docs card has nothing to fill in, so its session starts on the job rather than waiting for a prompt.
+        const first = prompt !== '' ? prompt : message.mode === 'docs' ? docsEvaluationKickoff() : undefined
+        await this.newSession(message.mode, message.feature, first)
         return
       }
       case 'resume_plan':
@@ -1126,6 +1137,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const stage = planStage(state, review, tasks)
     const spec = state.exists ? parseSpec(state.body) : undefined
     const relativeTo = (file: string) => relative(this.workspaceRoot, file).split('\\').join('/')
+    const runs = this.runsOf(record).map((r) => ({ mode: r.mode, status: this.statusOf(r.id) }))
+    const blocked = blockOf(runs)
+    const implementerBusy = runs.some((r) => r.mode === 'implement' && r.status === 'implementing')
     return {
       specPath: relativeTo(path),
       tasksPath: relativeTo(tasksPath(this.workspaceRoot, feature)),
@@ -1140,7 +1154,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       ...(mapping ? { mapping } : {}),
       remappable: fromPlan && stage === 'mapped' && state.status === 'draft' && mapping?.live !== true,
       // Offered only as the way back in: approval starts the build itself, so the button is for an implementer that never started or stopped early.
-      implementable: fromPlan && stage === 'mapped' && !this.reviewingDocs.has(feature) && implementationStarts(state, tasks, this.implementerLive(feature)),
+      // An implementer whose engine is up but whose turn has ended is stopped too: its status says so, its engine does not.
+      implementable:
+        fromPlan &&
+        (stage === 'mapped' || stage === 'under_development') &&
+        !this.reviewingDocs.has(feature) &&
+        implementationStarts(state, tasks, implementerBusy),
       // Offered while the board is tested and the last record did not pass; a re-run after a pass is a manual choice too.
       verifiable: (stage === 'verification' || stage === 'verified') && verification?.live !== true,
       ...(verification ? { verification } : {}),
@@ -1156,6 +1175,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       pendingDecisions: pendingDecisions(decisions).length,
       applyingRulings: this.applying.has(feature),
       reviewingDocs: this.reviewingDocs.has(feature),
+      atWork: runs.some((r) => r.status === 'planning' || r.status === 'implementing') || mapping?.live === true || verification?.live === true || cleanup?.live === true,
+      ...(blocked ? { blocked } : {}),
     }
   }
 

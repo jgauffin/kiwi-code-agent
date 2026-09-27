@@ -8,7 +8,7 @@ import type { CleanupDecision, Task, VerificationRecord } from '../agent/phases/
 import type { UnitKind } from '../agent/cleanup/unit-size'
 import type { ModelProfile } from '../agent/session/model-profile'
 import type { SessionMode } from '../agent/session/session-manager'
-import type { SessionStatus } from '../agent/session/session-status'
+import type { RunBlock, SessionStatus } from '../agent/session/session-status'
 import type { ProfileDefaults } from '../settings/settings-store'
 
 /** One tab: a session that is live, or the one being looked at. */
@@ -32,7 +32,7 @@ export type PlanState = {
   /** Where the feature stands, derived from its files. */
   stage: PlanStage
   /** The spec's front-matter status; `missing` while no spec is written. */
-  status: 'missing' | 'draft' | 'approved'
+  status: 'missing' | 'draft' | 'approved' | 'implemented'
   /** Spec markdown without its front matter; absent while no spec is written. */
   body?: string
   /** The spec as the contract reads it; absent while no spec is written. */
@@ -77,6 +77,10 @@ export type PlanState = {
   applyingRulings: boolean
   /** The planner is listing what the docs should now say, right after approval; Implement is offered once that turn ends. */
   reviewingDocs: boolean
+  /** Some run of the feature is at work: a turn in flight, or a mapping, test run or cleanup live. False means the next act is the dev's. */
+  atWork: boolean
+  /** A run of the feature is stopped mid-turn on the dev: a question to answer or a call to allow or deny. */
+  blocked?: RunBlock
 }
 
 /** One line on a run under the plan: its current step while it runs, its outcome once it ended. */

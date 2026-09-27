@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mostUrgent, nextStatus, type SessionStatus } from '../src/agent/session/session-status'
+import { blockOf, mostUrgent, nextStatus, type SessionStatus } from '../src/agent/session/session-status'
 import type { SessionEvent } from '../src/agent/session/code-session'
 import type { SessionMode } from '../src/agent/session/session-manager'
 
@@ -33,14 +33,17 @@ describe('session status', () => {
     expect(run('cleanup', [{ type: 'user_message', text: 'x' }, turnDone()])).toEqual(['implementing', 'needs_human'])
   })
 
-  it('a_pending_permission_needs_the_human_until_it_is_answered', () => {
+  it('a_pending_permission_is_its_own_status_until_it_is_answered', () => {
+    // Apart from a turn that merely ended: the run is blocked mid-turn, not done.
     const request: SessionEvent = { type: 'permission_request', requestId: 'r', toolName: 'Edit', input: {} }
-    expect(run('chat', [{ type: 'user_message', text: 'x' }, request, { type: 'status', status: 'requesting' }])).toEqual([
+    expect(run('implement', [{ type: 'user_message', text: 'x' }, request, { type: 'status', status: 'requesting' }])).toEqual([
       'implementing',
-      'needs_human',
-      'needs_human',
+      'needs_approval',
+      'needs_approval',
     ])
-    expect(nextStatus('needs_human', 'chat', { type: 'permission_resolved', requestId: 'r', decision: 'allow' })).toBe('implementing')
+    expect(nextStatus('needs_approval', 'chat', { type: 'permission_resolved', requestId: 'r', decision: 'allow' })).toBe('implementing')
+    // A prompt cannot outlive its turn: a turn torn down around it leaves a turn that ended.
+    expect(nextStatus('needs_approval', 'implement', turnDone())).toBe('needs_human')
   })
 
   it('a_failed_turn_or_fatal_error_is_an_error_until_the_next_prompt', () => {
@@ -82,8 +85,15 @@ describe('session status', () => {
     // A run waiting on the user must not be hidden behind another that is merely at work.
     expect(mostUrgent(['idle', 'implementing', 'needs_answer'])).toBe('needs_answer')
     expect(mostUrgent(['needs_human', 'planning', 'error'])).toBe('needs_human')
+    expect(mostUrgent(['needs_human', 'needs_approval', 'implementing'])).toBe('needs_approval')
     expect(mostUrgent(['idle', 'idle'])).toBe('idle')
     expect(mostUrgent([])).toBe('idle')
+  })
+
+  it('a_tab_is_blocked_by_the_run_stopped_on_the_user_a_question_first', () => {
+    expect(blockOf([{ mode: 'plan', status: 'needs_human' }, { mode: 'implement', status: 'implementing' }])).toBeUndefined()
+    expect(blockOf([{ mode: 'plan', status: 'needs_approval' }, { mode: 'implement', status: 'needs_answer' }])).toEqual({ on: 'answer', mode: 'implement' })
+    expect(blockOf([{ mode: 'reconcile', status: 'needs_approval' }])).toEqual({ on: 'approval', mode: 'reconcile' })
   })
 
   it('a_finished_chat_turn_is_idle_but_a_finished_plan_turn_needs_the_human', () => {

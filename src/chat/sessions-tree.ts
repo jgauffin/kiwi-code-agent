@@ -19,6 +19,7 @@ const STATUS_ICON: Record<SessionStatus, { icon: string; color?: string }> = {
   needs_human: { icon: 'person', color: 'charts.orange' },
   // A question waiting on the user is its own signal: the session is blocked on an answer, not merely done.
   needs_answer: { icon: 'question', color: 'charts.purple' },
+  needs_approval: { icon: 'lock', color: 'charts.purple' },
   error: { icon: 'error', color: 'charts.red' },
 }
 

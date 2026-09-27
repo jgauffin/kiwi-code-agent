@@ -1,4 +1,6 @@
 import { ASK_USER_TOOL } from '../openai-session/tools/ask-user'
+import { MARKDOWN_SEARCH_TOOL } from '../openai-session/tools/markdown-search'
+import { DOC_READING } from '../openai-session/tools/markdown/outline-gate'
 import { DOCS_DIR, PLAN_DIR, README_GLOB, SPECS_GLOB } from './blind-plan'
 import type { Scope } from './scope-guard'
 
@@ -29,7 +31,7 @@ export function docsEvaluationScope(ignored: string[] = []): Scope {
  * Write and Edit are here for the changes the user asks for, not for the
  * evaluation itself: the scope leaves both to the permission prompt.
  */
-export const DOCS_EVALUATION_TOOLS = ['Read', 'Glob', 'Write', 'Edit', ASK_USER_TOOL]
+export const DOCS_EVALUATION_TOOLS = ['Read', 'Glob', MARKDOWN_SEARCH_TOOL, 'Write', 'Edit', ASK_USER_TOOL]
 
 /** The first message: there is nothing to configure, so the session starts on the job. */
 export function docsEvaluationKickoff(): string {
@@ -47,7 +49,7 @@ Why this matters: a feature here is planned blind. The planner reads \`${DOCS_DI
 
 You judge that arrangement. Not the prose, not whether the docs are right, not whether they are complete: they are meant to be to the point, not complete. Only what a planner cannot find, or finds in a place it cannot point at.
 
-What you may read: \`${DOCS_DIR}/**\`, the README, and every spec under \`${SPECS_GLOB}\`. The docs map above already gives you every doc and every section, so read a doc only when the map does not tell you enough. Nothing else exists for you; do not try.
+What you may read: \`${DOCS_DIR}/**\`, the README, and every spec under \`${SPECS_GLOB}\`. The docs map above already gives you every doc and every section, so read a doc only when the map does not tell you enough. ${DOC_READING} Nothing else exists for you; do not try.
 
 What counts as a finding:
 - a doc long enough that answering one question means reading all of it, where the sections would stand on their own

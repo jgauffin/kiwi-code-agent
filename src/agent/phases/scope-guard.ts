@@ -1,5 +1,8 @@
 import { isAbsolute, matchesGlob, relative, resolve } from 'node:path'
 import type { PreToolUseOutcome, SessionHooks, ToolUse } from '../session/hooks'
+import { MARKDOWN_SEARCH_TOOL } from '../openai-session/tools/markdown-search'
+import { CODE_OUTLINE_TOOL } from '../code-outline/code-outline-tool'
+import { CODE_SEARCH_TOOL } from '../code-outline/code-search'
 
 export type Scope = {
   /** Globs, workspace-relative, of what Read and Glob may see. */
@@ -10,6 +13,15 @@ export type Scope = {
   askable?: string[]
   /** Globs carved out of `readable`; a match is denied even when readable allows it. */
   ignored?: string[]
+}
+
+/**
+ * Whether a file, workspace-relative, is one the phase may read: the rule Read
+ * is held to, for a tool that reads files it finds on its own under a path
+ * the guard already let through.
+ */
+export function readableIn(scope: Scope): (relPath: string) => boolean {
+  return (rel) => !(scope.ignored ?? []).some((g) => matchesGlob(rel, g)) && scope.readable.some((g) => matchesGlob(rel, g))
 }
 
 /**
@@ -32,6 +44,9 @@ export class ScopeGuard implements SessionHooks {
         return this.check(input['file_path'], this.scope.readable, 'read')
       case 'Glob':
       case 'Grep':
+      case MARKDOWN_SEARCH_TOOL:
+      case CODE_OUTLINE_TOOL:
+      case CODE_SEARCH_TOOL:
         return this.check(input['path'] ?? '.', this.scope.readable, 'search', true)
       case 'Write':
       case 'Edit':

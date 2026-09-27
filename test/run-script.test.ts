@@ -66,7 +66,7 @@ describe('RunScript', () => {
       const { ctx, dir } = await context({
         review: async (_title, edits) => {
           reviews.push(edits.map((e) => e.label))
-          return true
+          return { kind: 'allow' }
         },
       })
       await writeFile(join(dir, 'a.ts'), 'let foo = 1\n')
@@ -80,15 +80,22 @@ describe('RunScript', () => {
     })
 
     it('leaves_every_file_untouched_when_the_user_declines', async () => {
-      const { ctx, dir } = await context({ review: async () => false })
+      const { ctx, dir } = await context({ review: async () => ({ kind: 'deny' }) })
       await writeFile(join(dir, 'a.ts'), 'foo')
       const result = await runScriptTool().execute({ script: 'await replace("a.ts", "foo", "bar")' }, ctx)
       expect(result.isError).toBe(true)
       expect(await readFile(join(dir, 'a.ts'), 'utf8')).toBe('foo')
     })
 
+    it('tells_the_model_why_the_user_declined_the_changes', async () => {
+      const { ctx, dir } = await context({ review: async () => ({ kind: 'deny', message: 'rename it in b.ts too' }) })
+      await writeFile(join(dir, 'a.ts'), 'foo')
+      const result = await runScriptTool().execute({ script: 'await replace("a.ts", "foo", "bar")' }, ctx)
+      expect(result.text).toContain('rename it in b.ts too')
+    })
+
     it('lets_a_later_read_see_what_the_script_staged_earlier', async () => {
-      const { ctx, dir } = await context({ review: async () => false })
+      const { ctx, dir } = await context({ review: async () => ({ kind: 'deny' }) })
       await writeFile(join(dir, 'a.ts'), 'one')
       const script = 'await write("a.ts", "two"); return await read("a.ts")'
       const result = await runScriptTool().execute({ script }, ctx)
@@ -103,14 +110,14 @@ describe('RunScript', () => {
     })
 
     it('supports_capture_groups_in_a_regex_replace', async () => {
-      const { ctx, dir } = await context({ review: async () => true })
+      const { ctx, dir } = await context({ review: async () => ({ kind: 'allow' }) })
       await writeFile(join(dir, 'a.ts'), 'get(1) get(2)')
       await runScriptTool().execute({ script: 'await replace("a.ts", "get\\\\((\\\\d)\\\\)", "fetch($1)")' }, ctx)
       expect(await readFile(join(dir, 'a.ts'), 'utf8')).toBe('fetch(1) fetch(2)')
     })
 
     it('previews_the_staged_diff_to_the_script_before_anything_is_applied', async () => {
-      const { ctx, dir } = await context({ review: async () => false })
+      const { ctx, dir } = await context({ review: async () => ({ kind: 'deny' }) })
       await writeFile(join(dir, 'a.ts'), 'foo\n')
       const result = await runScriptTool().execute({ script: 'await replace("a.ts", "foo", "bar"); return preview()' }, ctx)
       expect(result.text).toContain('--- a.ts')
@@ -119,13 +126,13 @@ describe('RunScript', () => {
     })
 
     it('refuses_to_stage_a_write_a_deny_rule_forbids', async () => {
-      const { ctx } = await context({ authorize: async (name) => (name === 'Write' ? 'Blocked: no writes' : undefined), review: async () => true })
+      const { ctx } = await context({ authorize: async (name) => (name === 'Write' ? 'Blocked: no writes' : undefined), review: async () => ({ kind: 'allow' }) })
       const result = await runScriptTool().execute({ script: 'try { await write("a.ts", "x") } catch (e) { return e.message }' }, ctx)
       expect(result.text).toContain('Blocked: no writes')
     })
 
     it('fails_an_edit_whose_text_is_ambiguous', async () => {
-      const { ctx, dir } = await context({ review: async () => true })
+      const { ctx, dir } = await context({ review: async () => ({ kind: 'allow' }) })
       await writeFile(join(dir, 'a.ts'), 'x x')
       const script = 'try { await edit({ file_path: "a.ts", old_string: "x", new_string: "y" }) } catch (e) { return e.message }'
       const result = await runScriptTool().execute({ script }, ctx)

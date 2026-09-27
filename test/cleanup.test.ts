@@ -35,14 +35,23 @@ describe('ScopeGuard for a cleanup run', () => {
 
 describe('cleanup prompt', () => {
   it('names_the_limits_the_scope_and_that_behaviour_stays', () => {
-    const prompt = cleanupPrompt('Order cancellation', cwd, { functionLines: 25, typeLines: 200, fileLines: 0 })
-    expect(prompt).toContain('a function 25 code lines')
-    expect(prompt).toContain('a type 200')
+    const off = { functionLines: 0, typeLines: 0, fileLines: 0 }
+    const prompt = cleanupPrompt('Order cancellation', cwd, { source: { functionLines: 25, typeLines: 200, fileLines: 0 }, tests: off, testGlobs: [] })
     expect(prompt).not.toContain('a file 0')
     expect(prompt).toContain('(a function 25 code lines, a type 200)')
     expect(prompt).toContain('Edit only the files listed and new files in their folders')
     expect(prompt).toContain('Keep behaviour')
     expect(prompt).toContain('the tests are run for you')
+  })
+
+  it('tests_get_their_own_limits_and_stay_one_file_per_tested_file', () => {
+    const prompt = cleanupPrompt('Order cancellation', cwd, {
+      source: { functionLines: 25, typeLines: 0, fileLines: 400 },
+      tests: { functionLines: 60, typeLines: 0, fileLines: 1200 },
+      testGlobs: ['**/*.test.*'],
+    })
+    expect(prompt).toContain('(a function 25 code lines, a file 400; in tests a function 60 code lines, a file 1200)')
+    expect(prompt).toContain('A test file stays one file per tested file')
   })
 
   it('the_kickoff_carries_the_report', () => {

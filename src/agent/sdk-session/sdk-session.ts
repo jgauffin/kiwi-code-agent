@@ -9,7 +9,7 @@ import type {
   SDKMessage,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
-import type { CodeSession, McpControl, McpServerState, PermissionDecision, SessionEvent } from '../session/code-session'
+import { permissionResolved, type CodeSession, type McpControl, type McpServerState, type PermissionDecision, type SessionEvent } from '../session/code-session'
 import type { McpServers } from '../mcp/mcp-config'
 import type { SessionHooks } from '../session/hooks'
 import type { ModelProfile } from '../session/model-profile'
@@ -40,6 +40,8 @@ export type SdkSessionOptions = {
   hooks?: SessionHooks
   /** Replaces Claude Code's own system prompt; phases use this. */
   systemPrompt?: string
+  /** Added to Claude Code's own system prompt when `systemPrompt` does not replace it. */
+  appendSystemPrompt?: string
   /** Restricts the built-in tools to these names. */
   tools?: string[]
   /** Tools this extension owns, served to the engine in-process on top of the built-ins. */
@@ -128,7 +130,7 @@ export class SdkSession implements CodeSession {
     const pending = this.pending.get(requestId)
     if (!pending) return
     this.pending.delete(requestId)
-    this.output.push({ type: 'permission_resolved', requestId, decision: decision.kind })
+    this.output.push(permissionResolved(requestId, decision))
     if (pending.decided) pending.decided(decision)
     else pending.resolve(toPermissionResult(decision, pending.input))
   }
@@ -186,6 +188,8 @@ export class SdkSession implements CodeSession {
     if (this.options.resumeEngineSessionId) options.resume = this.options.resumeEngineSessionId
     if (this.options.hooks) options.hooks = this.sdkHooks(this.options.hooks)
     if (this.options.systemPrompt !== undefined) options.systemPrompt = this.options.systemPrompt
+    else if (this.options.appendSystemPrompt !== undefined)
+      options.systemPrompt = { type: 'preset', preset: 'claude_code', append: this.options.appendSystemPrompt }
     if (this.options.tools) options.tools = this.options.tools
     // The workspace's servers go in as dynamic ones, which the host can
     // replace; the engine's own reading of the file yields to a dynamic
@@ -333,10 +337,7 @@ export class SdkSession implements CodeSession {
         }
       },
       authorize: (name, input) => denyReason(this.options.hooks, use(name, input)),
-      review: async (title, edits) => {
-        const id = crypto.randomUUID()
-        return (await ask(id, 'RunScript', { files: edits.map((e) => e.label) }, { title, edits })).kind === 'allow'
-      },
+      review: (title, edits) => ask(crypto.randomUUID(), 'RunScript', { files: edits.map((e) => e.label) }, { title, edits }),
     }
   }
 
@@ -420,7 +421,7 @@ function toPermissionResult(decision: PermissionDecision, input: Record<string, 
     case 'allow':
       return { behavior: 'allow', updatedInput: input, decisionClassification: 'user_temporary' }
     case 'deny':
-      return { behavior: 'deny', message: decision.message ?? 'Denied by user', decisionClassification: 'user_reject' }
+      return { behavior: 'deny', message: `Denied by user${decision.message ? `: ${decision.message}` : ''}`, decisionClassification: 'user_reject' }
   }
 }
 

@@ -1,5 +1,6 @@
-import { readFile, writeFile } from 'node:fs/promises'
-import { specPath } from './blind-plan'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { WORK_DIR, specPath } from './blind-plan'
 import { decisions, decisionsPath } from './decisions'
 import { reviewPath } from './plan-review'
 import { LEGACY_DECISIONS_SECTION, parseSpecText, specFingerprint } from './spec-model'
@@ -250,6 +251,7 @@ export async function migratePlan(cwd: string, feature: string): Promise<Migrati
     return report
   }
   const before = specText
+  await mkdir(join(cwd, WORK_DIR), { recursive: true })
 
   const legacy = extractLegacyTasks(specText)
   if (legacy.tasks.length > 0) {

@@ -78,6 +78,22 @@ chat-app {
         color: var(--vscode-focusBorder);
       }
 
+      /* The flow stands still until the person acts: warm, with a dot, so it reads apart from a step at work. */
+      &.current.yours {
+        color: var(--vscode-notificationsWarningIcon-foreground, var(--vscode-editorWarning-foreground));
+
+        &::after {
+          content: '';
+          display: inline-block;
+          width: 0.4rem;
+          height: 0.4rem;
+          margin-left: 0.3rem;
+          vertical-align: middle;
+          border-radius: 50%;
+          background: currentColor;
+        }
+      }
+
       &:is(button):hover {
         text-decoration: underline;
         cursor: pointer;
@@ -137,13 +153,21 @@ chat-app {
         color: var(--vscode-button-foreground);
       }
 
+      /* A goto is always the person's act: a pill, not a faint link, so it is not read past. */
       &.goto {
-        background: none;
-        color: var(--vscode-textLink-foreground);
-        padding: 0.2rem 0.3rem;
+        background: var(--vscode-button-secondaryBackground);
+        color: var(--vscode-button-secondaryForeground);
 
         &:hover {
-          text-decoration: underline;
+          background: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-secondaryBackground));
+        }
+
+        /* A run stopped mid-turn on the person: nothing moves until it is answered. */
+        &.blocked {
+          background: var(--vscode-inputValidation-warningBackground);
+          color: inherit;
+          border: 1px solid var(--vscode-inputValidation-warningBorder);
+          animation: pulse 1.2s ease-in-out infinite;
         }
       }
 
@@ -187,8 +211,9 @@ chat-app {
         border-bottom-color: var(--vscode-focusBorder);
       }
 
-      /* The conversation moved on while another tab was open. */
-      &.moved {
+      /* The conversation moved on while another tab was open; the person's next act is on an attention tab. */
+      &.moved,
+      &.attention {
         opacity: 1;
 
         &::after {
@@ -200,6 +225,14 @@ chat-app {
           vertical-align: middle;
           border-radius: 50%;
           background: var(--vscode-charts-blue, var(--vscode-focusBorder));
+        }
+      }
+
+      &.attention {
+        font-weight: 600;
+
+        &::after {
+          background: var(--vscode-notificationsWarningIcon-foreground, var(--vscode-editorWarning-foreground));
         }
       }
     }
@@ -1049,7 +1082,7 @@ chat-app {
         border-bottom-color: var(--vscode-focusBorder);
       }
 
-      &.needs_human .status {
+      &:is(.needs_human, .needs_approval, .needs_answer) .status {
         animation: pulse 1.2s ease-in-out infinite;
       }
 
@@ -1548,6 +1581,18 @@ chat-app {
             opacity: 1;
           }
         }
+      }
+
+      & .deny-reason {
+        display: block;
+        box-sizing: border-box;
+        width: 100%;
+        margin-top: 0.4rem;
+        background: var(--vscode-input-background);
+        color: var(--vscode-input-foreground);
+        border: 1px solid var(--vscode-input-border, transparent);
+        border-radius: 3px;
+        padding: 0.3rem 0.4rem;
       }
 
       & .decision {

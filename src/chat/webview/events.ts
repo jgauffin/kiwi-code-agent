@@ -1,7 +1,7 @@
 import type { SessionMode } from '../../agent/session/session-manager'
 import type { QuestionOutcome } from '../../agent/session/user-question'
 import type { ReviewAction, UserPermissionDecision } from '../protocol'
-import type { Step, Tab } from './plan-step'
+import type { Step, ViewTab } from './plan-step'
 
 export class PromptSubmittedEvent extends Event {
   static readonly type = 'prompt-submitted'
@@ -113,11 +113,11 @@ export class PlanStepSelectedEvent extends Event {
 /** Where to land on a tab: the first row that needs an act, or the item named. */
 export type PlanFocus = { scroll?: boolean; item?: string }
 
-/** Open a tab of the plan view and land somewhere on it: the bar's next-step link, or a link from one tab to a rule on another. */
+/** Open a tab of the plan view, or the chat, and land somewhere on it: the bar's next-step link, or a link from one tab to a rule on another. */
 export class PlanFocusRequestedEvent extends Event {
   static readonly type = 'plan-focus-requested'
   constructor(
-    public readonly tab: Tab,
+    public readonly tab: ViewTab,
     public readonly where: PlanFocus = {},
   ) {
     super(PlanFocusRequestedEvent.type, { bubbles: true })
@@ -207,8 +207,7 @@ export class ReviewActionEvent extends Event {
   }
 }
 
-/** What the feature session shows: one tab of the plan, or the conversation. */
-export type ViewTab = Tab | 'chat'
+export type { ViewTab }
 
 /** A tab picked on the strip. */
 export class PlanViewSelectedEvent extends Event {

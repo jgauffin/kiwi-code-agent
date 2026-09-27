@@ -1,5 +1,10 @@
 import { DOCS_DIR, PLAN_DIR, SPECS_GLOB, featureSlug } from './blind-plan'
 import { KEEP_RULING, decisionsFile } from './decisions'
+import { MARKDOWN_SEARCH_TOOL } from '../openai-session/tools/markdown-search'
+import { DOC_READING } from '../openai-session/tools/markdown/outline-gate'
+import { CODE_OUTLINE_TOOL } from '../code-outline/code-outline-tool'
+import { CODE_READING } from '../code-outline/code-outline-gate'
+import { CODE_SEARCH_TOOL } from '../code-outline/code-search'
 import type { Scope } from './scope-guard'
 import { tasksFile } from './tasks-file'
 import { MAP_ROOT } from '../repo-map/map-files'
@@ -15,7 +20,7 @@ export function reconcileScope(feature: string): Scope {
   }
 }
 
-export const RECONCILE_TOOLS = ['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'Edit', 'Write', 'Skill']
+export const RECONCILE_TOOLS = ['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', MARKDOWN_SEARCH_TOOL, CODE_OUTLINE_TOOL, CODE_SEARCH_TOOL, 'Edit', 'Write', 'Skill']
 
 /**
  * The first prompt of a mapping run; the system prompt carries the
@@ -47,9 +52,9 @@ export function reconcilePrompt(feature: string, cwd: string): string {
 
 The spec at \`${spec}\` under ${cwd} was written blind, from product intent alone, so that the code's mistakes would not become requirements. Your job is the other half, in two parts: find what in the code stands in the feature's way before implementation starts, then say what to do and where. You are not grading the spec. A rule the code accommodates without incident is not mentioned. An empty list of decisions is a valid result.
 
-Read the spec first. Every rule has a name, the bold lead-in of its line; that name is how you refer to it everywhere. Then search the code for what the spec touches: the rules it changes, the behaviour it adds to, the places its terms already live.
+Read the spec first. Every rule has a name, the bold lead-in of its line; that name is how you refer to it everywhere. Then search the code for what the spec touches: the rules it changes, the behaviour it adds to, the places its terms already live. ${CODE_READING}
 
-The spec is the intent for this feature; it was distilled from \`${DOCS_DIR}/**\` and the other features' specs under \`${SPECS_GLOB}\` by a session that read all of them, so do not browse those. A rule may end with a citation of the section it came from, as \`(${DOCS_DIR}/intent/orders.md#Cancellation)\`; open that section only to quote it in a contradiction. A rule without a citation is the planner's own default, the weaker side in a contradiction.
+The spec is the intent for this feature; it was distilled from \`${DOCS_DIR}/**\` and the other features' specs under \`${SPECS_GLOB}\` by a session that read all of them, so do not browse those. A rule may end with a citation of the section it came from, as \`(${DOCS_DIR}/intent/orders.md#Cancellation)\`; open that section only to quote it in a contradiction. ${DOC_READING} A rule without a citation is the planner's own default, the weaker side in a contradiction.
 
 What you look for, each of them a decision the user has to make: a business rule in the code that says otherwise (the human decides which side is right; you present both); existing behaviour the feature would change or break that the spec does not mention; something the spec assumes that the code shows to be wrong.
 
@@ -141,6 +146,10 @@ function toolLine(name: string, raw: unknown): string {
       return clip(`Grep "${text('pattern') ?? ''}" in ${text('path') ?? '.'}`)
     case 'Glob':
       return clip(`Glob ${text('pattern') ?? ''} in ${text('path') ?? '.'}`)
+    case 'CodeOutline':
+      return clip(`CodeOutline ${text('symbol') ? `${text('symbol')} in ` : ''}${text('path') ?? ''}`)
+    case 'CodeSearch':
+      return clip(`CodeSearch "${text('query') ?? ''}" in ${text('path') ?? '.'}`)
     case 'Skill':
       return clip(`Skill ${text('name') ?? text('skill') ?? ''}`)
     default:

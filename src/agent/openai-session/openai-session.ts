@@ -1,4 +1,4 @@
-import type { CodeSession, FileEditChange, McpControl, PermissionDecision, SessionEvent, TurnUsage } from '../session/code-session'
+import { permissionResolved, type CodeSession, type FileEditChange, type McpControl, type PermissionDecision, type SessionEvent, type TurnUsage } from '../session/code-session'
 import type { QuestionOutcome, UserQuestionRequest } from '../session/user-question'
 import type { SessionHooks, ToolUse } from '../session/hooks'
 import { denyReason, gateCall } from './tools/script-gate'
@@ -84,7 +84,7 @@ export class OpenAiSession implements CodeSession {
     const resolve = this.pending.get(requestId)
     if (!resolve) return
     this.pending.delete(requestId)
-    this.emit({ type: 'permission_resolved', requestId, decision: decision.kind })
+    this.emit(permissionResolved(requestId, decision))
     resolve(decision)
   }
 
@@ -275,10 +275,7 @@ export class OpenAiSession implements CodeSession {
       ask: (request) => this.askUser(callId, request),
       call: (name, input) => this.runTool({ id: nextId(), name, arguments: JSON.stringify(input) }, signal),
       authorize: (name, input) => denyReason(this.options.hooks, { toolName: name, input, toolUseId: nextId() }),
-      review: async (title, edits) => {
-        const decision = await this.askPermission(nextId(), 'RunScript', { files: edits.map((e) => e.label) }, signal, { title, edits })
-        return decision.kind === 'allow'
-      },
+      review: (title, edits) => this.askPermission(nextId(), 'RunScript', { files: edits.map((e) => e.label) }, signal, { title, edits }),
     }
   }
 

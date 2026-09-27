@@ -45,7 +45,7 @@ describe('what a docs evaluation may touch', () => {
   })
 
   it('the_session_gets_the_tools_a_reader_and_an_asked_for_edit_need_and_no_others', () => {
-    expect(DOCS_EVALUATION_TOOLS).toEqual(['Read', 'Glob', 'Write', 'Edit', ASK_USER_TOOL])
+    expect(DOCS_EVALUATION_TOOLS).toEqual(['Read', 'Glob', 'MarkdownSearch', 'Write', 'Edit', ASK_USER_TOOL])
   })
 })
 

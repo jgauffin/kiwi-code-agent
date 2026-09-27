@@ -13,7 +13,16 @@ export type SettingsSnapshot = {
   permissions: { allow: string[]; deny: string[] }
   verify: VerifyRule[]
   verifyFailureBudget: number
-  cleanup: { functionLines: number; typeLines: number; fileLines: number; ignore: string[] }
+  cleanup: {
+    functionLines: number
+    typeLines: number
+    fileLines: number
+    tests: string[]
+    testFunctionLines: number
+    testTypeLines: number
+    testFileLines: number
+    ignore: string[]
+  }
   planIgnore: string[]
   nodePath: string
   traceEngine: boolean
@@ -33,6 +42,10 @@ export type EditableSettings = {
   'cleanup.functionLines': number
   'cleanup.typeLines': number
   'cleanup.fileLines': number
+  'cleanup.tests': string[]
+  'cleanup.testFunctionLines': number
+  'cleanup.testTypeLines': number
+  'cleanup.testFileLines': number
   'cleanup.ignore': string[]
   planIgnore: string[]
 }

@@ -28,6 +28,7 @@ function plan(over: Partial<PlanState> = {}): PlanState {
     pendingDecisions: 0,
     applyingRulings: false,
     reviewingDocs: false,
+    atWork: true,
     ...over,
   }
 }
@@ -50,6 +51,13 @@ describe('planStep', () => {
     const step = planStep({ ...bare, status: 'missing', stage: 'missing', commentable: false })
     expect(step.current).toBe('plan')
     expect(step.next).toMatchObject({ kind: 'waiting' })
+  })
+
+  it('an_implemented_spec_whose_working_files_are_swept_is_done_and_opens_on_the_spec', () => {
+    const implemented = plan({ status: 'implemented', stage: 'verified', mappable: false, commentable: false })
+    const step = planStep(implemented)
+    expect(step.next).toMatchObject({ kind: 'done' })
+    expect(tabFor(step.current, implemented)).toBe('spec')
   })
 
   it('an_uncommented_spec_offers_mapping_from_the_review_step', () => {
@@ -122,7 +130,7 @@ describe('planStep', () => {
 
   it('an_approved_plan_offers_implement_only_while_nothing_is_building_the_tasks', () => {
     expect(planStep(plan({ stage: 'mapped', status: 'approved', commentable: false, implementable: true })).next).toMatchObject({ action: 'implement' })
-    expect(planStep(plan({ stage: 'mapped', status: 'approved', commentable: false })).next).toMatchObject({ kind: 'waiting' })
+    expect(planStep(plan({ stage: 'mapped', status: 'approved', commentable: false })).next).toEqual({ kind: 'waiting', text: 'the implementer is starting' })
   })
 
   it('right_after_approval_the_planner_lists_what_the_docs_should_say_and_the_implementation_follows_it', () => {
@@ -188,6 +196,53 @@ describe('planStep', () => {
   it('after_approval_only_passed_steps_are_reached', () => {
     const reached = planStep(plan({ stage: 'under_development', status: 'approved', commentable: false, tasks: [task('done')] })).reached
     expect(reached).toEqual(['plan', 'review', 'map', 'rule', 'approve', 'implement'])
+  })
+})
+
+describe('whose turn it is', () => {
+  const building = { stage: 'under_development' as const, status: 'approved' as const, commentable: false, tasks: [task('tested'), task('open')] }
+
+  it('a_question_in_a_run_takes_the_bar_and_points_at_the_chat', () => {
+    const step = planStep(plan({ ...building, blocked: { on: 'answer', mode: 'implement' } }))
+    expect(step.current).toBe('implement')
+    expect(step.next).toMatchObject({ kind: 'goto', tab: 'chat', label: 'Question from the implementer' })
+    expect(step.yours).toBe(true)
+  })
+
+  it('a_permission_prompt_points_at_the_chat_over_any_other_act', () => {
+    const open = decision({ proposals: ['drop it'] })
+    const step = planStep(plan({ stage: 'mapped', decisions: [open], pendingDecisions: 1, blocked: { on: 'approval', mode: 'plan' } }))
+    expect(step.next).toMatchObject({ kind: 'goto', tab: 'chat', label: 'Allow or deny: the planner' })
+    expect(step.goto).toBeUndefined()
+  })
+
+  it('an_implementer_that_stopped_with_tasks_left_offers_to_carry_on', () => {
+    const step = planStep(plan({ ...building, atWork: false, implementable: true }))
+    expect(step.next).toMatchObject({ kind: 'action', action: 'implement', label: 'Continue implementing' })
+    expect(step.goto).toMatchObject({ tab: 'chat' })
+    expect(step.yours).toBe(true)
+  })
+
+  it('a_run_that_stopped_with_nothing_to_restart_it_points_at_the_chat', () => {
+    const { body: _body, spec: _spec, ...bare } = plan()
+    const writing = planStep({ ...bare, status: 'missing', stage: 'missing', commentable: false, atWork: false })
+    expect(writing.next).toMatchObject({ kind: 'goto', tab: 'chat', label: 'The planner stopped' })
+    const answering = planStep(plan({ stage: 'under_review', atWork: false, review: { rounds: [round({ submittedAt: 't', comments: [{ target: 'Cancel', text: 'no' }] })] } }))
+    expect(answering.next).toMatchObject({ kind: 'goto', tab: 'chat', label: 'The planner stopped' })
+    expect(answering.yours).toBe(true)
+  })
+
+  it('a_stale_board_nobody_is_re_mapping_offers_to_map_again', () => {
+    expect(planStep(plan({ stage: 'mapped', stale: true, atWork: false })).next).toMatchObject({ kind: 'action', action: 'map', label: 'Map again' })
+  })
+
+  it('a_step_at_work_is_the_agents_and_an_act_or_an_offer_is_yours', () => {
+    expect(planStep(plan({ mapping: { live: true, text: 'reading src' } })).yours).toBe(false)
+    expect(planStep(plan(building)).yours).toBe(false)
+    expect(planStep(plan({ stage: 'mapped', approvable: true })).yours).toBe(true)
+    const verified = { stage: 'verified' as const, status: 'approved' as const, commentable: false, atWork: false }
+    expect(planStep(plan({ ...verified, cleanupSweep: { units: [unit()] } })).yours).toBe(true)
+    expect(planStep(plan({ ...verified, cleanupSweep: { units: [] } })).yours).toBe(false)
   })
 })
 

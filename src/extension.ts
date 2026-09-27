@@ -25,6 +25,9 @@ import { redoMappingTool } from './agent/openai-session/tools/redo-mapping'
 import { jsonQueryTool, jsonSchemaTool } from './agent/openai-session/tools/json'
 import { skillTool } from './agent/openai-session/tools/skill'
 import { copyTool, moveTool } from './agent/openai-session/tools/move-copy'
+import { codeOutlineTool } from './agent/code-outline/code-outline-tool'
+import { CODE_READING, CodeOutlineGate } from './agent/code-outline/code-outline-gate'
+import { codeSearchTool } from './agent/code-outline/code-search'
 import type { Tool } from './agent/openai-session/tools/tool'
 import { indexSkills } from './agent/skills/skill-index'
 import { MCP_CONFIG_FILE, readMcpConfig } from './agent/mcp/mcp-config'
@@ -38,12 +41,14 @@ import { packageScripts } from './agent/permissions/package-scripts'
 import { PermissionPolicy, type PermissionRules } from './agent/permissions/permission-policy'
 import type { ProjectCommands } from './agent/permissions/project-commands'
 import { WriteAllowance } from './agent/permissions/write-allowance'
-import { ScopeGuard } from './agent/phases/scope-guard'
-import { BLIND_PLAN_TOOLS, blindPlanPrompt, blindPlanScope } from './agent/phases/blind-plan'
+import { ScopeGuard, readableIn } from './agent/phases/scope-guard'
+import { BLIND_PLAN_TOOLS, PLAN_DIR, blindPlanPrompt, blindPlanScope } from './agent/phases/blind-plan'
+import { markdownSearchTool } from './agent/openai-session/tools/markdown-search'
+import { DOC_READING, OutlineGate } from './agent/openai-session/tools/markdown/outline-gate'
 import { RECONCILE_TOOLS, reconcilePrompt, reconcileScope } from './agent/phases/reconcile'
 import { IMPLEMENT_TOOLS, implementPrompt } from './agent/phases/implement'
 import { CLEANUP_TOOLS, cleanupPrompt, cleanupScope } from './agent/phases/cleanup'
-import type { Thresholds } from './agent/cleanup/oversized'
+import { sweepPlans } from './agent/phases/plan-housekeeping'
 import { SpecContract } from './agent/phases/spec-model'
 import { withRepoMap, workspaceRepoMap } from './agent/repo-map/session-context'
 import { withDocsMap, workspaceDocsMap } from './agent/docs-map/session-context'
@@ -62,7 +67,7 @@ import {
 import { openDraftPlanAction } from './chat/open-draft-plan'
 import { watchOwnBundle } from './dev-reload'
 import { SETTINGS_PANEL_TYPE, SettingsPanel } from './settings/settings-panel'
-import { SettingsStore, readModelSettings, secretKey, type ConfigPort } from './settings/settings-store'
+import { SettingsStore, readCleanupLimits, readModelSettings, secretKey, type ConfigPort } from './settings/settings-store'
 
 /** The `kiwiAgent` section as the settings store and the session factory both read it. */
 function configPort(): ConfigPort {
@@ -83,13 +88,22 @@ function configPort(): ConfigPort {
  * and shell tools. A mode's tool set decides which of them it is offered; a
  * chat session names none, so it gets them all.
  */
-const OWN_TOOLS: Tool[] = [jsonSchemaTool, jsonQueryTool, askUserTool, moveTool, copyTool, redoMappingTool, runScriptTool()]
+const OWN_TOOLS: Tool[] = [jsonSchemaTool, jsonQueryTool, codeOutlineTool, askUserTool, moveTool, copyTool, redoMappingTool, runScriptTool()]
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('KiwiAgent')
   // Without a folder open the engine still needs a working directory that exists.
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? context.globalStorageUri.fsPath
   mkdirSync(workspaceRoot, { recursive: true })
+  void sweepPlans(workspaceRoot, new Date()).then(
+    (report) => {
+      for (const path of report.moved) output.appendLine(`plan housekeeping: moved ${path} to the working files`)
+      for (const path of report.blocked) output.appendLine(`plan housekeeping: left ${path}, the working files already hold one of that name`)
+      for (const path of report.implemented) output.appendLine(`plan housekeeping: marked ${path} implemented`)
+      for (const path of report.removed) output.appendLine(`plan housekeeping: removed ${path}`)
+    },
+    (error: unknown) => output.appendLine(`plan housekeeping failed: ${error instanceof Error ? error.message : String(error)}`),
+  )
   const cliPath = vscode.Uri.joinPath(context.extensionUri, 'dist', 'cli.mjs').fsPath
   // The skills this extension ships, as a plugin folder the Claude engine loads and a skill root ours reads.
   const pluginPath = vscode.Uri.joinPath(context.extensionUri, 'dist', 'plugin').fsPath
@@ -111,7 +125,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   /** The cleanup after a feature's tests pass: the `kiwiAgent.cleanup` limits, read when the sizes are measured. */
   const sizeLimits: SizeLimits = {
-    thresholds: () => cleanupThresholds(),
+    limits: () => readCleanupLimits(configPort()),
     ignore: () => vscode.workspace.getConfiguration('kiwiAgent').get<string[]>('cleanup.ignore', []),
   }
 
@@ -181,17 +195,22 @@ export function activate(context: vscode.ExtensionContext): void {
     )
   }
 
-  /** What a session's mode dictates, independent of engine: hooks, prompt, tool set. */
-  const setupFor = async (record: SessionRecord): Promise<{ hooks?: SessionHooks; systemPrompt?: string; toolNames?: string[] }> => {
+  /** What a session's mode dictates, independent of engine: hooks, prompt, tool set, and the files a search may hand back. */
+  type ModeSetup = { hooks?: SessionHooks; systemPrompt?: string; toolNames?: string[]; readable?: (relPath: string) => boolean }
+
+  const setupFor = async (record: SessionRecord): Promise<ModeSetup> => {
     const setup = await modeSetup(record)
     // Last in line, so a call another hook denies is never captured: nothing changed.
     const recorder = new FileEditRecorder({ cwd: workspaceRoot, runDir: RunLog.forSession(workspaceRoot, record.id).dir })
     editRecorders.set(record.id, recorder)
+    // After the mode's scope, so a doc the session may not read is never outlined. The docs map
+    // describes every section, so it reads docs whole; plan files are the work and are read whole too.
+    const gate = record.mode === 'docs-map' ? [] : [new OutlineGate(workspaceRoot, [`${PLAN_DIR}/**`]), new CodeOutlineGate(workspaceRoot)]
     // The permission rules apply to every session; a mode's own hooks may still deny.
-    return { ...setup, hooks: composeHooks(policyFor(record.id), ...(setup.hooks ? [setup.hooks] : []), recorder) }
+    return { ...setup, hooks: composeHooks(policyFor(record.id), ...(setup.hooks ? [setup.hooks] : []), ...gate, recorder) }
   }
 
-  const modeSetup = async (record: SessionRecord): Promise<{ hooks?: SessionHooks; systemPrompt?: string; toolNames?: string[] }> => {
+  const modeSetup = async (record: SessionRecord): Promise<ModeSetup> => {
     switch (record.mode) {
       case 'chat':
         return switchableHooks(record)
@@ -205,19 +224,22 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       case 'plan': {
         if (!record.feature) throw new Error('A plan session needs a feature name')
-        const ignored = planIgnore()
+        const scope = blindPlanScope(record.feature, planIgnore())
         return {
           // The contract answers on the write that broke it, so the planner fixes the spec in the same turn.
-          hooks: composeHooks(new ScopeGuard(workspaceRoot, blindPlanScope(record.feature, ignored)), new SpecContract(workspaceRoot)),
+          hooks: composeHooks(new ScopeGuard(workspaceRoot, scope), new SpecContract(workspaceRoot)),
           systemPrompt: await withDocs(record, blindPlanPrompt(record.feature, workspaceRoot)),
           toolNames: BLIND_PLAN_TOOLS,
+          readable: readableIn(scope),
         }
       }
       case 'docs': {
+        const scope = docsEvaluationScope(planIgnore())
         return {
-          hooks: new ScopeGuard(workspaceRoot, docsEvaluationScope(planIgnore())),
+          hooks: new ScopeGuard(workspaceRoot, scope),
           systemPrompt: await withDocs(record, docsEvaluationPrompt(workspaceRoot)),
           toolNames: DOCS_EVALUATION_TOOLS,
+          readable: readableIn(scope),
         }
       }
       case 'docs-map': {
@@ -240,7 +262,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!record.feature || !record.files) throw new Error('A cleanup session needs a feature name and the files to split')
         return {
           hooks: new ScopeGuard(workspaceRoot, cleanupScope(record.files)),
-          systemPrompt: cleanupPrompt(record.feature, workspaceRoot, cleanupThresholds()),
+          systemPrompt: cleanupPrompt(record.feature, workspaceRoot, readCleanupLimits(configPort())),
           toolNames: CLEANUP_TOOLS,
         }
       }
@@ -258,13 +280,14 @@ export function activate(context: vscode.ExtensionContext): void {
     const { profile } = record
     const setup = await setupFor(record)
     const allowed = (tools: Tool[]) => (setup.toolNames ? tools.filter((t) => setup.toolNames!.includes(t.name)) : tools)
+    const ownTools = [...OWN_TOOLS, markdownSearchTool(setup.readable), codeSearchTool(setup.readable)]
     // A mode with a tool set of its own names no MCP server; only a chat takes the workspace's.
     const mcpServers = setup.toolNames ? undefined : await mcp.current()
     switch (profile.engine) {
       case 'claude-sdk':
         return new SdkSession({
-          ownTools: allowed(OWN_TOOLS),
-          scriptTools: [globTool, grepTool, bashTool(), jsonSchemaTool, jsonQueryTool],
+          ownTools: allowed(ownTools),
+          scriptTools: [globTool, grepTool, bashTool(), jsonSchemaTool, jsonQueryTool, codeOutlineTool],
           ...(mcpServers ? { mcpServers } : {}),
           id: record.id,
           profile,
@@ -275,7 +298,7 @@ export function activate(context: vscode.ExtensionContext): void {
           ...(record.engineSessionId ? { resumeEngineSessionId: record.engineSessionId } : {}),
           env: { CLAUDE_AGENT_SDK_CLIENT_APP: 'kiwi-agent-vscode/0.0.1' },
           ...(setup.hooks ? { hooks: setup.hooks } : {}),
-          ...(setup.systemPrompt !== undefined ? { systemPrompt: setup.systemPrompt } : {}),
+          ...(setup.systemPrompt !== undefined ? { systemPrompt: setup.systemPrompt } : { appendSystemPrompt: `${DOC_READING}\n${CODE_READING}` }),
           ...(setup.toolNames ? { tools: setup.toolNames } : {}),
           query,
           onStderr: (chunk) => output.append(chunk),
@@ -290,7 +313,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!apiKey) throw new Error(`No API key stored for "${profile.apiKeySecret}". Set it on the provider in KiwiAgent settings.`)
         // Indexed per session so a skill added to the workspace or the user profile shows up on the next one.
         const skills = await indexSkills(workspaceRoot, undefined, join(pluginPath, 'skills'))
-        const allTools = [readTool, writeTool, editTool, globTool, grepTool, ...OWN_TOOLS, bashTool(), ...(skills.length ? [skillTool(skills)] : [])]
+        const allTools = [readTool, writeTool, editTool, globTool, grepTool, ...ownTools, bashTool(), ...(skills.length ? [skillTool(skills)] : [])]
         // A session that ran before, or continues one that did, picks its conversation up from the run log.
         const resume = record.engineSessionId
           ? { engineSessionId: record.engineSessionId, history: messagesFromEvents(await sessions.conversation(record.id)) }
@@ -424,15 +447,6 @@ function profileFor(mode: SessionMode): ModelProfile {
 function registeredModels(): ModelProfile[] {
   const { providers } = readModelSettings(configPort())
   return providers.flatMap((provider) => provider.models.map((model) => providerModel(provider, model)))
-}
-
-function cleanupThresholds(): Thresholds {
-  const config = vscode.workspace.getConfiguration('kiwiAgent')
-  return {
-    functionLines: config.get<number>('cleanup.functionLines', 25),
-    typeLines: config.get<number>('cleanup.typeLines', 200),
-    fileLines: config.get<number>('cleanup.fileLines', 400),
-  }
 }
 
 /** Read on every tool call, so a rule just written applies at once. */

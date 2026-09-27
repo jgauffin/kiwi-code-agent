@@ -116,6 +116,7 @@ describe('PermissionPolicy', () => {
     const p = policy({})
     expect(await use(p, 'Read', { file_path: 'src/a.ts' })).toEqual({ allow: true })
     expect(await use(p, 'Grep', { pattern: 'x' })).toEqual({ allow: true })
+    expect(await use(p, 'MarkdownSearch', { query: 'x', path: 'docs' })).toEqual({ allow: true })
     expect(await use(p, 'Bash', { command: 'git status && ls' })).toEqual({ allow: true })
     expect(await use(p, 'PowerShell', { command: 'git status; ls' })).toEqual({ allow: true })
     expect(await use(p, 'PowerShell', { command: 'npm test' })).toBeUndefined()

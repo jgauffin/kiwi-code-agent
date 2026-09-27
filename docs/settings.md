@@ -32,4 +32,4 @@ Claude Code's layout, at the user level and in the workspace. On the own-loop en
 
 ## Logs
 
-Session events are logged to `.agent/runs/<session id>/events.jsonl` in the workspace; add `.agent/` to the workspace's `.gitignore`. Generated context lives beside the logs: the repo map under `.agent/repo-map/` and the docs map under `.agent/docs-map/`, both rebuilt from the workspace and safe to delete.
+Session events are logged to `.agent/runs/<session id>/events.jsonl` in the workspace; add `.agent/` to the workspace's `.gitignore`. Generated context lives beside the logs: the repo map under `.agent/repo-map/` and the docs map under `.agent/docs-map/`, both rebuilt from the workspace and safe to delete. A feature's review, decisions and tasks live under `.agent/plan/` until the feature is finished (see [plan-sessions.md](plan-sessions.md)).

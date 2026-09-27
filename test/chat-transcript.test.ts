@@ -99,6 +99,19 @@ describe('finished steps in the transcript', () => {
 
     expect(step(view).classList.contains('failed')).toBe(true)
   })
+
+  it('a_collapsed_read_names_the_lines_it_read_and_a_whole_file_read_names_none', () => {
+    const view = transcript()
+    const summary = (input: unknown) => {
+      view.reset([{ type: 'tool_call', toolUseId: 't1', name: 'Read', input }])
+      return step(view).querySelector('summary')!.textContent
+    }
+
+    expect(summary({ file_path: 'src/x.ts', offset: 120, limit: 30 })).toBe('Read src/x.ts:120–149')
+    expect(summary({ file_path: 'src/x.ts', limit: 50 })).toBe('Read src/x.ts:1–50')
+    expect(summary({ file_path: 'src/x.ts', offset: 300 })).toBe('Read src/x.ts:300–')
+    expect(summary({ file_path: 'src/x.ts' })).toBe('Read src/x.ts')
+  })
 })
 
 describe('file edits in the transcript', () => {

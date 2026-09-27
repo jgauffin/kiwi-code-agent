@@ -183,6 +183,66 @@ describe('a call that is not a shell command', () => {
   })
 })
 
+describe('the reason for a denial', () => {
+  const editRequest = (): Request => ({ type: 'permission_request', requestId: 'e1', toolName: 'Edit', input: { file_path: 'a.ts' } })
+  const reason = (c: Card) => c.querySelector<HTMLInputElement>('input.deny-reason')
+  const type = (c: Card, text: string) => {
+    const input = reason(c)!
+    input.value = text
+    input.dispatchEvent(new Event('input'))
+  }
+  const press = (c: Card, label: string) => [...c.querySelectorAll('button')].find((b) => b.textContent === label)!.click()
+
+  it('goes_to_the_model_with_the_denial', () => {
+    const { card: c, decisions } = card(editRequest())
+
+    type(c, 'use the existing helper')
+    press(c, 'Deny')
+
+    expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'deny', message: 'use the existing helper' }])
+  })
+
+  it('left_blank_denies_without_a_message', () => {
+    const { card: c, decisions } = card(editRequest())
+
+    type(c, '   ')
+    press(c, 'Deny')
+
+    expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'deny' }])
+  })
+
+  it('is_not_sent_when_the_call_is_allowed', () => {
+    const { card: c, decisions } = card(editRequest())
+
+    type(c, 'changed my mind')
+    press(c, 'Allow')
+
+    expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'allow' }])
+  })
+
+  it('typed_before_a_shell_line_is_answered_survives_and_rides_on_a_later_lines_denial', () => {
+    const { card: c, decisions } = card(shellRequest())
+
+    type(c, 'run the narrow test')
+    click(rows(c)[0]!, 'Allow npm run for session')
+    expect(reason(c)?.value).toBe('run the narrow test')
+    click(rows(c)[1]!, 'Deny')
+
+    expect(decisions.map((d) => d.decision)).toEqual([
+      { kind: 'deny', message: 'run the narrow test', remember: { session: ['Bash(npm run:*)'], project: [] } },
+    ])
+  })
+
+  it('is_shown_on_the_denied_card_in_place_of_the_field', () => {
+    const { card: c } = card(editRequest())
+
+    c.resolve('deny', 'use the existing helper')
+
+    expect(reason(c)).toBeNull()
+    expect(c.querySelector('.decision')?.textContent).toBe('Denied: use the existing helper')
+  })
+})
+
 describe('a shell step in the transcript', () => {
   it('is_named_by_its_description_and_shows_its_commands_one_per_line', () => {
     const view = new ChatTranscript()

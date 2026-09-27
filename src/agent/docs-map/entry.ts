@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import type { PostToolUseOutcome, SessionHooks, ToolUse } from '../session/hooks'
+import { parseSections } from '../openai-session/tools/markdown/outline'
 import { DOCS_MAP_ROOT, ENTRY_DIR } from './map-files'
 
 /**
@@ -31,29 +32,16 @@ export type DocsMapEntry = {
 const HEADING_LINE = /^-\s+`#(.+)`\s*:\s*(.+)$/
 const FRONT_MATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/
 const DOC_FIELD = /^doc:\s*(.+)$/m
-const FENCE = /^\s*(```|~~~)/
-/** `##` and `###` only: the title says what the doc is, and nothing deeper is worth a line of its own. */
-const HEADING = /^(#{2,3})\s+(.+?)\s*#*\s*$/
 
 /**
- * The headings of a doc, in file order, as a citation would name them. Lines
- * inside a fenced block are examples, not structure: the spec contract is
- * quoted as fenced markdown in more than one doc here, and every `##` in it
- * would otherwise become an anchor that does not exist.
+ * The headings of a doc, in file order, as a citation would name them.
+ * `##` and `###` only: the title says what the doc is, and nothing deeper is
+ * worth a line of its own.
  */
 export function docHeadings(text: string): string[] {
-  const headings: string[] = []
-  let fenced = false
-  for (const raw of text.split(/\r?\n/)) {
-    if (FENCE.test(raw)) {
-      fenced = !fenced
-      continue
-    }
-    if (fenced) continue
-    const match = HEADING.exec(raw)
-    if (match) headings.push(match[2]!.trim())
-  }
-  return headings
+  return parseSections(text)
+    .filter((s) => s.level === 2 || s.level === 3)
+    .map((s) => s.heading)
 }
 
 /** Reads the entry as written. What does not fit the grammar is a problem, never dropped in silence. */

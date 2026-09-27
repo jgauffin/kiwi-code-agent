@@ -19,12 +19,13 @@ const run = async (command: string, cwd: string) => {
   return outcome
 }
 
-const board = (...lines: string[]) => writeFile(join(dir, 'plan', 'order-cancellation.tasks.md'), `# Tasks\n\n${lines.join('\n')}\n`)
+const board = (...lines: string[]) => writeFile(join(dir, '.agent', 'plan', 'order-cancellation.tasks.md'), `# Tasks\n\n${lines.join('\n')}\n`)
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'verify-'))
   await mkdir(join(dir, 'src', 'Api', 'Orders'), { recursive: true })
   await mkdir(join(dir, 'plan'))
+  await mkdir(join(dir, '.agent', 'plan'), { recursive: true })
   await writeFile(join(dir, 'src', 'Api', 'Api.csproj'), '<Project/>')
   await writeFile(join(dir, 'src', 'Api', 'Orders', 'Order.cs'), 'class Order {}')
   await writeFile(join(dir, 'package.json'), '{}')
@@ -73,7 +74,7 @@ describe('runVerification', () => {
     const result = await runVerification({ cwd: dir, feature: 'Order cancellation', rules, run, now: '2026-09-14T10:00:00Z' })
     expect(runs).toHaveLength(2)
     expect(result.failures).toEqual([])
-    const tasks = parseTasks(await readFile(join(dir, 'plan', 'order-cancellation.tasks.md'), 'utf8'))
+    const tasks = parseTasks(await readFile(join(dir, '.agent', 'plan', 'order-cancellation.tasks.md'), 'utf8'))
     expect(tasks.verification).toMatchObject({ at: '2026-09-14T10:00:00Z', ok: true })
     expect(tasks.verification?.text).toContain('`npm test` in .')
   })
@@ -92,7 +93,7 @@ describe('runVerification', () => {
     expect(result.record.text).toBe('`npm test` in .')
     expect(result.failures[0]?.output).toBe('[...]\n' + 'x'.repeat(11) + 'THE ERROR')
     const prompt = verificationHandoffPrompt('Order cancellation', result.failures, dir)
-    expect(prompt).toContain('plan/order-cancellation.tasks.md')
+    expect(prompt).toContain('.agent/plan/order-cancellation.tasks.md')
     expect(prompt).toContain('`npm test` in .')
     expect(prompt).toContain('THE ERROR')
     expect(prompt).toContain('runs again as soon as you stop')

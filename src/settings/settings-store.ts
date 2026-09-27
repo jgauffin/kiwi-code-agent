@@ -1,3 +1,4 @@
+import type { Limits } from '../agent/cleanup/oversized'
 import { type ModelChoice, type Profile, type Provider } from '../agent/session/model-profile'
 import { STEPS } from '../agent/session/session-manager'
 import type { VerifyRule } from '../agent/phases/verification'
@@ -46,6 +47,10 @@ const TARGETS: Record<SettingKey | 'profiles' | 'providers', SettingsTarget> = {
   'cleanup.functionLines': 'workspace',
   'cleanup.typeLines': 'workspace',
   'cleanup.fileLines': 'workspace',
+  'cleanup.tests': 'workspace',
+  'cleanup.testFunctionLines': 'workspace',
+  'cleanup.testTypeLines': 'workspace',
+  'cleanup.testFileLines': 'workspace',
   'cleanup.ignore': 'workspace',
   planIgnore: 'workspace',
 }
@@ -61,6 +66,23 @@ export function readModelSettings(config: ConfigPort): ModelSettings {
   const active = config.get('activeProfile', '')
   if (!needsMigration(providers)) return { providers, profiles, activeProfile: active }
   return migrateModelSettings(config.get<LegacyProfile[]>('profiles', []), active, config.get('planProfile', ''))
+}
+
+/** The cleanup's size limits, shared with the sweep so it and the settings page read the same defaults. */
+export function readCleanupLimits(config: ConfigPort): Limits {
+  return {
+    source: {
+      functionLines: config.get('cleanup.functionLines', 25),
+      typeLines: config.get('cleanup.typeLines', 200),
+      fileLines: config.get('cleanup.fileLines', 400),
+    },
+    tests: {
+      functionLines: config.get('cleanup.testFunctionLines', 60),
+      typeLines: config.get('cleanup.testTypeLines', 600),
+      fileLines: config.get('cleanup.testFileLines', 1200),
+    },
+    testGlobs: config.get<string[]>('cleanup.tests', []),
+  }
 }
 
 export class SettingsStore {
@@ -80,12 +102,7 @@ export class SettingsStore {
       permissions: { allow: this.config.get<string[]>('permissions.allow', []), deny: this.config.get<string[]>('permissions.deny', []) },
       verify: this.config.get<VerifyRule[]>('verify', []),
       verifyFailureBudget: this.config.get('verifyFailureBudget', 3),
-      cleanup: {
-        functionLines: this.config.get('cleanup.functionLines', 25),
-        typeLines: this.config.get('cleanup.typeLines', 200),
-        fileLines: this.config.get('cleanup.fileLines', 400),
-        ignore: this.config.get<string[]>('cleanup.ignore', []),
-      },
+      cleanup: this.cleanup(),
       planIgnore: this.config.get<string[]>('planIgnore', []),
       nodePath: this.config.get('nodePath', ''),
       traceEngine: this.config.get('traceEngine', false),
@@ -156,6 +173,18 @@ export class SettingsStore {
 
   private models(): ModelSettings {
     return readModelSettings(this.config)
+  }
+
+  private cleanup(): SettingsSnapshot['cleanup'] {
+    const { source, tests, testGlobs } = readCleanupLimits(this.config)
+    return {
+      ...source,
+      tests: testGlobs,
+      testFunctionLines: tests.functionLines,
+      testTypeLines: tests.typeLines,
+      testFileLines: tests.fileLines,
+      ignore: this.config.get<string[]>('cleanup.ignore', []),
+    }
   }
 
   /**
