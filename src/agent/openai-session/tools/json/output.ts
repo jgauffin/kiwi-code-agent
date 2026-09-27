@@ -6,9 +6,6 @@
 
 import { LongString } from "./scanner.js";
 
-/** Ceiling on the JSON text a single tool call may return. */
-export const MAX_RESPONSE_BYTES = 32 * 1024;
-
 export interface Truncation {
   reason: "limit" | "response_bytes";
   rows_omitted: number;

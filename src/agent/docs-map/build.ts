@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { diffDocs, readDocsIndex, scanDocs, writeDocsIndex, type DocsDiff, type DocsIndex } from './doc-index'
 import { checkEntry, docHeadings, parseEntry, type DocsMapEntry } from './entry'
-import { SUMMARY_FILE, byPath, docsMapRoot, entryPath, listEntries, readMapFile, removeEntry, writeMapFile } from './map-files'
+import { SUMMARY_FILE, byPath, entryPath, listEntries, readMapFile, removeEntry, writeMapFile } from './map-files'
 import { renderDocsSummary } from './summary'
 
 /**
@@ -81,5 +81,3 @@ async function readEntry(cwd: string, doc: string): Promise<DocsMapEntry | undef
   if (source === undefined) return undefined
   return checkEntry(entry, docHeadings(source)).length === 0 ? entry : undefined
 }
-
-export const docsMapDir = (cwd: string): string => docsMapRoot(cwd)

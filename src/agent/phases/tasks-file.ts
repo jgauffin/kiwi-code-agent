@@ -29,7 +29,7 @@ export type Task = {
   files: string[]
   /** Paths the mapping run read to reach the task: what the implementer starts from and does not have to find again. */
   context: string[]
-  /** The mapper's instruction to the implementer, markdown: the steps, the symbols to change, the pattern to follow, so building does not start with discovery. Empty when the board carries none. */
+  /** The mapper's note to the implementer, markdown: what reading the files would not tell (the pattern to follow, a constraint the code imposes, what not to touch). Empty when the board carries none. */
   how: string
   /** What the implementer proved, item by item. */
   proves: Proof[]

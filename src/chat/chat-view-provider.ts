@@ -14,7 +14,7 @@ import {
   rulingsHandoffPrompt,
   specPath,
 } from '../agent/phases/blind-plan'
-import { assertAllRuled, assertRulingsSent, decisionsFile, decisionsPath, openDecisions, pendingDecisions, readDecisions, withRuling } from '../agent/phases/decisions'
+import { assertAllRuled, assertRulingsSent, compactAppliedDecisions, decisionsFile, decisionsPath, openDecisions, pendingDecisions, readDecisions, withRuling } from '../agent/phases/decisions'
 import { listPlans } from '../agent/phases/plan-list'
 import { progressLine, reconcileKickoff } from '../agent/phases/reconcile'
 import { REDO_MAPPING_TOOL } from '../agent/openai-session/tools/redo-mapping'
@@ -24,7 +24,7 @@ import { anyLimit, oversizedFiles, sizeReport, type Oversized, type Thresholds }
 import { editedFiles } from '../agent/edits/edited-files'
 import { isApprovable, isMappable, planStage, remapDue, tasksStale } from '../agent/phases/plan-stage'
 import { parseSpec, specFingerprint } from '../agent/phases/spec-model'
-import { migratePlan, type MigrationReport } from '../agent/phases/migrate-plan'
+import { followRenames, migratePlan, type MigrationReport } from '../agent/phases/migrate-plan'
 import { liveTasks, readTasks, recordCleanupDecision, stampSpecFingerprint, tasksDone, tasksPath, type TasksState } from '../agent/phases/tasks-file'
 import {
   describeCommand,
@@ -316,11 +316,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * A plan turn ended: a repair the planner was asked for is finished
+   * A plan turn ended: renames are followed and applied decisions cut to
+   * their record, a repair the planner was asked for is finished
    * mechanically, and a board the turn left behind the spec is re-mapped.
    */
   private async followPlan(record: SessionRecord): Promise<void> {
     const feature = record.feature!
+    await followRenames(this.workspaceRoot, feature)
+    await compactAppliedDecisions(decisionsPath(this.workspaceRoot, feature))
     if (this.repairing.delete(feature)) {
       const report = await migratePlan(this.workspaceRoot, feature)
       this.reportMigration(report, false)

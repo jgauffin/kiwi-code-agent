@@ -2,14 +2,30 @@
   "name": "kiwi-agent",
   "displayName": "KiwiAgent",
   "description": "Coding sessions in VS Code with a choice of model engine per session.",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "publisher": "coderr",
-  "private": true,
-  "license": "UNLICENSED",
+  "icon": "docs/kiwi-bird-320.png",
+  "galleryBanner": {
+    "color": "#1e1e1e",
+    "theme": "dark"
+  },
+  "license": "GPL-3.0-only",
   "repository": {
     "type": "git",
     "url": "https://github.com/jgauffin/kiwi-code-agent.git"
   },
+  "homepage": "https://github.com/jgauffin/kiwi-code-agent#readme",
+  "bugs": {
+    "url": "https://github.com/jgauffin/kiwi-code-agent/issues"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "claude",
+    "openai",
+    "coding",
+    "planning"
+  ],
   "engines": {
     "vscode": "^1.100.0",
     "node": ">=22.0.0"
@@ -397,9 +413,10 @@
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "package": "npm run typecheck && npm run build && vsce package --no-dependencies",
+    "package": "npm run typecheck && npm run build && vsce package --no-dependencies --target win32-x64 win32-arm64",
     "link-dev": "node scripts/link-dev.mjs",
-    "unlink-dev": "node scripts/link-dev.mjs --unlink"
+    "unlink-dev": "node scripts/link-dev.mjs --unlink",
+    "publish": "npm run typecheck && npm run build && vsce publish --no-dependencies --target win32-x64 win32-arm64"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.2.112",

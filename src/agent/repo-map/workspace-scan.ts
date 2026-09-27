@@ -53,9 +53,6 @@ export async function scanWorkspace(cwd: string): Promise<WorkspaceScan> {
   return { files, newest: files.reduce((newest, file) => Math.max(newest, file.mtimeMs), 0) }
 }
 
-/** The newest source or project file in the workspace, what a stale map is measured against. */
-export const newestSource = async (cwd: string): Promise<number> => (await scanWorkspace(cwd)).newest
-
 async function walk(cwd: string, prefix: string, ignored: IgnorePredicate, into: ScannedFile[]): Promise<void> {
   const entries = await readdir(join(cwd, ...prefix.split('/').filter((s) => s.length > 0)), { withFileTypes: true }).catch(() => [])
   for (const entry of entries.sort((a, b) => byPath(a.name, b.name))) {

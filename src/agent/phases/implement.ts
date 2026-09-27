@@ -1,6 +1,5 @@
 import { DOCS_DIR, PLAN_DIR, featureSlug } from './blind-plan'
 import { ASK_USER_TOOL } from '../openai-session/tools/ask-user'
-import { KEEP_RULING, decisionsFile } from './decisions'
 import type { SpecState } from './spec-file'
 import { tasksDone, tasksFile, type TasksState } from './tasks-file'
 import type { VerifyRule } from './verification'
@@ -20,7 +19,7 @@ export function implementKickoff(continued: Continued): string {
   switch (continued) {
     case 'mapping':
       return [
-        'The spec you mapped is approved and its decisions are ruled and applied; the board you wrote is the work. Read the spec again for the revised rules and the decisions file for the rulings, then implement it task by task.',
+        'The spec you mapped is approved and the rulings are applied to it; the board you wrote is the work. Read the spec again for the revised rules, then implement it task by task.',
         'The files and context you read hold unless a tool result says a file changed; do not read them again to be sure.',
       ].join(' ')
     case 'implement':
@@ -70,15 +69,12 @@ function verifyCommands(rules: VerifyRule[]): string {
  */
 export function implementPrompt(feature: string, cwd: string, rules: VerifyRule[] = []): string {
   const spec = `${PLAN_DIR}/${featureSlug(feature)}.spec.md`
-  const decisions = decisionsFile(feature)
   const tasks = tasksFile(feature)
   return `You are implementing the feature "${feature}" from its approved spec at \`${spec}\` under ${cwd}, task by task from \`${tasks}\`.
 
 The spec is the contract: goal, rules and edge cases. Every rule has a name, the bold lead-in of its line. A human approved it; do not reinterpret it. Where the code and the spec disagree, the spec wins. Where the spec is silent, do the simplest thing that satisfies it and record the choice on the task's \`note:\` line.
 
-\`${decisions}\`, where it exists, holds what the user ruled where the code and the spec disagreed. A decision ruled \`${KEEP_RULING}\` means the rule stands and the code changes: that is work, done with the task that touches it.
-
-The tasks file is the board. Each task names the rules it delivers, the files it touches (\`files:\`), what was read to arrive at it (\`context:\`: the modules those files lean on, the test that shows the pattern, where the term already lives) and how to build it (\`how:\`: the steps, the symbols to add or change, the pattern to follow). The mapping has been done; start a task by reading its files and its context, and search the code only for what they do not answer. Follow the \`how:\` block; depart from it only where the code as you read it says it cannot be done that way, and say so on the task's \`note:\` line. Work through the board in order; a task's state is a marker appended to its line, and you move it along as you go:
+The tasks file is the board. Each task names the rules it delivers, the files it touches (\`files:\`), what was read to arrive at it (\`context:\`: the modules those files lean on, the test that shows the pattern, where the term already lives) and what reading would not tell you (\`how:\`: the pattern to follow, a constraint the code imposes, what not to touch). The design within that is yours. The mapping has been done; start a task by reading its files and its context, and search the code only for what they do not answer. Follow the \`how:\` block; depart from it only where the code as you read it says it cannot be done that way, and say so on the task's \`note:\` line. Work through the board in order; a task's state is a marker appended to its line, and you move it along as you go:
 - \` [in progress]\` when you start it;
 - \` [done]\` when the code is written and the project holding it builds;
 - \` [tested]\` when every rule the task delivers is proven by a test named on the task's \`proves:\` line, passing in a run you narrowed to it;

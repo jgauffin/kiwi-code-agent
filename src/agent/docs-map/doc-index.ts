@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFile, readdir } from 'node:fs/promises'
 import { join, matchesGlob } from 'node:path'
 import { DOCS_DIR, README_GLOB } from '../phases/blind-plan'
-import { byPath, indexFile, readMapFile, writeMapFile, INDEX_FILE } from './map-files'
+import { byPath, readMapFile, writeMapFile, INDEX_FILE } from './map-files'
 
 /**
  * What the map is of, and what has changed since it was last built. A doc is
@@ -74,8 +74,6 @@ export async function writeDocsIndex(cwd: string, index: DocsIndex): Promise<voi
   const docs = Object.fromEntries(Object.entries(index).sort(([a], [b]) => byPath(a, b)))
   await writeMapFile(cwd, INDEX_FILE, JSON.stringify({ docs }, null, 2))
 }
-
-export const docsIndexPath = (cwd: string): string => indexFile(cwd)
 
 async function readmePaths(cwd: string): Promise<string[]> {
   const entries = await readdir(cwd, { withFileTypes: true }).catch(() => [])

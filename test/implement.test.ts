@@ -115,4 +115,9 @@ describe('implement phase', () => {
     expect(mapped).not.toBe(fresh)
     expect(implementKickoff('implement')).toContain('Carry on')
   })
+
+  it('the_implementer_is_not_sent_to_the_decisions_file_since_the_board_carries_every_ruling', () => {
+    expect(implementPrompt('Order cancellation', cwd)).not.toContain('decisions.md')
+    expect(implementKickoff('mapping')).not.toContain('decisions')
+  })
 })

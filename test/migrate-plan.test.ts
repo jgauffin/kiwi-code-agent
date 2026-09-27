@@ -7,6 +7,7 @@ import {
   collectRenames,
   extractDecisions,
   extractLegacyTasks,
+  followRenames,
   migratePlan,
   modernizeFindings,
   modernizeReview,
@@ -16,7 +17,7 @@ import {
 import { migrateSpecPrompt } from '../src/agent/phases/blind-plan'
 import { decisions } from '../src/agent/phases/decisions'
 import { parseReview } from '../src/agent/phases/plan-review'
-import { parseSpecText } from '../src/agent/phases/spec-model'
+import { parseSpecText, specFingerprint } from '../src/agent/phases/spec-model'
 import { parseTasks } from '../src/agent/phases/tasks-file'
 
 const legacy = `---
@@ -252,7 +253,7 @@ describe('migratePlan', () => {
     const report = await migratePlan(dir, 'Orders')
     expect(report.problems).toEqual([])
     expect(report.steps).toEqual([
-      'renamed I1 → The invariant across the spec, the review and the tasks file.',
+      'renamed I1 → The invariant across the plan files.',
       'stamped the tasks file with the spec it was mapped from.',
     ])
     expect(await readFile(join(dir, 'plan', 'orders.spec.md'), 'utf8')).toContain('- **The invariant**: the invariant, now a rule\n')
@@ -262,6 +263,20 @@ describe('migratePlan', () => {
     expect(board.spec).toMatch(/^[0-9a-f]{8}$/)
     // Running it again changes nothing.
     expect((await migratePlan(dir, 'Orders')).steps).toEqual([])
+  })
+
+  it('a_rename_in_an_ordinary_revision_is_followed_into_the_decisions_and_leaves_no_was_note', async () => {
+    const spec = '# Orders\n\n## Goal\ng\n\n## Cancelling\n- **Refund on cancel** (was Refund): a\n'
+    await writeFile(join(dir, 'plan', 'orders.spec.md'), spec)
+    await writeFile(join(dir, 'plan', 'orders.decisions.md'), '# Decisions for Orders\n\n### X\n- on: Cancel, Refund\n- finding: x\n')
+    await writeFile(join(dir, 'plan', 'orders.tasks.md'), '# Tasks for Orders\n\n- **T1** (Refund): x\n')
+    expect(await followRenames(dir, 'Orders')).toEqual(['Refund → Refund on cancel'])
+    expect(await readFile(join(dir, 'plan', 'orders.spec.md'), 'utf8')).toContain('- **Refund on cancel**: a\n')
+    expect(decisions(await readFile(join(dir, 'plan', 'orders.decisions.md'), 'utf8'))[0]!.on).toEqual(['Cancel', 'Refund on cancel'])
+    expect(parseTasks(await readFile(join(dir, 'plan', 'orders.tasks.md'), 'utf8')).tasks[0]!.delivers).toEqual(['Refund on cancel'])
+    // What the board was mapped from reads the same without the note, so following a rename does not force a re-map.
+    expect(specFingerprint(parseSpecText(await readFile(join(dir, 'plan', 'orders.spec.md'), 'utf8')))).toBe(specFingerprint(parseSpecText(spec)))
+    expect(await followRenames(dir, 'Orders')).toEqual([])
   })
 
   it('a_missing_spec_is_reported_not_hidden', async () => {

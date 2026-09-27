@@ -2,7 +2,7 @@
 
 ![A mad motha f00ker bird logo for them to see](/docs/kiwi-bird-320.png)
 
-***still early, nothing to try yet***
+Windows only (x64, arm64).
 
 VS Code extension that runs coding sessions with a choice of engine per session:
 

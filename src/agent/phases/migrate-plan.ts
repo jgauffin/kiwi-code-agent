@@ -193,10 +193,17 @@ export function collectRenames(specText: string): { spec: string; renames: Map<s
 
 const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-/** Rewrites every whole-word occurrence of a renamed name, in whatever file refers to it. */
+/**
+ * Rewrites every whole-word occurrence of a renamed name, in whatever file
+ * refers to it. The new name is matched too, longer first, so a new name that
+ * contains the old one ("Refund" → "Refund on cancel") is not renamed again.
+ */
 export function applyRenames(text: string, renames: Map<string, string>): string {
   let result = text
-  for (const [from, to] of renames) result = result.replace(new RegExp(`\\b${escape(from)}\\b`, 'g'), to)
+  for (const [from, to] of renames) {
+    const names = [from, to].sort((a, b) => b.length - a.length).map(escape)
+    result = result.replace(new RegExp(`\\b(?:${names.join('|')})\\b`, 'g'), to)
+  }
   return result
 }
 
@@ -207,6 +214,27 @@ async function readIfThere(path: string): Promise<string | undefined> {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
     throw error
   }
+}
+
+/**
+ * Follows the planner's `(was X)` notes into the review, the tasks and the
+ * decisions, and strips them from the spec. Returns the renames as `old → new`,
+ * none when there was nothing to follow.
+ */
+export async function followRenames(cwd: string, feature: string): Promise<string[]> {
+  const spec = specPath(cwd, feature)
+  const text = await readIfThere(spec)
+  if (text === undefined) return []
+  const { spec: cleaned, renames } = collectRenames(text)
+  if (renames.size === 0) return []
+  await writeFile(spec, applyRenames(cleaned, renames), 'utf8')
+  for (const path of [reviewPath(cwd, feature), tasksPath(cwd, feature), decisionsPath(cwd, feature)]) {
+    const current = await readIfThere(path)
+    if (current === undefined) continue
+    const next = applyRenames(current, renames)
+    if (next !== current) await writeFile(path, next, 'utf8')
+  }
+  return [...renames].map(([from, to]) => `${from} → ${to}`)
 }
 
 /** The mechanical part, safe to run any number of times. */
@@ -258,20 +286,12 @@ export async function migratePlan(cwd: string, feature: string): Promise<Migrati
     report.steps.push(`moved ${decisions(lifted.decisions).length} decision(s) from the spec into the decisions file.`)
   }
 
-  const renamed = collectRenames(specText)
-  if (renamed.renames.size > 0) {
-    specText = applyRenames(renamed.spec, renamed.renames)
-    const pairs = [...renamed.renames].map(([from, to]) => `${from} → ${to}`).join(', ')
-    for (const path of [review, tasks]) {
-      const text = await readIfThere(path)
-      if (text === undefined) continue
-      const next = applyRenames(text, renamed.renames)
-      if (next !== text) await writeFile(path, next, 'utf8')
-    }
-    report.steps.push(`renamed ${pairs} across the spec, the review and the tasks file.`)
-  }
-
   if (specText !== before) await writeFile(spec, specText, 'utf8')
+  const renamed = await followRenames(cwd, feature)
+  if (renamed.length > 0) {
+    specText = await readFile(spec, 'utf8')
+    report.steps.push(`renamed ${renamed.join(', ')} across the plan files.`)
+  }
 
   let boardChanged = false
   const modernized: [string, (text: string) => string, string][] = [

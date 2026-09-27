@@ -275,10 +275,6 @@ export function struckItems(review: Review): string[] {
   return [...new Set(review.rounds.flatMap((r) => r.strikes))]
 }
 
-export function commentsFor(review: Review, target: string): ReviewComment[] {
-  return allComments(review).filter((c) => same(c.target, target))
-}
-
 /** A review with nothing in it is refused rather than sent; no turn is spent on it. */
 export function submitRound(review: Review, at: string = new Date().toISOString()): ReviewRound {
   const round = pendingRound(review)

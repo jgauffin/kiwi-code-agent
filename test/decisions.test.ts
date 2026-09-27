@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   assertAllRuled,
   assertRulingsSent,
+  compactApplied,
   decisions,
   decisionsFile,
   openDecisions,
@@ -120,5 +121,30 @@ describe('decisions', () => {
     expect(rulingKind(decisions(withRuling(file, 'Shipped orders cannot be cancelled', 'Keep'))[0]!)).toBe('keep')
     expect(rulingKind(decisions(withRuling(file, 'Shipped orders cannot be cancelled', 'the rule says an unshipped order'))[0]!)).toBe('proposal')
     expect(rulingKind(decisions(withRuling(file, 'Shipped orders cannot be cancelled', 'cancel it, but keep the shipment'))[0]!)).toBe('own')
+  })
+
+  it('an_applied_decision_keeps_only_its_finding_and_ruling', () => {
+    const applied = `### Reservations are released by a job [applied]
+- on: Refund
+- finding: a job releases them nightly
+- proposed: say the reservation is released when the job runs
+- proposed: release it on cancel
+- recommended: 1
+- because: the job is what users see
+- ruling: say the reservation is released when the job runs
+`
+    expect(compactApplied(applied)).toBe(`### Reservations are released by a job [applied]
+- on: Refund
+- finding: a job releases them nightly
+- ruling: say the reservation is released when the job runs
+`)
+  })
+
+  it('an_open_ruled_or_withdrawn_decision_is_left_whole', () => {
+    const ruled = withRuling(file, 'Shipped orders cannot be cancelled', 'keep')
+    const compacted = compactApplied(ruled)
+    expect(compacted).toContain('- proposed: the rule says an unshipped order\n- proposed: a shipped order is cancelled and returned\n- recommended: 2')
+    expect(compacted).not.toContain('- proposed: say the reservation is released when the job runs')
+    expect(decisions(compacted).map((d) => [d.title, d.state])).toEqual(decisions(ruled).map((d) => [d.title, d.state]))
   })
 })

@@ -1,5 +1,5 @@
 import { renderConvention, type Convention } from './conventions'
-import { byPath, mapPath } from './map-files'
+import { INDEX_DIR, byPath, mapPath } from './map-files'
 
 /**
  * The small part of the map, the part a session is given at its start: what the
@@ -31,7 +31,7 @@ export type MapSummary = { projects: MappedProject[]; conventions: Convention[] 
 export const SUMMARY_BUDGET = 4000
 
 /** The index file of a project, by the name the build gives it. */
-export const indexPathFor = (name: string): string => mapPath(`types/${name}.md`)
+export const indexPathFor = (name: string): string => mapPath(`${INDEX_DIR}/${name}.md`)
 
 const projectLine = (p: MappedProject): string =>
   `- ${p.name} (${p.kind}) \`${p.path}\` — ${p.publicTypes} public types, index \`${p.index}\``

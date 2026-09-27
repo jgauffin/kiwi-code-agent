@@ -13,10 +13,6 @@ export type NodeRuntime = {
   env: Record<string, string>
 }
 
-export function nodeOnPath(): NodeRuntime {
-  return { command: 'node', args: [], env: {} }
-}
-
 export function hostExecutableAsNode(execPath: string): NodeRuntime {
   return { command: execPath, args: [], env: { ELECTRON_RUN_AS_NODE: '1' } }
 }

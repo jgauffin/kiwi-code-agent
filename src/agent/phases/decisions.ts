@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { PLAN_DIR, featureSlug } from './blind-plan'
 import { KEEP_RULING } from './ruling'
@@ -205,6 +205,33 @@ export function withRuling(text: string, title: string, ruling: string): string 
   if (existing !== -1) lines[existing] = ruled
   else lines.splice(decision.end, 0, ruled)
   return lines.join('\n')
+}
+
+/** The lines only a ruling needed: once it is applied, the spec holds the outcome and they are read by no one. */
+const SPENT = /^-\s+(proposed|recommended|because)\s*:/i
+
+/** The file with every applied decision cut to its heading, `on`, finding and ruling; the rest stay whole. */
+export function compactApplied(text: string): string {
+  const lines = text.split(/\r?\n/)
+  const spent = new Set<number>()
+  for (const decision of decisions(text)) {
+    if (decision.state !== 'applied') continue
+    for (let i = decision.line + 1; i < decision.end; i++) if (SPENT.test(lines[i]!.trim())) spent.add(i)
+  }
+  return lines.filter((_, i) => !spent.has(i)).join('\n')
+}
+
+/** Compacts the decisions file on disk; a missing one stays missing. */
+export async function compactAppliedDecisions(path: string): Promise<void> {
+  let text: string
+  try {
+    text = await readFile(path, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+    throw error
+  }
+  const compacted = compactApplied(text)
+  if (compacted !== text) await writeFile(path, compacted, 'utf8')
 }
 
 /** The ruling's meaning for the planner: the rule stands, a proposal replaces it verbatim, or the user's own words. */

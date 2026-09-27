@@ -1,7 +1,7 @@
 import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { findConventions } from './conventions'
-import { SUMMARY_FILE, byPath, mapPath, sharedBuild, summaryPath, writeMap, type MapFile } from './map-files'
+import { INDEX_DIR, SUMMARY_FILE, byPath, sharedBuild, summaryPath, writeMap, type MapFile } from './map-files'
 import { indexPathFor, renderSummary, type MappedProject, type ProjectKind } from './summary'
 import { buildTypeIndex, renderTypeIndex, type SourceFile } from './type-index'
 import { isSourceFile, scanWorkspace, type ScannedFile } from './workspace-scan'
@@ -42,7 +42,7 @@ async function build(cwd: string, onProgress: (line: string) => void): Promise<B
   for (const seed of seeds) {
     onProgress(`Indexing ${seed.name}…`)
     const index = buildTypeIndex(await readSources(cwd, filesOf(seed, seeds, sources)))
-    files.push({ path: `types/${seed.name}.md`, text: renderTypeIndex(seed.name, index) })
+    files.push({ path: `${INDEX_DIR}/${seed.name}.md`, text: renderTypeIndex(seed.name, index) })
     projects.push({ name: seed.name, path: seed.path, kind: seed.kind, index: indexPathFor(seed.name), publicTypes: index.types.length })
   }
   const summary = renderSummary({ projects, conventions: findConventions(scan.files.map((f) => f.path)) })
@@ -68,9 +68,6 @@ export async function readSummary(cwd: string): Promise<string | undefined> {
     return undefined
   }
 }
-
-/** The summary's path as a session would open it. */
-export const summaryMapPath = (): string => mapPath(SUMMARY_FILE)
 
 const dirOf = (path: string): string => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '')
 

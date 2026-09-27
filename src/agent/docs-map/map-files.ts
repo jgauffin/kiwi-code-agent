@@ -32,7 +32,6 @@ export const entryPath = (doc: string): string => `${ENTRY_DIR}/${doc}`
 /** A doc's entry, workspace-relative: what the run is told to write. */
 export const entryFile = (doc: string): string => `${DOCS_MAP_ROOT}/${entryPath(doc)}`
 
-export const summaryFile = (cwd: string): string => join(docsMapRoot(cwd), SUMMARY_FILE)
 export const indexFile = (cwd: string): string => join(docsMapRoot(cwd), INDEX_FILE)
 
 /** Code-unit order, not the host's locale: the same docs have to sort the same on every machine. */

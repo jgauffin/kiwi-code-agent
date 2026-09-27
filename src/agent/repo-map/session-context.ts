@@ -1,7 +1,6 @@
 import { buildRepoMap, mapIsStale, readSummary } from './build-map'
 import { MAP_ROOT } from './map-files'
 import {
-  CONTEXT_TIME_BOUND_MS,
   generatedContext,
   type ContextOptions,
   type GeneratedContext,
@@ -14,9 +13,6 @@ import {
  * Building and degrading are the shared rules in `session/generated-context`;
  * what lives here is what the repo map in particular is and says.
  */
-
-/** How long a session start waits for a build before going ahead without it. */
-export const REPO_MAP_TIME_BOUND_MS = CONTEXT_TIME_BOUND_MS
 
 /** The map in the product's words; every note about it is written from this. */
 const REPO_MAP = 'repo map'

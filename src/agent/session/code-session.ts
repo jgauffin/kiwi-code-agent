@@ -79,8 +79,6 @@ export type SessionEvent =
   | { type: 'error'; message: string; fatal: boolean }
   | { type: 'ended' }
 
-export type SessionEventType = SessionEvent['type']
-
 /**
  * A coding session on one engine. Session-centric on purpose: the extension
  * sends prompts and reacts to events; how the engine talks to its model is

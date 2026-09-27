@@ -125,11 +125,30 @@ describe('reconcile prompt', () => {
     expect(prompt).toContain('would otherwise have to find again')
   })
 
-  it('writes_a_how_block_per_task_so_the_implementer_builds_instead_of_discovering', () => {
+  it('a_how_block_holds_only_what_reading_the_files_would_not_tell', () => {
     expect(prompt).toContain('- how:')
-    expect(prompt).toContain('The `how:` block is the instruction the implementer builds from')
+    expect(prompt).toContain('what the implementer would not learn from reading its files and context')
+    // The implementer reads the same code and designs the signatures; spelling them out plans the work twice.
+    expect(prompt).toContain('Not the steps, signatures, fields or columns')
+    expect(prompt).not.toContain('the symbols to add or change by path and name')
     // The line the person reads stays short; the detail is beneath it.
     expect(prompt).toContain('one sentence, for the person')
+  })
+
+  it('a_scenario_is_split_only_when_it_cannot_be_built_in_one_sitting', () => {
+    expect(prompt).toContain('too big to build and test in one sitting')
+    expect(prompt).toContain('a group of rules is not a reason to split')
+  })
+
+  it('code_the_feature_leaves_alone_is_not_a_finding', () => {
+    expect(prompt).toContain('code the tasks will change or build on')
+    expect(prompt).toContain('Behaviour in code the feature leaves alone is not a finding')
+    // Where to build decides which code is in play, so it is ruled before the findings it would make moot.
+    expect(prompt).toContain('where the feature is built is itself open')
+  })
+
+  it('a_how_question_goes_to_the_task_not_to_a_decision', () => {
+    expect(prompt).toContain('changes how a rule is built but not what it does is not a decision')
   })
 })
 
@@ -141,6 +160,9 @@ describe('the handoffs to the planner', () => {
     expect(prompt).toContain('one to three `- proposed: ...` lines')
     // A proposal is the rule's replacement text, so picking it is verbatim and the rule stays one sentence.
     expect(prompt).toContain("the rule's new text as it would stand in the spec, one sentence")
+    // A rule says what the feature does; how it is stored or transacted is the task's, or it ends up in the contract.
+    expect(prompt).toContain('observable behaviour, not how it is built')
+    expect(blindPlanPrompt('Order cancellation', cwd)).toContain('observable behaviour, not how it is built')
     // Keeping the rule is the wizard's own option, so the planner does not spend one on it.
     expect(prompt).toContain('do not propose it')
     // The user weighs the options first and meets the argument for one underneath them.

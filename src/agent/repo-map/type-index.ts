@@ -144,8 +144,6 @@ export function buildTypeIndex(files: SourceFile[]): TypeIndex {
   return index
 }
 
-export const publicTypeCount = (index: TypeIndex): number => index.types.length
-
 /** The file a session opens for a signature: one line per type, its members under it. */
 export function renderTypeIndex(project: string, index: TypeIndex): string {
   const lines = [`# Public types: ${project}`, '', `${index.types.length} public types.`, '']

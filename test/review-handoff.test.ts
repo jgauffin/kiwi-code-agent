@@ -231,7 +231,7 @@ describe('the plan session knows what a review asks of it', () => {
   it('a_rule_is_one_sentence_and_each_proposal_is_a_replacement_text_the_ruling_picks_keeps_or_overrides', () => {
     const prompt = blindPlanPrompt('Order cancellation', '/work/repo')
     expect(prompt).toContain('each one sentence: what the rule has to survive is an edge case, and why it holds is not written in the spec')
-    expect(prompt).toContain("written as the rule's new text as it would stand in the spec (one sentence, no argument, no reference to the decision)")
+    expect(prompt).toContain("written as the rule's new text as it would stand in the spec (one sentence, no argument, no reference to the decision; observable behaviour, not how it is built)")
     expect(prompt).toContain('`keep` means the rule stands and the code will change')
     expect(prompt).toContain('the text of a proposal means it replaces the rule verbatim')
     expect(prompt).toContain('Keeping the rule as it stands is always offered to the user, so do not propose it')

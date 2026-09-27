@@ -1,10 +1,16 @@
 .vscode/**
 .claude/**
+.agent/**
 src/**
 test/**
+plan/**
+scripts/**
+assets/**
 docs/**
+!docs/kiwi-bird-320.png
 node_modules/**
 **/*.map
+**/*.ts
 esbuild.mjs
 tsconfig.json
 vitest.config.mts

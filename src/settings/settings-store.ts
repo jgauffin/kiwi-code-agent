@@ -1,4 +1,4 @@
-import { choiceFor, type ModelChoice, type Profile, type Provider } from '../agent/session/model-profile'
+import { type ModelChoice, type Profile, type Provider } from '../agent/session/model-profile'
 import { STEPS } from '../agent/session/session-manager'
 import type { VerifyRule } from '../agent/phases/verification'
 import { migrateModelSettings, needsMigration, type LegacyProfile, type ModelSettings } from './model-settings'
@@ -232,7 +232,3 @@ function validChoice(profile: string, where: string, choice: ModelChoice, provid
   const systemPromptFile = choice.systemPromptFile?.trim()
   return { provider, model, ...(choice.effort ? { effort: choice.effort } : {}), ...(systemPromptFile ? { systemPromptFile } : {}) }
 }
-
-/** What a profile runs each step on, for the settings page to show without resolving providers. */
-export const stepChoices = (profile: Profile): { step: string; label: string; hint: string; choice: ModelChoice; own: boolean }[] =>
-  STEPS.map(({ step, label, hint }) => ({ step, label, hint, choice: choiceFor(profile, step), own: profile.steps?.[step] !== undefined }))

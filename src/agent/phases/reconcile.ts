@@ -53,6 +53,8 @@ The spec is the intent for this feature; it was distilled from \`${DOCS_DIR}/**\
 
 What you look for, each of them a decision the user has to make: a business rule in the code that says otherwise (the human decides which side is right; you present both); existing behaviour the feature would change or break that the spec does not mention; something the spec assumes that the code shows to be wrong.
 
+Only in code the tasks will change or build on. Behaviour in code the feature leaves alone is not a finding, even where it disagrees with the spec. When where the feature is built is itself open (the behaviour already lives in code the feature may replace rather than change), that is one decision, and the findings in that code wait for its ruling. A constraint that changes how a rule is built but not what it does is not a decision: it goes in the task's \`how:\`.
+
 Authority order, when sources disagree: the docs and the approved specs, then the code. The code is the presumed-wrong party, but it is also where the users' current reality lives, so a contradiction is reported, not resolved.
 
 Your first output: the decisions file, \`${decisions}\`, one \`###\` per decision. Structure:
@@ -87,9 +89,8 @@ Your second output: the task board, \`${tasks}\`, written with Write. Start from
   - files: src/orders/cancel.ts, src/orders/cancel.test.ts (new)
   - context: src/orders/order.ts, src/orders/ship.test.ts
   - how:
-    - add \`cancel()\` on \`Order\` in src/orders/order.ts beside \`ship()\`, same guard shape; it throws on a shipped order
-    - the command handler follows src/orders/ship.ts: parse, load, call, save
-    - src/orders/cancel.test.ts mirrors src/orders/ship.test.ts, one test per delivered rule
+    - follow src/orders/ship.ts and its test: the guard sits on \`Order\`, the handler only parses, loads, calls and saves
+    - leave \`OrderStatus\` alone: the reports switch on it
 
 ## Releasing the reservation
 - **Reservation release** (Release on cancel): ...
@@ -100,12 +101,12 @@ Your second output: the task board, \`${tasks}\`, written with Write. Start from
 \`\`\`
 
 Rules:
-- One task per scenario is the default; depart from it only for a reason you name in the task text: a scenario too big for one sitting is split in build order under the same heading, a foundation every scenario needs (a contract module, a schema) is one task under a \`## Foundation\` heading first in the file, delivering the rules it serves.
+- One task per scenario is the default; depart from it only for a reason you name in the task text: a scenario too big to build and test in one sitting is split in build order under the same heading (a group of rules is not a reason to split), a foundation every scenario needs (a contract module, a schema) is one task under a \`## Foundation\` heading first in the file, delivering the rules it serves.
 - Every rule and edge case of the spec is delivered by some task. A rule no task delivers is a gap the user sees.
 - The task's own line is one sentence, for the person: what the task does, no more. The detail goes in \`how:\`.
 - The files are workspace-relative paths that exist, or paths to create marked \`(new)\`, placed where the code around them says such a file belongs. The tests that prove a task's rules are files of that task.
 - The context is what you read to arrive at the task and the implementer would otherwise have to find again: the modules the task's files lean on, the test that shows the pattern to follow, the place the term already lives. Existing paths only, the few that matter; a task starts from its files and its context and searches beyond them only when those do not answer.
-- The \`how:\` block is the instruction the implementer builds from, written from what you read: the steps in build order, the symbols to add or change by path and name, the existing code that shows the pattern to follow, what not to touch. Concrete enough that the implementer opens the files and the context and starts writing, rather than reading the code to work out what you already know. No code pasted.
+- The \`how:\` block holds what the implementer would not learn from reading its files and context: the existing code that shows the pattern to follow, a constraint the code imposes that those files do not show, what not to touch. Not the steps, signatures, fields or columns: the implementer reads the same code and designs them. A few lines. No code pasted.
 - A task's name is the bold lead-in of its line, a few words, unique in the file and stable across re-runs: keep a task that still holds and update its text, files, context and how, append \` [removed]\` to one that no longer applies, add new ones. Never touch a marker, a \`proves:\` line or a \`note:\` line the implementer left on a task (\`[in progress]\`, \`[done]\`, \`[tested]\`, \`[blocked: ...]\`): a note says where the build departed from the \`how:\` it was given and why, so it survives a rewrite of the task and goes only when the task does.
 - No task for what a pending decision puts in question: the user rules first.
 - The file's front matter and a \`## Verification\` section at its end are the extension's; leave them alone.
