@@ -57,13 +57,4 @@ describe('McpServerSet', () => {
     expect(a.reloads).toEqual([])
     expect(reported).toEqual(['.mcp.json: not valid JSON'])
   })
-
-  it('reconnect_all_re_reads_the_file_and_then_tries_every_server_in_every_live_session', async () => {
-    const a = fakeSession(true)
-    const { set } = setUp([{ docs }, { docs, other }], [a.session])
-    await set.current()
-    await set.reconnectAll()
-    expect(a.reloads).toEqual([{ docs, other }])
-    expect(a.reconnects).toEqual(['docs', 'other'])
-  })
 })

@@ -20,7 +20,6 @@ The keys, for settings.json:
 - `kiwiAgent.traceEngine`: one line per Claude engine message in the KiwiAgent output channel, to see what the engine sends (thinking deltas, status) when the UI shows nothing.
 - `kiwiAgent.verify`: test commands run once every task of a feature is marked tested, over the files the tasks name, in the directory of the nearest `project` file; a repo with a backend and a frontend runs each suite once, and only the suites the feature touched. A failure is handed to the implement session, up to `kiwiAgent.verifyFailureBudget` consecutive failures. Default: `dotnet test` of the `.csproj` owning a `.cs` file, `npm test` in the `package.json` folder owning a `.ts` file.
 - `kiwiAgent.planIgnore`: globs under `docs/` a blind planner must not see. The docs map does not describe them and the docs evaluation does not judge them.
-- Command *KiwiAgent: Set API Key for Provider* stores the key for an OpenAI-compatible provider, under its own name.
 - Command *KiwiAgent: Build Docs Map* describes the docs that changed since the last build. A plan session and a docs evaluation do it themselves when the map is behind.
 
 ## Instruction files and skills
@@ -29,7 +28,7 @@ Claude Code's layout, at the user level and in the workspace. On the own-loop en
 
 ## MCP servers
 
-`.mcp.json` in the workspace root (Claude Code's format) gives chat sessions its servers' tools on both engines, as `mcp__<server>__<tool>`. They ask before running unless an allow rule names the tool or `mcp__<server>__*`. A save of the file reaches running sessions; *KiwiAgent: Reload MCP Servers* re-reads it and reconnects every server, and the composer shows each server's status with a reconnect button.
+`.mcp.json` in the workspace root (Claude Code's format) gives chat sessions its servers' tools on both engines, as `mcp__<server>__<tool>`. They ask before running unless an allow rule names the tool or `mcp__<server>__*`. A save of the file reaches running sessions, and the composer shows each server's status with a reconnect button.
 
 ## Logs
 

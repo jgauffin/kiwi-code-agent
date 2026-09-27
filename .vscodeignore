@@ -7,7 +7,8 @@ plan/**
 scripts/**
 assets/**
 docs/**
-!docs/kiwi-bird-320.png
+!docs/logo-square-transparent-500px.png
+articles/**
 node_modules/**
 **/*.map
 **/*.ts

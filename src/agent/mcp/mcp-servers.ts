@@ -31,13 +31,6 @@ export class McpServerSet {
     await Promise.all(this.live().map((session) => session.mcp?.reload(after)))
   }
 
-  /** The command: the file again, then every server in every running session tried afresh. */
-  async reconnectAll(): Promise<void> {
-    await this.refresh()
-    const names = Object.keys(await this.servers)
-    await Promise.all(this.live().flatMap((session) => names.map((name) => session.mcp?.reconnect(name))))
-  }
-
   private async readOr(fallback: McpServers): Promise<McpServers> {
     try {
       return await this.read()

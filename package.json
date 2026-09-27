@@ -3,8 +3,8 @@
   "displayName": "KiwiAgent",
   "description": "Coding sessions in VS Code with a choice of model engine per session.",
   "version": "0.1.0",
-  "publisher": "coderr",
-  "icon": "docs/kiwi-bird-320.png",
+  "publisher": "CoderrAB",
+  "icon": "docs/logo-square-transparent-500px.png",
   "galleryBanner": {
     "color": "#1e1e1e",
     "theme": "dark"
@@ -92,10 +92,6 @@
         "icon": "$(gear)"
       },
       {
-        "command": "kiwiAgent.setApiKey",
-        "title": "KiwiAgent: Set API Key for Provider"
-      },
-      {
         "command": "kiwiAgent.migratePlans",
         "title": "KiwiAgent: Migrate plans to the spec contract"
       },
@@ -106,10 +102,6 @@
       {
         "command": "kiwiAgent.buildDocsMap",
         "title": "KiwiAgent: Build Docs Map"
-      },
-      {
-        "command": "kiwiAgent.reconnectMcp",
-        "title": "KiwiAgent: Reload MCP Servers"
       }
     ],
     "menus": {
@@ -148,6 +140,10 @@
         },
         {
           "command": "kiwiAgent.openDraftPlan",
+          "when": "false"
+        },
+        {
+          "command": "kiwiAgent.openSettings",
           "when": "false"
         }
       ]
@@ -413,10 +409,10 @@
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "package": "npm run typecheck && npm run build && vsce package --no-dependencies --target win32-x64 win32-arm64",
+    "package": "npm run typecheck && npm run build && vsce package --no-dependencies",
     "link-dev": "node scripts/link-dev.mjs",
     "unlink-dev": "node scripts/link-dev.mjs --unlink",
-    "publish": "npm run typecheck && npm run build && vsce publish --no-dependencies --target win32-x64 win32-arm64"
+    "publish": "npm run typecheck && npm run build && vsce publish --no-dependencies"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.2.112",

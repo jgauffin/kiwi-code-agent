@@ -287,7 +287,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!profile.baseUrl) throw new Error(`Profile "${profile.name}" has no baseUrl`)
         if (!profile.apiKeySecret) throw new Error(`Profile "${profile.name}" has no apiKeySecret`)
         const apiKey = await context.secrets.get(secretKey(profile.apiKeySecret))
-        if (!apiKey) throw new Error(`No API key stored for "${profile.apiKeySecret}". Run "KiwiAgent: Set API Key for Provider".`)
+        if (!apiKey) throw new Error(`No API key stored for "${profile.apiKeySecret}". Set it on the provider in KiwiAgent settings.`)
         // Indexed per session so a skill added to the workspace or the user profile shows up on the next one.
         const skills = await indexSkills(workspaceRoot, undefined, join(pluginPath, 'skills'))
         const allTools = [readTool, writeTool, editTool, globTool, grepTool, ...OWN_TOOLS, bashTool(), ...(skills.length ? [skillTool(skills)] : [])]
@@ -392,11 +392,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerWebviewPanelSerializer(SETTINGS_PANEL_TYPE, {
       deserializeWebviewPanel: async (panel) => settingsPanel.adopt(panel),
     }),
-    vscode.commands.registerCommand('kiwiAgent.setApiKey', () => setApiKey(settings)),
     vscode.commands.registerCommand('kiwiAgent.migratePlans', () => chat.migratePlans()),
     vscode.commands.registerCommand('kiwiAgent.buildRepoMap', () => chat.buildRepoMap()),
     vscode.commands.registerCommand('kiwiAgent.buildDocsMap', () => chat.buildDocsMapCommand(planIgnore())),
-    vscode.commands.registerCommand('kiwiAgent.reconnectMcp', () => mcp.reconnectAll()),
     watchMcpConfig(workspaceRoot, () => mcp.refresh()),
     openDraftPlanAction(chat, sessions, workspaceRoot, output),
     watchOwnBundle(context),
@@ -451,18 +449,4 @@ function permissionRules(): PermissionRules {
 function nodeRuntime(): NodeRuntime {
   const configured = vscode.workspace.getConfiguration('kiwiAgent').get<string>('nodePath', '')
   return configured ? { command: configured, args: [], env: {} } : hostExecutableAsNode(process.execPath)
-}
-
-async function setApiKey(settings: SettingsStore): Promise<void> {
-  const names = (await settings.snapshot()).keys.map((k) => k.name)
-  if (names.length === 0) {
-    void vscode.window.showInformationMessage('No OpenAI-compatible provider is configured.')
-    return
-  }
-  const name = names.length === 1 ? names[0] : await vscode.window.showQuickPick(names, { title: 'API key for' })
-  if (!name) return
-  const key = await vscode.window.showInputBox({ title: `API key: ${name}`, password: true, ignoreFocusOut: true })
-  if (key === undefined) return
-  await settings.setApiKey(name, key)
-  void vscode.window.showInformationMessage(`Stored API key for ${name}.`)
 }
