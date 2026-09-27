@@ -8,7 +8,7 @@ import type { QuestionOutcome } from '../src/agent/session/user-question'
 
 const { ChatTranscript } = await import('../src/chat/webview/chat-transcript')
 const { QuestionCard } = await import('../src/chat/webview/question-card')
-const { QuestionAnsweredEvent } = await import('../src/chat/webview/events')
+const { PromptSubmittedEvent, QuestionAnsweredEvent } = await import('../src/chat/webview/events')
 
 type Transcript = InstanceType<typeof ChatTranscript>
 
@@ -418,5 +418,40 @@ describe('questions in a replayed transcript', () => {
 
     expect(cards(view).map((c) => headers(c)[0])).toEqual(['Storage', 'Naming'])
     expect(cards(view).map((c) => c.isResolved)).toEqual([true, false])
+  })
+})
+
+describe('a turn stopped at its round limit', () => {
+  const stopped: SessionEvent = { type: 'error', message: 'Stopped after 50 tool rounds in one turn', fatal: false, resumable: true }
+  const resume = (view: Transcript) => view.querySelector<HTMLButtonElement>('article.error button.resume')
+
+  it('offers_to_resume_and_the_button_sends_a_prompt_that_carries_on', () => {
+    const view = transcript()
+    let sent: string | undefined
+    view.addEventListener(PromptSubmittedEvent.type, (e) => {
+      sent = (e as InstanceType<typeof PromptSubmittedEvent>).text
+    })
+
+    view.reset([stopped])
+    resume(view)?.click()
+
+    expect(sent).toMatch(/continue/i)
+  })
+
+  it('the_offer_goes_once_the_conversation_moves_on', () => {
+    const view = transcript()
+
+    view.reset([stopped, { type: 'user_message', text: 'something else' }])
+
+    expect(resume(view)).toBeNull()
+    expect(view.querySelector('article.error')?.textContent).toContain('Stopped after 50 tool rounds')
+  })
+
+  it('an_ordinary_error_offers_no_resume', () => {
+    const view = transcript()
+
+    view.reset([{ type: 'error', message: 'API error 429', fatal: false }])
+
+    expect(resume(view)).toBeNull()
   })
 })

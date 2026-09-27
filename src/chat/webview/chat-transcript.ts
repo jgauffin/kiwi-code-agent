@@ -5,6 +5,7 @@ import { renderAnsi } from './ansi'
 import { editDiffView, fileLink } from './edit-diff'
 import { formatUsage } from './format-usage'
 import { fillCode } from './highlight'
+import { PromptSubmittedEvent } from './events'
 import { renderMarkdown } from './markdown'
 import { PermissionCard } from './permission-card'
 import { isQuestionTool, QuestionCard } from './question-card'
@@ -46,6 +47,8 @@ export class ChatTranscript extends HTMLElement {
   /** What the session is doing right now, or what it needs from the user; nothing when idle. */
   private activity: Activity | undefined
   private working: { element: HTMLElement; label: string; startedAt: number; stop: () => void } | undefined
+  /** The offer to carry on a turn that stopped short; it stands only until the conversation moves on. */
+  private resume: HTMLButtonElement | undefined
 
   connectedCallback(): void {
     this.ensureStatusLine()
@@ -70,6 +73,7 @@ export class ChatTranscript extends HTMLElement {
     this.approvedByHand.clear()
     this.pendingTools.clear()
     this.openEdit = undefined
+    this.resume = undefined
     this.working?.stop()
     this.working = undefined
     this.activity = undefined
@@ -102,6 +106,8 @@ export class ChatTranscript extends HTMLElement {
         if (this.activity) this.activity = this.currentActivity()
         break
       case 'user_message':
+        this.resume?.remove()
+        this.resume = undefined
         // A test-run handoff quotes the command's output, colours and all.
         this.insert(block('user', event.text, renderAnsi))
         this.activity = atWork(WAITING_ON_MODEL)
@@ -221,10 +227,13 @@ export class ChatTranscript extends HTMLElement {
         this.insert(line)
         break
       }
-      case 'error':
-        this.insert(block(event.fatal ? 'error fatal' : 'error', event.message))
+      case 'error': {
+        const message = block(event.fatal ? 'error fatal' : 'error', event.message)
+        if (event.resumable) this.offerResume(message)
+        this.insert(message)
         if (event.fatal) this.activity = undefined
         break
+      }
       case 'ended':
         this.activity = undefined
         this.insert(block('ended', 'Engine stopped. The next prompt resumes the conversation.'))
@@ -234,6 +243,16 @@ export class ChatTranscript extends HTMLElement {
       this.showWorking()
       this.scrollToEnd()
     }
+  }
+
+  private offerResume(message: HTMLElement): void {
+    this.resume?.remove()
+    const button = document.createElement('button')
+    button.className = 'resume'
+    button.textContent = 'Resume'
+    button.addEventListener('click', () => this.dispatchEvent(new PromptSubmittedEvent('Continue where you stopped.')))
+    message.append(button)
+    this.resume = button
   }
 
   /**

@@ -86,7 +86,8 @@ export type SessionEvent =
   /** The session's MCP servers as of now; the newest replaces the last. */
   | { type: 'mcp_servers'; servers: McpServerState[] }
   | { type: 'turn_done'; usage?: TurnUsage; durationMs?: number; isError: boolean; errors: string[] }
-  | { type: 'error'; message: string; fatal: boolean }
+  /** `resumable` is set when the turn stopped short with its work intact: another turn carries on where it stopped. */
+  | { type: 'error'; message: string; fatal: boolean; resumable?: true }
   | { type: 'ended' }
 
 /**

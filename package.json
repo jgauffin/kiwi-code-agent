@@ -2,7 +2,7 @@
   "name": "kiwi-agent",
   "displayName": "KiwiAgent",
   "description": "Coding sessions in VS Code with a choice of model engine per session.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "CoderrAB",
   "icon": "docs/logos/logo-square-transparent-500px.png",
   "galleryBanner": {

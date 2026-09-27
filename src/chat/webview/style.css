@@ -1278,6 +1278,11 @@ chat-app {
         opacity: 1;
       }
 
+      /* What the user sends reaches the current run alone, so an earlier run cannot be resumed from here. */
+      &:not(.current) .resume {
+        display: none;
+      }
+
       &.moved > .run-head::after {
         content: ' •';
         color: var(--vscode-charts-blue);
@@ -1711,6 +1716,10 @@ chat-app {
     & .error {
       color: var(--vscode-errorForeground);
       white-space: pre-wrap;
+
+      & .resume {
+        margin-left: 0.5rem;
+      }
     }
 
     & .ended {

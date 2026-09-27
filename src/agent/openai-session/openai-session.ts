@@ -164,7 +164,7 @@ export class OpenAiSession implements CodeSession {
     try {
       for (let round = 1; ; round++) {
         if (round > maxRounds) {
-          this.emitError(`Stopped after ${maxRounds} tool rounds in one turn`)
+          this.emit({ type: 'error', message: `Stopped after ${maxRounds} tool rounds in one turn`, fatal: false, resumable: true })
           return this.finishTurn(usage, started, true, ['max tool rounds'])
         }
         this.emit({ type: 'status', status: 'requesting' })

@@ -269,6 +269,7 @@ describe('OpenAiSession', () => {
     s.send('go')
     const events = await untilTurnDone(s)
     expect(model.requests).toHaveLength(3)
+    expect(events.find((e) => e.type === 'error')).toMatchObject({ resumable: true })
     expect(events.at(-1)).toMatchObject({ type: 'turn_done', isError: true, errors: ['max tool rounds'] })
     await s.dispose()
   })
