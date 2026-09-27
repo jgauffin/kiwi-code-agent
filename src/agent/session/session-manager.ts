@@ -12,8 +12,23 @@ import { answerText, UNANSWERED_RESULT, type QuestionOutcome, type UserQuestionR
  */
 export type SessionMode = 'chat' | 'plan' | 'reconcile' | 'implement' | 'cleanup' | 'docs' | 'docs-map'
 
-/** Work in the intent rather than the code: the plan profile, and no blanket allow for writes. */
+/** Work in the intent rather than the code: no blanket allow for writes. */
 export const isPlanning = (mode: SessionMode): boolean => mode === 'plan' || mode === 'reconcile' || mode === 'docs'
+
+/**
+ * The steps a profile names a model for, in the order the settings page lists
+ * them. A step is a mode: what a session is for is what decides how strong a
+ * model it earns, so there is no second vocabulary to keep in step.
+ */
+export const STEPS: { step: SessionMode; label: string; hint: string }[] = [
+  { step: 'chat', label: 'Chat', hint: 'Work in the code with the full tool set.' },
+  { step: 'plan', label: 'Plan', hint: 'Write the spec from the intent docs, blind to the code.' },
+  { step: 'reconcile', label: 'Map against code', hint: 'Name each disagreement between the spec and the code, and what it costs.' },
+  { step: 'implement', label: 'Implement', hint: 'Build the approved spec, task by task, with a test per rule.' },
+  { step: 'cleanup', label: 'Cleanup', hint: 'Split what the implementation left oversized.' },
+  { step: 'docs', label: 'Evaluate docs', hint: 'Judge how the docs a blind planner reads are arranged.' },
+  { step: 'docs-map', label: 'Docs map', hint: 'Describe the docs so a blind planner can find its way.' },
+]
 
 /** The modes that stand on their own rather than on a feature's plan files. */
 export const isFeatureless = (mode: SessionMode): boolean => mode === 'chat' || mode === 'docs' || mode === 'docs-map'
@@ -225,6 +240,22 @@ export class SessionManager {
     await this.send(id, questionPrompt(request.request, outcome))
   }
 
+  /**
+   * Switches a session to a model chosen mid-conversation: the engine stops,
+   * the next prompt starts it again on the new profile. The conversation
+   * carries only within the same engine, by the rule a new session follows
+   * when it continues one; across engines it starts from the files on disk.
+   */
+  async setProfile(id: string, profile: ModelProfile): Promise<void> {
+    const record = this.require(id)
+    await this.close(id)
+    const continued = continuationOf(record, profile)
+    record.profile = profile
+    if (continued) record.engineSessionId = continued
+    else delete record.engineSessionId
+    await this.store.save(this.records)
+  }
+
   async interrupt(id: string): Promise<void> {
     await this.live.get(id)?.interrupt()
   }
@@ -350,6 +381,18 @@ export class SessionManager {
     }
     return request
   }
+}
+
+/**
+ * Of a tab's runs (oldest first), the one free text typed there is for: the
+ * newest still live among the ones with a tab of their own, else the newest
+ * of those. A child run (a mapping, a cleanup) is never a candidate: it has
+ * no transcript in the UI, so a person typing at the tab can never mean it,
+ * live or not.
+ */
+export function pickConversationalRun(runs: SessionRecord[], isLive: (id: string) => boolean): SessionRecord | undefined {
+  const newestFirst = [...runs].reverse().filter((r) => !r.parentId)
+  return newestFirst.find((r) => isLive(r.id)) ?? newestFirst.at(0)
 }
 
 type PermissionRequest = Extract<SessionEvent, { type: 'permission_request' }>

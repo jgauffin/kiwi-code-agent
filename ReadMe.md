@@ -29,7 +29,7 @@ code --install-extension kiwi-agent-<version>.vsix
 
 Open the "KiwiAgent" view in the activity bar. The Sessions view lists every session with its status; the Chat view has a tab per session and a `+` tab for a new one, which picks the model. The gear opens the settings page.
 
-Claude works with the login Claude Code already has. For another endpoint, add a profile with `baseUrl`, `model` and `apiKeySecret` on the Models tab, then run *KiwiAgent: Set API Key for Profile*. Node is needed only if `kiwiAgent.nodePath` is set; otherwise VS Code's own executable runs the engine.
+Claude works with the login Claude Code already has. For another endpoint, add a provider with its `baseUrl` on the Models tab's Providers sub-tab, then run *KiwiAgent: Set API Key for Provider*. Node is needed only if `kiwiAgent.nodePath` is set; otherwise VS Code's own executable runs the engine.
 
 ## More
 

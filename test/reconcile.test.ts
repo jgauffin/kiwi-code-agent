@@ -63,6 +63,16 @@ describe('reconcile prompt', () => {
     expect(again).not.toBe(fresh)
   })
 
+  it('a_redo_note_is_guidance_for_the_mapping_itself_appended_to_either_kickoff', () => {
+    const fresh = reconcileKickoff(false, 'keep findings to one short sentence')
+    expect(fresh).toContain('Map the spec against the code')
+    expect(fresh).toContain('Also: keep findings to one short sentence')
+    const again = reconcileKickoff(true, 'less detail')
+    expect(again).toContain('changed since you mapped it')
+    expect(again).toContain('Also: less detail')
+    expect(reconcileKickoff(true)).not.toContain('Also:')
+  })
+
   it('the_spec_stands_in_for_the_docs_and_the_other_specs_so_the_check_does_not_read_them_again', () => {
     expect(prompt).toContain('plan/*.spec.md')
     expect(prompt).toContain('do not browse those')
@@ -83,7 +93,7 @@ describe('reconcile prompt', () => {
   })
 
   it('the_proposals_and_the_ruling_belong_to_others_and_the_run_ends_silently', () => {
-    expect(prompt).toContain('The `proposed` lines are the planner\'s and the `ruling` line is the user\'s')
+    expect(prompt).toContain('The `proposed`, `recommended` and `because` lines are the planner\'s and the `ruling` line is the user\'s')
     expect(prompt).toContain('The spec is not yours to write')
     expect(prompt).toContain('When both files are written, stop.')
     expect(prompt).not.toContain('summarise')
@@ -97,6 +107,11 @@ describe('reconcile prompt', () => {
     expect(prompt).toContain('[tested]')
     // A task under an unruled decision would pre-empt the ruling.
     expect(prompt).toContain('No task for what a pending decision puts in question')
+  })
+
+  it('a_re_map_keeps_the_note_saying_why_the_build_departed_from_its_how_block', () => {
+    expect(prompt).toContain('Never touch a marker, a `proves:` line or a `note:` line')
+    expect(prompt).toContain('survives a rewrite of the task and goes only when the task does')
   })
 
   it('starts_from_one_task_per_scenario_under_its_heading_and_covers_every_rule', () => {
@@ -128,6 +143,10 @@ describe('the handoffs to the planner', () => {
     expect(prompt).toContain("the rule's new text as it would stand in the spec, one sentence")
     // Keeping the rule is the wizard's own option, so the planner does not spend one on it.
     expect(prompt).toContain('do not propose it')
+    // The user weighs the options first and meets the argument for one underneath them.
+    expect(prompt).toContain('`- recommended: <n>`')
+    expect(prompt).toContain('`- because: <one sentence>`')
+    expect(prompt).toContain('Recommend on every decision')
     expect(prompt).toContain('Change nothing else')
     expect(prompt).toContain('Then stop')
   })

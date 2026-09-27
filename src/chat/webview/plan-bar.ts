@@ -9,7 +9,9 @@ import {
   SpecApprovedEvent,
   SpecMapRequestedEvent,
   SpecMapStoppedEvent,
+  SpecRemapRequestedEvent,
   SpecRepairRequestedEvent,
+  SweepRequestedEvent,
   VerifyRequestedEvent,
 } from './events'
 import { STEPS, STEP_LABEL, planStep, type NextAction, type Step } from './plan-step'
@@ -23,6 +25,9 @@ import { STEPS, STEP_LABEL, planStep, type NextAction, type Step } from './plan-
  * off contract. A reached step is a button that opens the tab it works in.
  */
 export class PlanBar extends HTMLElement {
+  /** The note typed for the next redo, kept across a redraw so it is not lost when state elsewhere changes. */
+  private remapNote = ''
+
   update(plan: PlanState | undefined): void {
     this.hidden = plan === undefined
     this.replaceChildren()
@@ -34,7 +39,36 @@ export class PlanBar extends HTMLElement {
       const state = name === step.current ? 'current' : index < currentIndex ? 'done' : step.reached.includes(name) ? 'reached' : 'future'
       steps.append(this.stepNode(name, state))
     }
-    this.append(steps, ...this.run(plan), ...this.repair(plan), ...this.next(plan))
+    this.append(steps, ...this.run(plan), ...this.repair(plan), ...this.remap(plan), ...this.next(plan))
+  }
+
+  /**
+   * Feedback on the mapping itself, not on the spec: a level of detail, a
+   * scope, a house style. Redoing continues the mapping's own conversation,
+   * so the note only has to say what should differ, not repeat the code it
+   * already read.
+   */
+  private remap(plan: PlanState): HTMLElement[] {
+    if (!plan.remappable) return []
+    const wrap = el('span', 'remap')
+    const input = document.createElement('input')
+    input.type = 'text'
+    input.value = this.remapNote
+    input.placeholder = 'What should the mapping do differently? (optional)'
+    input.title = 'Guidance for the mapping run itself, not a change to the spec.'
+    input.addEventListener('input', () => (this.remapNote = input.value))
+    const go = button(
+      'Redo mapping',
+      () => {
+        const note = this.remapNote.trim()
+        this.remapNote = ''
+        this.dispatchEvent(new SpecRemapRequestedEvent(note || undefined))
+      },
+      'remap-go',
+      'Run the mapping again, continuing its own conversation.',
+    )
+    wrap.append(input, go)
+    return [wrap]
   }
 
   private stepNode(step: Step, state: string): HTMLElement {
@@ -56,8 +90,10 @@ export class PlanBar extends HTMLElement {
     const verifying = plan.verification?.live === true
     const live = mapping ? plan.mapping : cleaning ? plan.cleanup : verifying ? plan.verification : undefined
     if (live) {
-      const nodes = [el('span', 'running', live.text)]
-      nodes[0]!.title = live.text
+      // A run's tool line says nothing about which run it is, and the step it sits under is not always the answer.
+      const text = cleaning ? `Cleanup · ${live.text}` : live.text
+      const nodes = [el('span', 'running', text)]
+      nodes[0]!.title = text
       if (mapping) nodes.push(button('Stop', () => this.dispatchEvent(new SpecMapStoppedEvent()), 'stop', 'Stop the mapping.'))
       if (cleaning) nodes.push(button('Stop', () => this.dispatchEvent(new CleanupStoppedEvent()), 'stop', 'Stop the cleanup.'))
       return nodes
@@ -125,6 +161,8 @@ function eventFor(action: NextAction): Event {
       return new ImplementRequestedEvent()
     case 'verify':
       return new VerifyRequestedEvent()
+    case 'sweep':
+      return new SweepRequestedEvent()
   }
 }
 

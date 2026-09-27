@@ -77,7 +77,7 @@
       },
       {
         "command": "kiwiAgent.setApiKey",
-        "title": "KiwiAgent: Set API Key for Profile"
+        "title": "KiwiAgent: Set API Key for Provider"
       },
       {
         "command": "kiwiAgent.migratePlans",
@@ -149,11 +149,6 @@
           "default": 0,
           "description": "Font size in pixels for the chat and settings views. 0 follows editor.fontSize, a step above it. A value outside 8-40 is ignored. Takes effect when the view is reopened."
         },
-        "kiwiAgent.planProfile": {
-          "type": "string",
-          "default": "",
-          "description": "Profile used for plan sessions. Empty: same as activeProfile."
-        },
         "kiwiAgent.planIgnore": {
           "type": "array",
           "items": {
@@ -169,7 +164,7 @@
           },
           "default": [],
           "scope": "resource",
-          "description": "Tool calls that run without a prompt, on every engine. A rule is a tool name (Edit), a tool with a glob on the workspace-relative path (Edit(src/**)), or Bash or PowerShell with a command: Bash(npm test) for that exact command, PowerShell(npm run:*) for any command starting with those words; a rule for one shell says nothing about the other. Every segment of a chained command must be covered or read-only. \"Allow for project\" on a prompt writes here; \"Allow for session\" keeps the rule in memory for that session instead. Read-only tools and commands (Read, Grep, ls, git status, ...) never prompt."
+          "description": "Tool calls that run without a prompt, on every engine. A rule is a tool name (Edit), a tool with a glob on the workspace-relative path (Edit(src/**)), or Bash or PowerShell with a command: Bash(npm test) for that exact command, PowerShell(npm run:*) for any command starting with those words; a rule for one shell says nothing about the other. Every segment of a chained command must be covered or read-only. \"Allow for project\" on a prompt writes here; \"Allow for session\" keeps the rule in memory for that session instead. No rule is needed for read-only tools and commands (Read, Grep, ls, git status, ...), for a script the root package.json defines, or for a command kiwiAgent.verify names: a deny rule still blocks those."
         },
         "kiwiAgent.permissions.deny": {
           "type": "array",
@@ -192,7 +187,7 @@
         },
         "kiwiAgent.verify": {
           "type": "array",
-          "description": "Test commands run once every task of a feature is marked tested, over the files its tasks name: a matching file runs its rule's command once per project. {project} is the nearest file matching 'project' above the file, {projectDir} its directory. A failure is handed to the implement session, up to the failure budget.",
+          "description": "Test commands run once every task of a feature is marked tested, over the files its tasks name: a matching file runs its rule's command once per project. {project} is the nearest file matching 'project' above the file, {projectDir} its directory, {file} the file itself. A failure is handed to the implement session, up to the failure budget. The implement session is told these commands, so it narrows the same ones while it works, and may run them without a prompt.",
           "default": [
             {
               "match": "**/*.cs",
@@ -258,19 +253,17 @@
           ],
           "description": "Workspace-relative globs of edited files the cleanup never measures: tests, generated code."
         },
-        "kiwiAgent.profiles": {
+        "kiwiAgent.providers": {
           "type": "array",
-          "description": "Model profiles selectable per session.",
+          "description": "Where models come from: an engine, its endpoint for an OpenAI-compatible one, and the models it serves. The API key itself is stored in VS Code secret storage under the provider's own name, never here.",
           "default": [
             {
               "name": "Claude",
               "engine": "claude-sdk",
-              "model": "claude-opus-5"
-            },
-            {
-              "name": "Claude Sonnet",
-              "engine": "claude-sdk",
-              "model": "claude-sonnet-5"
+              "models": [
+                "claude-opus-5",
+                "claude-sonnet-5"
+              ]
             }
           ],
           "items": {
@@ -278,7 +271,7 @@
             "required": [
               "name",
               "engine",
-              "model"
+              "models"
             ],
             "properties": {
               "name": {
@@ -291,28 +284,107 @@
                   "openai-compatible"
                 ]
               },
-              "model": {
-                "type": "string"
-              },
               "baseUrl": {
                 "type": "string"
               },
-              "apiKeySecret": {
-                "type": "string",
-                "description": "Name under which the API key is stored in VS Code secret storage."
-              },
-              "effort": {
-                "type": "string",
-                "enum": [
-                  "low",
-                  "medium",
-                  "high",
-                  "xhigh",
-                  "max"
-                ]
-              },
-              "systemPromptFile": {
+              "models": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "kiwiAgent.profiles": {
+          "type": "array",
+          "description": "A named way to work: a model for every step, and the steps that earn a different one.",
+          "default": [
+            {
+              "name": "Claude",
+              "default": {
+                "provider": "Claude",
+                "model": "claude-opus-5"
+              }
+            },
+            {
+              "name": "Claude Sonnet",
+              "default": {
+                "provider": "Claude",
+                "model": "claude-sonnet-5"
+              }
+            }
+          ],
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "default"
+            ],
+            "properties": {
+              "name": {
                 "type": "string"
+              },
+              "default": {
+                "type": "object",
+                "required": [
+                  "provider",
+                  "model"
+                ],
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "description": "The name of an entry in kiwiAgent.providers."
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "effort": {
+                    "type": "string",
+                    "enum": [
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh",
+                      "max"
+                    ]
+                  },
+                  "systemPromptFile": {
+                    "type": "string"
+                  }
+                }
+              },
+              "steps": {
+                "type": "object",
+                "description": "One entry per step that runs on something other than the default: chat, plan, reconcile, implement, cleanup, docs, docs-map.",
+                "additionalProperties": {
+                  "type": "object",
+                  "required": [
+                    "provider",
+                    "model"
+                  ],
+                  "properties": {
+                    "provider": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "effort": {
+                      "type": "string",
+                      "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max"
+                      ]
+                    },
+                    "systemPromptFile": {
+                      "type": "string"
+                    }
+                  }
+                }
               }
             }
           }
@@ -331,12 +403,14 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.2.112",
+    "@jitl/quickjs-singlefile-cjs-release-sync": "^0.32.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@relax.js/core": "^1.8.0",
     "dompurify": "^3.4.15",
     "highlight.js": "^11.12.0",
     "marked": "^18.0.13",
     "mermaid": "^12.0.0",
+    "quickjs-emscripten": "^0.32.0",
     "zod": "^4.0.0"
   },
   "overrides": {

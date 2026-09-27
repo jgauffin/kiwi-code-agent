@@ -125,7 +125,9 @@ export function verificationHandoffPrompt(feature: string, failures: Verificatio
     lines.push(`${describeCommand(failure, cwd)}:`, '```', failure.output.trim(), '```', '')
   }
   lines.push(
-    'Fix what the output names. Mark the tasks it touches ` [in progress]` while you work and ` [tested]` once their tests pass; leave the rest of the board as it is. The run runs again when you stop with every task tested.',
+    'Fix what the output names. Mark the tasks it touches ` [in progress]` while you work and ` [tested]` once their tests pass; leave the rest of the board as it is.',
+    '',
+    'Reproduce the failure with a run narrowed to the test the output names, fix it, then run that test again and build its project. The whole sweep runs again as soon as you stop with every task tested, so stopping on a fix you have not run costs another one.',
   )
   return lines.join('\n')
 }

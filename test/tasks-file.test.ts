@@ -10,6 +10,7 @@ import {
   tasksFresh,
   undeliveredItems,
   unprovenItems,
+  withCleanupDecision,
   withRecord,
   withSpecFingerprint,
 } from '../src/agent/phases/tasks-file'
@@ -147,6 +148,18 @@ describe('tasks file', () => {
     // Restamping replaces, and the record section still lands at the end.
     expect(parseTasks(withSpecFingerprint(stamped, 'def00000')).spec).toBe('def00000')
     expect(parseTasks(withRecord(stamped, { at: 't', ok: true, text: '' })).verification?.ok).toBe(true)
+  })
+
+  it('the_board_remembers_what_the_user_said_about_the_cleanup', () => {
+    const text = withSpecFingerprint(board('- **A**: a [tested]'), 'abc12345')
+    expect(parseTasks(text).cleanup).toBeUndefined()
+    const postponed = withCleanupDecision(text, 'postponed')
+    expect(parseTasks(postponed).cleanup).toBe('postponed')
+    // The stamp it stands beside survives, and a later word replaces the earlier one.
+    expect(parseTasks(postponed).spec).toBe('abc12345')
+    expect(parseTasks(withCleanupDecision(postponed, 'done')).cleanup).toBe('done')
+    // A value the extension never writes is no decision at all: the offer still stands.
+    expect(parseTasks(text.replace('spec: abc12345', 'spec: abc12345\ncleanup: maybe')).cleanup).toBeUndefined()
   })
 
   it('blocked_wins_over_a_finish_marker_left_from_an_earlier_run', () => {

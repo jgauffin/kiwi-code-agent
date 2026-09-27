@@ -140,6 +140,14 @@ export class SpecMapStoppedEvent extends Event {
   }
 }
 
+/** The plan bar's "Redo mapping": run it again, continuing its own conversation, with an optional note on what should differ. */
+export class SpecRemapRequestedEvent extends Event {
+  static readonly type = 'spec-remap-requested'
+  constructor(public readonly note?: string) {
+    super(SpecRemapRequestedEvent.type, { bubbles: true })
+  }
+}
+
 /** The plan bar's stop on a running cleanup. */
 export class CleanupStoppedEvent extends Event {
   static readonly type = 'cleanup-stopped'
@@ -161,6 +169,25 @@ export class VerifyRequestedEvent extends Event {
   static readonly type = 'verify-requested'
   constructor() {
     super(VerifyRequestedEvent.type, { bubbles: true })
+  }
+}
+
+/** What the user said about the units the size sweep found, on the Cleanup tab; a split names the files picked. */
+export class CleanupDecidedEvent extends Event {
+  static readonly type = 'cleanup-decided'
+  constructor(
+    public readonly decision: 'run' | 'postpone' | 'skip',
+    public readonly paths?: string[],
+  ) {
+    super(CleanupDecidedEvent.type, { bubbles: true })
+  }
+}
+
+/** The plan bar's "Check sizes": measure the feature's files against the limits again. */
+export class SweepRequestedEvent extends Event {
+  static readonly type = 'sweep-requested'
+  constructor() {
+    super(SweepRequestedEvent.type, { bubbles: true })
   }
 }
 
@@ -212,6 +239,14 @@ export class AllowWritesToggledEvent extends Event {
   }
 }
 
+/** The composer's model switch, on a chat session only: the model to run it on from now. */
+export class SessionModelChangedEvent extends Event {
+  static readonly type = 'session-model-changed'
+  constructor(public readonly name: string) {
+    super(SessionModelChangedEvent.type, { bubbles: true })
+  }
+}
+
 /** The composer's reconnect on one of the active session's MCP servers. */
 export class McpReconnectRequestedEvent extends Event {
   static readonly type = 'mcp-reconnect-requested'
@@ -220,13 +255,10 @@ export class McpReconnectRequestedEvent extends Event {
   }
 }
 
-/** A picker on the new-session screen: what new sessions of that kind run on from now. */
+/** The picker on the new-session screen: the profile new sessions run on from now. */
 export class DefaultProfileChangedEvent extends Event {
   static readonly type = 'default-profile-changed'
-  constructor(
-    public readonly role: 'work' | 'plan',
-    public readonly name: string,
-  ) {
+  constructor(public readonly name: string) {
     super(DefaultProfileChangedEvent.type, { bubbles: true })
   }
 }
@@ -257,7 +289,10 @@ declare global {
     [PlanFocusRequestedEvent.type]: PlanFocusRequestedEvent
     [SpecMapRequestedEvent.type]: SpecMapRequestedEvent
     [SpecMapStoppedEvent.type]: SpecMapStoppedEvent
+    [SpecRemapRequestedEvent.type]: SpecRemapRequestedEvent
     [CleanupStoppedEvent.type]: CleanupStoppedEvent
+    [CleanupDecidedEvent.type]: CleanupDecidedEvent
+    [SweepRequestedEvent.type]: SweepRequestedEvent
     [SpecRepairRequestedEvent.type]: SpecRepairRequestedEvent
     [VerifyRequestedEvent.type]: VerifyRequestedEvent
     [ImplementRequestedEvent.type]: ImplementRequestedEvent
@@ -265,6 +300,7 @@ declare global {
     [ReviewActionEvent.type]: ReviewActionEvent
     [SessionRemovedEvent.type]: SessionRemovedEvent
     [AllowWritesToggledEvent.type]: AllowWritesToggledEvent
+    [SessionModelChangedEvent.type]: SessionModelChangedEvent
     [McpReconnectRequestedEvent.type]: McpReconnectRequestedEvent
     [DefaultProfileChangedEvent.type]: DefaultProfileChangedEvent
   }

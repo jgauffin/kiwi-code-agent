@@ -224,7 +224,7 @@ describe('the plan session knows what a review asks of it', () => {
   it('the_check_is_a_run_not_a_reviewer_so_rulings_on_decisions_never_go_to_it', () => {
     const prompt = reconcilePrompt('Order cancellation', '/work/repo')
     expect(prompt).not.toContain('review.md')
-    expect(prompt).toContain('never write, change or remove either')
+    expect(prompt).toContain('never write, change or remove any of them')
     expect(blindPlanPrompt('Order cancellation', '/work/repo')).toContain('[applied]')
   })
 

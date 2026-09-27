@@ -24,7 +24,7 @@ chat-app {
   flex-direction: column;
   height: 100vh;
 
-  & > .transcript,
+  & > .runs,
   & > .new-session {
     flex: 1;
     min-height: 0;
@@ -112,6 +112,21 @@ chat-app {
       border: 1px solid var(--vscode-inputValidation-warningBorder);
     }
 
+    & .remap {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+
+      & input[type='text'] {
+        background: var(--vscode-input-background);
+        color: var(--vscode-input-foreground);
+        border: 1px solid var(--vscode-input-border, transparent);
+        border-radius: 2px;
+        padding: 0.15rem 0.4rem;
+        min-width: 12rem;
+      }
+    }
+
     /* The one next step: a button when it moves the plan on, green when it is the gate; a link when the act is on a row; text while someone else works. */
     & .next {
       white-space: nowrap;
@@ -170,6 +185,22 @@ chat-app {
       &.active {
         opacity: 1;
         border-bottom-color: var(--vscode-focusBorder);
+      }
+
+      /* The conversation moved on while another tab was open. */
+      &.moved {
+        opacity: 1;
+
+        &::after {
+          content: '';
+          display: inline-block;
+          width: 0.4rem;
+          height: 0.4rem;
+          margin-left: 0.35rem;
+          vertical-align: middle;
+          border-radius: 50%;
+          background: var(--vscode-charts-blue, var(--vscode-focusBorder));
+        }
       }
     }
   }
@@ -533,7 +564,9 @@ chat-app {
         & .rule {
           margin: 0 0 0.2rem;
 
+          /* The name is a link, and a spec row's margin under it would space the rule's wrapped lines apart. */
           & .name {
+            margin: 0;
             font-weight: 600;
           }
         }
@@ -546,9 +579,34 @@ chat-app {
         gap: 0.4rem;
         margin: 0.7rem 0 0.1rem;
 
+        & .heading {
+          margin: 0;
+          font-size: 1em;
+          font-weight: 600;
+        }
+
         & .lead {
           margin: 0 0 0.1rem;
           opacity: 0.75;
+        }
+
+        /* The planner's pick, under the options so every way is read before its argument. */
+        & .recommendation {
+          display: flex;
+          gap: 0.4rem;
+          margin: 0.5rem 0 0.1rem;
+
+          & .kind {
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            white-space: nowrap;
+            opacity: 0.8;
+            color: var(--vscode-testing-iconPassed);
+          }
+
+          & .text {
+            flex: 1;
+          }
         }
 
         & .option {
@@ -564,6 +622,12 @@ chat-app {
 
           &:hover {
             background: var(--vscode-button-secondaryHoverBackground);
+          }
+
+          /* What the recommendation beneath calls this option. */
+          & .index {
+            opacity: 0.8;
+            font-variant-numeric: tabular-nums;
           }
 
           & .kind {
@@ -827,10 +891,45 @@ chat-app {
         }
       }
 
-      & .files {
+      & .paths {
+        display: flex;
+        gap: 0.4rem;
+        margin-left: 1rem;
+
+        & .kind {
+          text-transform: uppercase;
+          letter-spacing: 0.03em;
+          opacity: 0.7;
+          flex: 0 0 4rem;
+        }
+      }
+
+      & .files,
+      & .context {
         list-style: none;
         padding: 0;
-        margin: 0.1rem 0 0 1rem;        font-family: var(--vscode-editor-font-family);
+        margin: 0.1rem 0 0;
+        font-family: var(--vscode-editor-font-family);
+      }
+
+      & details.how {
+        margin: 0.2rem 0 0.2rem 1rem;
+
+        & > summary {
+          cursor: pointer;
+          text-transform: uppercase;
+          letter-spacing: 0.03em;
+          opacity: 0.7;
+        }
+
+        & > .body {
+          opacity: 0.85;
+
+          & ul {
+            margin: 0.2rem 0;
+            padding-left: 1.1rem;
+          }
+        }
       }
 
       & .verification {
@@ -847,6 +946,71 @@ chat-app {
         &.failed .kind {
           color: var(--vscode-errorForeground);
         }
+      }
+
+    }
+
+    & .cleanup {
+      & .toolbar {
+        display: flex;
+        gap: 0.6rem;
+        align-items: center;
+
+        & .count {
+          opacity: 0.7;
+        }
+      }
+
+      & .files {
+        list-style: none;
+        padding: 0;
+        margin: 0.3rem 0;
+
+        & .entry {
+          margin: 0.3rem 0;
+
+          & .pick {
+            display: flex;
+            gap: 0.4rem;
+            align-items: center;
+
+            & .link.file {
+              font-family: var(--vscode-editor-font-family);
+            }
+          }
+        }
+      }
+
+      & .units {
+        list-style: none;
+        padding: 0;
+        margin: 0.1rem 0 0 1.6rem;
+
+        & .unit {
+          display: flex;
+          gap: 0.5rem;
+          align-items: baseline;
+
+          & .link.file {
+            font-family: var(--vscode-editor-font-family);
+            opacity: 0.8;
+          }
+        }
+      }
+
+      & .choices {
+        display: flex;
+        gap: 0.4rem;
+        align-items: center;
+        flex-wrap: wrap;
+
+        & .note {
+          margin: 0;
+        }
+      }
+
+      & .running {
+        opacity: 0.85;
       }
     }
 
@@ -1048,8 +1212,47 @@ chat-app {
     }
   }
 
-  & > .transcript {
+  /*
+   * A tab holds every run of its feature: the planner, the mapping, the
+   * implementer, the cleanup. They scroll as one column, each folded under
+   * its own name, so the tab reads as one place without the conversations
+   * running into each other.
+   */
+  & > .runs {
     overflow-y: auto;
+
+    & > .run {
+      & > .run-head {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        cursor: pointer;
+        padding: 0.2rem 0.6rem;
+        background: var(--vscode-editor-background);
+        border-bottom: 1px solid var(--vscode-panel-border);
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        font-size: 0.9em;
+        opacity: 0.7;
+      }
+
+      &.current > .run-head {
+        opacity: 1;
+      }
+
+      &.moved > .run-head::after {
+        content: ' •';
+        color: var(--vscode-charts-blue);
+      }
+    }
+
+    /* One run and nothing to choose between: its header is noise. */
+    & > .run:only-child > .run-head {
+      display: none;
+    }
+  }
+
+  & .transcript {
     padding: 0.6rem;
     display: flex;
     flex-direction: column;

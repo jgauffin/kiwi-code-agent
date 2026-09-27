@@ -28,6 +28,8 @@ const awaitingUser = (label: string): Activity => ({ label, needsUser: true })
  * their call, permission cards resolve in place. `reset()` replays history.
  */
 export class ChatTranscript extends HTMLElement {
+  /** What scrolls as the conversation grows: this element, or the container a tab's several runs share. */
+  scrollHost: HTMLElement = this
   private readonly bubbles = new Map<string, AssistantBubble>()
   private readonly tools = new Map<string, HTMLDetailsElement>()
   private readonly permissions = new Map<string, PermissionCard>()
@@ -46,14 +48,19 @@ export class ChatTranscript extends HTMLElement {
   private working: { element: HTMLElement; label: string; startedAt: number; stop: () => void } | undefined
 
   connectedCallback(): void {
-    if (this.childElementCount === 0) {
-      this.statusLine = document.createElement('p')
-      this.statusLine.className = 'status'
-      this.appendChild(this.statusLine)
-    }
+    this.ensureStatusLine()
+  }
+
+  /** The status line is the transcript's own first child; history can be replayed into it before it is on screen. */
+  private ensureStatusLine(): void {
+    if (this.statusLine) return
+    this.statusLine = document.createElement('p')
+    this.statusLine.className = 'status'
+    this.appendChild(this.statusLine)
   }
 
   reset(events: SessionEvent[]): void {
+    this.ensureStatusLine()
     this.replaceChildren(this.statusLine)
     this.bubbles.clear()
     this.tools.clear()
@@ -82,6 +89,7 @@ export class ChatTranscript extends HTMLElement {
   }
 
   apply(event: SessionEvent, live = true): void {
+    this.ensureStatusLine()
     switch (event.type) {
       case 'session_started':
         this.setStatus(`${event.model} · Claude Code ${event.engineVersion ?? ''}`.trim())
@@ -322,7 +330,7 @@ export class ChatTranscript extends HTMLElement {
   }
 
   private scrollToEnd(): void {
-    this.scrollTop = this.scrollHeight
+    this.scrollHost.scrollTop = this.scrollHost.scrollHeight
   }
 }
 

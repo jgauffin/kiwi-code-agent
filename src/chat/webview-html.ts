@@ -15,7 +15,7 @@ export function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, r
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="stylesheet" href="${style}">
 ${size}
-<title>KiwiAgent</title>
+<!-- No <title>: a webview's document title leaks into the VS Code window title and the taskbar entry. -->
 </head>
 <body>
 <${rootElement}></${rootElement}>

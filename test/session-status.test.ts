@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { nextStatus, type SessionStatus } from '../src/agent/session/session-status'
+import { mostUrgent, nextStatus, type SessionStatus } from '../src/agent/session/session-status'
 import type { SessionEvent } from '../src/agent/session/code-session'
 import type { SessionMode } from '../src/agent/session/session-manager'
 
@@ -76,6 +76,14 @@ describe('session status', () => {
     const unanswered: SessionEvent = { type: 'question_resolved', requestId: 'q1', outcome: { kind: 'unanswered' } }
     expect(nextStatus('needs_answer', 'plan', answered)).toBe('planning')
     expect(nextStatus('needs_answer', 'implement', unanswered)).toBe('implementing')
+  })
+
+  it('a_tab_of_several_runs_shows_the_one_that_asks_most_of_the_user', () => {
+    // A run waiting on the user must not be hidden behind another that is merely at work.
+    expect(mostUrgent(['idle', 'implementing', 'needs_answer'])).toBe('needs_answer')
+    expect(mostUrgent(['needs_human', 'planning', 'error'])).toBe('needs_human')
+    expect(mostUrgent(['idle', 'idle'])).toBe('idle')
+    expect(mostUrgent([])).toBe('idle')
   })
 
   it('a_finished_chat_turn_is_idle_but_a_finished_plan_turn_needs_the_human', () => {

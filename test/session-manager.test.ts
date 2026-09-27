@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { SessionManager, type SessionRecord, type SessionStore } from '../src/agent/session/session-manager'
+import { pickConversationalRun, SessionManager, type SessionRecord, type SessionStore } from '../src/agent/session/session-manager'
 import type { QuestionOutcome, UserQuestionRequest } from '../src/agent/session/user-question'
 import type { CodeSession, PermissionDecision, SessionEvent } from '../src/agent/session/code-session'
 import { AsyncQueue } from '../src/agent/session/async-queue'
@@ -643,6 +643,68 @@ describe('SessionManager', () => {
     })
   })
 
+  describe('switching a session to a model chosen mid-conversation', () => {
+    const berget: ModelProfile = { name: 'GLM', engine: 'openai-compatible', model: 'glm', baseUrl: 'https://b', apiKeySecret: 'k' }
+
+    function setup(dir: string) {
+      const engines: FakeSession[] = []
+      const manager = new SessionManager(
+        memoryStore(),
+        async (r) => {
+          const s = new FakeSession(r.id, r.profile, r.engineSessionId)
+          engines.push(s)
+          return s
+        },
+        (id) => RunLog.forSession(dir, id),
+        () => {},
+      )
+      return { manager, engines }
+    }
+
+    it('a_model_switch_within_the_same_engine_stops_the_engine_but_keeps_the_conversation', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+      try {
+        const { manager, engines } = setup(dir)
+        const chat = await manager.create(profile, 'chat')
+        await manager.send(chat.id, 'hi')
+        engines[0]!.out.push({ type: 'session_started', engineSessionId: 'eng-1', model: 'opus' })
+        await tick()
+
+        const sonnet: ModelProfile = { ...profile, name: 'Claude Sonnet', model: 'sonnet' }
+        await manager.setProfile(chat.id, sonnet)
+        expect(engines[0]!.disposed).toBe(true)
+        expect(manager.isLive(chat.id)).toBe(false)
+        expect(manager.get(chat.id)!.profile).toEqual(sonnet)
+        expect(manager.get(chat.id)!.engineSessionId).toBe('eng-1')
+
+        await manager.send(chat.id, 'again')
+        expect(engines[1]!.profile).toEqual(sonnet)
+        expect(engines[1]!.resumedFrom).toBe('eng-1')
+        await manager.disposeAll()
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
+
+    it('a_model_switch_across_engines_drops_the_engine_session_id', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+      try {
+        const { manager, engines } = setup(dir)
+        const chat = await manager.create(profile, 'chat')
+        await manager.send(chat.id, 'hi')
+        engines[0]!.out.push({ type: 'session_started', engineSessionId: 'eng-1', model: 'opus' })
+        await tick()
+
+        await manager.setProfile(chat.id, berget)
+        expect(manager.get(chat.id)!.profile).toEqual(berget)
+        expect(manager.get(chat.id)!.engineSessionId).toBeUndefined()
+        await manager.disposeAll()
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
+  })
+
   describe('answering a question', () => {
     const card: UserQuestionRequest = {
       questions: [{ header: 'Scope', question: 'How far?', options: [{ label: 'Small' }, { label: 'Large' }] }],
@@ -730,5 +792,44 @@ describe('SessionManager', () => {
         await rm(dir, { recursive: true, force: true })
       }
     })
+  })
+})
+
+describe('pickConversationalRun', () => {
+  const rec = (id: string, over: Partial<SessionRecord> = {}): SessionRecord => ({
+    id,
+    title: id,
+    profile,
+    mode: 'plan',
+    createdAt: '2024-01-01T00:00:00.000Z',
+    feature: 'Orders',
+    ...over,
+  })
+
+  it('a_live_mapping_child_never_wins_the_floor_over_the_idle_plan_session', () => {
+    const plan = rec('plan')
+    const mapping = rec('mapping', { mode: 'reconcile', parentId: plan.id })
+    const isLive = (id: string) => id === mapping.id
+    expect(pickConversationalRun([plan, mapping], isLive)?.id).toBe(plan.id)
+  })
+
+  it('a_live_plan_session_holds_the_floor_over_an_older_run', () => {
+    const plan = rec('plan')
+    const isLive = (id: string) => id === plan.id
+    expect(pickConversationalRun([plan], isLive)?.id).toBe(plan.id)
+  })
+
+  it('with_nothing_live_the_newest_run_with_a_tab_of_its_own_holds_the_floor', () => {
+    const plan = rec('plan')
+    const implementer = rec('implement', { mode: 'implement' })
+    const cleanup = rec('cleanup', { mode: 'cleanup', parentId: implementer.id })
+    const isLive = () => false
+    expect(pickConversationalRun([plan, implementer, cleanup], isLive)?.id).toBe(implementer.id)
+  })
+
+  it('no_conversational_run_at_all_yields_undefined', () => {
+    const plan = rec('plan')
+    const mapping = rec('mapping', { mode: 'reconcile', parentId: plan.id })
+    expect(pickConversationalRun([mapping], () => true)).toBeUndefined()
   })
 })

@@ -39,15 +39,9 @@ export class NewSessionView extends HTMLElement {
   private readonly template = compileTemplate(`
     <h2>New session</h2>
     <div class="models">
-      <label>Model
-        <select name="work" r-change="pick('work', event)">
-          <option loop="p in work" value="{{p.name}}" selected="{{p.selected}}">{{p.name}}</option>
-        </select>
-      </label>
-      <label>Plan model
-        <select name="plan" r-change="pick('plan', event)">
-          <option value="" selected="{{planFollows}}">Same as model</option>
-          <option loop="p in plan" value="{{p.name}}" selected="{{p.selected}}">{{p.name}}</option>
+      <label>Profile
+        <select name="profile" r-change="pick(event)">
+          <option loop="p in profiles" value="{{p.name}}" selected="{{p.selected}}">{{p.name}}</option>
         </select>
       </label>
     </div>
@@ -115,7 +109,7 @@ export class NewSessionView extends HTMLElement {
   /** What has been typed, so swapping card keeps it: the same intent describes either session type. */
   private draft: Draft = { feature: '', prompt: '' }
   private plans: PlanRow[] = []
-  private profiles: ProfileDefaults = { names: [], active: '', plan: '' }
+  private profileDefaults: ProfileDefaults = { names: [], active: '' }
 
   connectedCallback(): void {
     if (this.childElementCount > 0) return
@@ -131,19 +125,17 @@ export class NewSessionView extends HTMLElement {
   update(plans: ResumablePlan[], profiles: ProfileDefaults): void {
     const rows = plans.map((p) => ({ ...p, hint: STATUS_HINT[p.status] }))
     // State arrives often; a re-render while the user types is only worth it when something shown changed.
-    if (JSON.stringify([rows, profiles]) === JSON.stringify([this.plans, this.profiles])) return
+    if (JSON.stringify([rows, profiles]) === JSON.stringify([this.plans, this.profileDefaults])) return
     this.plans = rows
-    this.profiles = profiles
+    this.profileDefaults = profiles
     this.render()
   }
 
   private render(): void {
-    const { names, active, plan } = this.profiles
+    const { names, active } = this.profileDefaults
     this.template.render(
       {
-        work: names.map((name) => ({ name, selected: name === active })),
-        plan: names.map((name) => ({ name, selected: name === plan })),
-        planFollows: plan === '',
+        profiles: names.map((name) => ({ name, selected: name === active })),
         isChat: this.mode === 'chat',
         isPlan: this.mode === 'plan',
         isResume: this.mode === 'resume',
@@ -157,8 +149,7 @@ export class NewSessionView extends HTMLElement {
       },
       {
         resume: (p: PlanRow) => this.dispatchEvent(new PlanResumeRequestedEvent(p.feature)),
-        pick: (role: 'work' | 'plan', event: Event) =>
-          this.dispatchEvent(new DefaultProfileChangedEvent(role, (event.target as HTMLSelectElement).value)),
+        pick: (event: Event) => this.dispatchEvent(new DefaultProfileChangedEvent((event.target as HTMLSelectElement).value)),
         edit: (field: keyof Draft, event: Event) => {
           this.draft[field] = (event.target as TextField).value
         },

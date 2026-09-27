@@ -4,7 +4,9 @@ import type { Decision } from '../agent/phases/decisions'
 import type { CommentRef, Review } from '../agent/phases/plan-review'
 import type { PlanStage } from '../agent/phases/plan-stage'
 import type { Spec } from '../agent/phases/spec-model'
-import type { Task, VerificationRecord } from '../agent/phases/tasks-file'
+import type { CleanupDecision, Task, VerificationRecord } from '../agent/phases/tasks-file'
+import type { UnitKind } from '../agent/cleanup/unit-size'
+import type { ModelProfile } from '../agent/session/model-profile'
 import type { SessionMode } from '../agent/session/session-manager'
 import type { SessionStatus } from '../agent/session/session-status'
 import type { ProfileDefaults } from '../settings/settings-store'
@@ -43,6 +45,8 @@ export type PlanState = {
   mappable: boolean
   /** The mapping run under this plan session: what it is doing, or how the last one ended. Absent before the first. */
   mapping?: RunState
+  /** The mapping can be redone, as feedback on itself rather than on the spec: it has run before, the spec is still a draft, and no run is live. */
+  remappable: boolean
   /** Implementation can be started from here: a plan session with an approved, mapped spec whose board is not all tested. */
   implementable: boolean
   /** The test run can be started from here: every task is tested and no run is live. */
@@ -51,6 +55,10 @@ export type PlanState = {
   verification?: RunState
   /** The cleanup run after the tests passed: what it is splitting, or how it ended. Absent before the first and once a new test run starts. */
   cleanup?: RunState
+  /** What the size sweep found after the tests passed; absent until one has run in this window. */
+  cleanupSweep?: CleanupSweep
+  /** What the user said about the cleanup, as the tasks file records it; absent while the offer stands open. */
+  cleanupDecision?: CleanupDecision
   /** The newest record in the tasks file, the outcome that stands. */
   lastVerification?: VerificationRecord
   /** The task board; empty until the spec is mapped. */
@@ -74,6 +82,21 @@ export type PlanState = {
 /** One line on a run under the plan: its current step while it runs, its outcome once it ended. */
 export type RunState = { live: boolean; text: string }
 
+/** One unit the size sweep flagged, its path workspace-relative. */
+export type CleanupUnit = { path: string; line: number; name: string; kind: UnitKind; lines: number; threshold: number }
+
+/** What the last sweep found, in file order; empty when every unit is within its limit. */
+export type CleanupSweep = { units: CleanupUnit[] }
+
+/**
+ * One run under a tab: the planner, a mapping, an implementer, a cleanup.
+ * Each keeps its own conversation; the tab shows them one under the other,
+ * and only the current one takes what the user types.
+ */
+export type RunRef = { sessionId: string; mode: SessionMode; title: string; current: boolean }
+
+export type RunSection = RunRef & { events: SessionEvent[] }
+
 /** A plan on disk the new-session screen offers to pick up; verified ones are finished and not offered. */
 export type ResumablePlan = { feature: string; status: 'draft' | 'approved' }
 
@@ -91,14 +114,16 @@ export type ToWebview =
       plans: ResumablePlan[]
       /** The profiles by name and which of them new sessions get, for the new-session screen's pickers. */
       profiles: ProfileDefaults
+      /** Every model a provider serves, for the composer's model switch on a chat session. */
+      models: ModelProfile[]
     }
-  /** Full history of the active session, sent on switch. */
-  | { type: 'transcript'; sessionId: string; events: SessionEvent[] }
+  /** Full history of the active tab, one section per run under it, oldest first. */
+  | { type: 'transcript'; sessionId: string; runs: RunSection[] }
   /** The file the editor had open when the composer asked to link it, as it will be named in the prompt. */
   | { type: 'linked_file'; path: string }
   /** Show the new-session screen (from the Sessions view's + button). */
   | { type: 'show_new_session' }
-  | { type: 'event'; sessionId: string; event: SessionEvent }
+  | { type: 'event'; sessionId: string; run: RunRef; event: SessionEvent }
 
 /** The user's answer to a permission prompt, with the rules its lines were allowed by that later calls should pass on. */
 export type UserPermissionDecision = PermissionDecision & { remember?: RememberedRules }
@@ -127,12 +152,15 @@ export type FromWebview =
   | { type: 'send'; text: string; files?: string[] }
   /** Answers with `linked_file` for the file open in the editor, so the composer can link it. */
   | { type: 'link_open_file' }
-  | { type: 'permission'; requestId: string; decision: UserPermissionDecision }
+  /** `sessionId` is the run whose section the card sits in: a tab holds several, and only that one asked. */
+  | { type: 'permission'; sessionId: string; requestId: string; decision: UserPermissionDecision }
   /** The card's answers to a question the model asked, or that the user left it unanswered. */
-  | { type: 'question'; requestId: string; outcome: QuestionOutcome }
+  | { type: 'question'; sessionId: string; requestId: string; outcome: QuestionOutcome }
   | { type: 'interrupt' }
   /** File writes in the active session go through without a prompt while on. */
   | { type: 'set_allow_writes'; enabled: boolean }
+  /** Switches the active chat session to a model named as `models` on `state` lists it. */
+  | { type: 'set_session_model'; name: string }
   /** Tries one of the active session's MCP servers again. */
   | { type: 'reconnect_mcp'; server: string }
   | { type: 'switch_session'; sessionId: string }
@@ -140,8 +168,8 @@ export type FromWebview =
   | { type: 'close_session'; sessionId: string }
   /** `prompt`, when given, is sent as the first message; `files` are linked files it should read. */
   | { type: 'new_session'; mode: SessionMode; feature?: string; prompt?: string; files?: string[] }
-  /** Sets the profile new sessions of that kind run on; `plan` with an empty name follows `work`. */
-  | { type: 'set_default_profile'; role: 'work' | 'plan'; name: string }
+  /** Sets the profile new sessions run on. */
+  | { type: 'set_default_profile'; name: string }
   /** Opens the plan session behind a spec on disk, or starts one on it when none remains; what it offers follows the spec's status. */
   | { type: 'resume_plan'; feature: string }
   /** Approves the mapped draft; refused while a decision is pending or a comment open. */
@@ -153,8 +181,14 @@ export type FromWebview =
   | { type: 'map_spec' }
   /** Stops the mapping running under the active plan session. */
   | { type: 'stop_map' }
+  /** Redoes the mapping as a continuation of its own conversation, with an optional note on how it should differ; refused while a mapping is already live. */
+  | { type: 'redo_map'; note?: string }
   /** Stops the cleanup running on the active feature. */
   | { type: 'stop_cleanup' }
+  /** What to do with the units the size sweep found: split them now, leave the offer for later, or settle the feature without splitting. `paths` narrows a split to the files picked; absent means every one. */
+  | { type: 'cleanup_decision'; decision: 'run' | 'postpone' | 'skip'; paths?: string[] }
+  /** Measures the feature's edited files again, for an offer this window has not made yet. */
+  | { type: 'sweep_sizes' }
   /** Migrates the active feature's plan files to the contract: mechanically where possible, through the planner for the rest. */
   | { type: 'repair_spec' }
   /** Starts an implement session on the approved spec and switches to it; refused on a draft. */

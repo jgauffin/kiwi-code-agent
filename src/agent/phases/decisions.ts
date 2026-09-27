@@ -17,6 +17,13 @@ export { KEEP_RULING }
 /** Open awaits the user; ruled awaits the planner; applied and withdrawn are settled. */
 export type DecisionState = 'open' | 'ruled' | 'applied' | 'withdrawn'
 
+/** The planner's pick among the ways to settle a decision: a `proposed` line by its place, or keeping the rule. */
+export type Recommendation = {
+  choice: number | 'keep'
+  /** Why that settles it best; empty when the planner gave no reason. */
+  because: string
+}
+
 export type Decision = {
   /** The `###` heading, markers stripped; what a ruling and a handover name. */
   title: string
@@ -26,6 +33,8 @@ export type Decision = {
   finding: string
   /** The planner's change options, each a rule text as it would stand in the spec; empty until it has been asked. */
   proposals: string[]
+  /** Which way the planner would settle it, and why; absent until it has said. */
+  recommendation?: Recommendation
   /** The user's ruling: `keep`, one of the proposals, or their own text. */
   ruling?: string
   state: DecisionState
@@ -47,7 +56,7 @@ export function decisionsPath(cwd: string, feature: string): string {
 
 const TITLE = /^#{1,2}\s+/
 const HEADING = /^###\s+(.*?)\s*(\[applied\]|\[withdrawn\])?\s*$/i
-const META = /^-\s+(on|finding|proposed|ruling)\s*:\s*(.*)$/i
+const META = /^-\s+(on|finding|proposed|recommended|because|ruling)\s*:\s*(.*)$/i
 
 const same = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase()
 
@@ -62,11 +71,21 @@ export function parseDecisions(text: string): { decisions: Decision[]; problems:
   const decisions: Decision[] = []
   const problems: DecisionProblem[] = []
   let current: Decision | undefined
+  let recommended: string | undefined
+  let because: string | undefined
   const lines = text.split(/\r?\n/)
   const close = (): void => {
     if (!current) return
     if (!current.finding) problems.push({ line: current.line, text: `"${current.title}": a decision without a finding line.` })
+    if (recommended !== undefined) {
+      const choice = choiceOf(recommended, current.proposals.length)
+      if (choice === undefined) {
+        problems.push({ line: current.line, text: `"${current.title}": "${recommended}" recommends nothing; a recommendation is a \`proposed\` line's number, or \`${KEEP_RULING}\`.` })
+      } else current.recommendation = { choice, because: because ?? '' }
+    }
     current = undefined
+    recommended = undefined
+    because = undefined
   }
   for (const [index, raw] of lines.entries()) {
     const line = raw.trim()
@@ -111,6 +130,12 @@ export function parseDecisions(text: string): { decisions: Decision[]; problems:
       case 'proposed':
         if (value) current.proposals.push(value)
         break
+      case 'recommended':
+        recommended = value
+        break
+      case 'because':
+        because = value
+        break
       case 'ruling':
         current.ruling = value
         if (current.state === 'open') current.state = 'ruled'
@@ -120,6 +145,16 @@ export function parseDecisions(text: string): { decisions: Decision[]; problems:
   }
   close()
   return { decisions, problems }
+}
+
+/** A recommendation names a proposal by its place in the decision, counting from one, or keeps the rule. */
+function choiceOf(value: string, proposals: number): number | 'keep' | undefined {
+  const text = value.trim()
+  if (same(text, KEEP_RULING)) return 'keep'
+  const place = /^#?(\d+)\.?$/.exec(text)
+  if (!place) return undefined
+  const index = Number(place[1])
+  return index >= 1 && index <= proposals ? index : undefined
 }
 
 export const decisions = (text: string): Decision[] => parseDecisions(text).decisions

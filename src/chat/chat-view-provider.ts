@@ -1,8 +1,8 @@
 import * as vscode from 'vscode'
-import { isBuild, isFeatureless, isPlanning, type SessionManager, type SessionMode, type SessionRecord } from '../agent/session/session-manager'
+import { isBuild, isFeatureless, isPlanning, pickConversationalRun, type SessionManager, type SessionMode, type SessionRecord } from '../agent/session/session-manager'
 import type { ModelProfile } from '../agent/session/model-profile'
 import type { McpServerState, SessionEvent } from '../agent/session/code-session'
-import { nextStatus, type SessionStatus } from '../agent/session/session-status'
+import { mostUrgent, nextStatus, type SessionStatus } from '../agent/session/session-status'
 import { readSpecState, setSpecStatus, type SpecState } from '../agent/phases/spec-file'
 import {
   PLAN_DIR,
@@ -17,14 +17,15 @@ import {
 import { assertAllRuled, assertRulingsSent, decisionsFile, decisionsPath, openDecisions, pendingDecisions, readDecisions, withRuling } from '../agent/phases/decisions'
 import { listPlans } from '../agent/phases/plan-list'
 import { progressLine, reconcileKickoff } from '../agent/phases/reconcile'
-import { assertImplementable, implementKickoff } from '../agent/phases/implement'
+import { REDO_MAPPING_TOOL } from '../agent/openai-session/tools/redo-mapping'
+import { assertImplementable, implementKickoff, implementationStarts } from '../agent/phases/implement'
 import { cleanupKickoff } from '../agent/phases/cleanup'
-import { anyLimit, oversizedFiles, sizeReport, type Thresholds } from '../agent/cleanup/oversized'
+import { anyLimit, oversizedFiles, sizeReport, type Oversized, type Thresholds } from '../agent/cleanup/oversized'
 import { editedFiles } from '../agent/edits/edited-files'
 import { isApprovable, isMappable, planStage, remapDue, tasksStale } from '../agent/phases/plan-stage'
 import { parseSpec, specFingerprint } from '../agent/phases/spec-model'
 import { migratePlan, type MigrationReport } from '../agent/phases/migrate-plan'
-import { liveTasks, readTasks, stampSpecFingerprint, tasksDone, tasksPath, type TasksState } from '../agent/phases/tasks-file'
+import { liveTasks, readTasks, recordCleanupDecision, stampSpecFingerprint, tasksDone, tasksPath, type TasksState } from '../agent/phases/tasks-file'
 import {
   describeCommand,
   runVerification,
@@ -59,7 +60,7 @@ import { sharedBuild } from '../agent/session/generated-context'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative } from 'node:path'
 import { linkedFilePath, withLinkedFiles } from './linked-files'
-import type { FromWebview, PlanState, RunState, SessionTab, ToWebview } from './protocol'
+import type { CleanupSweep, CleanupUnit, FromWebview, PlanState, RunRef, RunSection, RunState, SessionTab, ToWebview } from './protocol'
 import { webviewHtml } from './webview-html'
 import type { ProfileDefaults } from '../settings/settings-store'
 
@@ -93,7 +94,7 @@ export interface PermissionStore {
 /** What new sessions run on, as the new-session screen shows and sets it. */
 export interface ProfileDefaultsStore {
   read(): ProfileDefaults
-  set(role: 'work' | 'plan', name: string): Promise<void>
+  set(name: string): Promise<void>
 }
 
 /** The editor panel's view type; a serializer registered under it brings the panel back after a reload. */
@@ -115,8 +116,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private readonly verifyFailures = new Map<string, number>()
   /** The cleanup run per feature: what it is doing, or how the last one ended. */
   private readonly cleanups = new Map<string, RunState>()
-  /** Features whose sizes were measured once their tests passed; the run does not repeat on the pass that proves its own split. */
-  private readonly cleaned = new Set<string>()
+  /** What the last size sweep found per feature: the offer the user rules on. Absent until one has run in this window. */
+  private readonly sweeps = new Map<string, Oversized[]>()
   /** Features whose planner was handed the contract problems; its next finished turn completes the migration. */
   private readonly repairing = new Set<string>()
   /** Features whose rulings were handed to the planner; Approve waits for that turn to end rather than sending them twice. */
@@ -137,6 +138,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     private readonly sessions: SessionManager,
     private readonly profileFor: (mode: SessionMode) => ModelProfile,
     private readonly profileDefaults: ProfileDefaultsStore,
+    private readonly registeredModels: () => ModelProfile[],
     private readonly verifier: Verifier,
     private readonly sizeLimits: SizeLimits,
     private readonly allowWrites: SessionSwitch,
@@ -185,9 +187,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   async newSession(mode: SessionMode, feature?: string, prompt?: string, continues?: SessionRecord): Promise<SessionRecord> {
     if (!isFeatureless(mode) && !feature) throw new Error(`A ${mode} session needs a feature name`)
     const record = await this.sessions.create(this.profileFor(mode), mode, feature, { continues })
+    // Approving the plan is the consent for the writes it maps out, so the switch starts on where a build session carries it out.
+    if (mode === 'implement' || mode === 'cleanup') this.allowWrites.setEnabled(record.id, true)
     this.setActive(record.id)
     await this.sendState()
-    this.broadcast({ type: 'transcript', sessionId: record.id, events: [] })
+    // A run on a feature joins the tab that feature already has, so the whole tab is sent, not this run alone.
+    await this.sendTranscript(record.id)
     this.changed.fire()
     if (prompt) await this.sessions.send(record.id, prompt)
     return record
@@ -233,9 +238,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.changed.fire()
   }
 
+  /** Closing a tab closes the feature it stands for: every run under it, not the one the tab is keyed by. */
   async close(sessionId: string): Promise<void> {
-    await this.sessions.close(sessionId)
-    if (this.activeSessionId === sessionId) this.setActive(undefined)
+    const record = this.sessions.get(sessionId)
+    const runs = record ? this.runsOf(record) : []
+    for (const run of runs) await this.sessions.close(run.id)
+    if (runs.length === 0) await this.sessions.close(sessionId)
+    if (runs.some((r) => r.id === this.activeSessionId) || this.activeSessionId === sessionId) this.setActive(undefined)
     void this.sendState()
     this.changed.fire()
   }
@@ -265,12 +274,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       this.followDocsMap(record, event)
       return
     }
+    // A run under a session keeps its one line on the plan bar, and now also fills its own section of the tab.
     if (record?.parentId) {
       if (record.mode === 'cleanup') this.followCleanup(record, event)
       else this.followMapping(record, event)
-      return
     }
-    if (sessionId === this.activeSessionId) this.broadcast({ type: 'event', sessionId, event })
+    if (record && this.underActiveTab(record)) {
+      this.broadcast({ type: 'event', sessionId: this.tabIdOf(record), run: this.runRef(record, this.currentRun(record)), event })
+    }
+    if (record?.parentId) return
     if (event.type === 'mcp_servers') {
       this.mcpServers.set(sessionId, event.servers)
       void this.sendState()
@@ -284,6 +296,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       // The session just wrote a plan file (a revision, proposals, a task marker); the plan bar and view must follow.
       void this.sendState()
     }
+    if (event.type === 'tool_call' && event.name === REDO_MAPPING_TOOL && record?.mode === 'plan' && record.feature) {
+      // The planner decided on its own, mid-conversation, that the mapping should run again; same button, same guardrails.
+      const note = typeof (event.input as { note?: unknown } | null)?.note === 'string' ? ((event.input as { note: string }).note || undefined) : undefined
+      void this.startMapping(record, note)
+    }
     if (event.type === 'turn_done' && !event.isError && record?.mode === 'implement' && record.feature) {
       void this.followBoard(record.feature)
     }
@@ -292,6 +309,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       const applied = this.applying.delete(record.feature)
       const reviewed = this.reviewingDocs.delete(record.feature)
       if (applied || reviewed) void this.sendState()
+      // Approval is the go-ahead for the build; the docs listing was the last thing between it and the implementer.
+      if (reviewed && !event.isError) void this.implementAfterApproval(record)
       if (!event.isError) void this.followPlan(record)
     }
   }
@@ -338,9 +357,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   /**
    * Maps the plan session's draft spec against the code as a run under it;
    * nothing happens while one is live. A re-map continues the last mapping's
-   * conversation where the engine resumes, so the code it read is not read again.
+   * conversation where the engine resumes, so the code it read is not read
+   * again. A note is guidance for the mapping itself, not a spec change: the
+   * button ("Redo mapping") and the planner's own tool call both land here.
    */
-  private async startMapping(record: SessionRecord): Promise<void> {
+  private async startMapping(record: SessionRecord, note?: string): Promise<void> {
     if (record.mode !== 'plan' || !record.feature || this.sessions.liveChildOf(record.id)) return
     const spec = await readSpecState(specPath(this.workspaceRoot, record.feature))
     if (!spec.exists || spec.status !== 'draft') return
@@ -348,7 +369,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const child = await this.sessions.create(this.profileFor('reconcile'), 'reconcile', record.feature, { parentId: record.id, continues: previous })
     this.mappings.set(record.id, { live: true, text: 'Mapping the spec against the code…' })
     await this.sendState()
-    await this.sessions.send(child.id, reconcileKickoff(child.engineSessionId !== undefined))
+    await this.sessions.send(child.id, reconcileKickoff(child.engineSessionId !== undefined, note))
   }
 
   /**
@@ -437,7 +458,42 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this.verifications.set(feature, { live: false, text })
     await this.sendState()
     this.changed.fire()
-    if (passed) await this.startCleanup(feature)
+    if (passed) await this.sweepForCleanup(feature)
+  }
+
+  /** The docs listing after approval has ended: the build starts on its own, so approving is the only act it takes. */
+  private async implementAfterApproval(record: SessionRecord): Promise<void> {
+    const feature = record.feature!
+    try {
+      const spec = await readSpecState(specPath(this.workspaceRoot, feature))
+      const tasks = await readTasks(tasksPath(this.workspaceRoot, feature))
+      if (!implementationStarts(spec, tasks, this.implementerLive(feature))) return
+      await this.startImplementing(record)
+    } catch (error) {
+      void vscode.window.showErrorMessage(`KiwiAgent: cannot start the implementation: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  /**
+   * The implementer that already has the board carries on; the first one
+   * continues the mapping that wrote it. Its tab is opened either way: the
+   * build is what happens next, so it is what the user should be looking at.
+   */
+  private async startImplementing(record: SessionRecord): Promise<void> {
+    const feature = record.feature!
+    const latest = this.sessions.latest('implement', feature)
+    if (latest) {
+      await this.open(latest.id)
+      await this.sessions.send(latest.id, implementKickoff('implement'))
+      return
+    }
+    const implementer = await this.newSession('implement', feature, undefined, this.sessions.latest('reconcile', feature))
+    await this.sessions.send(implementer.id, implementKickoff(implementer.engineSessionId ? 'mapping' : undefined))
+  }
+
+  /** An implementer at work on the feature: nothing starts a second one. */
+  private implementerLive(feature: string): boolean {
+    return this.sessions.list().some((r) => r.mode === 'implement' && r.feature === feature && this.sessions.isLive(r.id))
   }
 
   /**
@@ -453,36 +509,68 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   /**
    * The tests passed: the files the feature's implementers edited are
-   * measured, and what is over a limit goes to a cleanup run under the
-   * latest implement session. Once per feature while the window lives: the
-   * pass that proves the split must not start another.
+   * measured. Nothing is split on this alone. What is over a limit is an
+   * offer the user rules on at the Cleanup step, since a split is a change to
+   * code they have just seen proven.
    */
-  private async startCleanup(feature: string): Promise<void> {
-    if (this.cleaned.has(feature) || this.cleanups.get(feature)?.live) return
+  private async sweepForCleanup(feature: string): Promise<void> {
+    if (this.cleanups.get(feature)?.live) return
     const thresholds = this.sizeLimits.thresholds()
     if (!anyLimit(thresholds)) return
+    const tasks = await readTasks(tasksPath(this.workspaceRoot, feature))
+    // Skipped is the user's word that this feature is finished; done is the split already carried out.
+    if (tasks.exists && (tasks.cleanup === 'skipped' || tasks.cleanup === 'done')) return
     const implementers = this.sessions.list().filter((r) => r.mode === 'implement' && r.feature === feature)
-    const parent = implementers[0]
-    if (!parent || this.sessions.liveChildOf(parent.id)) return
-    this.cleaned.add(feature)
+    if (implementers.length === 0) return
     const files: string[] = []
     for (const record of implementers) {
       for (const file of editedFiles(await this.sessions.transcript(record.id))) if (!files.includes(file)) files.push(file)
     }
     const flagged = await oversizedFiles(this.workspaceRoot, files, thresholds, this.sizeLimits.ignore())
-    if (flagged.length === 0) {
-      this.cleanups.set(feature, { live: false, text: 'Sizes checked: nothing to split' })
-      await this.sendState()
-      this.changed.fire()
-      return
-    }
+    this.sweeps.set(feature, flagged)
+    if (flagged.length === 0) this.cleanups.set(feature, { live: false, text: 'Sizes checked: nothing to split' })
+    await this.sendState()
+    this.changed.fire()
+  }
+
+  /** The user asked for the split: the units the last sweep found, in the files picked (all when none are named), go to a cleanup run under the first implementer. */
+  private async runCleanup(feature: string, picked?: string[]): Promise<void> {
+    if (this.cleanups.get(feature)?.live) return
     const relativeTo = (file: string) => relative(this.workspaceRoot, file).split('\\').join('/')
+    const flagged = (this.sweeps.get(feature) ?? []).filter((u) => picked === undefined || picked.includes(relativeTo(u.path)))
+    if (flagged.length === 0) return
+    const parent = this.sessions.list().find((r) => r.mode === 'implement' && r.feature === feature)
+    if (!parent || this.sessions.liveChildOf(parent.id)) return
     const paths = [...new Set(flagged.map((u) => relativeTo(u.path)))]
     // The run carries the implementer's memory of the files under the cleanup's own prompt, tools and write scope.
     const child = await this.sessions.create(this.profileFor('cleanup'), 'cleanup', feature, { parentId: parent.id, files: paths, continues: parent })
     this.cleanups.set(feature, { live: true, text: 'Splitting oversized units…' })
     await this.sendState()
     await this.sessions.send(child.id, cleanupKickoff(sizeReport(this.workspaceRoot, flagged), child.engineSessionId !== undefined))
+  }
+
+  /** A flagged unit as the plan view reads it: the path workspace-relative, so it links like every other path there. */
+  private cleanupUnit(unit: Oversized): CleanupUnit {
+    return {
+      path: relative(this.workspaceRoot, unit.path).split('\\').join('/'),
+      line: unit.line,
+      name: unit.name,
+      kind: unit.kind,
+      lines: unit.lines,
+      threshold: unit.threshold,
+    }
+  }
+
+  /** The user's word on the offer: split now, come back to it, or settle the feature as it stands. */
+  private async decideCleanup(feature: string, decision: 'run' | 'postpone' | 'skip', paths?: string[]): Promise<void> {
+    if (decision === 'run') {
+      await this.runCleanup(feature, paths)
+      return
+    }
+    await recordCleanupDecision(tasksPath(this.workspaceRoot, feature), decision === 'skip' ? 'skipped' : 'postponed')
+    if (decision === 'skip') this.sweeps.delete(feature)
+    await this.sendState()
+    this.changed.fire()
   }
 
   /** A cleanup run has no transcript in the UI either: its events become the one line the plan bar shows. */
@@ -523,6 +611,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const files = (child.files ?? []).map((f) => join(this.workspaceRoot, f))
     const left = await oversizedFiles(this.workspaceRoot, files, this.sizeLimits.thresholds(), [])
     const split = left.length === 0 ? 'Cleaned: every unit is within its limit' : `Cleanup left ${left.length} unit${left.length === 1 ? '' : 's'} over the limit`
+    // Written before the test run, whose pass sweeps again: the offer was answered, and what the split left is not a new one.
+    await recordCleanupDecision(tasksPath(this.workspaceRoot, feature), 'done')
+    this.sweeps.delete(feature)
     this.cleanups.set(feature, { live: true, text: `${split}; running the tests…` })
     await this.verify(feature, false)
     this.cleanups.set(feature, { live: false, text: `${split}; ${this.verifications.get(feature)?.text ?? 'tests not run'}` })
@@ -705,10 +796,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         await this.sendState()
         if (this.activeSessionId) await this.sendTranscript(this.activeSessionId)
         return
-      case 'send':
+      case 'send': {
         if (!this.activeSessionId) await this.newSession('chat')
-        await this.sessions.send(this.activeSessionId!, withLinkedFiles(message.text, message.files ?? []))
+        // The tab's current run is what the person is talking to; the runs before it are history, and hear nothing.
+        const run = this.activeRun()
+        await this.sessions.send(run?.id ?? this.activeSessionId!, withLinkedFiles(message.text, message.files ?? []))
         return
+      }
       case 'link_open_file': {
         // A chat panel of its own leaves no active text editor, so the file beside it is the one meant.
         const editor = vscode.window.activeTextEditor ?? vscode.window.visibleTextEditors[0]
@@ -720,30 +814,43 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         return
       }
       case 'permission': {
-        if (!this.activeSessionId) return
+        if (!this.sessions.get(message.sessionId)) return
         // The rules are in place before the call runs, so a second call they cover in the same turn already passes.
         const { remember, ...decision } = message.decision
         if (remember?.project.length) await this.permissions.allowForProject(remember.project)
-        if (remember?.session.length) this.permissions.allowForSession(this.activeSessionId, remember.session)
-        await this.sessions.respondToPermission(this.activeSessionId, message.requestId, decision)
+        if (remember?.session.length) this.permissions.allowForSession(message.sessionId, remember.session)
+        await this.sessions.respondToPermission(message.sessionId, message.requestId, decision)
         return
       }
       case 'question':
-        if (!this.activeSessionId) return
-        await this.sessions.respondToQuestion(this.activeSessionId, message.requestId, message.outcome)
+        if (!this.sessions.get(message.sessionId)) return
+        await this.sessions.respondToQuestion(message.sessionId, message.requestId, message.outcome)
         return
-      case 'interrupt':
-        if (this.activeSessionId) await this.sessions.interrupt(this.activeSessionId)
+      case 'interrupt': {
+        const run = this.activeRun()
+        if (run) await this.sessions.interrupt(run.id)
         return
-      case 'set_allow_writes':
-        if (this.activeSessionId) this.allowWrites.setEnabled(this.activeSessionId, message.enabled)
+      }
+      case 'set_allow_writes': {
+        const run = this.activeRun()
+        if (run) this.allowWrites.setEnabled(run.id, message.enabled)
         void this.sendState()
         return
-      case 'reconnect_mcp':
-        if (this.activeSessionId) await this.sessions.reconnectMcp(this.activeSessionId, message.server)
+      }
+      case 'set_session_model': {
+        const record = this.activeRecord()
+        const profile = this.registeredModels().find((m) => m.name === message.name)
+        if (record && profile) await this.sessions.setProfile(record.id, profile)
+        void this.sendState()
         return
+      }
+      case 'reconnect_mcp': {
+        const run = this.activeRun()
+        if (run) await this.sessions.reconnectMcp(run.id, message.server)
+        return
+      }
       case 'set_default_profile':
-        await this.profileDefaults.set(message.role, message.name)
+        await this.profileDefaults.set(message.name)
         await this.sendState()
         return
       case 'switch_session':
@@ -761,7 +868,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         await this.resumePlan(message.feature)
         return
       case 'approve_spec': {
-        const record = this.activeRecord()
+        const record = this.planRecord()
         const path = this.activeSpecPath()
         const feature = record?.feature
         if (!record || !path || !feature) return
@@ -782,7 +889,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         return
       }
       case 'send_rulings': {
-        const record = this.activeRecord()
+        const record = this.planRecord()
         if (!record?.feature) return
         if (!(await this.handOverRulings(record))) throw new Error('No decision is pending; there is nothing to send.')
         return
@@ -822,12 +929,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           closed = openComments(review).length === 0
         }, false)
         // The last resolve closes the review; the spec is settled and its mapping against the code starts by itself.
-        const record = this.activeRecord()
+        const record = this.planRecord()
         if (closed && record) await this.startMapping(record)
         return
       }
       case 'submit_review': {
-        const record = this.activeRecord()
+        const record = this.planRecord()
         if (!record?.feature) return
         await submitReview({
           courier: this.courier(),
@@ -839,12 +946,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         return
       }
       case 'map_spec': {
-        const record = this.activeRecord()
+        const record = this.planRecord()
         if (record) await this.startMapping(record)
         return
       }
+      case 'redo_map': {
+        const record = this.planRecord()
+        if (record) await this.startMapping(record, message.note)
+        return
+      }
       case 'stop_map': {
-        const record = this.activeRecord()
+        const record = this.planRecord()
         const child = record ? this.sessions.liveChildOf(record.id) : undefined
         if (!record || !child) return
         this.mappings.set(record.id, { live: false, text: 'Mapping stopped' })
@@ -866,25 +978,27 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         this.changed.fire()
         return
       }
+      case 'cleanup_decision': {
+        const feature = this.activeRecord()?.feature
+        if (feature) await this.decideCleanup(feature, message.decision, message.paths)
+        return
+      }
+      case 'sweep_sizes': {
+        const feature = this.activeRecord()?.feature
+        if (feature) await this.sweepForCleanup(feature)
+        return
+      }
       case 'repair_spec': {
         const feature = this.activeRecord()?.feature
         if (feature) this.reportMigration(await this.repairPlan(feature), true)
         return
       }
       case 'implement_spec': {
-        const record = this.activeRecord()
+        const record = this.planRecord()
         const path = this.activeSpecPath()
         if (record?.mode !== 'plan' || !record.feature || !path) return
         assertImplementable(await readSpecState(path), await readTasks(tasksPath(this.workspaceRoot, record.feature)))
-        // The implementer that already has the board carries on; the first one continues the mapping that wrote it.
-        const latest = this.sessions.latest('implement', record.feature)
-        if (latest) {
-          await this.open(latest.id)
-          await this.sessions.send(latest.id, implementKickoff('implement'))
-          return
-        }
-        const implementer = await this.newSession('implement', record.feature, undefined, this.sessions.latest('reconcile', record.feature))
-        await this.sessions.send(implementer.id, implementKickoff(implementer.engineSessionId ? 'mapping' : undefined))
+        await this.startImplementing(record)
         return
       }
       case 'verify_spec': {
@@ -916,6 +1030,17 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   private activeRecord(): SessionRecord | undefined {
     return this.activeSessionId ? this.sessions.get(this.activeSessionId) : undefined
+  }
+
+  /**
+   * The plan session of the tab in front of the person. The tab is the
+   * feature, whichever of its runs is speaking, so the plan bar's acts belong
+   * to the planner even while an implementer or a cleanup holds the floor.
+   */
+  private planRecord(): SessionRecord | undefined {
+    const record = this.activeRecord()
+    if (!record?.feature) return record
+    return this.sessions.list().find((r) => r.mode === 'plan' && r.feature === record.feature) ?? record
   }
 
   private activeSpecPath(): string | undefined {
@@ -981,7 +1106,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   private async planState(): Promise<PlanState | undefined> {
     const path = this.activeSpecPath()
-    const record = this.activeRecord()
+    // The bar belongs to the feature's planner, not to whichever of its runs is speaking: they share the tab.
+    const record = this.planRecord()
     const feature = record?.feature
     if (!path || !record || !feature) return undefined
     const state = await readSpecState(path)
@@ -989,6 +1115,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const mapping = this.mappings.get(record.id)
     const verification = this.verifications.get(feature)
     const cleanup = this.cleanups.get(feature)
+    const flagged = this.sweeps.get(feature)
+    const sweep: CleanupSweep | undefined = flagged ? { units: flagged.map((u) => this.cleanupUnit(u)) } : undefined
     const review = await readReview(reviewPath(this.workspaceRoot, feature)).catch(() => emptyReview())
     const tasks: TasksState = await readTasks(tasksPath(this.workspaceRoot, feature))
     const decisions = await readDecisions(decisionsPath(this.workspaceRoot, feature))
@@ -1007,11 +1135,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       repairable: fromPlan && (spec?.problems.length ?? 0) > 0,
       mappable: fromPlan && isMappable(stage, state) && mapping?.live !== true,
       ...(mapping ? { mapping } : {}),
-      implementable: fromPlan && stage === 'mapped' && state.status === 'approved' && !this.reviewingDocs.has(feature),
+      remappable: fromPlan && stage === 'mapped' && state.status === 'draft' && mapping?.live !== true,
+      // Offered only as the way back in: approval starts the build itself, so the button is for an implementer that never started or stopped early.
+      implementable: fromPlan && stage === 'mapped' && !this.reviewingDocs.has(feature) && implementationStarts(state, tasks, this.implementerLive(feature)),
       // Offered while the board is tested and the last record did not pass; a re-run after a pass is a manual choice too.
       verifiable: (stage === 'verification' || stage === 'verified') && verification?.live !== true,
       ...(verification ? { verification } : {}),
       ...(cleanup ? { cleanup } : {}),
+      ...(sweep ? { cleanupSweep: sweep } : {}),
+      ...(tasks.exists && tasks.cleanup ? { cleanupDecision: tasks.cleanup } : {}),
       ...(tasks.exists && tasks.verification ? { lastVerification: tasks.verification } : {}),
       tasks: tasks.exists ? tasks.tasks : [],
       review,
@@ -1024,28 +1156,75 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /** Tabs: live sessions plus the active one, in creation order (list is newest first). A run under a session, and a build, have no tab. */
+  /**
+   * One tab per feature, plus the sessions that belong to no feature: a
+   * feature is one thing to the person, however many runs it takes. A build
+   * has no tab at all. In creation order, the list being newest first.
+   */
   private tabs(): SessionTab[] {
-    return this.sessions
-      .list()
-      .filter((r) => !r.parentId && !isBuild(r.mode) && (this.sessions.isLive(r.id) || r.id === this.activeSessionId))
-      .reverse()
-      .map((r) => this.tab(r))
+    const shown = this.sessions.list().filter((r) => !isBuild(r.mode) && (this.sessions.isLive(r.id) || this.underActiveTab(r)))
+    const keys = new Map<string, SessionRecord>()
+    for (const record of shown) {
+      // Reverse order, so the last one kept per feature is its oldest run: the tab keeps its identity as runs come and go.
+      keys.set(record.feature ?? record.id, record)
+    }
+    return [...keys.values()].reverse().map((r) => this.tab(r))
+  }
+
+  private underActiveTab(record: SessionRecord): boolean {
+    return record.id === this.activeSessionId || (record.feature !== undefined && record.feature === this.activeRecord()?.feature)
   }
 
   private tab(record: SessionRecord): SessionTab {
+    const runs = this.runsOf(record)
     return {
-      id: record.id,
-      title: record.title,
+      // Keyed the same way wherever the tab is named, so a message about one run reaches the tab that holds it.
+      id: this.tabIdOf(record),
+      title: record.feature ?? record.title,
       mode: record.mode,
       profileName: record.profile.name,
-      status: this.statusOf(record.id),
-      active: record.id === this.activeSessionId,
+      status: mostUrgent(runs.map((r) => this.statusOf(r.id))),
+      active: runs.some((r) => r.id === this.activeSessionId),
     }
   }
 
+  /** Every run the tab holds, oldest first: one feature's sessions, or the one session that belongs to no feature. */
+  private runsOf(record: SessionRecord): SessionRecord[] {
+    if (!record.feature) return [record]
+    return this.sessions
+      .list()
+      .filter((r) => r.feature === record.feature && !isBuild(r.mode))
+      .reverse()
+  }
+
+  /**
+   * What the webview calls the tab a session belongs to: its feature's oldest
+   * run, so the tab keeps one identity while runs come and go under it.
+   */
+  private tabIdOf(record: SessionRecord): string {
+    return this.runsOf(record)[0]?.id ?? record.id
+  }
+
+  /**
+   * The run holding the floor: the newest one still live, else the newest the
+   * person can carry on with. A mapping or a cleanup that has ended is not
+   * that: waking one with a follow-up meant for the planner would put the
+   * question to a run scoped to something else. Nor is one still live: it has
+   * no tab of its own, so free text typed at this tab is never meant for it.
+   * The conversational run under the tab (the plan or implement session
+   * itself) holds the floor even while its child is at work.
+   */
+  private currentRun(record: SessionRecord): SessionRecord {
+    return pickConversationalRun(this.runsOf(record), (id) => this.sessions.isLive(id)) ?? record
+  }
+
+  /** The run the user's typing, interrupting and switches act on, for the tab in front of them. */
+  private activeRun(): SessionRecord | undefined {
+    const record = this.activeRecord()
+    return record ? this.currentRun(record) : undefined
+  }
+
   private async sendState(): Promise<void> {
-    const active = this.activeSessionId
     const plan = await this.planState().catch((error: unknown) => {
       void vscode.window.showErrorMessage(`KiwiAgent: cannot read spec: ${error instanceof Error ? error.message : String(error)}`)
       return undefined
@@ -1054,9 +1233,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       void vscode.window.showErrorMessage(`KiwiAgent: cannot list plans: ${error instanceof Error ? error.message : String(error)}`)
       return []
     })
-    const record = this.activeRecord()
+    // The switches belong to the run the person is talking to, not to the session the tab is keyed by.
+    const run = this.activeRun()
     // Planning phases auto-allow their in-scope writes and deny the rest, so the switch has nothing to decide there.
-    const writesAsked = record !== undefined && !isPlanning(record.mode)
+    const writesAsked = run !== undefined && !isPlanning(run.mode)
+    const active = run?.id
     this.broadcast({
       type: 'state',
       tabs: this.tabs(),
@@ -1065,16 +1246,27 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       ...(plan ? { plan } : {}),
       plans: plans.flatMap((p) => (p.status === 'verified' ? [] : [{ feature: p.feature, status: p.status }])),
       profiles: this.profileDefaults.read(),
+      models: this.registeredModels(),
     })
   }
 
+  /** The tab's history: every run under it, oldest first, each its own conversation. */
   private async sendTranscript(sessionId: string): Promise<void> {
-    const events = await this.sessions.transcript(sessionId)
-    this.broadcast({ type: 'transcript', sessionId, events })
+    const record = this.sessions.get(sessionId)
+    if (!record) return
+    const current = this.currentRun(record)
+    const runs: RunSection[] = []
+    for (const run of this.runsOf(record)) {
+      runs.push({ ...this.runRef(run, current), events: await this.sessions.transcript(run.id) })
+    }
+    this.broadcast({ type: 'transcript', sessionId: this.tabIdOf(record), runs })
+  }
+
+  private runRef(run: SessionRecord, current: SessionRecord): RunRef {
+    return { sessionId: run.id, mode: run.mode, title: run.title, current: run.id === current.id }
   }
 
   private broadcast(message: ToWebview): void {
     for (const webview of this.webviews) void webview.postMessage(message)
   }
-
 }

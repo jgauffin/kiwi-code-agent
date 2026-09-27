@@ -95,7 +95,17 @@ describe('runVerification', () => {
     expect(prompt).toContain('plan/order-cancellation.tasks.md')
     expect(prompt).toContain('`npm test` in .')
     expect(prompt).toContain('THE ERROR')
-    expect(prompt).toContain('runs again when you stop')
+    expect(prompt).toContain('runs again as soon as you stop')
+  })
+
+  it('a_failure_handoff_asks_for_a_narrowed_reproduction_before_the_sweep_is_paid_for_again', async () => {
+    await board('- **T1**: a [tested]', '  - files: src/a.ts')
+    outcome = { ok: false, output: 'THE ERROR' }
+    const result = await runVerification({ cwd: dir, feature: 'Order cancellation', rules, run })
+    const prompt = verificationHandoffPrompt('Order cancellation', result.failures, dir)
+    expect(prompt).toContain('Reproduce the failure with a run narrowed to the test')
+    expect(prompt).toContain('build its project')
+    expect(prompt).toContain('stopping on a fix you have not run costs another one')
   })
 
   it('nothing_to_run_is_recorded_as_such_rather_than_leaving_the_board_stuck', async () => {

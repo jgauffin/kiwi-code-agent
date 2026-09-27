@@ -41,6 +41,21 @@ describe('skill index', () => {
     expect(skills[0]!.dir).toBe(join(dir, '.claude', 'skills', 'forms'))
   })
 
+  it('the_extensions_own_skills_are_listed_and_a_workspace_skill_of_the_same_name_replaces_them', async () => {
+    const builtin = await mkdtemp(join(tmpdir(), 'skills-builtin-'))
+    await mkdir(join(builtin, 'run-script'))
+    await writeFile(join(builtin, 'run-script', 'SKILL.md'), '---\nname: run-script\ndescription: Built in.\n---\nbody')
+    await mkdir(join(builtin, 'other'))
+    await writeFile(join(builtin, 'other', 'SKILL.md'), '---\nname: other\ndescription: Also built in.\n---\nbody')
+    await skill('run-script', '---\nname: run-script\ndescription: Ours.\n---\nbody')
+    const skills = await indexUnder(dir, home, builtin)
+    expect(skills.map((s) => [s.name, s.description])).toEqual([
+      ['other', 'Also built in.'],
+      ['run-script', 'Ours.'],
+    ])
+    await rm(builtin, { recursive: true, force: true })
+  })
+
   it('folder_name_stands_in_when_frontmatter_has_no_name', async () => {
     await skill('deploy', '---\ndescription: Ship it.\n---\nbody')
     expect((await indexSkills(dir)).map((s) => s.name)).toEqual(['deploy'])

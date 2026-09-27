@@ -1,21 +1,26 @@
 # Settings
 
-*KiwiAgent: Settings* (or the gear in the Sessions and Chat views) opens a page in the editor with four tabs: Models and Advanced write to user settings, Permissions and Project to the workspace. API keys go to the editor's secret storage from the Models tab.
+*KiwiAgent: Settings* (or the gear in the Sessions and Chat views) opens a page in the editor with four tabs: Models and Advanced write to user settings, Permissions and Project to the workspace. Models has its own Providers and Profiles sub-tabs. API keys go to the editor's secret storage from the Providers sub-tab, under the provider's own name; a rename carries the stored key with it, so nothing else names it.
 
 The keys, for settings.json:
 
-- `kiwiAgent.profiles`: one entry per model: `name`, `engine` (`claude-sdk` or `openai-compatible`), `model`, optional `effort` and `systemPromptFile`; `openai-compatible` also takes `baseUrl` and `apiKeySecret`. Defaults: Claude Opus and Sonnet. Example:
+- `kiwiAgent.providers`: where models come from: `name`, `engine` (`claude-sdk` or `openai-compatible`), and `models`, the list to pick from; `openai-compatible` also takes `baseUrl`. The Providers sub-tab can fill `models` from the endpoint's own list once a base URL and a key, typed or already stored, are both in place. Example:
 
   ```json
-  { "name": "Kimi K3", "engine": "openai-compatible", "model": "moonshotai/Kimi-K3", "baseUrl": "https://api.berget.ai/v1", "apiKeySecret": "berget" }
+  { "name": "berget", "engine": "openai-compatible", "baseUrl": "https://api.berget.ai/v1", "models": ["moonshotai/Kimi-K3"] }
   ```
-- `kiwiAgent.activeProfile`: profile name used for new sessions; `kiwiAgent.planProfile` overrides it for plan sessions.
+- `kiwiAgent.profiles`: a named way to work: `name`, `default` (a `{provider, model}` naming an entry in `kiwiAgent.providers`, plus optional `effort` and `systemPromptFile`), and optional `steps`, one entry per step (`chat`, `plan`, `reconcile`, `implement`, `cleanup`, `docs`, `docs-map`) that earns a different model than the default. A step named in neither `steps` still runs, on the default, so a step added later needs no profile changed. Example, the strongest reasoner for planning and mapping, throughput for the rest:
+
+  ```json
+  { "name": "Balanced", "default": { "provider": "Claude", "model": "claude-sonnet-5" }, "steps": { "plan": { "provider": "Claude", "model": "claude-opus-5" }, "reconcile": { "provider": "Claude", "model": "claude-opus-5" } } }
+  ```
+- `kiwiAgent.activeProfile`: the profile name new sessions run on.
 - `kiwiAgent.permissions.allow`: shell commands and tools allowed without asking, per project. Read-only tools never ask; a shell call is prompted command by command and can be allowed for the session or the project, or denied.
 - `kiwiAgent.nodePath`: Node executable for the Claude engine; empty uses VS Code's executable.
 - `kiwiAgent.traceEngine`: one line per Claude engine message in the KiwiAgent output channel, to see what the engine sends (thinking deltas, status) when the UI shows nothing.
 - `kiwiAgent.verify`: test commands run once every task of a feature is marked tested, over the files the tasks name, in the directory of the nearest `project` file; a repo with a backend and a frontend runs each suite once, and only the suites the feature touched. A failure is handed to the implement session, up to `kiwiAgent.verifyFailureBudget` consecutive failures. Default: `dotnet test` of the `.csproj` owning a `.cs` file, `npm test` in the `package.json` folder owning a `.ts` file.
 - `kiwiAgent.planIgnore`: globs under `docs/` a blind planner must not see. The docs map does not describe them and the docs evaluation does not judge them.
-- Command *KiwiAgent: Set API Key for Profile* stores keys for profiles that declare `apiKeySecret`.
+- Command *KiwiAgent: Set API Key for Provider* stores the key for an OpenAI-compatible provider, under its own name.
 - Command *KiwiAgent: Build Docs Map* describes the docs that changed since the last build. A plan session and a docs evaluation do it themselves when the map is behind.
 
 ## Instruction files and skills

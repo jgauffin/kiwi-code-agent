@@ -1,13 +1,14 @@
-import type { CodeSession, McpControl, PermissionDecision, SessionEvent, TurnUsage } from '../session/code-session'
+import type { CodeSession, FileEditChange, McpControl, PermissionDecision, SessionEvent, TurnUsage } from '../session/code-session'
 import type { QuestionOutcome, UserQuestionRequest } from '../session/user-question'
-import type { SessionHooks } from '../session/hooks'
+import type { SessionHooks, ToolUse } from '../session/hooks'
+import { denyReason, gateCall } from './tools/script-gate'
 import type { ModelProfile } from '../session/model-profile'
 import { AsyncQueue } from '../session/async-queue'
 import type { McpServers } from '../mcp/mcp-config'
 import type { McpToolHost } from '../mcp/mcp-tool-host'
 import type { ChatCompletionClient, ChatMessage, ToolCall, ToolDefinition, Usage } from './chat-messages'
 import { ReadTracker } from './tools/read-tracker'
-import { toDefinition, type Tool, type ToolOutput } from './tools/tool'
+import { toDefinition, type Tool, type ToolContext, type ToolOutput } from './tools/tool'
 import { UNANSWERED_TOOL_RESULT } from './history'
 
 export type OpenAiSessionOptions = {
@@ -244,20 +245,12 @@ export class OpenAiSession implements CodeSession {
       return { text: `Invalid arguments for ${tool.name}: ${issues}`, isError: true }
     }
     const use = { toolName: tool.name, input: parsed.data, toolUseId: call.id }
-    const pre = await this.options.hooks?.preToolUse?.(use)
-    if (pre && 'deny' in pre) return { text: `Blocked: ${pre.deny}`, isError: true }
-    if (!tool.readOnly && !pre?.allow) {
-      const decision = await this.askPermission(call.id, tool.name, parsed.data, signal)
-      if (decision.kind === 'deny') return { text: `Denied by user${decision.message ? `: ${decision.message}` : ''}`, isError: true }
-    }
+    const gate = await this.gate(tool, use, signal)
+    if (gate.refused) return gate.refused
+    const pre = gate.pre
     let output: ToolOutput
     try {
-      output = await tool.execute(parsed.data, {
-        cwd: this.options.cwd,
-        signal,
-        files: this.files,
-        ask: (request) => this.askUser(call.id, request),
-      })
+      output = await tool.execute(parsed.data, this.contextFor(call.id, signal))
     } catch (error) {
       output = { text: `${tool.name} failed: ${error instanceof Error ? error.message : String(error)}`, isError: true }
     }
@@ -266,13 +259,42 @@ export class OpenAiSession implements CodeSession {
     return context.length ? { ...output, text: `${output.text}\n\n${context.join('\n\n')}` } : output
   }
 
-  private askPermission(toolUseId: string, toolName: string, input: unknown, signal: AbortSignal): Promise<PermissionDecision> {
+  /** The permission decision every call passes, whether the model or a running script makes it. */
+  private gate(tool: Tool, use: ToolUse, signal: AbortSignal) {
+    return gateCall(this.options.hooks, (id, name, input, shown) => this.askPermission(id, name, input, signal, shown), tool, use)
+  }
+
+  /** What a tool gets to work with; a script's calls back into other tools take the same gate as the model's own. */
+  private contextFor(callId: string, signal: AbortSignal): ToolContext {
+    let nested = 0
+    const nextId = () => `${callId}/${++nested}`
+    return {
+      cwd: this.options.cwd,
+      signal,
+      files: this.files,
+      ask: (request) => this.askUser(callId, request),
+      call: (name, input) => this.runTool({ id: nextId(), name, arguments: JSON.stringify(input) }, signal),
+      authorize: (name, input) => denyReason(this.options.hooks, { toolName: name, input, toolUseId: nextId() }),
+      review: async (title, edits) => {
+        const decision = await this.askPermission(nextId(), 'RunScript', { files: edits.map((e) => e.label) }, signal, { title, edits })
+        return decision.kind === 'allow'
+      },
+    }
+  }
+
+  private askPermission(
+    toolUseId: string,
+    toolName: string,
+    input: unknown,
+    signal: AbortSignal,
+    shown: { title?: string; edits?: FileEditChange[] } = {},
+  ): Promise<PermissionDecision> {
     return new Promise((resolve) => {
       this.pending.set(toolUseId, resolve)
       signal.addEventListener('abort', () => {
         if (this.pending.delete(toolUseId)) resolve({ kind: 'deny', message: 'Interrupted' })
       })
-      this.emit({ type: 'permission_request', requestId: toolUseId, toolUseId, toolName, input })
+      this.emit({ type: 'permission_request', requestId: toolUseId, toolUseId, toolName, input, ...shown })
     })
   }
 

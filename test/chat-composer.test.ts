@@ -75,6 +75,7 @@ describe('ChatComposer MCP line', () => {
     const node = composer()
     node.setSwitches({
       allowWrites: undefined,
+      model: undefined,
       mcp: [
         { name: 'docs', status: 'connected' },
         { name: 'github', status: 'failed', error: 'ECONNREFUSED' },
@@ -89,7 +90,7 @@ describe('ChatComposer MCP line', () => {
 
   it('the_reconnect_button_names_its_server', () => {
     const node = composer()
-    node.setSwitches({ allowWrites: undefined, mcp: [{ name: 'github', status: 'failed', error: 'down' }] })
+    node.setSwitches({ allowWrites: undefined, model: undefined, mcp: [{ name: 'github', status: 'failed', error: 'down' }] })
     const seen: string[] = []
     node.addEventListener(McpReconnectRequestedEvent.type, (e) => seen.push(e.server))
     node.querySelector<HTMLButtonElement>('.mcp-servers .reconnect')!.click()
@@ -98,9 +99,37 @@ describe('ChatComposer MCP line', () => {
 
   it('no_line_is_shown_without_servers', () => {
     const node = composer()
-    node.setSwitches({ allowWrites: true, mcp: undefined })
+    node.setSwitches({ allowWrites: true, model: undefined, mcp: undefined })
     expect(node.querySelector('.mcp-servers')).toBeNull()
-    node.setSwitches({ allowWrites: true, mcp: [] })
+    node.setSwitches({ allowWrites: true, model: undefined, mcp: [] })
     expect(node.querySelector('.mcp-servers')).toBeNull()
+  })
+})
+
+describe('ChatComposer model switch', () => {
+  it('the_switch_is_hidden_for_a_session_with_no_model_choice', () => {
+    const node = composer()
+    node.setSwitches({ allowWrites: undefined, mcp: undefined, model: undefined })
+    expect(node.querySelector('select[name=model]')).toBeNull()
+  })
+
+  it('every_registered_model_is_offered_with_the_one_in_use_selected', () => {
+    const node = composer()
+    node.setSwitches({ allowWrites: undefined, mcp: undefined, model: { current: 'Kimi', options: ['Balanced', 'Kimi'] } })
+    const select = node.querySelector<HTMLSelectElement>('select[name=model]')!
+    expect([...select.options].map((o) => o.value)).toEqual(['Balanced', 'Kimi'])
+    expect(select.value).toBe('Kimi')
+  })
+
+  it('picking_a_model_dispatches_its_name', async () => {
+    const { SessionModelChangedEvent } = await import('../src/chat/webview/events')
+    const node = composer()
+    node.setSwitches({ allowWrites: undefined, mcp: undefined, model: { current: 'Balanced', options: ['Balanced', 'Kimi'] } })
+    let seen: string | undefined
+    node.addEventListener(SessionModelChangedEvent.type, (e) => (seen = e.name))
+    const select = node.querySelector<HTMLSelectElement>('select[name=model]')!
+    select.value = 'Kimi'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(seen).toBe('Kimi')
   })
 })

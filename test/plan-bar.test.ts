@@ -22,6 +22,7 @@ function plan(over: Partial<PlanState> = {}): PlanState {
     stale: false,
     repairable: false,
     mappable: true,
+    remappable: false,
     implementable: false,
     verifiable: false,
     tasks: [],
@@ -102,6 +103,12 @@ describe('PlanBar next step', () => {
     expect(running.querySelector('.stop')).not.toBeNull()
   })
 
+  it('a_cleanup_line_says_which_run_is_reading', () => {
+    const node = bar(plan({ stage: 'verified', status: 'approved', commentable: false, cleanup: { live: true, text: 'Read src/a.ts' } }))
+    expect(node.querySelector('.running')!.textContent).toBe('Cleanup · Read src/a.ts')
+    expect(node.querySelector('.stop')).not.toBeNull()
+  })
+
   it('the_last_run_outcome_stays_beside_the_steps_until_the_stage_moves_on', () => {
     const node = bar(plan({ stage: 'mapped', approvable: true, mapping: { live: false, text: 'Mapped: 6 tasks, the code is clear' } }))
     expect(node.querySelector('.ran')!.textContent).toBe('Mapped: 6 tasks, the code is clear')
@@ -114,13 +121,32 @@ describe('PlanBar next step', () => {
     expect(node.querySelector('.repair')!.textContent).toBe('Repair (1)')
     expect(next(node)).not.toBeNull()
   })
+
+  it('redo_mapping_offers_a_note_and_carries_it_on_the_event', () => {
+    const node = bar(plan({ stage: 'mapped', approvable: true, remappable: true }))
+    const input = node.querySelector<HTMLInputElement>('.remap input')!
+    input.value = 'keep findings to one short sentence'
+    input.dispatchEvent(new Event('input'))
+    let note: string | undefined
+    node.addEventListener(events.SpecRemapRequestedEvent.type, (e) => (note = (e as InstanceType<typeof events.SpecRemapRequestedEvent>).note))
+    node.querySelector<HTMLElement>('.remap-go')!.click()
+    expect(note).toBe('keep findings to one short sentence')
+  })
+
+  it('redo_mapping_is_hidden_while_a_mapping_is_live_or_none_has_run_yet', () => {
+    const notMapped = bar(plan({ stage: 'created', remappable: false }))
+    expect(notMapped.querySelector('.remap')).toBeNull()
+
+    const running = bar(plan({ mapping: { live: true, text: 'reading src' }, remappable: false }))
+    expect(running.querySelector('.remap')).toBeNull()
+  })
 })
 
 describe('PlanBar steps', () => {
   it('marks_the_current_step_and_the_ones_behind_it', () => {
     const node = bar(plan({ stage: 'mapped', approvable: true }))
     const classes = [...node.querySelectorAll<HTMLElement>('.step')].map((s) => `${s.textContent}:${s.className.replace('step ', '')}`)
-    expect(classes).toEqual(['Plan:done', 'Review:done', 'Map:done', 'Rule:done', 'Approve:current', 'Implement:future', 'Verify:future'])
+    expect(classes).toEqual(['Plan:done', 'Review:done', 'Map:done', 'Rule:done', 'Approve:current', 'Implement:future', 'Verify:future', 'Cleanup:future'])
   })
 
   it('a_reached_step_is_a_button_that_names_itself', () => {

@@ -61,6 +61,8 @@ export type SessionEvent =
       description?: string
       /** The change the call proposes, shown in place of the raw arguments. */
       edit?: FileEditChange
+      /** Several files' changes asked about as one: a script's whole run, applied or dropped together. */
+      edits?: FileEditChange[]
       /** A shell call as its commands, each with what already lets it through or the rule that would; shown in place of the raw arguments. */
       commands?: CommandLine[]
     }

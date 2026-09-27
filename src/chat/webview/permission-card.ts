@@ -1,7 +1,7 @@
-import type { CommandLine, PermissionDecision, SessionEvent } from '../../agent/session/code-session'
+import type { CommandLine, FileEditChange, PermissionDecision, SessionEvent } from '../../agent/session/code-session'
 import { isShellTool, projectRuleFor, ruleLabel } from '../../agent/permissions/permission-rules'
 import type { RememberedRules } from '../protocol'
-import { editDiffView } from './edit-diff'
+import { editDiffView, fileLink } from './edit-diff'
 import { PermissionDecidedEvent } from './events'
 import { fillCode } from './highlight'
 
@@ -87,7 +87,7 @@ export class PermissionCard extends HTMLElement {
     if (isShellTool(r.toolName) && this.lines.length) return this.commandList()
     const wrapper = document.createElement('div')
     // A file edit is asked about as the change it would make, decided or not: its arguments are never what the user answers.
-    wrapper.append(r.edit ? editDiffView(r.edit) : jsonInput(r.input), this.wholeCallActions(r))
+    wrapper.append(r.edits ? changeList(r.edits) : r.edit ? editDiffView(r.edit) : jsonInput(r.input), this.wholeCallActions(r))
     return wrapper
   }
 
@@ -195,6 +195,19 @@ export class PermissionCard extends HTMLElement {
     ]
     return kept.length ? `Allowed (${kept.join(', ')})` : 'Allowed'
   }
+}
+
+/** Several files' changes, each under its file, asked about as one. */
+function changeList(edits: FileEditChange[]): HTMLElement {
+  const list = document.createElement('div')
+  list.className = 'changes'
+  for (const change of edits) {
+    const item = document.createElement('div')
+    item.className = 'change'
+    item.append(fileLink(change), editDiffView(change))
+    list.appendChild(item)
+  }
+  return list
 }
 
 function jsonInput(input: unknown): HTMLElement {

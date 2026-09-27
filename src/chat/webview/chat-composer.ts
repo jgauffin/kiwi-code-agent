@@ -1,10 +1,13 @@
 import { compileTemplate } from '@relax.js/core/html'
 import type { McpServerState } from '../../agent/session/code-session'
 import { LinkedFilesRow } from './linked-files-row'
-import { AllowWritesToggledEvent, InterruptRequestedEvent, McpReconnectRequestedEvent, PromptSubmittedEvent } from './events'
+import { AllowWritesToggledEvent, InterruptRequestedEvent, McpReconnectRequestedEvent, PromptSubmittedEvent, SessionModelChangedEvent } from './events'
+
+/** The chat session's own model switch: every model on offer, and the one it runs on now. */
+type ModelSwitch = { current: string; options: string[] }
 
 /** The composer's per-session switches; `undefined` hides a switch the session has no use for. */
-type Switches = { allowWrites: boolean | undefined; mcp: McpServerState[] | undefined }
+type Switches = { allowWrites: boolean | undefined; mcp: McpServerState[] | undefined; model: ModelSwitch | undefined }
 
 /**
  * Prompt input. Enter sends, Shift+Enter breaks the line. Held while the
@@ -23,6 +26,11 @@ export class ChatComposer extends HTMLElement {
           <label class="allow-writes" if="allowWritesAvailable" title="Let this session write files without asking. Bash and other tools still ask; deny rules still block.">
             <input type="checkbox" name="allowWrites" checked="{{allowWrites}}" r-change="toggleAllowWrites(event)"> Allow writes
           </label>
+          <label class="model" if="modelAvailable" title="Runs this session's next turn on the model chosen; the conversation carries over only within the same engine.">
+            <select name="model" r-change="changeModel(event)">
+              <option loop="m in models" value="{{m.name}}" selected="{{m.selected}}">{{m.name}}</option>
+            </select>
+          </label>
           <linked-files-row class="linked-files"></linked-files-row>
         </span>
         <button type="button" class="stop" r-click="stop()">Stop</button>
@@ -36,7 +44,7 @@ export class ChatComposer extends HTMLElement {
       </div>
     </form>
   `)
-  private switches: Switches = { allowWrites: undefined, mcp: undefined }
+  private switches: Switches = { allowWrites: undefined, mcp: undefined, model: undefined }
   private held = false
 
   connectedCallback(): void {
@@ -62,7 +70,7 @@ export class ChatComposer extends HTMLElement {
   }
 
   private render(): void {
-    const { allowWrites, mcp } = this.switches
+    const { allowWrites, mcp, model } = this.switches
     this.template.render(
       {
         held: this.held,
@@ -71,6 +79,8 @@ export class ChatComposer extends HTMLElement {
         allowWrites: allowWrites ?? false,
         mcpAvailable: mcp !== undefined && mcp.length > 0,
         servers: (mcp ?? []).map((s) => ({ ...s, title: s.error ?? s.status })),
+        modelAvailable: model !== undefined,
+        models: (model?.options ?? []).map((name) => ({ name, selected: name === model?.current })),
       },
       {
         reconnect: (s: McpServerState) => this.dispatchEvent(new McpReconnectRequestedEvent(s.name)),
@@ -84,6 +94,7 @@ export class ChatComposer extends HTMLElement {
             this.send()
           }
         },
+        changeModel: (event: Event) => this.dispatchEvent(new SessionModelChangedEvent((event.target as HTMLSelectElement).value)),
         stop: () => this.dispatchEvent(new InterruptRequestedEvent()),
         toggleAllowWrites: (event: Event) => {
           this.dispatchEvent(new AllowWritesToggledEvent((event.target as HTMLInputElement).checked))

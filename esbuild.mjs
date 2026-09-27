@@ -19,6 +19,9 @@ for (const platform of ['x64-win32', 'arm64-win32']) {
   cpSync(join(sdkDir, 'vendor', 'ripgrep', platform), join('dist/vendor/ripgrep', platform), { recursive: true })
 }
 
+// Skills the extension ships, laid out as a Claude Code plugin so both engines can read them.
+cpSync('assets/plugin', 'dist/plugin', { recursive: true })
+
 const extensionHost = {
   entryPoints: ['src/extension.ts'],
   outfile: 'dist/extension.js',

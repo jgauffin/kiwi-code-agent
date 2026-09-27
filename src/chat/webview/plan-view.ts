@@ -1,12 +1,12 @@
-import type { PlanState } from '../protocol'
-import type { Decision } from '../../agent/phases/decisions'
+import type { CleanupUnit, PlanState } from '../protocol'
+import type { Decision, Recommendation } from '../../agent/phases/decisions'
 import { KEEP_RULING } from '../../agent/phases/ruling'
 import type { CommentRef, Review, ReviewComment, ReviewRound } from '../../agent/phases/plan-review'
 import type { Item, Scenario, Spec } from '../../agent/phases/spec-model'
 import type { Task, TaskState } from '../../agent/phases/tasks-file'
-import { PlanFocusRequestedEvent, ReviewActionEvent, type PlanFocus } from './events'
+import { CleanupDecidedEvent, PlanFocusRequestedEvent, ReviewActionEvent, type PlanFocus } from './events'
 import { renderMarkdown, renderMarkdownInline } from './markdown'
-import { presentTabs, type Tab } from './plan-step'
+import { offeredUnits, presentTabs, type Tab } from './plan-step'
 import { post } from './vscode-api'
 
 const PLAN_TARGET = 'plan'
@@ -38,7 +38,7 @@ const same = (a: string, b: string): boolean => a.trim().toLowerCase() === b.tri
 /**
  * One tab of the plan at a time: the spec as the contract reads it (goal,
  * scenarios, questions, with the review written on its rows), the review as
- * a batch, the decisions one at a time, or the task board. Which tab is the
+ * a batch, the decisions one at a time, the task board, or the cleanup. Which tab is the
  * app's call, made on the strip above; a link from one tab to a rule on
  * another asks the app the same way. Built by hand rather than from a
  * template so an open comment box keeps its text and caret while the plan
@@ -51,6 +51,8 @@ export class PlanView extends HTMLElement {
   private tab: Tab = 'spec'
   /** The pending decision the wizard shows, by title; the first open one when unset or gone. */
   private shown: string | undefined
+  /** Files the user took out of the cleanup; every file is picked until named here. */
+  private unpicked = new Set<string>()
 
   update(plan: PlanState | undefined, tab: Tab): void {
     const tabChanged = tab !== this.tab
@@ -71,7 +73,10 @@ export class PlanView extends HTMLElement {
             // What the step is read from beyond the files: a run in flight (not its progress line, which ticks), an implement session to start.
             mapping: plan.mapping?.live,
             verification: plan.verification?.live,
-            cleanup: plan.cleanup?.live,
+            // The cleanup's line ticks on the Cleanup tab, not only in the bar, so its text counts here.
+            cleanup: plan.cleanup,
+            cleanupSweep: plan.cleanupSweep,
+            cleanupDecision: plan.cleanupDecision,
             implementable: plan.implementable,
             reviewingDocs: plan.reviewingDocs,
           }
@@ -129,6 +134,9 @@ export class PlanView extends HTMLElement {
         break
       case 'tasks':
         this.append(this.tasksSection(plan))
+        break
+      case 'cleanup':
+        this.append(this.cleanupTab(plan))
         break
     }
   }
@@ -448,20 +456,23 @@ export class PlanView extends HTMLElement {
     const chosen = (ruling: string) => decision.ruling !== undefined && same(decision.ruling, ruling)
     const sent = 'Send rulings from the plan bar hands them to the planner; nothing is sent now.'
     if (decision.state === 'open' && decision.proposals.length > 0) {
-      wrap.append(el('p', 'lead', 'Pick one: the spec then reads as chosen and the code is built to it. Nothing is sent until Send rulings.'))
+      wrap.append(el('h4', 'heading', 'How to settle it'), el('p', 'lead', 'The spec then reads as you pick and the code is built to it. Nothing is sent until Send rulings.'))
     }
-    for (const proposal of decision.proposals) {
+    const rewrites = decision.proposals.map((p) => rewrittenRule(p, decision, plan))
+    // The rule is named above, so it is worth naming on an option only when the options do not all rewrite the same one.
+    const several = new Set(rewrites.filter((r) => r !== undefined).map((r) => r.name.toLowerCase())).size > 1
+    decision.proposals.forEach((proposal, index) => {
       const option = button('', () => pick(proposal), { title: `Rule that the rule reads so. ${sent}` })
       option.className = `option change${chosen(proposal) ? ' chosen' : ''}`
-      const rewritten = rewrittenRule(proposal, decision, plan)
-      option.append(el('span', 'kind', 'Change the spec'))
-      // The rule is named above; repeating its lead-in on every option buries the sentence that differs.
-      if (rewritten && decision.on.length > 1) option.append(el('span', 'rule', rewritten.name))
+      const rewritten = rewrites[index]
+      // The number is how the recommendation beneath names this option.
+      option.append(el('span', 'index', String(index + 1)), el('span', 'kind', 'Change the spec'))
+      if (rewritten && several) option.append(el('span', 'rule', rewritten.name))
       const text = el('span', 'text')
       renderMarkdownInline(rewritten?.text ?? proposal, text)
       option.append(text)
       wrap.append(option)
-    }
+    })
     const keep = button('', () => pick(KEEP_RULING), { title: `The rule stands as written; the code is changed to match. ${sent}` })
     keep.className = `option keep${chosen(KEEP_RULING) ? ' chosen' : ''}`
     keep.append(el('span', 'kind', 'Keep the spec'), el('span', 'text', 'the code changes'))
@@ -476,6 +487,7 @@ export class PlanView extends HTMLElement {
     else ownText.textContent = 'say what should happen'
     own.append(el('span', 'kind', 'Own ruling'), ownText)
     wrap.append(own)
+    if (decision.recommendation) wrap.append(recommendation(decision.recommendation))
     return wrap
   }
 
@@ -504,6 +516,91 @@ export class PlanView extends HTMLElement {
     return section
   }
 
+  // --- the cleanup tab --------------------------------------------------------
+
+  /**
+   * What the size sweep found once the tests passed, by file, and the ways
+   * out of it. Nothing is split until the user says so: the code was just
+   * proven, and a split is a change to it. Every file starts picked; the
+   * user narrows the split to the files worth it.
+   */
+  private cleanupTab(plan: PlanState): HTMLElement {
+    const units = offeredUnits(plan)
+    const decided = plan.cleanupDecision
+    const section = el('section', 'cleanup')
+    section.append(el('h2', 'heading', 'Cleanup'))
+    if (units.length > 0) {
+      const files = [...new Set(units.map((u) => u.path))]
+      const picked = files.filter((f) => !this.unpicked.has(f))
+      section.append(note('These units grew past the size limits while the feature was built. Splitting them changes shape, never behaviour.'))
+      section.append(this.pickToggle(files, picked.length))
+      const list = el('ul', 'files')
+      for (const file of files) list.append(this.cleanupFile(file, units.filter((u) => u.path === file)))
+      section.append(list, this.cleanupChoices(files, picked, decided === 'postponed'))
+      return section
+    }
+    if (plan.cleanup?.live) section.append(el('p', 'running', plan.cleanup.text))
+    else if (decided === 'skipped') section.append(note('Cleanup skipped: the feature stands as it is.'))
+    else if (plan.cleanup) section.append(el('p', 'ran', plan.cleanup.text))
+    else if (decided === 'done') section.append(note('The split has been made.'))
+    return section
+  }
+
+  /** One button for the whole list: everything is picked, or nothing, so the user starts from either end. */
+  private pickToggle(files: string[], pickedCount: number): HTMLElement {
+    const none = pickedCount > 0
+    const toggle = button(none ? 'Select none' : 'Select all', () => {
+      this.unpicked = new Set(none ? files : [])
+      this.draw()
+    })
+    toggle.className = 'toggle'
+    const bar = el('div', 'toolbar')
+    bar.append(toggle, el('span', 'count', `${pickedCount} of ${files.length} files`))
+    return bar
+  }
+
+  private cleanupFile(file: string, units: CleanupUnit[]): HTMLElement {
+    const row = el('li', 'entry')
+    const label = document.createElement('label')
+    label.className = 'pick'
+    const box = document.createElement('input')
+    box.type = 'checkbox'
+    box.checked = !this.unpicked.has(file)
+    box.addEventListener('change', () => {
+      if (box.checked) this.unpicked.delete(file)
+      else this.unpicked.add(file)
+      this.draw()
+    })
+    label.append(box, fileLink(file, file))
+    const list = el('ul', 'units')
+    for (const unit of units) {
+      const item = el('li', 'unit')
+      item.append(named(unit.name, `${unit.kind}, ${unit.lines} lines, limit ${unit.threshold}`), fileLink(file, `:${unit.line}`))
+      list.append(item)
+    }
+    row.append(label, list)
+    return row
+  }
+
+  private cleanupChoices(files: string[], picked: string[], postponed: boolean): HTMLElement {
+    const wrap = el('div', 'choices')
+    const decide = (decision: 'run' | 'postpone' | 'skip', paths?: string[]) => this.dispatchEvent(new CleanupDecidedEvent(decision, paths))
+    const some = button(`Clean up selected (${picked.length})`, () => decide('run', picked), {
+      title: 'Split the units in the files picked, in a run of their own. Behaviour and tests stay as they are.',
+    })
+    some.disabled = picked.length === 0
+    wrap.append(
+      some,
+      button('Clean up all', () => decide('run', files), { title: 'Split every unit listed, whatever is picked.' }),
+      button(postponed ? 'Still later' : 'Later', () => decide('postpone'), {
+        title: 'Leave the offer standing. The feature keeps its place in the plan list until the cleanup is settled.',
+      }),
+      button('Skip', () => decide('skip'), { title: 'The feature is finished as it stands; this is not offered again.' }),
+    )
+    if (postponed) wrap.append(note('Postponed. The feature stays on the plan list until this is settled.'))
+    return wrap
+  }
+
   private taskGroup(title: string, tasks: Task[], plan: PlanState): HTMLElement {
     const group = el('div', 'group')
     if (title) group.append(el('h3', 'heading', title))
@@ -514,15 +611,15 @@ export class PlanView extends HTMLElement {
   }
 
   /**
-   * What the person wants of a task: its name, where it stands and the files
-   * it touches. The mapper's text, context and `how:` are for the implementer
-   * and stay in the file; the heading is the link to it.
+   * A task as work the reader can judge: what it does in the mapper's own
+   * sentence, where it stands, the paths it changes and the ones it reads, and
+   * the build steps on demand. A bare list of paths explains nothing.
    */
   private taskRow(task: Task, plan: PlanState): HTMLElement {
     const started = plan.stage !== 'mapped'
     const row = el('li', `task ${task.state}${task.removed ? ' removed' : ''}`)
     const line = el('div', 'line')
-    line.append(named(task.name, ''))
+    line.append(named(task.name, task.text.replace(MARKER, '').trim()))
     if (task.removed) line.append(el('span', 'badge removed', 'removed'))
     else if (started) {
       line.append(el('span', `badge state ${task.state}`, blockedReason(task) ?? TASK_STATE[task.state]))
@@ -530,14 +627,17 @@ export class PlanView extends HTMLElement {
       if (unproven.length > 0) line.append(el('span', 'badge gap', `no test for ${unproven.join(', ')}`))
     }
     row.append(line)
-    if (task.files.length > 0) {
-      const files = el('ul', 'files')
-      for (const file of task.files) {
-        const item = el('li', 'file')
-        item.append(fileLink(file, file))
-        files.append(item)
-      }
-      row.append(files)
+    if (task.files.length > 0) row.append(paths('changes', 'files', task.files))
+    if (task.context.length > 0) row.append(paths('reads', 'context', task.context))
+    if (task.how.trim()) {
+      const how = document.createElement('details')
+      how.className = 'how'
+      const summary = document.createElement('summary')
+      summary.textContent = 'how'
+      const body = el('div', 'body')
+      renderMarkdown(task.how, body, true)
+      how.append(summary, body)
+      row.append(how)
     }
     return row
   }
@@ -695,6 +795,26 @@ function named(name: string, text: string): HTMLElement {
   return span
 }
 
+/**
+ * Which way the planner would settle it, under the options rather than on
+ * one: the user reads every way first and meets the recommendation as an
+ * argument to weigh, not as the answer.
+ */
+function recommendation(pick: Recommendation): HTMLElement {
+  const row = el('div', 'recommendation')
+  row.append(el('span', 'kind', 'recommended'))
+  const text = el('span', 'text')
+  text.append(el('strong', 'which', pick.choice === 'keep' ? 'Keep the spec' : `Option ${pick.choice}`))
+  if (pick.because) {
+    text.append(': ')
+    const because = el('span', 'because')
+    renderMarkdownInline(pick.because, because)
+    text.append(because)
+  }
+  row.append(text)
+  return row
+}
+
 /** A labelled line: what the mapper found, what the user ruled. The text is one line of markdown, as the file has it. */
 function labelled(className: string, kind: string, text: string): HTMLElement {
   const line = el('div', className)
@@ -720,6 +840,19 @@ function blockedReason(task: Task): string | undefined {
   if (!match) return undefined
   const reason = match[1]!.trim()
   return reason ? `blocked: ${reason}` : 'blocked'
+}
+
+/** A task's paths under what they are to it: the files it changes, the ones it reads to get there. */
+function paths(kind: string, className: string, files: string[]): HTMLElement {
+  const wrap = el('div', 'paths')
+  const list = el('ul', className)
+  for (const file of files) {
+    const item = el('li', 'file')
+    item.append(fileLink(file, file))
+    list.append(item)
+  }
+  wrap.append(el('span', 'kind', kind), list)
+  return wrap
 }
 
 function fileLink(path: string, label: string): HTMLButtonElement {

@@ -21,14 +21,17 @@ export const RECONCILE_TOOLS = ['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery
  * The first prompt of a mapping run; the system prompt carries the
  * instructions. A run that continues the last mapping's conversation has the
  * code it read and the spec it mapped in context, so it re-reads the spec and
- * touches only what the change reaches.
+ * touches only what the change reaches. A note is guidance for the mapping
+ * itself — a level of detail, a scope, a house style — not a spec change.
  */
-export function reconcileKickoff(continued: boolean): string {
-  if (!continued) return 'Map the spec against the code: write the decisions, then the tasks.'
-  return [
-    'The spec changed since you mapped it. Read it again and map the change: update the decisions and the tasks it touches, leave the rest as they are, and write what is still missing.',
-    'What you read of the code holds unless a tool result says a file changed; do not read it again to be sure.',
-  ].join(' ')
+export function reconcileKickoff(continued: boolean, note?: string): string {
+  const base = !continued
+    ? 'Map the spec against the code: write the decisions, then the tasks.'
+    : [
+        'The spec changed since you mapped it. Read it again and map the change: update the decisions and the tasks it touches, leave the rest as they are, and write what is still missing.',
+        'What you read of the code holds unless a tool result says a file changed; do not read it again to be sure.',
+      ].join(' ')
+  return note ? `${base}\n\nAlso: ${note}` : base
 }
 
 /**
@@ -69,7 +72,7 @@ Your first output: the decisions file, \`${decisions}\`, one \`###\` per decisio
 Rules:
 - The title names the disagreement. The finding is one or two sentences, as in the example: what the code does today, at the one path and symbol that shows it, and how that stands against the rules in \`on\`: it contradicts them, or they are silent on it. Do not quote or restate a rule; the user reads it verbatim beside your finding. Not how you found it, not what the spec should say instead, not the task: the planner's proposals and the board carry those.
 - \`on\` names the rules the decision concerns, as they are named in the spec.
-- The \`proposed\` lines are the planner's and the \`ruling\` line is the user's: never write, change or remove either.
+- The \`proposed\`, \`recommended\` and \`because\` lines are the planner's and the \`ruling\` line is the user's: never write, change or remove any of them.
 - Titles are stable. On a re-run, keep a decision that still holds, append \` [withdrawn]\` to the heading of one that no longer applies, and add new ones. A decision marked \` [applied]\` is settled: one ruled \`${KEEP_RULING}\` means the spec stands and the code changes, which is work for the task that touches it, so its \`how:\` says so; do not report it again.
 - Do not paste code.
 - The spec is not yours to write: its rules are the planner's and the user's.
@@ -103,7 +106,7 @@ Rules:
 - The files are workspace-relative paths that exist, or paths to create marked \`(new)\`, placed where the code around them says such a file belongs. The tests that prove a task's rules are files of that task.
 - The context is what you read to arrive at the task and the implementer would otherwise have to find again: the modules the task's files lean on, the test that shows the pattern to follow, the place the term already lives. Existing paths only, the few that matter; a task starts from its files and its context and searches beyond them only when those do not answer.
 - The \`how:\` block is the instruction the implementer builds from, written from what you read: the steps in build order, the symbols to add or change by path and name, the existing code that shows the pattern to follow, what not to touch. Concrete enough that the implementer opens the files and the context and starts writing, rather than reading the code to work out what you already know. No code pasted.
-- A task's name is the bold lead-in of its line, a few words, unique in the file and stable across re-runs: keep a task that still holds and update its text, files, context and how, append \` [removed]\` to one that no longer applies, add new ones. Never touch a marker or a \`proves:\` line the implementer left on a task (\`[in progress]\`, \`[done]\`, \`[tested]\`, \`[blocked: ...]\`).
+- A task's name is the bold lead-in of its line, a few words, unique in the file and stable across re-runs: keep a task that still holds and update its text, files, context and how, append \` [removed]\` to one that no longer applies, add new ones. Never touch a marker, a \`proves:\` line or a \`note:\` line the implementer left on a task (\`[in progress]\`, \`[done]\`, \`[tested]\`, \`[blocked: ...]\`): a note says where the build departed from the \`how:\` it was given and why, so it survives a rewrite of the task and goes only when the task does.
 - No task for what a pending decision puts in question: the user rules first.
 - The file's front matter and a \`## Verification\` section at its end are the extension's; leave them alone.
 - When both files are written, stop. Say nothing more: decisions and tasks are read from the files.`

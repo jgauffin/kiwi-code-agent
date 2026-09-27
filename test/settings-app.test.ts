@@ -14,9 +14,9 @@ const events = await import('../src/settings/webview/events')
 
 export function snapshot(over: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
   return {
-    profiles: [{ name: 'Claude', engine: 'claude-sdk', model: 'claude-opus-5' }],
+    providers: [{ name: 'Claude', engine: 'claude-sdk', models: ['claude-opus-5'] }],
+    profiles: [{ name: 'Claude', default: { provider: 'Claude', model: 'claude-opus-5' } }],
     activeProfile: 'Claude',
-    planProfile: '',
     keys: [],
     permissions: { allow: ['Edit'], deny: [] },
     verify: [{ match: 'src/**/*.ts', project: 'package.json', command: 'npm test' }],

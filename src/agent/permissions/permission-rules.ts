@@ -1,4 +1,5 @@
 import { commandName, unwrapCommand } from './command-wrappers'
+import { NO_PROJECT_COMMANDS, projectCommandOf, type ProjectCommands } from './project-commands'
 import { isReadOnlySegment, type ReadOnlyContext } from './read-only-commands'
 import { splitShellCommand } from './shell-split'
 
@@ -32,7 +33,7 @@ export function formatRule(rule: PermissionRule): string {
 export const TRANSFER_TOOLS: ReadonlySet<string> = new Set(['Move', 'Copy'])
 
 /** Tools that write a file. A write is answered per call or per session, never remembered for the project. */
-export const WRITE_TOOLS: ReadonlySet<string> = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', ...TRANSFER_TOOLS])
+export const WRITE_TOOLS: ReadonlySet<string> = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'RunScript', ...TRANSFER_TOOLS])
 
 /**
  * Tools that run a command line. Both are judged, prompted and remembered
@@ -66,7 +67,7 @@ export function projectRuleFor(toolName: string): string | undefined {
 export type CommandLine = {
   /** The command as written. */
   text: string
-  /** What already lets it through: `read-only`, or the rule that covers it. Absent when this line is part of why the call is asked about. */
+  /** What already lets it through: `read-only`, a command the project defines, or the rule that covers it. Absent when this line is part of why the call is asked about. */
   passes?: string
   /** The rule that would cover it, for "Allow for session" and "Allow for project". Absent when it passes, or when no rule can stand for it. */
   rule?: string
@@ -77,13 +78,15 @@ export type CommandLine = {
  * runs a command no line shows, so then nothing passes and no rule is offered:
  * such a call is allowed per call or not at all.
  */
-export function commandLines(toolName: string, command: string, allow: string[], context: ReadOnlyContext = {}): CommandLine[] {
+export function commandLines(toolName: string, command: string, allow: string[], context: ReadOnlyContext = {}, project: ProjectCommands = NO_PROJECT_COMMANDS): CommandLine[] {
   const parsed = splitShellCommand(command)
   const patterns = allow.map(parseRule).filter((r) => r.tool === toolName && r.pattern !== undefined)
   return parsed.segments.map((segment) => {
     const { text } = segment
     if (parsed.substitutes) return { text }
     if (isReadOnlySegment(segment, context)) return { text, passes: 'read-only' }
+    const defined = projectCommandOf(segment, project)
+    if (defined) return { text, passes: defined }
     const covering = patterns.find((r) => bashPatternMatches(r.pattern!, segment.tokens))
     if (covering) return { text, passes: formatRule(covering) }
     const prefix = commandPrefix(segment.tokens)

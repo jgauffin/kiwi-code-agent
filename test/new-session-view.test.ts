@@ -8,7 +8,7 @@ const { NewSessionView } = await import('../src/chat/webview/new-session-view')
 const { LinkedFilesRow } = await import('../src/chat/webview/linked-files-row')
 const events = await import('../src/chat/webview/events')
 
-function view(profiles = { names: ['Claude', 'Kimi'], active: 'Claude', plan: '' }) {
+function view(profiles = { names: ['Claude', 'Kimi'], active: 'Claude' }) {
   const node = new NewSessionView()
   document.body.appendChild(node)
   node.update([], profiles)
@@ -26,39 +26,30 @@ function type(node: HTMLElement, selector: string, text: string): void {
   field.dispatchEvent(new Event('input', { bubbles: true }))
 }
 
-describe('NewSessionView model pickers', () => {
-  it('lists_every_profile_with_the_defaults_selected', () => {
-    const node = view({ names: ['Claude', 'Kimi'], active: 'Kimi', plan: 'Claude' })
-    const work = node.querySelector<HTMLSelectElement>('select[name=work]')!
-    const plan = node.querySelector<HTMLSelectElement>('select[name=plan]')!
-    expect(options(work)).toEqual(['Claude', 'Kimi'])
-    expect(work.value).toBe('Kimi')
-    expect(options(plan)).toEqual(['Same as model', 'Claude', 'Kimi'])
-    expect(plan.value).toBe('Claude')
+describe('NewSessionView profile picker', () => {
+  it('lists_every_profile_with_the_default_selected', () => {
+    const node = view({ names: ['Claude', 'Kimi'], active: 'Kimi' })
+    const profile = node.querySelector<HTMLSelectElement>('select[name=profile]')!
+    expect(options(profile)).toEqual(['Claude', 'Kimi'])
+    expect(profile.value).toBe('Kimi')
     node.remove()
   })
 
-  it('an_empty_plan_profile_reads_as_same_as_model', () => {
-    const node = view()
-    expect(node.querySelector<HTMLSelectElement>('select[name=plan]')!.value).toBe('')
-    node.remove()
-  })
-
-  it('picking_a_profile_dispatches_the_role_and_name', () => {
+  it('picking_a_profile_dispatches_its_name', () => {
     const node = view()
     let seen: unknown
-    node.addEventListener(events.DefaultProfileChangedEvent.type, (e) => (seen = [e.role, e.name]))
-    const plan = node.querySelector<HTMLSelectElement>('select[name=plan]')!
-    plan.value = 'Kimi'
-    plan.dispatchEvent(new Event('change', { bubbles: true }))
-    expect(seen).toEqual(['plan', 'Kimi'])
+    node.addEventListener(events.DefaultProfileChangedEvent.type, (e) => (seen = e.name))
+    const profile = node.querySelector<HTMLSelectElement>('select[name=profile]')!
+    profile.value = 'Kimi'
+    profile.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(seen).toBe('Kimi')
     node.remove()
   })
 
   it('a_changed_default_moves_the_selection_on_the_next_state', () => {
     const node = view()
-    node.update([], { names: ['Claude', 'Kimi'], active: 'Kimi', plan: '' })
-    expect(node.querySelector<HTMLSelectElement>('select[name=work]')!.value).toBe('Kimi')
+    node.update([], { names: ['Claude', 'Kimi'], active: 'Kimi' })
+    expect(node.querySelector<HTMLSelectElement>('select[name=profile]')!.value).toBe('Kimi')
     node.remove()
   })
 })
@@ -81,7 +72,7 @@ describe('NewSessionView fields across cards', () => {
   it('a_render_from_arriving_state_keeps_what_is_half_typed', () => {
     const node = view()
     type(node, '.chat-fields textarea[name=prompt]', 'half a thou')
-    node.update([{ feature: 'Order cancellation', status: 'draft' }], { names: ['Claude'], active: 'Claude', plan: '' })
+    node.update([{ feature: 'Order cancellation', status: 'draft' }], { names: ['Claude'], active: 'Claude' })
     expect(node.querySelector<HTMLTextAreaElement>('.chat-fields textarea[name=prompt]')!.value).toBe('half a thou')
     node.remove()
   })

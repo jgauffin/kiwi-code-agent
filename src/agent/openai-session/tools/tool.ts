@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { ToolDefinition } from '../chat-messages'
 import type { ReadTracker } from './read-tracker'
 import type { QuestionOutcome, UserQuestionRequest } from '../../session/user-question'
+import type { FileEditChange } from '../../edits/file-edit-diff'
 
 /**
  * How a tool reaches the person running the session. The engine supplies it;
@@ -16,6 +17,12 @@ export type ToolContext = {
   files: ReadTracker
   /** Absent in a session whose user never sees its transcript; the question tool then has nobody to ask. */
   ask?: QuestionAsker
+  /** Runs another tool as if the model had called it: same permission gate, same result. Absent where tools cannot call tools. */
+  call?: (name: string, input: unknown) => Promise<ToolOutput>
+  /** The reason a call is refused outright, by a deny rule; undefined when nothing forbids it. Never asks the user. */
+  authorize?: (name: string, input: unknown) => Promise<string | undefined>
+  /** Puts changes to files to the user as one decision; true when they are to be applied. */
+  review?: (title: string, edits: FileEditChange[]) => Promise<boolean>
 }
 
 export type ToolOutput = { text: string; isError: boolean }

@@ -4,14 +4,17 @@ import type { FromSettingsWebview, SettingsSnapshot, ToSettingsWebview } from '.
 import { AdvancedTab } from './advanced-tab'
 import {
   ApiKeySetEvent,
+  ModelsRefreshRequestedEvent,
   ProfileRemovedEvent,
   ProfileSavedEvent,
+  ProviderRemovedEvent,
+  ProviderSavedEvent,
   SettingSavedEvent,
   SettingsFileRequestedEvent,
   SettingsTabSelectedEvent,
   type SettingsTab,
 } from './events'
-import { ModelsTab } from './models-tab'
+import { ModelsSection } from './models-section'
 import { PermissionsTab } from './permissions-tab'
 import { ProjectTab } from './project-tab'
 
@@ -31,8 +34,9 @@ const TABS: { tab: SettingsTab; label: string }[] = [
  */
 export class SettingsApp extends HTMLElement {
   private readonly strip = document.createElement('nav')
+  private readonly modelsSection = new ModelsSection()
   private readonly panes: Record<SettingsTab, HTMLElement & { update(snapshot: SettingsSnapshot): void }> = {
-    models: new ModelsTab(),
+    models: this.modelsSection,
     permissions: new PermissionsTab(),
     project: new ProjectTab(),
     advanced: new AdvancedTab(),
@@ -53,6 +57,9 @@ export class SettingsApp extends HTMLElement {
     this.addEventListener(SettingSavedEvent.type, (e) => post({ type: 'save', key: e.key, value: e.value } as FromSettingsWebview))
     this.addEventListener(ProfileSavedEvent.type, (e) => post({ type: 'save_profile', index: e.index, profile: e.profile }))
     this.addEventListener(ProfileRemovedEvent.type, (e) => post({ type: 'remove_profile', index: e.index }))
+    this.addEventListener(ProviderSavedEvent.type, (e) => post({ type: 'save_provider', index: e.index, provider: e.provider }))
+    this.addEventListener(ProviderRemovedEvent.type, (e) => post({ type: 'remove_provider', index: e.index }))
+    this.addEventListener(ModelsRefreshRequestedEvent.type, (e) => post({ type: 'refresh_models', name: e.name, baseUrl: e.baseUrl, apiKeyValue: e.apiKeyValue }))
     this.addEventListener(ApiKeySetEvent.type, (e) => post({ type: 'set_api_key', name: e.name, value: e.value }))
     this.addEventListener(SettingsFileRequestedEvent.type, (e) => post({ type: 'open_settings_file', target: e.scope }))
 
@@ -61,7 +68,10 @@ export class SettingsApp extends HTMLElement {
   }
 
   private receive(message: ToSettingsWebview): void {
-    if (message.type !== 'settings') return
+    if (message.type === 'models') {
+      this.modelsSection.discoveredModels(message.provider, message.models)
+      return
+    }
     for (const pane of Object.values(this.panes)) pane.update(message.snapshot)
   }
 

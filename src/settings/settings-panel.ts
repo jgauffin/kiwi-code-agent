@@ -5,6 +5,13 @@ import type { SettingsStore } from './settings-store'
 
 export const SETTINGS_PANEL_TYPE = 'kiwiAgent.settingsPanel'
 
+/**
+ * What an OpenAI-compatible endpoint says it serves, off the base URL and key
+ * as the form has them now rather than what was last saved; an empty
+ * `apiKeyValue` falls back to what is already stored under `name`.
+ */
+export type ModelLister = (args: { name: string; baseUrl: string; apiKeyValue: string }) => Promise<string[]>
+
 /** Hosts the settings page in one editor panel; every write goes through the store and the page is re-sent after it. */
 export class SettingsPanel {
   private panel: vscode.WebviewPanel | undefined
@@ -12,6 +19,7 @@ export class SettingsPanel {
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly store: SettingsStore,
+    private readonly listModels: ModelLister,
   ) {}
 
   open(): void {
@@ -58,6 +66,15 @@ export class SettingsPanel {
         case 'remove_profile':
           await this.store.removeProfile(message.index)
           return
+        case 'save_provider':
+          await this.store.saveProvider(message.index, message.provider)
+          return
+        case 'remove_provider':
+          await this.store.removeProvider(message.index)
+          return
+        case 'refresh_models':
+          await this.refreshModels(message)
+          return
         case 'set_api_key':
           await this.store.setApiKey(message.name, message.value)
           return
@@ -69,6 +86,13 @@ export class SettingsPanel {
       // The page shows what the host holds, whether the write went through or was refused.
       await this.send()
     }
+  }
+
+  private async refreshModels(args: { name: string; baseUrl: string; apiKeyValue: string }): Promise<void> {
+    const models = await this.listModels(args)
+    if (!this.panel) return
+    const message: ToSettingsWebview = { type: 'models', provider: args.name, models }
+    await this.panel.webview.postMessage(message)
   }
 
   private async send(): Promise<void> {

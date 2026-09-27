@@ -89,7 +89,7 @@ describe('blind plan helpers', () => {
     expect(prompt).toContain('it never changes once written')
     expect(prompt).toContain('(was Old name)')
     expect(prompt).toContain('Write nothing until the user says go')
-    expect(BLIND_PLAN_TOOLS).toEqual(['Read', 'Glob', 'JsonSchema', 'JsonQuery', 'Write', 'Edit', 'AskUser'])
+    expect(BLIND_PLAN_TOOLS).toEqual(['Read', 'Glob', 'JsonSchema', 'JsonQuery', 'Write', 'Edit', 'AskUser', 'RedoMapping'])
   })
 
   it('prompt_states_the_contract_scenarios_with_nested_edges_and_no_restating_sections', () => {

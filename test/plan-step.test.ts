@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { planStep, presentTabs, tabFor, tabLabel } from '../src/chat/webview/plan-step'
-import type { PlanState } from '../src/chat/protocol'
+import type { CleanupUnit, PlanState } from '../src/chat/protocol'
 import type { Decision } from '../src/agent/phases/decisions'
 import type { Task } from '../src/agent/phases/tasks-file'
 import type { ReviewRound } from '../src/agent/phases/plan-review'
@@ -17,6 +17,7 @@ function plan(over: Partial<PlanState> = {}): PlanState {
     stale: false,
     repairable: false,
     mappable: true,
+    remappable: false,
     implementable: false,
     verifiable: false,
     tasks: [],
@@ -40,6 +41,8 @@ function task(state: Task['state'], group?: string): Task {
 }
 
 const round = (over: Partial<ReviewRound>): ReviewRound => ({ number: 1, comments: [], strikes: [], ...over })
+
+const unit = (): CleanupUnit => ({ path: 'src/orders/cancel.ts', line: 12, name: 'cancel', kind: 'function', lines: 61, threshold: 25 })
 
 describe('planStep', () => {
   it('a_spec_not_yet_written_waits_on_the_planner', () => {
@@ -117,15 +120,15 @@ describe('planStep', () => {
     expect(step.next).toMatchObject({ kind: 'action', action: 'approve' })
   })
 
-  it('an_approved_plan_offers_implement_from_the_plan_session', () => {
+  it('an_approved_plan_offers_implement_only_while_nothing_is_building_the_tasks', () => {
     expect(planStep(plan({ stage: 'mapped', status: 'approved', commentable: false, implementable: true })).next).toMatchObject({ action: 'implement' })
     expect(planStep(plan({ stage: 'mapped', status: 'approved', commentable: false })).next).toMatchObject({ kind: 'waiting' })
   })
 
-  it('right_after_approval_the_planner_lists_what_the_docs_should_say_before_implement_is_offered', () => {
+  it('right_after_approval_the_planner_lists_what_the_docs_should_say_and_the_implementation_follows_it', () => {
     const step = planStep(plan({ stage: 'mapped', status: 'approved', commentable: false, reviewingDocs: true }))
     expect(step.current).toBe('approve')
-    expect(step.next).toEqual({ kind: 'waiting', text: 'the planner is listing what the docs should now say' })
+    expect(step.next).toEqual({ kind: 'waiting', text: 'the planner is listing what the docs should now say; the implementation starts after it' })
   })
 
   it('under_development_reports_progress_and_blocks', () => {
@@ -148,10 +151,34 @@ describe('planStep', () => {
     expect(planStep(plan({ ...base, lastVerification: { at: 't', ok: false, text: 'failed' } })).next).toMatchObject({ label: 'Verify again' })
   })
 
-  it('verified_is_done_at_the_verify_step', () => {
-    const step = planStep(plan({ stage: 'verified', status: 'approved', commentable: false }))
-    expect(step.current).toBe('verify')
-    expect(step.next).toEqual({ kind: 'done', text: 'verified' })
+  it('a_verified_feature_stands_at_the_cleanup_step', () => {
+    const verified = { stage: 'verified' as const, status: 'approved' as const, commentable: false }
+    const step = planStep(plan(verified))
+    expect(step.current).toBe('cleanup')
+    // Nothing measured yet in this window: the sizes can be checked, and nothing is claimed about them.
+    expect(step.next).toMatchObject({ kind: 'action', action: 'sweep' })
+    expect(planStep(plan({ ...verified, cleanupSweep: { units: [] } })).next).toEqual({ kind: 'done', text: 'verified' })
+  })
+
+  it('units_over_the_limit_are_offered_at_the_cleanup_step_and_never_split_on_their_own', () => {
+    const verified = { stage: 'verified' as const, status: 'approved' as const, commentable: false }
+    const sweep = { units: [unit(), { ...unit(), name: 'LasAsync' }] }
+    const offered = planStep(plan({ ...verified, cleanupSweep: sweep }))
+    expect(offered.current).toBe('cleanup')
+    expect(offered.next).toMatchObject({ kind: 'goto', tab: 'cleanup', label: '2 units over the limit' })
+
+    const postponed = planStep(plan({ ...verified, cleanupSweep: sweep, cleanupDecision: 'postponed' }))
+    expect(postponed.next).toMatchObject({ kind: 'goto', tab: 'cleanup', label: 'Cleanup postponed (2)' })
+
+    // Skipped and done are answers: the offer is not put again.
+    expect(planStep(plan({ ...verified, cleanupSweep: sweep, cleanupDecision: 'skipped' })).next).toEqual({ kind: 'done', text: 'cleanup skipped' })
+    expect(planStep(plan({ ...verified, cleanupSweep: sweep, cleanupDecision: 'done' })).next).toEqual({ kind: 'done', text: 'verified' })
+  })
+
+  it('a_cleanup_run_in_flight_says_what_it_is_doing', () => {
+    const step = planStep(plan({ stage: 'verified', status: 'approved', commentable: false, cleanup: { live: true, text: 'Read src/a.ts' } }))
+    expect(step.current).toBe('cleanup')
+    expect(step.next).toEqual({ kind: 'waiting', text: 'Read src/a.ts' })
   })
 
   it('review_stays_reachable_on_a_mapped_draft', () => {
@@ -190,6 +217,17 @@ describe('tabs', () => {
     expect(presentTabs(full)).toEqual(['spec', 'review', 'decisions', 'tasks'])
     // The decisions count is what is left to rule on.
     expect(presentTabs(full).map((t) => tabLabel(t, full))).toEqual(['Spec', 'Review (1)', 'Decisions (1)', 'Tasks (1)'])
+  })
+
+  it('the_cleanup_tab_appears_with_the_sweep_and_counts_the_units_on_offer', () => {
+    const verified = { stage: 'verified' as const, status: 'approved' as const, commentable: false, tasks: [task('tested')] }
+    expect(presentTabs(plan(verified))).not.toContain('cleanup')
+    const offered = plan({ ...verified, cleanupSweep: { units: [unit(), unit()] } })
+    expect(tabLabel('cleanup', offered)).toBe('Cleanup (2)')
+    expect(tabFor('cleanup', offered)).toBe('cleanup')
+    const skipped = plan({ ...verified, cleanupSweep: { units: [unit()] }, cleanupDecision: 'skipped' })
+    expect(presentTabs(skipped)).toContain('cleanup')
+    expect(tabLabel('cleanup', skipped)).toBe('Cleanup')
   })
 
   it('the_tasks_tab_counts_tested_once_work_has_started', () => {

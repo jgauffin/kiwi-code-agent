@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { ModelProfile } from '../src/agent/session/model-profile'
+import type { Profile, Provider } from '../src/agent/session/model-profile'
 import type { SettingsTarget } from '../src/settings/protocol'
 import { SettingsStore, type ConfigPort, type SecretPort } from '../src/settings/settings-store'
 
@@ -25,12 +25,22 @@ function fakeSecrets(stored: string[] = []) {
   const port: SecretPort = {
     has: async (name) => keys.has(name),
     store: async (name, value) => void keys.set(name, value),
+    move: async (from, to) => {
+      const value = keys.get(from)
+      if (value === undefined) return
+      keys.set(to, value)
+      keys.delete(from)
+    },
+    delete: async (name) => void keys.delete(name),
   }
   return { port, keys }
 }
 
-const claude: ModelProfile = { name: 'Claude', engine: 'claude-sdk', model: 'claude-opus-5' }
-const kimi: ModelProfile = { name: 'Kimi', engine: 'openai-compatible', model: 'moonshotai/Kimi-K3', baseUrl: 'https://api.berget.ai/v1', apiKeySecret: 'berget' }
+const claudeProvider: Provider = { name: 'Claude', engine: 'claude-sdk', models: ['claude-opus-5', 'claude-sonnet-5'] }
+const bergetProvider: Provider = { name: 'berget', engine: 'openai-compatible', baseUrl: 'https://api.berget.ai/v1', models: ['moonshotai/Kimi-K3'] }
+
+const opus: Profile = { name: 'Opus', default: { provider: 'Claude', model: 'claude-opus-5' } }
+const kimi: Profile = { name: 'Kimi', default: { provider: 'berget', model: 'moonshotai/Kimi-K3' } }
 
 function store(config: Record<string, unknown>, options: { hasWorkspace?: boolean; secrets?: string[] } = {}) {
   const cfg = fakeConfig(config, options.hasWorkspace ?? true)
@@ -38,48 +48,109 @@ function store(config: Record<string, unknown>, options: { hasWorkspace?: boolea
   return { store: new SettingsStore(cfg.port, sec.port), ...cfg, secrets: sec.keys }
 }
 
+const withModels = (providers: Provider[], profiles: Profile[], activeProfile: string) => ({ providers, profiles, activeProfile })
+
 describe('SettingsStore profiles', () => {
-  it('renaming_a_profile_updates_the_defaults_that_named_it', async () => {
-    const { store: s, values } = store({ profiles: [claude, kimi], activeProfile: 'Claude', planProfile: 'Claude' })
-    await s.saveProfile(0, { ...claude, name: 'Opus' })
-    expect(values.get('activeProfile')).toBe('Opus')
-    expect(values.get('planProfile')).toBe('Opus')
-    expect((values.get('profiles') as ModelProfile[]).map((p) => p.name)).toEqual(['Opus', 'Kimi'])
+  it('renaming_a_profile_updates_the_default_that_named_it', async () => {
+    const { store: s, values } = store(withModels([claudeProvider, bergetProvider], [opus, kimi], 'Opus'))
+    await s.saveProfile(0, { ...opus, name: 'Balanced' })
+    expect(values.get('activeProfile')).toBe('Balanced')
+    expect((values.get('profiles') as Profile[]).map((p) => p.name)).toEqual(['Balanced', 'Kimi'])
   })
 
-  it('removing_the_work_default_profile_is_refused', async () => {
-    const { store: s, values } = store({ profiles: [claude, kimi], activeProfile: 'Claude', planProfile: '' })
-    await expect(s.removeProfile(0)).rejects.toThrow(/Claude/)
-    expect(values.get('profiles')).toEqual([claude, kimi])
+  it('removing_the_active_profile_is_refused', async () => {
+    const { store: s, values } = store(withModels([claudeProvider, bergetProvider], [opus, kimi], 'Opus'))
+    await expect(s.removeProfile(0)).rejects.toThrow(/Opus/)
+    expect(values.get('profiles')).toEqual([opus, kimi])
     await s.removeProfile(1)
-    expect(values.get('profiles')).toEqual([claude])
+    expect(values.get('profiles')).toEqual([opus])
   })
 
   it('duplicate_profile_names_are_refused', async () => {
-    const { store: s } = store({ profiles: [claude, kimi] })
-    await expect(s.saveProfile(2, { ...kimi, name: 'Claude' })).rejects.toThrow(/already exists/)
-    await expect(s.saveProfile(1, { ...kimi, name: 'Claude' })).rejects.toThrow(/already exists/)
+    const { store: s } = store(withModels([claudeProvider, bergetProvider], [opus, kimi], 'Opus'))
+    await expect(s.saveProfile(2, { ...kimi, name: 'Opus' })).rejects.toThrow(/already exists/)
+    await expect(s.saveProfile(1, { ...kimi, name: 'Opus' })).rejects.toThrow(/already exists/)
     await expect(s.saveProfile(1, { ...kimi, name: 'Kimi' })).resolves.toBeUndefined()
   })
 
-  it('openai_profile_without_base_url_or_key_name_is_refused', async () => {
-    const { store: s } = store({ profiles: [claude] })
-    await expect(s.saveProfile(1, { ...kimi, baseUrl: ' ' })).rejects.toThrow(/base URL/)
-    const { apiKeySecret: _, ...withoutKey } = kimi
-    await expect(s.saveProfile(1, withoutKey)).rejects.toThrow(/API key name/)
+  it('a_profile_naming_a_provider_that_is_not_configured_is_refused', async () => {
+    const { store: s } = store(withModels([claudeProvider], [], ''))
+    await expect(s.saveProfile(0, { name: 'Ghost', default: { provider: 'berget', model: 'x' } })).rejects.toThrow(/not configured/)
   })
 
-  it('a_claude_profile_keeps_no_openai_fields', async () => {
-    const { store: s, values } = store({ profiles: [] })
-    await s.saveProfile(0, { ...claude, baseUrl: 'https://x', apiKeySecret: 'k', effort: 'high' })
-    expect(values.get('profiles')).toEqual([{ ...claude, effort: 'high' }])
+  it('a_step_override_identical_to_the_default_is_not_kept_as_one', async () => {
+    const { store: s, values } = store(withModels([claudeProvider, bergetProvider], [], ''))
+    await s.saveProfile(0, { name: 'Balanced', default: { provider: 'Claude', model: 'claude-opus-5' }, steps: { plan: { provider: 'Claude', model: 'claude-opus-5' } } })
+    expect((values.get('profiles') as Profile[])[0]!.steps).toBeUndefined()
   })
 
-  it('profiles_and_defaults_write_to_user_settings', async () => {
-    const { store: s, writes } = store({ profiles: [claude] })
-    await s.saveProfile(1, kimi)
-    await s.save('activeProfile', 'Kimi')
-    expect(writes.map((w) => w.target)).toEqual(['user', 'user'])
+  it('the_first_profile_saved_becomes_what_new_sessions_run_on', async () => {
+    const { store: s, values } = store(withModels([claudeProvider], [], ''))
+    await s.saveProfile(0, opus)
+    expect(values.get('activeProfile')).toBe('Opus')
+  })
+
+  it('providers_and_profiles_write_to_user_settings', async () => {
+    const { store: s, writes } = store(withModels([claudeProvider], [], ''))
+    await s.saveProfile(0, opus)
+    await s.save('permissions.allow', ['Edit'])
+    expect(writes.filter((w) => w.key === 'profiles' || w.key === 'activeProfile').every((w) => w.target === 'user')).toBe(true)
+    expect(writes.find((w) => w.key === 'permissions.allow')?.target).toBe('workspace')
+  })
+})
+
+describe('SettingsStore providers', () => {
+  it('renaming_a_provider_updates_the_profiles_that_chose_it', async () => {
+    const { store: s, values } = store(withModels([bergetProvider], [kimi], 'Kimi'))
+    await s.saveProvider(0, { ...bergetProvider, name: 'GLM' })
+    expect((values.get('profiles') as Profile[])[0]!.default.provider).toBe('GLM')
+  })
+
+  it('renaming_an_openai_compatible_provider_carries_its_stored_key_to_the_new_name', async () => {
+    const { store: s, secrets } = store(withModels([bergetProvider], [], ''), { secrets: ['berget'] })
+    await s.saveProvider(0, { ...bergetProvider, name: 'GLM' })
+    expect(secrets.has('berget')).toBe(false)
+    expect(secrets.get('GLM')).toBe('x')
+  })
+
+  it('renaming_a_claude_provider_moves_no_secret', async () => {
+    const { store: s, secrets } = store(withModels([claudeProvider], [], ''))
+    await s.saveProvider(0, { ...claudeProvider, name: 'Opus SDK' })
+    expect(secrets.size).toBe(0)
+  })
+
+  it('removing_an_openai_compatible_provider_deletes_its_stored_key', async () => {
+    const { store: s, secrets } = store(withModels([claudeProvider, bergetProvider], [], ''), { secrets: ['berget'] })
+    await s.removeProvider(1)
+    expect(secrets.has('berget')).toBe(false)
+  })
+
+  it('removing_a_provider_still_named_by_a_profile_is_refused', async () => {
+    const { store: s } = store(withModels([claudeProvider, bergetProvider], [kimi], 'Kimi'))
+    await expect(s.removeProvider(1)).rejects.toThrow(/Kimi/)
+    await expect(s.removeProvider(0)).resolves.toBeUndefined()
+  })
+
+  it('duplicate_provider_names_are_refused', async () => {
+    const { store: s } = store(withModels([claudeProvider], [], ''))
+    await expect(s.saveProvider(1, { ...bergetProvider, name: 'Claude' })).rejects.toThrow(/already exists/)
+  })
+
+  it('an_openai_provider_without_a_base_url_is_refused', async () => {
+    const { store: s } = store(withModels([], [], ''))
+    await expect(s.saveProvider(0, { ...bergetProvider, baseUrl: ' ' })).rejects.toThrow(/base URL/)
+  })
+
+  it('a_claude_provider_keeps_no_endpoint', async () => {
+    const { store: s, values } = store(withModels([], [], ''))
+    await s.saveProvider(0, { ...claudeProvider, baseUrl: 'https://x' })
+    expect(values.get('providers')).toEqual([claudeProvider])
+  })
+
+  it('empty_model_rows_are_dropped', async () => {
+    const { store: s, values } = store(withModels([], [], ''))
+    await s.saveProvider(0, { ...claudeProvider, models: ['claude-opus-5', ' ', ''] })
+    expect((values.get('providers') as Provider[])[0]!.models).toEqual(['claude-opus-5'])
   })
 })
 
@@ -115,24 +186,34 @@ describe('SettingsStore workspace settings', () => {
 })
 
 describe('SettingsStore api keys', () => {
-  it('api_key_is_stored_under_the_name_the_profile_gives', async () => {
-    const { store: s, secrets } = store({ profiles: [claude, kimi] })
+  it('api_key_is_stored_under_the_name_the_provider_gives', async () => {
+    const { store: s, secrets } = store(withModels([claudeProvider, bergetProvider], [], ''))
     await s.setApiKey('berget', 'sk-1')
     expect(secrets.get('berget')).toBe('sk-1')
   })
 
   it('snapshot_tells_which_named_keys_are_stored_without_the_keys', async () => {
-    const { store: s } = store({ profiles: [kimi, { ...kimi, name: 'GLM', apiKeySecret: 'other' }] }, { secrets: ['berget'] })
+    const { store: s } = store(withModels([bergetProvider, { ...bergetProvider, name: 'GLM' }], [], ''), { secrets: ['berget'] })
     const snapshot = await s.snapshot()
     expect(snapshot.keys).toEqual([
       { name: 'berget', stored: true },
-      { name: 'other', stored: false },
+      { name: 'GLM', stored: false },
     ])
     expect(JSON.stringify(snapshot)).not.toContain('sk-')
   })
 
-  it('profile_defaults_name_every_profile_and_the_two_in_use', () => {
-    const { store: s } = store({ profiles: [claude, kimi], activeProfile: 'Kimi', planProfile: '' })
-    expect(s.profileDefaults()).toEqual({ names: ['Claude', 'Kimi'], active: 'Kimi', plan: '' })
+  it('profile_defaults_names_every_profile_and_the_one_in_use', () => {
+    const { store: s } = store(withModels([claudeProvider, bergetProvider], [opus, kimi], 'Kimi'))
+    expect(s.profileDefaults()).toEqual({ names: ['Opus', 'Kimi'], active: 'Kimi' })
+  })
+})
+
+describe('SettingsStore migrating settings from before providers existed', () => {
+  it('reads_a_flat_profile_list_as_a_provider_and_a_profile_until_the_page_saves_over_it', async () => {
+    const { store: s } = store({ profiles: [{ name: 'Claude', engine: 'claude-sdk', model: 'claude-opus-5' }], activeProfile: 'Claude', planProfile: '' })
+    const snapshot = await s.snapshot()
+    expect(snapshot.providers).toEqual([{ name: 'Claude', engine: 'claude-sdk', models: ['claude-opus-5'] }])
+    expect(snapshot.profiles[0]!.default).toEqual({ provider: 'Claude', model: 'claude-opus-5' })
+    expect(snapshot.activeProfile).toBe('Claude')
   })
 })

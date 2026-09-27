@@ -22,9 +22,10 @@ export function skillRoots(cwd: string, home = homedir()): string[] {
 }
 
 /** Every `<root>/<folder>/SKILL.md`, one entry per name, sorted. */
-export async function indexSkills(cwd: string, home = homedir()): Promise<SkillEntry[]> {
+export async function indexSkills(cwd: string, home = homedir(), builtinRoot?: string): Promise<SkillEntry[]> {
   const byName = new Map<string, SkillEntry>()
-  for (const root of skillRoots(cwd, home)) {
+  // The extension's own skills come first, so any the user or workspace defines under the same name replace them.
+  for (const root of [...(builtinRoot ? [builtinRoot] : []), ...skillRoots(cwd, home)]) {
     for (const skill of await indexRoot(root)) byName.set(skill.name, skill)
   }
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name))

@@ -1,9 +1,9 @@
 import * as vscode from 'vscode'
 import { mkdirSync } from 'node:fs'
 import { query } from '@anthropic-ai/claude-agent-sdk'
-import { SessionManager, isPlanning, type SessionMode, type SessionRecord, type SessionStore } from './agent/session/session-manager'
+import { SessionManager, type SessionMode, type SessionRecord, type SessionStore } from './agent/session/session-manager'
 import { SessionsTree } from './chat/sessions-tree'
-import type { ModelProfile } from './agent/session/model-profile'
+import { providerModel, resolveStep, type ModelProfile } from './agent/session/model-profile'
 import type { CodeSession } from './agent/session/code-session'
 import { SdkSession } from './agent/sdk-session/sdk-session'
 import { hostExecutableAsNode, type NodeRuntime } from './agent/sdk-session/node-runtime'
@@ -15,10 +15,13 @@ import { buildSystemPrompt } from './agent/openai-session/system-prompt'
 import { readTool } from './agent/openai-session/tools/read'
 import { writeTool } from './agent/openai-session/tools/write'
 import { editTool } from './agent/openai-session/tools/edit'
+import { runScriptTool } from './agent/openai-session/tools/run-script'
+import { join } from 'node:path'
 import { globTool } from './agent/openai-session/tools/glob'
 import { grepTool } from './agent/openai-session/tools/grep'
 import { bashTool } from './agent/openai-session/tools/bash'
 import { askUserTool } from './agent/openai-session/tools/ask-user'
+import { redoMappingTool } from './agent/openai-session/tools/redo-mapping'
 import { jsonQueryTool, jsonSchemaTool } from './agent/openai-session/tools/json'
 import { skillTool } from './agent/openai-session/tools/skill'
 import { copyTool, moveTool } from './agent/openai-session/tools/move-copy'
@@ -31,7 +34,9 @@ import { McpToolHost } from './agent/mcp/mcp-tool-host'
 import { runShell } from './agent/shell/run-shell'
 import { composeHooks, type SessionHooks } from './agent/session/hooks'
 import { FileEditRecorder } from './agent/edits/file-edit-recorder'
+import { packageScripts } from './agent/permissions/package-scripts'
 import { PermissionPolicy, type PermissionRules } from './agent/permissions/permission-policy'
+import type { ProjectCommands } from './agent/permissions/project-commands'
 import { WriteAllowance } from './agent/permissions/write-allowance'
 import { ScopeGuard } from './agent/phases/scope-guard'
 import { BLIND_PLAN_TOOLS, blindPlanPrompt, blindPlanScope } from './agent/phases/blind-plan'
@@ -57,14 +62,28 @@ import {
 import { openDraftPlanAction } from './chat/open-draft-plan'
 import { watchOwnBundle } from './dev-reload'
 import { SETTINGS_PANEL_TYPE, SettingsPanel } from './settings/settings-panel'
-import { SettingsStore, secretKey } from './settings/settings-store'
+import { SettingsStore, readModelSettings, secretKey, type ConfigPort } from './settings/settings-store'
+
+/** The `kiwiAgent` section as the settings store and the session factory both read it. */
+function configPort(): ConfigPort {
+  return {
+    get: (key, fallback) => vscode.workspace.getConfiguration('kiwiAgent').get(key, fallback),
+    update: (key, value, target) =>
+      Promise.resolve(
+        vscode.workspace
+          .getConfiguration('kiwiAgent')
+          .update(key, value, target === 'user' ? vscode.ConfigurationTarget.Global : vscode.ConfigurationTarget.Workspace),
+      ),
+    hasWorkspace: () => (vscode.workspace.workspaceFolders?.length ?? 0) > 0,
+  }
+}
 
 /**
  * Tools the extension provides to every engine, beside the engine's own file
  * and shell tools. A mode's tool set decides which of them it is offered; a
  * chat session names none, so it gets them all.
  */
-const OWN_TOOLS: Tool[] = [jsonSchemaTool, jsonQueryTool, askUserTool, moveTool, copyTool]
+const OWN_TOOLS: Tool[] = [jsonSchemaTool, jsonQueryTool, askUserTool, moveTool, copyTool, redoMappingTool, runScriptTool()]
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('KiwiAgent')
@@ -72,6 +91,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? context.globalStorageUri.fsPath
   mkdirSync(workspaceRoot, { recursive: true })
   const cliPath = vscode.Uri.joinPath(context.extensionUri, 'dist', 'cli.mjs').fsPath
+  // The skills this extension ships, as a plugin folder the Claude engine loads and a skill root ours reads.
+  const pluginPath = vscode.Uri.joinPath(context.extensionUri, 'dist', 'plugin').fsPath
 
   const store: SessionStore = {
     list: () => context.workspaceState.get<SessionRecord[]>('sessions', []),
@@ -110,15 +131,21 @@ export function activate(context: vscode.ExtensionContext): void {
 
   /** Rules allowed "for session": they hold beside the project's until the extension host goes. */
   const sessionAllowed = new Map<string, string[]>()
+  /** The commands the user has already defined for this project: they run without a prompt. */
+  const projectCommands = (): ProjectCommands => ({ scripts: packageScripts(workspaceRoot), verify: verifier.rules().map((rule) => rule.command) })
   /** Per session, the rules in force: the project's plus the session's own. */
   const policies = new Map<string, PermissionPolicy>()
   const policyFor = (sessionId: string): PermissionPolicy => {
     const existing = policies.get(sessionId)
     if (existing) return existing
-    const policy = new PermissionPolicy(workspaceRoot, () => {
-      const { allow, deny } = permissionRules()
-      return { allow: [...allow, ...(sessionAllowed.get(sessionId) ?? [])], deny }
-    })
+    const policy = new PermissionPolicy(
+      workspaceRoot,
+      () => {
+        const { allow, deny } = permissionRules()
+        return { allow: [...allow, ...(sessionAllowed.get(sessionId) ?? [])], deny }
+      },
+      projectCommands,
+    )
     policies.set(sessionId, policy)
     return policy
   }
@@ -172,7 +199,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!record.feature) throw new Error('An implement session needs a feature name')
         return {
           ...switchableHooks(record),
-          systemPrompt: await withMap(record, implementPrompt(record.feature, workspaceRoot)),
+          systemPrompt: await withMap(record, implementPrompt(record.feature, workspaceRoot, verifier.rules())),
           toolNames: IMPLEMENT_TOOLS,
         }
       }
@@ -237,11 +264,13 @@ export function activate(context: vscode.ExtensionContext): void {
       case 'claude-sdk':
         return new SdkSession({
           ownTools: allowed(OWN_TOOLS),
+          scriptTools: [globTool, grepTool, bashTool(), jsonSchemaTool, jsonQueryTool],
           ...(mcpServers ? { mcpServers } : {}),
           id: record.id,
           profile,
           cwd: workspaceRoot,
           cliPath,
+          pluginPath,
           runtime: nodeRuntime(),
           ...(record.engineSessionId ? { resumeEngineSessionId: record.engineSessionId } : {}),
           env: { CLAUDE_AGENT_SDK_CLIENT_APP: 'kiwi-agent-vscode/0.0.1' },
@@ -258,9 +287,9 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!profile.baseUrl) throw new Error(`Profile "${profile.name}" has no baseUrl`)
         if (!profile.apiKeySecret) throw new Error(`Profile "${profile.name}" has no apiKeySecret`)
         const apiKey = await context.secrets.get(secretKey(profile.apiKeySecret))
-        if (!apiKey) throw new Error(`No API key stored for "${profile.apiKeySecret}". Run "KiwiAgent: Set API Key for Profile".`)
+        if (!apiKey) throw new Error(`No API key stored for "${profile.apiKeySecret}". Run "KiwiAgent: Set API Key for Provider".`)
         // Indexed per session so a skill added to the workspace or the user profile shows up on the next one.
-        const skills = await indexSkills(workspaceRoot)
+        const skills = await indexSkills(workspaceRoot, undefined, join(pluginPath, 'skills'))
         const allTools = [readTool, writeTool, editTool, globTool, grepTool, ...OWN_TOOLS, bashTool(), ...(skills.length ? [skillTool(skills)] : [])]
         // A session that ran before, or continues one that did, picks its conversation up from the run log.
         const resume = record.engineSessionId
@@ -304,31 +333,32 @@ export function activate(context: vscode.ExtensionContext): void {
       sessionAllowed.set(sessionId, [...current, ...rules.filter((r) => !current.includes(r))])
     },
   }
-  const settings = new SettingsStore(
-    {
-      get: (key, fallback) => vscode.workspace.getConfiguration('kiwiAgent').get(key, fallback),
-      update: (key, value, target) =>
-        Promise.resolve(
-          vscode.workspace
-            .getConfiguration('kiwiAgent')
-            .update(key, value, target === 'user' ? vscode.ConfigurationTarget.Global : vscode.ConfigurationTarget.Workspace),
-        ),
-      hasWorkspace: () => (vscode.workspace.workspaceFolders?.length ?? 0) > 0,
+  const settings = new SettingsStore(configPort(), {
+    has: async (name) => (await context.secrets.get(secretKey(name))) !== undefined,
+    store: (name, value) => Promise.resolve(context.secrets.store(secretKey(name), value)),
+    move: async (from, to) => {
+      const value = await context.secrets.get(secretKey(from))
+      if (value === undefined) return
+      await context.secrets.store(secretKey(to), value)
+      await context.secrets.delete(secretKey(from))
     },
-    {
-      has: async (name) => (await context.secrets.get(secretKey(name))) !== undefined,
-      store: (name, value) => Promise.resolve(context.secrets.store(secretKey(name), value)),
-    },
-  )
-  const settingsPanel = new SettingsPanel(context.extensionUri, settings)
+    delete: (name) => Promise.resolve(context.secrets.delete(secretKey(name))),
+  })
+  const settingsPanel = new SettingsPanel(context.extensionUri, settings, async ({ name, baseUrl, apiKeyValue }) => {
+    if (!baseUrl) return []
+    const apiKey = apiKeyValue || (await context.secrets.get(secretKey(name)))
+    if (!apiKey) throw new Error(`No API key typed or stored for "${name}".`)
+    return new OpenAiClient({ baseUrl, apiKey }).listModels()
+  })
   chat = new ChatViewProvider(
     context.extensionUri,
     sessions,
     profileFor,
     {
       read: () => settings.profileDefaults(),
-      set: (role, name) => settings.save(role === 'work' ? 'activeProfile' : 'planProfile', name),
+      set: (name) => settings.save('activeProfile', name),
     },
+    registeredModels,
     verifier,
     sizeLimits,
     allowWritesControl,
@@ -381,22 +411,21 @@ function watchMcpConfig(workspaceRoot: string, onChange: () => Promise<void>): v
   return vscode.Disposable.from(watcher, watcher.onDidCreate(changed), watcher.onDidChange(changed), watcher.onDidDelete(changed))
 }
 
-function profiles(): ModelProfile[] {
-  return vscode.workspace.getConfiguration('kiwiAgent').get<ModelProfile[]>('profiles', [])
+/** What a step runs on: the profile new sessions use, resolved against the providers it names. */
+function profileFor(mode: SessionMode): ModelProfile {
+  const { providers, profiles, activeProfile } = readModelSettings(configPort())
+  const profile = profiles.find((p) => p.name === activeProfile) ?? profiles[0]
+  if (!profile) throw new Error('No model profiles configured (kiwiAgent.profiles)')
+  if (activeProfile && profile.name !== activeProfile) {
+    void vscode.window.showWarningMessage(`KiwiAgent: profile "${activeProfile}" not found, using "${profile.name}".`)
+  }
+  return resolveStep(profile, providers, mode)
 }
 
-/** The profile a new session runs on comes from settings, per mode. */
-function profileFor(mode: SessionMode): ModelProfile {
-  const config = vscode.workspace.getConfiguration('kiwiAgent')
-  const all = profiles()
-  const active = config.get<string>('activeProfile', '')
-  const name = (isPlanning(mode) && config.get<string>('planProfile', '')) || active
-  const profile = all.find((p) => p.name === name) ?? all[0]
-  if (!profile) throw new Error('No model profiles configured (kiwiAgent.profiles)')
-  if (name && profile.name !== name) {
-    void vscode.window.showWarningMessage(`KiwiAgent: profile "${name}" not found, using "${profile.name}".`)
-  }
-  return profile
+/** Every model the providers serve, as the chat picker offers them. */
+function registeredModels(): ModelProfile[] {
+  const { providers } = readModelSettings(configPort())
+  return providers.flatMap((provider) => provider.models.map((model) => providerModel(provider, model)))
 }
 
 function cleanupThresholds(): Thresholds {
@@ -427,7 +456,7 @@ function nodeRuntime(): NodeRuntime {
 async function setApiKey(settings: SettingsStore): Promise<void> {
   const names = (await settings.snapshot()).keys.map((k) => k.name)
   if (names.length === 0) {
-    void vscode.window.showInformationMessage('No profile declares an apiKeySecret.')
+    void vscode.window.showInformationMessage('No OpenAI-compatible provider is configured.')
     return
   }
   const name = names.length === 1 ? names[0] : await vscode.window.showQuickPick(names, { title: 'API key for' })

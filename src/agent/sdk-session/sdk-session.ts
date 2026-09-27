@@ -18,7 +18,8 @@ import { SdkEventMapper } from './sdk-event-mapper'
 import { spawnWithRuntime, type NodeRuntime } from './node-runtime'
 import { bareToolName, toolServer } from './tool-server'
 import { ReadTracker } from '../openai-session/tools/read-tracker'
-import type { Tool, ToolContext } from '../openai-session/tools/tool'
+import { fail, type Tool, type ToolContext } from '../openai-session/tools/tool'
+import { denyReason, gateCall, type AskPermission, type PermissionShown } from '../openai-session/tools/script-gate'
 import type { QuestionOutcome, UserQuestionRequest } from '../session/user-question'
 
 type QueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>; options?: Options }) => Query
@@ -29,6 +30,8 @@ export type SdkSessionOptions = {
   cwd: string
   /** Absolute path to the SDK's cli.js. */
   cliPath: string
+  /** A plugin folder of skills this extension ships, loaded into the engine. */
+  pluginPath?: string
   runtime: NodeRuntime
   /** Engine session id from an earlier `session_started`, to continue that conversation. */
   resumeEngineSessionId?: string
@@ -41,6 +44,8 @@ export type SdkSessionOptions = {
   tools?: string[]
   /** Tools this extension owns, served to the engine in-process on top of the built-ins. */
   ownTools?: Tool[]
+  /** The tools a script may call, as our own implementations run in this process. */
+  scriptTools?: Tool[]
   /** The workspace's MCP servers; absent on a session that takes none. */
   mcpServers?: McpServers
   query: QueryFn
@@ -56,6 +61,8 @@ const MCP_PENDING_CHECKS = 15
 type PendingPermission = {
   resolve: (result: PermissionResult) => void
   input: Record<string, unknown>
+  /** Set on a question a script's own call put; the user's answer goes here as given, not through the engine's result. */
+  decided?: (decision: PermissionDecision) => void
 }
 
 /**
@@ -91,6 +98,7 @@ export class SdkSession implements CodeSession {
       signal: this.abort.signal,
       files: new ReadTracker(),
       ask: (request) => this.askUser(request),
+      ...this.scriptAccess(),
     }
     this.ownServer = options.ownTools?.length ? toolServer(options.ownTools, this.toolContext) : undefined
     this.mcpServers = options.mcpServers
@@ -121,7 +129,8 @@ export class SdkSession implements CodeSession {
     if (!pending) return
     this.pending.delete(requestId)
     this.output.push({ type: 'permission_resolved', requestId, decision: decision.kind })
-    pending.resolve(toPermissionResult(decision, pending.input))
+    if (pending.decided) pending.decided(decision)
+    else pending.resolve(toPermissionResult(decision, pending.input))
   }
 
   respondToQuestion(requestId: string, outcome: QuestionOutcome): boolean {
@@ -163,6 +172,7 @@ export class SdkSession implements CodeSession {
       // Project settings so the workspace's .claude/ and CLAUDE.md apply; not
       // the user's global settings, which belong to this machine, not the repo.
       settingSources: ['project', 'local'],
+      ...(this.options.pluginPath ? { plugins: [{ type: 'local' as const, path: this.options.pluginPath }] } : {}),
       executable: 'node',
       pathToClaudeCodeExecutable: this.options.cliPath,
       spawnClaudeCodeProcess: spawnWithRuntime(this.options.runtime, this.options.onStderr ?? (() => {})),
@@ -297,6 +307,47 @@ export class SdkSession implements CodeSession {
         ...(ctx.title ? { title: ctx.title } : {}),
         ...(ctx.description ? { description: ctx.description } : {}),
       })
+    })
+  }
+
+  /**
+   * What a script gets on this engine. Claude's built-in tools run in the
+   * engine's process, out of reach, so a script's calls run our own
+   * implementations of them here, through the same permission gate.
+   */
+  private scriptAccess(): Pick<ToolContext, 'call' | 'authorize' | 'review'> {
+    const ask: AskPermission = (id, toolName, input, shown) => this.askScriptPermission(id, toolName, input, shown)
+    const use = (toolName: string, input: unknown) => ({ toolName, input, toolUseId: crypto.randomUUID() })
+    return {
+      call: async (name, input) => {
+        const tool = this.options.scriptTools?.find((t) => t.name === name)
+        if (!tool) return fail(`Unknown tool: ${name}`)
+        const parsed = tool.schema.safeParse(input)
+        if (!parsed.success) return fail(`Invalid arguments for ${name}: ${parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ')}`)
+        const gate = await gateCall(this.options.hooks, ask, tool, use(name, parsed.data))
+        if (gate.refused) return gate.refused
+        try {
+          return await tool.execute(parsed.data, this.toolContext)
+        } catch (error) {
+          return fail(`${name} failed: ${error instanceof Error ? error.message : String(error)}`)
+        }
+      },
+      authorize: (name, input) => denyReason(this.options.hooks, use(name, input)),
+      review: async (title, edits) => {
+        const id = crypto.randomUUID()
+        return (await ask(id, 'RunScript', { files: edits.map((e) => e.label) }, { title, edits })).kind === 'allow'
+      },
+    }
+  }
+
+  private askScriptPermission(requestId: string, toolName: string, input: unknown, shown: PermissionShown = {}): Promise<PermissionDecision> {
+    return new Promise((resolve) => {
+      const ended = (result: PermissionResult) => resolve({ kind: 'deny', message: result.behavior === 'deny' ? result.message : 'Cancelled' })
+      this.pending.set(requestId, { resolve: ended, input: {}, decided: resolve })
+      this.abort.signal.addEventListener('abort', () => {
+        if (this.pending.delete(requestId)) resolve({ kind: 'deny', message: 'Cancelled' })
+      })
+      this.output.push({ type: 'permission_request', requestId, toolUseId: requestId, toolName, input, ...shown })
     })
   }
 

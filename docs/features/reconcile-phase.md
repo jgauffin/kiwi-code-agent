@@ -2,7 +2,7 @@
 
 A mapping of a draft spec against the code, run under the plan session from the plan bar: what stands in the feature's way, then what to build and where.
 
-- Runs as a child of the plan session: no tab, no transcript in the chat. The plan bar shows one line (the current tool call or message) and a Stop; afterwards `Mapped: N tasks, 2 decisions`, `Mapped: N tasks, the code is clear`, `Mapping failed: ...` or `Mapping stopped`, until the next run.
+- Runs as a child of the plan session: no tab of its own, and its conversation is a section of the feature's chat, folded away once another run takes the floor. The plan bar shows one line (the current tool call or message) and a Stop; afterwards `Mapped: N tasks, 2 decisions`, `Mapped: N tasks, the code is clear`, `Mapping failed: ...` or `Mapping stopped`, until the next run.
 - Offered as "Map against code" on a spec nobody has commented on. After that it runs by itself: when the last comment of a review is resolved, and when a plan turn leaves the board stale with no decision pending. A re-map continues the last run's conversation where the engine resumes, told that the spec changed; on an engine without resume it is a fresh run.
 - Tools: Read, Glob, Grep, JsonSchema, JsonQuery, Skill over the whole workspace; Edit/Write on `plan/<feature>.decisions.md` and `plan/<feature>.tasks.md` only. The spec is never the mapper's to write.
 - Input is the spec and the repo. It never sees the plan session's transcript and does not browse `docs/**` or the other specs: the spec is the intent, and a rule's citation (`(docs/intent/orders.md#Cancellation)` after its text) is what it opens to quote intent in a contradiction.

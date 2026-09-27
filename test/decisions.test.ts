@@ -5,6 +5,7 @@ import {
   decisions,
   decisionsFile,
   openDecisions,
+  parseDecisions,
   pendingDecisions,
   rulingKind,
   withRuling,
@@ -17,6 +18,8 @@ const file = `# Decisions for Order cancellation
 - finding: OrderService.Cancel refuses shipped orders; the rule says any order
 - proposed: the rule says an unshipped order
 - proposed: a shipped order is cancelled and returned
+- recommended: 2
+- because: the shipped order is the one the user is calling about
 
 ### The daily report counts cancelled orders [withdrawn]
 - on: Cancel command
@@ -82,10 +85,11 @@ describe('decisions', () => {
   })
 
   it('a_ruling_lands_under_the_proposals_and_a_second_one_replaces_it_until_applied', () => {
+    const last = '- because: the shipped order is the one the user is calling about'
     const once = withRuling(file, 'Shipped orders cannot be cancelled', 'keep')
-    expect(once).toContain('- proposed: a shipped order is cancelled and returned\n- ruling: keep\n\n### The daily report')
+    expect(once).toContain(`${last}\n- ruling: keep\n\n### The daily report`)
     const twice = withRuling(once, 'Shipped orders cannot be cancelled', 'the rule stands; fix the code')
-    expect(twice).toContain('- proposed: a shipped order is cancelled and returned\n- ruling: the rule stands; fix the code\n\n### The daily report')
+    expect(twice).toContain(`${last}\n- ruling: the rule stands; fix the code\n\n### The daily report`)
     expect(twice).not.toContain('- ruling: keep\n\n### The daily report')
     // A decision without a proposal takes a ruling too; the user may rule ahead of the planner.
     expect(withRuling(file, 'Refunds are asynchronous', 'queue it')).toContain(
@@ -95,6 +99,19 @@ describe('decisions', () => {
     expect(() => withRuling(file, 'The daily report counts cancelled orders', 'no')).toThrow(/withdrawn/)
     expect(() => withRuling(file, 'Nope', 'no')).toThrow(/Nope/)
     expect(() => withRuling(file, 'Refunds are asynchronous', '  ')).toThrow(/text/)
+  })
+
+  it('a_recommendation_names_a_proposal_by_its_place_or_keeps_the_rule', () => {
+    expect(decisions(file)[0]!.recommendation).toEqual({ choice: 2, because: 'the shipped order is the one the user is calling about' })
+    // Nothing recommended: the user still has every option, just no argument for one.
+    expect(decisions(file)[2]!.recommendation).toBeUndefined()
+    const decision = (lines: string): string => `### Shipped\n- on: Cancel command\n- finding: it refuses\n- proposed: allow it\n${lines}`
+    expect(decisions(decision('- recommended: keep\n'))[0]!.recommendation).toEqual({ choice: 'keep', because: '' })
+    expect(decisions(decision('- recommended: 1\n- because: it is the smaller change\n'))[0]!.recommendation).toEqual({ choice: 1, because: 'it is the smaller change' })
+    // A number with no proposal behind it would point at nothing, so it is reported rather than shown.
+    const { decisions: parsed, problems } = parseDecisions(decision('- recommended: 3\n'))
+    expect(parsed[0]!.recommendation).toBeUndefined()
+    expect(problems[0]!.text).toContain('"3" recommends nothing')
   })
 
   it('a_ruling_is_keep_a_chosen_proposal_or_the_users_own_words', () => {

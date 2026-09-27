@@ -9,7 +9,8 @@ import { presentTabs, tabLabel } from './plan-step'
  * toggle over a second row of tabs.
  */
 export class PlanTabs extends HTMLElement {
-  update(plan: PlanState | undefined, active: ViewTab): void {
+  /** `chatMoved`: the conversation has gone on while another tab was open, so its tab is marked instead of taking over. */
+  update(plan: PlanState | undefined, active: ViewTab, chatMoved = false): void {
     this.hidden = plan?.body === undefined
     this.replaceChildren()
     if (!plan?.body) return
@@ -17,7 +18,7 @@ export class PlanTabs extends HTMLElement {
     for (const tab of tabs) {
       const node = document.createElement('button')
       node.type = 'button'
-      node.className = `tab${tab === active ? ' active' : ''}`
+      node.className = `tab${tab === active ? ' active' : ''}${tab === 'chat' && chatMoved ? ' moved' : ''}`
       node.textContent = tab === 'chat' ? 'Chat' : tabLabel(tab, plan)
       node.addEventListener('click', () => this.dispatchEvent(new PlanViewSelectedEvent(tab)))
       this.append(node)

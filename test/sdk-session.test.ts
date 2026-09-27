@@ -1,5 +1,10 @@
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { z } from 'zod'
 import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk'
+import { runScriptTool } from '../src/agent/openai-session/tools/run-script'
 import { SdkSession } from '../src/agent/sdk-session/sdk-session'
 import { TOOL_SERVER_NAME } from '../src/agent/sdk-session/tool-server'
 import { jsonQueryTool } from '../src/agent/openai-session/tools/json'
@@ -353,6 +358,65 @@ describe('SdkSession', () => {
     expect(hooks.Stop).toBeUndefined()
     expect(seen).toEqual(['pre:Bash', 'pre:Write', 'post:Edit:ok'])
     await session.dispose()
+  })
+
+  describe('running a script', () => {
+    const bash: Tool = {
+      name: 'Bash',
+      description: '',
+      schema: z.object({ command: z.string() }),
+      readOnly: false,
+      execute: async (input) => ({ text: `ran ${(input as { command: string }).command}`, isError: false }),
+    }
+
+    function scriptingSession(fake: ReturnType<typeof fakeQuery>, cwd: string) {
+      return new SdkSession({
+        id: 'sess-1',
+        profile,
+        cwd,
+        cliPath: '/ext/dist/cli.js',
+        runtime: { command: 'node', args: [], env: {} },
+        query: fake.query,
+        scriptTools: [bash],
+      })
+    }
+
+    it('a_shell_call_from_a_script_is_asked_about_and_runs_only_once_allowed', async () => {
+      const session = scriptingSession(fakeQuery(), '/w')
+      const running = runScriptTool().execute({ script: 'return await bash({ command: "npm test" })' }, session.toolContext)
+      const [request] = await take(session, 1)
+      expect(request).toMatchObject({ type: 'permission_request', toolName: 'Bash', input: { command: 'npm test' } })
+      session.respondToPermission((request as { requestId: string }).requestId, { kind: 'allow' })
+      expect((await running).text).toBe('ran npm test')
+      await session.dispose()
+    })
+
+    it('a_denied_shell_call_from_a_script_throws_inside_the_script', async () => {
+      const session = scriptingSession(fakeQuery(), '/w')
+      const script = 'try { await bash({ command: "rm -rf x" }) } catch (e) { return e.message }'
+      const running = runScriptTool().execute({ script }, session.toolContext)
+      const [request] = await take(session, 1)
+      session.respondToPermission((request as { requestId: string }).requestId, { kind: 'deny' })
+      expect((await running).text).toBe('Denied by user')
+      await session.dispose()
+    })
+
+    it('a_scripts_edits_are_put_to_the_user_together_and_written_only_when_allowed', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'sdk-script-'))
+      await writeFile(join(dir, 'a.ts'), 'foo')
+      await writeFile(join(dir, 'b.ts'), 'foo')
+      const session = scriptingSession(fakeQuery(), dir)
+      const running = runScriptTool().execute({ script: 'await replace("a.ts", "foo", "bar"); await replace("b.ts", "foo", "bar")' }, session.toolContext)
+      const [request] = await take(session, 1)
+      expect(request).toMatchObject({ type: 'permission_request', title: 'Apply changes to 2 files' })
+      expect((request as { edits: unknown[] }).edits).toHaveLength(2)
+      expect(await readFile(join(dir, 'a.ts'), 'utf8')).toBe('foo')
+      session.respondToPermission((request as { requestId: string }).requestId, { kind: 'allow' })
+      await running
+      expect(await readFile(join(dir, 'a.ts'), 'utf8')).toBe('bar')
+      expect(await readFile(join(dir, 'b.ts'), 'utf8')).toBe('bar')
+      await session.dispose()
+    })
   })
 
   describe('asking the user', () => {

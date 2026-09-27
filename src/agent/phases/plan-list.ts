@@ -28,7 +28,9 @@ export async function listPlans(cwd: string): Promise<PlanSummary[]> {
     const text = await readFile(path, 'utf8')
     const status = statusOf(text)
     const tasks = await readTasks(join(dir, `${slug}.tasks.md`))
-    const verified = status === 'approved' && tasks.exists && tasksDone(tasks.tasks) && tasks.verification?.ok === true
+    // A postponed cleanup is work the user asked to come back to, so the feature stays on the list until it is settled.
+    const verified =
+      status === 'approved' && tasks.exists && tasksDone(tasks.tasks) && tasks.verification?.ok === true && tasks.cleanup !== 'postponed'
     plans.push({ feature: featureOf(text) ?? slug, path, status: verified ? 'verified' : status })
   }
   return plans

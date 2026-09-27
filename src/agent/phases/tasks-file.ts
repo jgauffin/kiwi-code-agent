@@ -41,6 +41,15 @@ export type Task = {
 /** One run of the test commands, newest first in the file. */
 export type VerificationRecord = { at: string; ok: boolean; text: string }
 
+/**
+ * What the user said about the cleanup the size sweep offered: put off until
+ * they ask for it, refused for this feature, or carried out. Absent while the
+ * offer has not been answered.
+ */
+export type CleanupDecision = 'postponed' | 'skipped' | 'done'
+
+const CLEANUP_DECISIONS: CleanupDecision[] = ['postponed', 'skipped', 'done']
+
 export type TasksState =
   | { exists: false }
   | {
@@ -49,10 +58,13 @@ export type TasksState =
       verification: VerificationRecord | undefined
       /** Fingerprint of the spec the board was mapped from; absent on a board written before the stamp existed. */
       spec: string | undefined
+      /** What the user said about the cleanup offer; absent while it stands open. */
+      cleanup: CleanupDecision | undefined
     }
 
 export const VERIFICATION_SECTION = 'Verification'
 const SPEC_KEY = 'spec'
+const CLEANUP_KEY = 'cleanup'
 
 export function tasksPath(cwd: string, feature: string): string {
   return join(cwd, PLAN_DIR, `${featureSlug(feature)}.tasks.md`)
@@ -107,7 +119,12 @@ function proofs(text: string): Proof[] {
   })
 }
 
-export function parseTasks(text: string): { tasks: Task[]; verification: VerificationRecord | undefined; spec: string | undefined } {
+export function parseTasks(text: string): {
+  tasks: Task[]
+  verification: VerificationRecord | undefined
+  spec: string | undefined
+  cleanup: CleanupDecision | undefined
+} {
   const tasks: Task[] = []
   let task: Task | undefined
   let group: string | undefined
@@ -175,7 +192,7 @@ export function parseTasks(text: string): { tasks: Task[]; verification: Verific
     tasks.push(task)
   }
   if (how && task) task.how = how.lines.join('\n').trimEnd()
-  return { tasks, verification, spec: frontMatterValue(text, SPEC_KEY) }
+  return { tasks, verification, spec: frontMatterValue(text, SPEC_KEY), cleanup: cleanupDecision(text) }
 }
 
 /** A `how:` block being read: the indent of its key line, and its body dedented to the first body line. */
@@ -258,6 +275,19 @@ export const withSpecFingerprint = (text: string, fingerprint: string): string =
 export async function stampSpecFingerprint(path: string, fingerprint: string): Promise<void> {
   const text = await readFile(path, 'utf8')
   await writeFile(path, withSpecFingerprint(text, fingerprint), 'utf8')
+}
+
+/** A value the extension did not write is no decision: the offer stands. */
+function cleanupDecision(text: string): CleanupDecision | undefined {
+  const value = frontMatterValue(text, CLEANUP_KEY)
+  return CLEANUP_DECISIONS.find((d) => d === value)
+}
+
+export const withCleanupDecision = (text: string, decision: CleanupDecision): string => withFrontMatterValue(text, CLEANUP_KEY, decision)
+
+export async function recordCleanupDecision(path: string, decision: CleanupDecision): Promise<void> {
+  const text = await readFile(path, 'utf8')
+  await writeFile(path, withCleanupDecision(text, decision), 'utf8')
 }
 
 export function renderRecord(record: VerificationRecord): string {

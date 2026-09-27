@@ -1,6 +1,7 @@
 import { isAbsolute, matchesGlob, relative, resolve } from 'node:path'
 import type { PreToolUseOutcome, SessionHooks, ToolUse } from '../session/hooks'
 import type { SessionEvent } from '../session/code-session'
+import { NO_PROJECT_COMMANDS, projectCommandOf, type ProjectCommands } from './project-commands'
 import { isReadOnlyCommand, isReadOnlySegment, type ReadOnlyContext } from './read-only-commands'
 import { bashPatternMatches, commandLines, isShellTool, parseRule, ruleCoversTool, TRANSFER_TOOLS, type PermissionRule } from './permission-rules'
 import { splitShellCommand, type ShellSegment } from './shell-split'
@@ -12,15 +13,17 @@ export type PermissionRules = { allow: string[]; deny: string[] }
  * `AskUser` changes nothing either: the person answers the question itself
  * rather than first being asked whether it may be put to them.
  */
-const READ_ONLY_TOOLS = new Set(['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'LS', 'NotebookRead', 'TodoRead', 'TodoWrite', 'AskUser'])
+const READ_ONLY_TOOLS = new Set(['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'LS', 'NotebookRead', 'TodoRead', 'TodoWrite', 'AskUser', 'RunScript'])
 
 const FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'NotebookRead', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'LS', ...TRANSFER_TOOLS])
 
 /**
  * Decides tool calls before any permission prompt, on every engine: a deny
- * rule blocks, a read-only call or one covered by the project's allow rules
- * goes through, everything else is asked. Rules are read on each call so a
- * rule allowed for the session or the project applies to the next call.
+ * rule blocks, a read-only call, a command the project defines for itself or
+ * one covered by the project's allow rules goes through, everything else is
+ * asked. Rules and defined commands are read on each call, so a rule allowed
+ * for the session or the project, or a script just added, applies to the next
+ * call.
  */
 export class PermissionPolicy implements SessionHooks {
   private readonly readOnlyContext: ReadOnlyContext
@@ -28,6 +31,7 @@ export class PermissionPolicy implements SessionHooks {
   constructor(
     private readonly cwd: string,
     private readonly rules: () => PermissionRules,
+    private readonly project: () => ProjectCommands = () => NO_PROJECT_COMMANDS,
   ) {
     this.readOnlyContext = { insideProject: (path) => !this.relativeTo(path).startsWith('..') }
   }
@@ -44,7 +48,7 @@ export class PermissionPolicy implements SessionHooks {
   /** A prompt for a shell call is asked line by line: each command with what the rules in force make of it. */
   decorate(event: SessionEvent): SessionEvent {
     if (event.type !== 'permission_request' || !isShellTool(event.toolName)) return event
-    return { ...event, commands: commandLines(event.toolName, this.command(event), this.rules().allow, this.readOnlyContext) }
+    return { ...event, commands: commandLines(event.toolName, this.command(event), this.rules().allow, this.readOnlyContext, this.project()) }
   }
 
   private isReadOnly(tool: ToolUse): boolean {
@@ -72,7 +76,9 @@ export class PermissionPolicy implements SessionHooks {
     if (isShellTool(tool.toolName)) {
       const parsed = splitShellCommand(this.command(tool))
       if (parsed.substitutes) return false
-      const covered = (s: ShellSegment) => isReadOnlySegment(s, this.readOnlyContext) || rules.some((r) => r.pattern === undefined || bashPatternMatches(r.pattern, s.tokens))
+      const project = this.project()
+      const covered = (s: ShellSegment) =>
+        isReadOnlySegment(s, this.readOnlyContext) || projectCommandOf(s, project) !== undefined || rules.some((r) => r.pattern === undefined || bashPatternMatches(r.pattern, s.tokens))
       return parsed.segments.every(covered)
     }
     const paths = this.relativePaths(tool)

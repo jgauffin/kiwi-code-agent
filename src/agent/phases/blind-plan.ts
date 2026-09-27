@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { ASK_USER_TOOL } from '../openai-session/tools/ask-user'
+import { REDO_MAPPING_TOOL } from '../openai-session/tools/redo-mapping'
 import { KEEP_RULING } from './ruling'
 import type { Scope } from './scope-guard'
 
@@ -44,9 +45,10 @@ export function blindPlanScope(feature: string, ignored: string[] = []): Scope {
 /**
  * Tools a blind planner gets, by name, on either engine. Edit is for answering
  * a comment in place; AskUser is how a gap in intent is settled by the user
- * mid-session instead of being written down and waited on.
+ * mid-session instead of being written down and waited on; RedoMapping is how
+ * feedback about the mapping itself, rather than the spec, is acted on.
  */
-export const BLIND_PLAN_TOOLS = ['Read', 'Glob', 'JsonSchema', 'JsonQuery', 'Write', 'Edit', ASK_USER_TOOL]
+export const BLIND_PLAN_TOOLS = ['Read', 'Glob', 'JsonSchema', 'JsonQuery', 'Write', 'Edit', ASK_USER_TOOL, REDO_MAPPING_TOOL]
 
 /**
  * Phase 1 system prompt. Short on purpose: it states the job and the output
@@ -101,7 +103,8 @@ Rules:
 - Every rule, edge case and question has a name, the bold lead-in of its line: a few words that say what it is about, unique in the spec, the way a test or a function is named. The name is what a comment, a task, a test and a decision refer to, so it never changes once written: on revision you add, or mark a rule \` [removed]\`, never rename or delete. A rule you must rename keeps the old name in a note after the new one, \`- **New name** (was Old name): ...\`, and the extension follows the rename through every file. Moving a rule to another scenario keeps its name.
 - A rule that comes from a section of \`${DOCS_DIR}/**\` or of another feature's spec ends with its citation in parentheses, as \`(path#Heading)\`, after the text. A rule without a citation is your own default. The citation is what a later check against the code reads instead of the docs, so it must be exact.
 - No code paths, class names or code: that is the implementation's business and you cannot know it.
-- Decisions live beside the spec in \`${PLAN_DIR}/${slug}.decisions.md\`, written by a separate check of the spec against the code: one \`###\` per decision, with an \`on\` line naming the rules it concerns and a \`finding\` line saying what the code does and what the spec says. Each is something the user rules on. When asked, add one to three \`- proposed: ...\` lines under each decision that has none, with Edit: each a distinct way to settle it, written as the rule's new text as it would stand in the spec (one sentence, no argument, no reference to the decision). Keeping the rule as it stands is always offered to the user, so do not propose it. A proposal is not a ruling: change no rule until the user has ruled. The \`- ruling: ...\` line is the user's, written for you: \`${KEEP_RULING}\` means the rule stands and the code will change, so nothing in the spec moves; the text of a proposal means it replaces the rule verbatim; anything else is the user's own decision, which you work into the rules as it says (revise the rule, or add an edge case). When rulings are handed to you, revise the rules each decision names per its ruling, append \` [applied]\` to that decision's heading in the decisions file, and touch nothing else there.
+- Decisions live beside the spec in \`${PLAN_DIR}/${slug}.decisions.md\`, written by a separate check of the spec against the code: one \`###\` per decision, with an \`on\` line naming the rules it concerns and a \`finding\` line saying what the code does and what the spec says. Each is something the user rules on. When asked, add one to three \`- proposed: ...\` lines under each decision that has none, with Edit: each a distinct way to settle it, written as the rule's new text as it would stand in the spec (one sentence, no argument, no reference to the decision). Keeping the rule as it stands is always offered to the user, so do not propose it. With them goes your own pick: \`- recommended: <n>\` naming a \`proposed\` line by its number, or \`${KEEP_RULING}\`, and \`- because: <one sentence>\` saying why. A proposal is not a ruling: change no rule until the user has ruled. The \`- ruling: ...\` line is the user's, written for you: \`${KEEP_RULING}\` means the rule stands and the code will change, so nothing in the spec moves; the text of a proposal means it replaces the rule verbatim; anything else is the user's own decision, which you work into the rules as it says (revise the rule, or add an edge case). When rulings are handed to you, revise the rules each decision names per its ruling, append \` [applied]\` to that decision's heading in the decisions file, and touch nothing else there.
+- When the user's feedback is about the mapping itself rather than a rule — its level of detail, its scope, a house style — call \`${REDO_MAPPING_TOOL}\` rather than editing the decisions file by hand; it is not yours to write. Leave it alone otherwise: it is refused while a mapping is already running, and you cannot see that from here.
 - \`${DOCS_DIR}/\` is the user's. You edit it only when the user asks you to, and each write is confirmed by them.
 - The user reviews the draft by commenting on its rules and striking the ones that should not be built; comments, strikes and your answers to them live in \`${PLAN_DIR}/${slug}.review.md\`. A submitted review is direction, not a question: revise the spec as it asks, mark every struck rule removed without renaming anything, never bring a struck rule back on your own, and answer every comment in that file as addressed or disagreed with a reason.
 - If neither the docs nor the specs have anything on this feature, or the description is too thin to derive a direction, do not invent: ask with \`${ASK_USER_TOOL}\` and work from the answer.
@@ -154,7 +157,11 @@ export function decisionsHandoffPrompt(feature: string, titles: string[]): strin
     `The check of the spec against the code wrote decisions into \`${decisions}\`:`,
     ...titles.map((t) => `- ${t}`),
     '',
-    `Read that file and the spec from disk. Under each of these decisions, add one to three \`- proposed: ...\` lines with Edit, each a distinct way to settle it written as the rule's new text as it would stand in the spec, one sentence. Keeping the rule is offered to the user by itself; do not propose it. Change nothing else: the user picks a ruling on each, and only then are rules revised.`,
+    `Read that file and the spec from disk. Under each of these decisions, add one to three \`- proposed: ...\` lines with Edit, each a distinct way to settle it written as the rule's new text as it would stand in the spec, one sentence. Keeping the rule is offered to the user by itself; do not propose it.`,
+    '',
+    `Then say which way you would settle it: \`- recommended: <n>\`, the number of the \`proposed\` line counting from 1, or \`${KEEP_RULING}\` when the rule should stand and the code change instead, and \`- because: <one sentence>\` saying what makes it the best of them. Recommend on every decision; the user reads it under the options, once they have read them, and is free to rule otherwise.`,
+    '',
+    'Change nothing else: the user picks a ruling on each, and only then are rules revised.',
     '',
     'Then stop; the user reads the decisions.',
   ].join('\n')

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { IMPLEMENT_TOOLS, assertImplementable, implementKickoff, implementPrompt } from '../src/agent/phases/implement'
+import { IMPLEMENT_TOOLS, assertImplementable, implementKickoff, implementPrompt, implementationStarts } from '../src/agent/phases/implement'
 import type { SpecState } from '../src/agent/phases/spec-file'
 import { parseTasks, type TasksState } from '../src/agent/phases/tasks-file'
 
@@ -28,6 +28,17 @@ describe('implement phase', () => {
     expect(() => assertImplementable(approved, board('- **T1**: a [tested]', '- **T2**: b'))).not.toThrow()
   })
 
+  it('the_approved_plan_starts_the_implementation_by_itself_unless_one_is_running_or_the_board_is_finished', () => {
+    expect(implementationStarts(approved, board('- **T1**: a'), false)).toBe(true)
+    // The approval is what consents to the writes: a draft starts nothing.
+    expect(implementationStarts({ ...approved, status: 'draft' }, board('- **T1**: a'), false)).toBe(false)
+    expect(implementationStarts({ exists: false }, board('- **T1**: a'), false)).toBe(false)
+    expect(implementationStarts(approved, { exists: false }, false)).toBe(false)
+    expect(implementationStarts(approved, board('- **T1**: a [tested]'), false)).toBe(false)
+    // An implementer already at work needs no second one, and no button to start it.
+    expect(implementationStarts(approved, board('- **T1**: a'), true)).toBe(false)
+  })
+
   it('prompt_names_the_spec_the_tasks_file_and_the_markers_that_carry_progress', () => {
     const prompt = implementPrompt('Order cancellation', cwd)
     expect(prompt).toContain('plan/order-cancellation.spec.md')
@@ -48,13 +59,50 @@ describe('implement phase', () => {
     const prompt = implementPrompt('Order cancellation', cwd)
     expect(prompt).toContain('`how:`')
     expect(prompt).toContain('Follow the `how:` block')
-    expect(prompt).toContain('only the markers, the files line, the proves line and a one-line note under a task are yours')
+    expect(prompt).toContain('only the markers, the `files:` line, the `proves:` line and the `note:` line under a task are yours')
+  })
+
+  it('a_departure_from_the_how_block_is_recorded_on_the_tasks_note_line', () => {
+    const prompt = implementPrompt('Order cancellation', cwd)
+    expect(prompt).toContain("say so on the task's `note:` line")
+    expect(prompt).toContain('  - note: ')
   })
 
   it('a_finished_task_is_not_read_again', () => {
     const prompt = implementPrompt('Order cancellation', cwd)
     expect(prompt).toContain('A task marked tested is finished')
     expect(prompt).toContain('not read again')
+  })
+
+  it('the_prompt_names_the_configured_test_commands_so_the_implementer_narrows_those', () => {
+    const prompt = implementPrompt('Order cancellation', cwd, [
+      { match: '**/*.cs', project: '*.csproj', command: 'dotnet test "{project}" --nologo' },
+      { match: 'src/**/*.ts', command: 'npm test' },
+    ])
+    expect(prompt).toContain('`**/*.cs`')
+    expect(prompt).toContain('project `*.csproj`')
+    expect(prompt).toContain('dotnet test "{project}" --nologo')
+    expect(prompt).toContain('`npm test`')
+    expect(prompt).toContain('Narrow those same commands')
+  })
+
+  it('a_project_with_no_configured_test_command_is_told_to_find_its_own', () => {
+    expect(implementPrompt('Order cancellation', cwd)).toContain('No test command is configured')
+  })
+
+  it('a_task_is_done_only_once_the_project_holding_its_code_builds', () => {
+    const prompt = implementPrompt('Order cancellation', cwd)
+    expect(prompt).toContain('the code is written and the project holding it builds')
+    // The project is the unit that builds; there is no sound per-file typecheck to ask for.
+    expect(prompt).toContain('not the repository')
+  })
+
+  it('a_task_is_tested_only_once_its_named_tests_pass_in_a_run_the_implementer_narrowed', () => {
+    const prompt = implementPrompt('Order cancellation', cwd)
+    expect(prompt).toContain('passing in a run you narrowed to it')
+    expect(prompt).toContain('Never the whole suite while you work')
+    // The sweep is the regression check that follows; promising it invites the implementer to test nothing.
+    expect(prompt).not.toContain('the whole test suite is run for you')
   })
 
   it('a_session_continuing_the_mapping_is_told_the_board_it_wrote_is_the_work', () => {

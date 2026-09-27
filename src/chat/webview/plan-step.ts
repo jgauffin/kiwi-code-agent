@@ -1,4 +1,4 @@
-import type { PlanState } from '../protocol'
+import type { CleanupUnit, PlanState } from '../protocol'
 
 /**
  * The plan flow as the person walks it, read off the plan state: which step
@@ -7,9 +7,9 @@ import type { PlanState } from '../protocol'
  * person, which is what the stepper and the bar's next-step slot show.
  */
 
-export type Step = 'plan' | 'review' | 'map' | 'rule' | 'approve' | 'implement' | 'verify'
+export type Step = 'plan' | 'review' | 'map' | 'rule' | 'approve' | 'implement' | 'verify' | 'cleanup'
 
-export const STEPS: Step[] = ['plan', 'review', 'map', 'rule', 'approve', 'implement', 'verify']
+export const STEPS: Step[] = ['plan', 'review', 'map', 'rule', 'approve', 'implement', 'verify', 'cleanup']
 
 export const STEP_LABEL: Record<Step, string> = {
   plan: 'Plan',
@@ -19,12 +19,13 @@ export const STEP_LABEL: Record<Step, string> = {
   approve: 'Approve',
   implement: 'Implement',
   verify: 'Verify',
+  cleanup: 'Cleanup',
 }
 
 /** A tab of the plan view; each step works in one of them. */
-export type Tab = 'spec' | 'review' | 'decisions' | 'tasks'
+export type Tab = 'spec' | 'review' | 'decisions' | 'tasks' | 'cleanup'
 
-export type NextAction = 'map' | 'submit_review' | 'send_rulings' | 'approve' | 'implement' | 'verify'
+export type NextAction = 'map' | 'submit_review' | 'send_rulings' | 'approve' | 'implement' | 'verify' | 'sweep'
 
 export type NextStep =
   /** A button in the bar: the act moves the plan on. */
@@ -97,9 +98,10 @@ function derive(plan: PlanState): Omit<PlanStep, 'reached'> {
   if (plan.stage === 'mapped' && plan.status === 'draft') return mappedDraft(plan)
 
   if (plan.stage === 'mapped') {
-    if (plan.reviewingDocs) return { current: 'approve', next: { kind: 'waiting', text: 'the planner is listing what the docs should now say' } }
+    if (plan.reviewingDocs) return { current: 'approve', next: { kind: 'waiting', text: 'the planner is listing what the docs should now say; the implementation starts after it' } }
     if (plan.implementable) {
-      return { current: 'implement', next: { kind: 'action', action: 'implement', label: 'Implement', hint: 'Start a fresh session that builds the tasks one by one.' } }
+      // Approval starts the build: this is the way back in when nothing is building the tasks.
+      return { current: 'implement', next: { kind: 'action', action: 'implement', label: 'Implement', hint: 'Nothing is building the tasks: pick the board up in a session that builds them one by one.' } }
     }
     return { current: 'implement', next: { kind: 'waiting', text: 'start the implementation from the plan session' } }
   }
@@ -124,8 +126,25 @@ function derive(plan: PlanState): Omit<PlanStep, 'reached'> {
   }
 
   // verified
-  if (plan.cleanup?.live) return { current: 'verify', next: { kind: 'waiting', text: plan.cleanup.text } }
-  return { current: 'verify', next: { kind: 'done', text: 'verified' } }
+  return { current: 'cleanup', next: cleanupNext(plan) }
+}
+
+/**
+ * The cleanup step: the split is offered, never taken on the user's behalf.
+ * A run in flight speaks for itself; an offer and a postponement point at the
+ * list on the Cleanup tab, where the choices are; a feature with no sweep
+ * to show can ask for one.
+ */
+function cleanupNext(plan: PlanState): NextStep {
+  if (plan.cleanup?.live) return { kind: 'waiting', text: plan.cleanup.text }
+  const units = plan.cleanupSweep?.units.length ?? 0
+  if (units > 0 && plan.cleanupDecision !== 'skipped' && plan.cleanupDecision !== 'done') {
+    const label = plan.cleanupDecision === 'postponed' ? `Cleanup postponed (${units})` : `${plural(units, 'unit')} over the limit`
+    return { kind: 'goto', tab: 'cleanup', label, hint: 'Pick the files the sweep found to split, leave it for later, or settle the feature as it stands.' }
+  }
+  if (plan.cleanupDecision === 'skipped') return { kind: 'done', text: 'cleanup skipped' }
+  if (plan.cleanupSweep || plan.cleanupDecision === 'done') return { kind: 'done', text: 'verified' }
+  return { kind: 'action', action: 'sweep', label: 'Check sizes', hint: 'Measure the files this feature touched against the size limits.' }
 }
 
 function mappedDraft(plan: PlanState): Omit<PlanStep, 'reached'> {
@@ -159,7 +178,7 @@ function reached(current: Step, plan: PlanState): Step[] {
   return steps
 }
 
-const TAB_ORDER: Tab[] = ['spec', 'review', 'decisions', 'tasks']
+const TAB_ORDER: Tab[] = ['spec', 'review', 'decisions', 'tasks', 'cleanup']
 
 /** The tabs with something on them, in fixed order; the spec is always there. */
 export function presentTabs(plan: PlanState): Tab[] {
@@ -173,8 +192,16 @@ export function presentTabs(plan: PlanState): Tab[] {
         return plan.decisions.length > 0
       case 'tasks':
         return plan.tasks.length > 0
+      case 'cleanup':
+        return (plan.cleanupSweep?.units.length ?? 0) > 0 || plan.cleanup !== undefined || plan.cleanupDecision !== undefined
     }
   })
+}
+
+/** The units the sweep found while the offer to split them still stands. */
+export function offeredUnits(plan: PlanState): CleanupUnit[] {
+  if (plan.cleanup?.live || plan.cleanupDecision === 'skipped' || plan.cleanupDecision === 'done') return []
+  return plan.cleanupSweep?.units ?? []
 }
 
 /** The tab's name with the count that says whether it needs the reader. */
@@ -193,6 +220,8 @@ export function tabLabel(tab: Tab, plan: PlanState): string {
       if (!live.some((t) => t.state !== 'open')) return `Tasks (${live.length})`
       return `Tasks (${live.filter((t) => t.state === 'tested').length} of ${live.length})`
     }
+    case 'cleanup':
+      return counted('Cleanup', offeredUnits(plan).length)
   }
 }
 
@@ -210,6 +239,8 @@ export function tabFor(step: Step, plan: PlanState): Tab {
     case 'implement':
     case 'verify':
       return 'tasks'
+    case 'cleanup':
+      return presentTabs(plan).includes('cleanup') ? 'cleanup' : 'tasks'
     default:
       return 'spec'
   }

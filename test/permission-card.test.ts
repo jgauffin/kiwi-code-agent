@@ -169,6 +169,18 @@ describe('a call that is not a shell command', () => {
     expect(c.querySelector('pre.input')).toBeNull()
     expect(c.querySelector('.decision')?.textContent).toBe('Allowed')
   })
+
+  it('a_scripts_changes_are_listed_per_file_and_answered_once_without_a_remembered_rule', () => {
+    const edits = ['a.ts', 'b.ts'].map((label) => ({ path: label, label, diffs: ['@@ -1 +1 @@\n-a\n+b'], omitted: 0 }))
+    const { card: c, decisions } = card({ type: 'permission_request', requestId: 's1', toolName: 'RunScript', input: {}, title: 'Apply changes to 2 files', edits })
+
+    expect(c.querySelectorAll('.change').length).toBe(2)
+    expect(labels(c)).toEqual(['a.ts', 'b.ts', 'Allow', 'Deny'])
+
+    press(c, 'Allow')
+
+    expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'allow' }])
+  })
 })
 
 describe('a shell step in the transcript', () => {

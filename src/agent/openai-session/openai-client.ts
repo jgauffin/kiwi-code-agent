@@ -75,6 +75,20 @@ export class OpenAiClient implements ChatCompletionClient {
     }
     yield { type: 'done', finishReason, usage }
   }
+
+  /** What the endpoint says it serves, sorted; an offer for the settings page, never a replacement for what is configured. */
+  async listModels(): Promise<string[]> {
+    const url = `${this.options.baseUrl.replace(/\/$/, '')}/models`
+    let response: Response
+    try {
+      response = await this.fetchFn(url, { headers: { authorization: `Bearer ${this.options.apiKey}` } })
+    } catch (error) {
+      throw new NetworkError(url, error)
+    }
+    if (!response.ok) throw new ApiError(response.status, await response.text().catch(() => ''))
+    const body = (await response.json()) as { data?: { id?: unknown }[] }
+    return [...new Set((body.data ?? []).map((m) => m.id).filter((id): id is string => typeof id === 'string' && id !== ''))].sort()
+  }
 }
 
 export class ApiError extends Error {

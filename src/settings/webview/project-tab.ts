@@ -27,7 +27,7 @@ export class ProjectTab extends HTMLElement {
     verify.append(
       el('h3', '', 'Verification'),
       rules,
-      note('The first rule whose match covers a task’s file runs; {project} is the nearest file matching the project glob, {projectDir} its folder.'),
+      note('Every rule whose match covers a task’s file runs, once per project; {project} is the nearest file matching the project glob, {projectDir} its folder, {file} the file itself. The implementer is told these commands and narrows them while it works, so it may run them without a prompt.'),
       this.number('Failure budget', 'verifyFailureBudget', snapshot.verifyFailureBudget, disabled, 'Consecutive failed test runs handed back to the implementer before the feature waits for you.'),
     )
 

@@ -14,6 +14,17 @@ const working = (mode: SessionMode): SessionStatus => (isPlanning(mode) ? 'plann
 /** Statuses that are the user's turn: engine noise does not take them away. */
 const waiting = (status: SessionStatus): boolean => status === 'needs_human' || status === 'needs_answer'
 
+/**
+ * What a tab of several runs says about itself: the one status of them that
+ * asks most of the user. A run waiting on an answer must not be hidden behind
+ * another that is merely at work.
+ */
+const URGENCY: SessionStatus[] = ['idle', 'planning', 'implementing', 'error', 'needs_human', 'needs_answer']
+
+export function mostUrgent(statuses: SessionStatus[]): SessionStatus {
+  return statuses.reduce((worst, status) => (URGENCY.indexOf(status) > URGENCY.indexOf(worst) ? status : worst), 'idle')
+}
+
 /** Derives the next status from an event. Pure, so both the extension host and tests share it. */
 export function nextStatus(current: SessionStatus, mode: SessionMode, event: SessionEvent): SessionStatus {
   switch (event.type) {

@@ -34,6 +34,24 @@ describe('plan list', () => {
     }
   })
 
+  it('a_postponed_cleanup_keeps_the_feature_on_the_list_until_it_is_settled', async () => {
+    const passed = '\n## Verification\n- 2026-09-14T10:00:00Z: passed\n'
+    const dir = await workspace({
+      'audit.spec.md': '---\nfeature: Audit\nstatus: approved\n---\n# Audit\n',
+      'audit.tasks.md': `---\ncleanup: postponed\n---\n# Tasks for Audit\n\n- **Log**: log [tested]\n${passed}`,
+      'billing.spec.md': '---\nfeature: Billing\nstatus: approved\n---\n# Billing\n',
+      'billing.tasks.md': `---\ncleanup: skipped\n---\n# Tasks for Billing\n\n- **Bill**: bill [tested]\n${passed}`,
+    })
+    try {
+      expect(await listPlans(dir)).toMatchObject([
+        { feature: 'Audit', status: 'approved' },
+        { feature: 'Billing', status: 'verified' },
+      ])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('a_spec_without_a_feature_line_is_named_by_its_slug', async () => {
     const dir = await workspace({ 'user-question.spec.md': '# User question\n' })
     try {

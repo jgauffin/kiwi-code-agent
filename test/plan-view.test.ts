@@ -9,7 +9,7 @@ import type { Task } from '../src/agent/phases/tasks-file'
 ;(globalThis as Record<string, unknown>).acquireVsCodeApi = () => ({ postMessage: () => {} })
 
 const { PlanView } = await import('../src/chat/webview/plan-view')
-const { PlanFocusRequestedEvent, ReviewActionEvent } = await import('../src/chat/webview/events')
+const { CleanupDecidedEvent, PlanFocusRequestedEvent, ReviewActionEvent } = await import('../src/chat/webview/events')
 type Tab = Parameters<InstanceType<typeof PlanView>['update']>[1]
 
 const spec: Spec = {
@@ -41,6 +41,7 @@ function plan(over: Partial<PlanState> = {}): PlanState {
     stale: false,
     repairable: false,
     mappable: true,
+    remappable: false,
     implementable: false,
     verifiable: false,
     tasks: [],
@@ -76,24 +77,104 @@ describe('PlanView', () => {
     expect(node.querySelector('.scenario')).not.toBeNull()
   })
 
-  it('the_tasks_tab_shows_scenario_state_and_files_and_keeps_the_implementers_detail_off_it', () => {
-    const detailed = task({
+  const detailed = () =>
+    task({
       group: 'Cancelling an order',
       state: 'in_progress',
+      text: 'add the cancel command [in progress]',
       files: ['src/orders/cancel.ts', 'src/orders/cancel.test.ts'],
       context: ['src/orders/order.ts'],
       how: '- add `cancel()` beside `ship()`',
     })
-    const node = view(plan({ stage: 'under_development', status: 'approved', commentable: false, tasks: [detailed] }), 'tasks')
+
+  it('the_tasks_tab_says_what_each_task_does_and_which_paths_it_changes_and_reads', () => {
+    const node = view(plan({ stage: 'under_development', status: 'approved', commentable: false, tasks: [detailed()] }), 'tasks')
     expect(node.querySelector('.group > .heading')?.textContent).toBe('Cancelling an order')
     expect(node.querySelector('.task .name')?.textContent).toBe('Cancel')
     expect(node.querySelector('.task .badge.state')?.textContent).toBe('in progress')
+    // The mapper's sentence is what the task does; its state is the badge, not the marker it wrote in the line.
+    expect(node.querySelector('.task .line > .text')?.textContent).toBe('Cancel: add the cancel command')
+    const paths = [...node.querySelectorAll<HTMLElement>('.task .paths')]
+    expect(paths.map((p) => p.querySelector('.kind')?.textContent)).toEqual(['changes', 'reads'])
     expect([...node.querySelectorAll('.task ul.files > li')].map((li) => li.textContent)).toEqual(['src/orders/cancel.ts', 'src/orders/cancel.test.ts'])
-    const text = node.querySelector('.task')!.textContent ?? ''
-    expect(text).not.toContain('add it')
-    expect(text).not.toContain('src/orders/order.ts')
-    expect(text).not.toContain('cancel()')
+    expect([...node.querySelectorAll('.task ul.context > li')].map((li) => li.textContent)).toEqual(['src/orders/order.ts'])
     expect(node.querySelector('.task .delivers')).toBeNull()
+  })
+
+  const verified = () => ({ stage: 'verified' as const, status: 'approved' as const, commentable: false, tasks: [task({ state: 'tested' })] })
+  const sweepUnits = [
+    { path: 'src/orders/cancel.ts', line: 12, name: 'cancel', kind: 'function' as const, lines: 61, threshold: 25 },
+    { path: 'src/orders/order.ts', line: 3, name: 'Order', kind: 'type' as const, lines: 240, threshold: 200 },
+  ]
+
+  it('the_units_the_sweep_found_are_offered_on_the_cleanup_tab_by_file_and_not_on_the_tasks_tab', () => {
+    const state = plan({ ...verified(), cleanupSweep: { units: sweepUnits } })
+    expect(view(state, 'tasks').querySelector('.cleanup')).toBeNull()
+
+    const node = view(state, 'cleanup')
+    const rows = [...node.querySelectorAll<HTMLElement>('.cleanup .unit')]
+    expect(rows.map((r) => r.querySelector('.name')?.textContent)).toEqual(['cancel', 'Order'])
+    expect(rows[0]!.textContent).toContain('function, 61 lines, limit 25')
+    expect(rows[1]!.querySelector('.link.file')?.textContent).toBe(':3')
+    expect([...node.querySelectorAll('.cleanup .pick .link.file')].map((l) => l.textContent)).toEqual(['src/orders/cancel.ts', 'src/orders/order.ts'])
+
+    const decided: string[] = []
+    node.addEventListener(CleanupDecidedEvent.type, (e) => decided.push((e as InstanceType<typeof CleanupDecidedEvent>).decision))
+    for (const [label, expected] of [['Clean up all', 'run'], ['Later', 'postpone'], ['Skip', 'skip']] as const) {
+      buttons(node, label)[0]!.click()
+      expect(decided.at(-1)).toBe(expected)
+    }
+  })
+
+  it('every_file_starts_picked_and_a_split_is_limited_to_the_files_left_picked', () => {
+    const node = view(plan({ ...verified(), cleanupSweep: { units: sweepUnits } }), 'cleanup')
+    const boxes = () => [...node.querySelectorAll<HTMLInputElement>('.cleanup input[type=checkbox]')]
+    expect(boxes().map((b) => b.checked)).toEqual([true, true])
+
+    let paths: string[] | undefined
+    node.addEventListener(CleanupDecidedEvent.type, (e) => (paths = (e as InstanceType<typeof CleanupDecidedEvent>).paths))
+    boxes()[0]!.click()
+    expect(node.querySelector('.cleanup .count')?.textContent).toBe('1 of 2 files')
+    buttons(node, 'Clean up selected (1)')[0]!.click()
+    expect(paths).toEqual(['src/orders/order.ts'])
+    buttons(node, 'Clean up all')[0]!.click()
+    expect(paths).toEqual(['src/orders/cancel.ts', 'src/orders/order.ts'])
+  })
+
+  it('the_toggle_selects_none_when_something_is_picked_and_all_when_nothing_is', () => {
+    const node = view(plan({ ...verified(), cleanupSweep: { units: sweepUnits } }), 'cleanup')
+    buttons(node, 'Select none')[0]!.click()
+    expect([...node.querySelectorAll<HTMLInputElement>('.cleanup input[type=checkbox]')].map((b) => b.checked)).toEqual([false, false])
+    expect(buttons(node, 'Clean up selected (0)')[0]!.disabled).toBe(true)
+    buttons(node, 'Select all')[0]!.click()
+    expect([...node.querySelectorAll<HTMLInputElement>('.cleanup input[type=checkbox]')].map((b) => b.checked)).toEqual([true, true])
+  })
+
+  it('a_settled_cleanup_offers_nothing_and_says_where_it_stands', () => {
+    const units = sweepUnits.slice(0, 1)
+    const skipped = view(plan({ ...verified(), cleanupSweep: { units }, cleanupDecision: 'skipped' }), 'cleanup')
+    expect(skipped.querySelectorAll('.cleanup .unit')).toHaveLength(0)
+    expect(buttons(skipped, 'Clean up all')).toHaveLength(0)
+    expect(skipped.querySelector('.cleanup .note')?.textContent).toContain('skipped')
+
+    const running = view(plan({ ...verified(), cleanupSweep: { units }, cleanup: { live: true, text: 'Read src/orders/cancel.ts' } }), 'cleanup')
+    expect(running.querySelector('.cleanup .running')?.textContent).toBe('Read src/orders/cancel.ts')
+    expect(buttons(running, 'Clean up all')).toHaveLength(0)
+  })
+
+  it('the_how_block_is_on_the_task_folded_away', () => {
+    const node = view(plan({ stage: 'under_development', status: 'approved', commentable: false, tasks: [detailed()] }), 'tasks')
+    const how = node.querySelector<HTMLDetailsElement>('.task details.how')!
+    expect(how.open).toBe(false)
+    expect(how.querySelector('summary')?.textContent).toBe('how')
+    expect(how.textContent).toContain('cancel()')
+  })
+
+  it('a_task_without_context_or_how_shows_neither', () => {
+    const node = view(plan({ stage: 'mapped', status: 'approved', commentable: false, tasks: [task({ files: ['src/orders/cancel.ts'] })] }), 'tasks')
+    expect(node.querySelector('.task ul.context')).toBeNull()
+    expect(node.querySelector('.task details.how')).toBeNull()
+    expect(node.querySelectorAll('.task .paths')).toHaveLength(1)
   })
 
   it('the_review_tab_lists_answers_with_resolve_and_lands_on_the_first', () => {
@@ -214,21 +295,38 @@ describe('PlanView', () => {
     expect(action).toEqual({ type: 'rule_decision', decision: 'Shipped', ruling: proposal })
   })
 
-  it('an_option_names_the_rule_it_rewrites_when_the_decision_is_on_more_than_one', () => {
+  it('the_planners_pick_sits_under_the_options_and_names_one_by_its_number', () => {
     const decisions = [
       {
         title: 'Shipped',
-        on: ['Cancel command', 'Shipped order'],
+        on: ['Cancel command'],
         finding: 'f',
-        proposals: ['**Shipped order**: refused with a reason'],
+        proposals: ['refuse it', 'allow it'],
+        recommendation: { choice: 2, because: 'the `Order` already carries the shipment' },
         state: 'open' as const,
         line: 0,
         end: 0,
       },
     ]
     const node = view(plan({ stage: 'mapped', tasks: [task()], decisions, pendingDecisions: 1 }), 'decisions')
-    expect(node.querySelector('.option.change .rule')!.textContent).toBe('Shipped order')
-    expect(node.querySelector('.option.change .text')!.textContent).toBe('refused with a reason')
+    expect([...node.querySelectorAll('.option.change .index')].map((i) => i.textContent)).toEqual(['1', '2'])
+    const pick = node.querySelector('.recommendation')!
+    expect(pick.querySelector('.which')!.textContent).toBe('Option 2')
+    expect(pick.querySelector('.because')!.innerHTML).toContain('<code>Order</code>')
+    // Read after every option, not marked on one: the options come first in the card.
+    expect([...node.querySelectorAll('.options > *')].at(-1)).toBe(pick)
+    expect(node.querySelector('.option.chosen')).toBeNull()
+  })
+
+  it('an_option_names_the_rule_it_rewrites_only_when_the_options_rewrite_different_rules', () => {
+    const on = ['Cancel command', 'Shipped order']
+    const sameRule = [{ title: 'Shipped', on, finding: 'f', proposals: ['**Shipped order**: refused', '**Shipped order**: refused with a reason'], state: 'open' as const, line: 0, end: 0 }]
+    const node = view(plan({ stage: 'mapped', tasks: [task()], decisions: sameRule, pendingDecisions: 1 }), 'decisions')
+    expect(node.querySelector('.option.change .rule')).toBeNull()
+    const twoRules = [{ ...sameRule[0]!, proposals: ['**Shipped order**: refused', '**Cancel command**: cancelled until it ships'] }]
+    node.update(plan({ stage: 'mapped', tasks: [task()], decisions: twoRules, pendingDecisions: 1 }), 'decisions')
+    expect([...node.querySelectorAll('.option.change .rule')].map((r) => r.textContent)).toEqual(['Shipped order', 'Cancel command'])
+    expect(node.querySelector('.option.change .text')!.textContent).toBe('refused')
   })
 
   it('settled_decisions_fold_into_history_with_the_ruling_as_the_record', () => {
