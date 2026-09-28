@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -20,6 +20,7 @@ async function context(overrides: Partial<ToolContext> = {}): Promise<{ ctx: Too
       return ok(`${name} output`)
     },
     authorize: async () => undefined,
+    confirm: async () => undefined,
     ...overrides,
   }
   return { ctx, calls, dir }
@@ -39,6 +40,51 @@ describe('RunScript', () => {
     const result = await runScriptTool().execute({ script: 'return await read("a.txt")' }, ctx)
     expect(result.isError).toBe(true)
     expect(result.text).toContain('Blocked: secrets')
+  })
+
+  describe('looking about the file system', () => {
+    it('lists_a_directory_with_its_subdirectories_marked', async () => {
+      const { ctx, dir } = await context()
+      await mkdir(join(dir, 'runs'))
+      await writeFile(join(dir, 'b.txt'), 'x')
+      await writeFile(join(dir, 'a.txt'), 'x')
+      const result = await runScriptTool().execute({ script: 'return (await readdir(".")).join(",")' }, ctx)
+      expect(result.text).toBe('a.txt,b.txt,runs/')
+    })
+
+    it('reports_what_is_there_and_what_is_not', async () => {
+      const { ctx, dir } = await context()
+      await writeFile(join(dir, 'a.txt'), 'x')
+      const result = await runScriptTool().execute({ script: 'return [await exists("a.txt"), await exists("nope.txt")].join(",")' }, ctx)
+      expect(result.text).toBe('true,false')
+    })
+
+    it('counts_a_file_the_script_has_staged_as_being_there', async () => {
+      const { ctx } = await context({ review: async () => ({ kind: 'deny' }) })
+      const result = await runScriptTool().execute({ script: 'await write("new.ts", "x"); return await exists("new.ts")' }, ctx)
+      expect(result.text).toContain('true')
+    })
+
+    it('puts_each_look_to_the_gate_that_may_ask_the_user', async () => {
+      const asked: Call[] = []
+      const { ctx } = await context({
+        confirm: async (name, input) => {
+          asked.push({ name, input })
+          return undefined
+        },
+      })
+      await runScriptTool().execute({ script: 'await readdir("."); await exists("a.txt")' }, ctx)
+      expect(asked).toEqual([
+        { name: 'ReadDir', input: { path: '.' } },
+        { name: 'Exists', input: { path: 'a.txt' } },
+      ])
+    })
+
+    it('fails_a_look_the_user_declines', async () => {
+      const { ctx } = await context({ confirm: async () => 'Denied by user' })
+      const result = await runScriptTool().execute({ script: 'try { await readdir("../..") } catch (e) { return e.message }' }, ctx)
+      expect(result.text).toBe('Denied by user')
+    })
   })
 
   it('runs_other_tools_through_the_sessions_own_dispatch', async () => {

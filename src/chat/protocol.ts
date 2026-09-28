@@ -105,7 +105,7 @@ export type RunRef = { sessionId: string; mode: SessionMode; title: string; curr
 
 export type RunSection = RunRef & { events: SessionEvent[] }
 
-/** A plan on disk the new-session screen offers to pick up; verified ones are finished and not offered. */
+/** A plan on disk the tab bar offers to pick up; verified ones are finished and not offered. */
 export type ResumablePlan = { feature: string; status: 'draft' | 'approved' }
 
 export type ToWebview =
@@ -120,7 +120,7 @@ export type ToWebview =
       plan?: PlanState
       /** The run under the active tab that what the user types reaches; its section is the one open. */
       currentRun?: string
-      /** Plans under `plan/` still in progress, for the new-session screen. */
+      /** Plans under `plan/` still in progress, for the tab bar's resume list. */
       plans: ResumablePlan[]
       /** The profiles by name and which of them new sessions get, for the new-session screen's pickers. */
       profiles: ProfileDefaults

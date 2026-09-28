@@ -63,7 +63,7 @@ export class NewSessionRequestedEvent extends Event {
   }
 }
 
-/** The new-session screen's pick of a plan already on disk. */
+/** The tab bar's pick of a plan already on disk. */
 export class PlanResumeRequestedEvent extends Event {
   static readonly type = 'plan-resume-requested'
   constructor(public readonly feature: string) {

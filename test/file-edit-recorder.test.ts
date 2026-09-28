@@ -102,6 +102,21 @@ describe('FileEditRecorder', () => {
     }
   })
 
+  it('a_card_for_a_file_kept_in_crlf_shows_the_change_a_multi_line_edit_would_make', async () => {
+    const w = await workspace()
+    try {
+      await writeFile(join(w.cwd, 'a.ts'), 'one\r\ntwo\r\nthree\r\n', 'utf8')
+      // The model writes its lines with \n; the file does not contain them that way.
+      const input = { file_path: 'a.ts', old_string: 'one\ntwo', new_string: 'ONE\nTWO' }
+      await w.recorder.preToolUse({ toolName: 'Edit', input, toolUseId: 'call-1' })
+      const change = edit(await w.recorder.decorate(request('call-1', 'Edit', input)))
+      expect(change?.diffs.join()).toContain('-one')
+      expect(change?.diffs.join()).toContain('+ONE')
+    } finally {
+      await w.clean()
+    }
+  })
+
   it('a_failed_or_denied_edit_leaves_the_step_without_a_diff', async () => {
     const w = await workspace()
     try {

@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { z } from 'zod'
 import { fileEditChange, type FileEditChange } from '../../edits/file-edit-diff'
@@ -20,7 +20,7 @@ const TOOL_FUNCTIONS: Record<string, string> = {
   codeOutline: 'CodeOutline',
 }
 
-const HOST_FUNCTIONS = ['read', 'write', 'edit', 'preview', ...Object.keys(TOOL_FUNCTIONS)]
+const HOST_FUNCTIONS = ['read', 'readdir', 'exists', 'write', 'edit', 'preview', ...Object.keys(TOOL_FUNCTIONS)]
 
 /**
  * `replace` is written in the guest so its regular expression runs inside the
@@ -55,7 +55,7 @@ export function runScriptTool(): Tool<typeof schema> {
     // A script can do nothing on its own; every call it makes is gated when made.
     readOnly: true,
     async execute(input, ctx) {
-      if (!ctx.call || !ctx.authorize) return fail('RunScript is not available in this session')
+      if (!ctx.call || !ctx.authorize || !ctx.confirm) return fail('RunScript is not available in this session')
       const lines: string[] = []
       const staged = new Map<string, Staged>()
       const result = await runSandboxed(
@@ -80,6 +80,10 @@ function hostFor(ctx: ToolContext, staged: Map<string, Staged>): HostCall {
     switch (name) {
       case 'read':
         return currentContent(ctx, staged, pathArg(first, 'read'))
+      case 'readdir':
+        return listDirectory(ctx, first === undefined ? '.' : pathArg(first, 'readdir'))
+      case 'exists':
+        return pathExists(ctx, staged, pathArg(first, 'exists'))
       case 'write':
         return stage(ctx, staged, pathArg(first, 'write'), textArg(second, 'write(path, content)'))
       case 'edit':
@@ -110,6 +114,37 @@ function textArg(value: unknown, usage: string): string {
 async function refuse(ctx: ToolContext, tool: string, input: unknown): Promise<void> {
   const refused = await ctx.authorize!(tool, input)
   if (refused) throw new Error(refused)
+}
+
+/**
+ * Looking about the file system rather than at one known file. Inside the
+ * project the gate lets it through; outside it the user is asked, so a script
+ * cannot wander the disk on its own.
+ */
+async function look(ctx: ToolContext, tool: string, path: string): Promise<void> {
+  const refused = await ctx.confirm!(tool, { path })
+  if (refused) throw new Error(refused)
+}
+
+/** The names in a directory, sorted, each directory marked by a trailing slash. */
+async function listDirectory(ctx: ToolContext, path: string): Promise<string[]> {
+  await look(ctx, 'ReadDir', path)
+  const entries = await readdir(absolute(ctx, path), { withFileTypes: true })
+  return entries.map((entry) => (entry.isDirectory() ? `${entry.name}/` : entry.name)).sort()
+}
+
+/** A file the script has staged counts as there, as `read` already treats it. */
+async function pathExists(ctx: ToolContext, staged: Map<string, Staged>, path: string): Promise<boolean> {
+  await look(ctx, 'Exists', path)
+  const full = absolute(ctx, path)
+  if (staged.has(full)) return true
+  try {
+    await stat(full)
+    return true
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw error
+  }
 }
 
 /** The file as the script has left it so far: its own staged version when it has one, else what is on disk (empty for a file that does not exist yet). */

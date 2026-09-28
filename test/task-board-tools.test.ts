@@ -6,6 +6,7 @@ import { ReadTracker } from '../src/agent/openai-session/tools/read-tracker'
 import { TaskBoardGuard, taskBoardTools } from '../src/agent/openai-session/tools/task-board'
 import type { Tool, ToolContext } from '../src/agent/openai-session/tools/tool'
 import { PermissionPolicy } from '../src/agent/permissions/permission-policy'
+import { readOnlyTools } from '../src/agent/permissions/tool-classes'
 import { readBoard, writeBoard } from '../src/agent/phases/tasks-file'
 import { board, task } from './task-board-fixture'
 
@@ -125,8 +126,10 @@ describe('WriteTasks', () => {
 
 describe('the board tools run without a prompt and the file itself is off limits to the implementer', () => {
   it('no_board_tool_is_put_to_a_permission_prompt', async () => {
-    const policy = new PermissionPolicy(dir, () => ({ allow: [], deny: [] }))
+    const tools = taskBoardTools(FEATURE)
+    const policy = new PermissionPolicy(dir, () => ({ allow: [], deny: [] }), { readOnly: readOnlyTools(() => tools) })
     for (const name of ['ReadTasks', 'UpdateTask', 'WriteTasks']) {
+      expect(tools.map((t) => t.name), name).toContain(name)
       expect(await policy.preToolUse({ toolName: name, input: {}, toolUseId: 't' })).toEqual({ allow: true })
     }
   })

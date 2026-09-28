@@ -277,6 +277,18 @@ chat-app {
       overflow-wrap: anywhere;
     }
 
+    /* A fenced block is code the reader reads as code, not a path dropped into a sentence: no chip behind it. */
+    & pre {
+      background: transparent;
+      padding: 0.5rem 0;
+      overflow-x: auto;
+
+      & code {
+        background: none;
+        padding: 0;
+      }
+    }
+
     & ul,
     & ol {
       list-style-position: outside;
@@ -1057,6 +1069,11 @@ chat-app {
   & > .tabs {
     border-bottom: 1px solid var(--vscode-panel-border);
 
+    & .bar {
+      display: flex;
+      align-items: stretch;
+    }
+
     & .tabs {
       list-style: none;
       margin: 0;
@@ -1064,6 +1081,8 @@ chat-app {
       display: flex;
       gap: 0.2rem;
       overflow-x: auto;
+      flex: 1;
+      min-width: 0;
     }
 
     & .tab {
@@ -1116,6 +1135,87 @@ chat-app {
       &.new {
         font-size: 1.2em;
         padding-block: 0.15rem;
+      }
+    }
+
+    /* The plans on disk: an icon at the far right, and the list it drops. */
+    & .menu {
+      position: relative;
+      flex: none;
+
+      & .old {
+        height: 100%;
+        background: none;
+        border: none;
+        border-bottom: 2px solid transparent;
+        color: inherit;
+        cursor: pointer;
+        opacity: 0.75;
+        padding: 0 0.6rem;
+
+        &:hover {
+          opacity: 1;
+          background: var(--vscode-list-hoverBackground);
+        }
+
+        &.active {
+          opacity: 1;
+          border-bottom-color: var(--vscode-focusBorder);
+        }
+      }
+
+      & .plans {
+        position: absolute;
+        right: 0;
+        top: 100%;
+        z-index: 10;
+        list-style: none;
+        margin: 0;
+        padding: 0.3rem;
+        min-width: 16rem;
+        max-height: 60vh;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+        background: var(--vscode-dropdown-background, var(--vscode-editor-background));
+        border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border));
+        border-radius: 6px;
+        box-shadow: 0 2px 8px rgb(0 0 0 / 0.35);
+      }
+
+      & .empty {
+        padding: 0.4rem 0.6rem;
+        opacity: 0.7;
+        white-space: nowrap;
+      }
+
+      & .plan {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.1rem;
+        text-align: left;
+        padding: 0.4rem 0.6rem;
+        background: none;
+        color: var(--vscode-foreground);
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+
+        &:hover {
+          background: var(--vscode-list-hoverBackground);
+        }
+
+        & .hint {
+          opacity: 0.7;
+        }
+
+        &.approved .hint {
+          color: var(--vscode-testing-iconPassed);
+          opacity: 1;
+        }
       }
     }
   }
@@ -1209,45 +1309,6 @@ chat-app {
       }
     }
 
-    & .resume {
-      & > .hint {
-        margin: 0;
-        opacity: 0.7;      }
-
-      & .plans {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 0.3rem;
-      }
-
-      & .plan {
-        width: 100%;
-        display: flex;
-        align-items: baseline;
-        gap: 0.5rem;
-        text-align: left;
-        padding: 0.4rem 0.6rem;
-        background: var(--vscode-input-background);
-        color: var(--vscode-foreground);
-        border: 1px solid var(--vscode-input-border, transparent);
-        border-radius: 6px;
-
-        &:hover {
-          background: var(--vscode-list-hoverBackground);
-        }
-
-        & .hint {
-          opacity: 0.7;        }
-
-        &.approved .hint {
-          color: var(--vscode-testing-iconPassed);
-          opacity: 1;
-        }
-      }
-    }
   }
 
   /*
@@ -1363,9 +1424,9 @@ chat-app {
         }
 
         & pre {
-          background: var(--vscode-textCodeBlock-background);
-          padding: 0.5rem;
-          border-radius: 4px;
+          /* Colored code sits on the message like plain text does, not on a block of its own. */
+          background: transparent;
+          padding: 0.5rem 0;
           overflow-x: auto;
 
           & code {

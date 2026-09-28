@@ -1,33 +1,21 @@
 import { compileTemplate } from '@relax.js/core/html'
 import { readData } from '@relax.js/core/forms'
 import type { SessionMode } from '../../agent/session/session-manager'
-import type { ResumablePlan } from '../protocol'
 import type { ProfileDefaults } from '../../settings/settings-store'
 import { LinkedFilesRow } from './linked-files-row'
-import { DefaultProfileChangedEvent, NewSessionRequestedEvent, PlanResumeRequestedEvent } from './events'
+import { DefaultProfileChangedEvent, NewSessionRequestedEvent } from './events'
 
 type NewSessionForm = { mode: SessionMode; feature?: string; prompt?: string }
-
-/** The cards: a session type to start, or a plan on disk to pick up. */
-type Choice = SessionMode | 'resume'
-
-type PlanRow = ResumablePlan & { hint: string }
 
 /** The text fields, held by the view rather than by the form that happens to show them. */
 type Draft = { feature: string; prompt: string }
 
 type TextField = HTMLInputElement | HTMLTextAreaElement
 
-/** What picking the plan up means at its status: the plan bar offers the same. */
-const STATUS_HINT: Record<ResumablePlan['status'], string> = {
-  draft: 'draft: review, check or approve',
-  approved: 'approved: ready to implement',
-}
-
 /**
- * The "+" screen. One card per session type, plus one for picking up a plan
- * on disk; the fields differ per card, so a new type means a new card, not
- * more conditionals.
+ * The "+" screen. One card per session type; the fields differ per card, so a
+ * new type means a new card, not more conditionals. A plan on disk is picked
+ * up from the tab bar instead, since it is not a new session.
  *
  * A card with a prompt links files beside its start button. On the plan card
  * that is a doc or a spec: a planner reads docs/**, the README and the specs
@@ -56,28 +44,12 @@ export class NewSessionView extends HTMLElement {
         <strong>Plan</strong>
         <span class="hint">Write a spec from the intent docs, blind to the code.</span>
       </button>
-      <button type="button" class="type {{resumeState}}" r-click="choose('resume')">
-        <span class="icon">↩</span>
-        <strong>Resume plan</strong>
-        <span class="hint">Pick up a spec under plan/ where it stands.</span>
-      </button>
       <button type="button" class="type {{docsState}}" r-click="choose('docs')">
         <span class="icon">🧭</span>
         <strong>Evaluate docs</strong>
         <span class="hint">Say where the docs would cost a planner, and change them.</span>
       </button>
     </div>
-    <section class="resume" if="isResume">
-      <p class="hint" unless="hasPlans">No plan under plan/ is in progress.</p>
-      <ul class="plans" if="hasPlans">
-        <li loop="p in plans">
-          <button type="button" class="plan {{p.status}}" title="Open the plan session behind this spec, or start one on it." r-click="resume(p)">
-            <strong>{{p.feature}}</strong>
-            <span class="hint">{{p.hint}}</span>
-          </button>
-        </li>
-      </ul>
-    </section>
     <form class="chat-fields" if="isChat" r-submit="create(event)">
       <label>First prompt (optional)
         <textarea name="prompt" rows="4" placeholder="What should be done?" r-input="edit('prompt', event)"></textarea>
@@ -105,10 +77,9 @@ export class NewSessionView extends HTMLElement {
       <button type="submit">Evaluate the docs</button>
     </form>
   `)
-  private mode: Choice = 'chat'
+  private mode: SessionMode = 'chat'
   /** What has been typed, so swapping card keeps it: the same intent describes either session type. */
   private draft: Draft = { feature: '', prompt: '' }
-  private plans: PlanRow[] = []
   private profileDefaults: ProfileDefaults = { names: [], active: '' }
 
   connectedCallback(): void {
@@ -122,11 +93,9 @@ export class NewSessionView extends HTMLElement {
     this.render()
   }
 
-  update(plans: ResumablePlan[], profiles: ProfileDefaults): void {
-    const rows = plans.map((p) => ({ ...p, hint: STATUS_HINT[p.status] }))
+  update(profiles: ProfileDefaults): void {
     // State arrives often; a re-render while the user types is only worth it when something shown changed.
-    if (JSON.stringify([rows, profiles]) === JSON.stringify([this.plans, this.profileDefaults])) return
-    this.plans = rows
+    if (JSON.stringify(profiles) === JSON.stringify(this.profileDefaults)) return
     this.profileDefaults = profiles
     this.render()
   }
@@ -138,22 +107,17 @@ export class NewSessionView extends HTMLElement {
         profiles: names.map((name) => ({ name, selected: name === active })),
         isChat: this.mode === 'chat',
         isPlan: this.mode === 'plan',
-        isResume: this.mode === 'resume',
         isDocs: this.mode === 'docs',
         chatState: this.mode === 'chat' ? 'selected' : '',
         planState: this.mode === 'plan' ? 'selected' : '',
-        resumeState: this.mode === 'resume' ? 'selected' : '',
         docsState: this.mode === 'docs' ? 'selected' : '',
-        hasPlans: this.plans.length > 0,
-        plans: this.plans,
       },
       {
-        resume: (p: PlanRow) => this.dispatchEvent(new PlanResumeRequestedEvent(p.feature)),
         pick: (event: Event) => this.dispatchEvent(new DefaultProfileChangedEvent((event.target as HTMLSelectElement).value)),
         edit: (field: keyof Draft, event: Event) => {
           this.draft[field] = (event.target as TextField).value
         },
-        choose: (mode: Choice) => {
+        choose: (mode: SessionMode) => {
           this.mode = mode
           this.render()
           // A card with nothing to fill in focuses its button, so the keyboard reaches the next step either way.
@@ -161,7 +125,6 @@ export class NewSessionView extends HTMLElement {
         },
         create: (event: SubmitEvent) => {
           event.preventDefault()
-          if (this.mode === 'resume') return
           const form = event.target as HTMLFormElement
           const data = readData<NewSessionForm>(form)
           const row = form.querySelector('linked-files-row') as LinkedFilesRow | null

@@ -11,14 +11,14 @@ const events = await import('../src/chat/webview/events')
 function view(profiles = { names: ['Claude', 'Kimi'], active: 'Claude' }) {
   const node = new NewSessionView()
   document.body.appendChild(node)
-  node.update([], profiles)
+  node.update(profiles)
   return node
 }
 
 const options = (select: HTMLSelectElement) => [...select.options].map((o) => o.textContent)
 
-const card = (node: HTMLElement, name: 'chat' | 'plan' | 'resume' | 'docs') =>
-  [...node.querySelectorAll<HTMLButtonElement>('.types button')][{ chat: 0, plan: 1, resume: 2, docs: 3 }[name]]!
+const card = (node: HTMLElement, name: 'chat' | 'plan' | 'docs') =>
+  [...node.querySelectorAll<HTMLButtonElement>('.types button')][{ chat: 0, plan: 1, docs: 2 }[name]]!
 
 function type(node: HTMLElement, selector: string, text: string): void {
   const field = node.querySelector<HTMLTextAreaElement>(selector)!
@@ -48,7 +48,7 @@ describe('NewSessionView profile picker', () => {
 
   it('a_changed_default_moves_the_selection_on_the_next_state', () => {
     const node = view()
-    node.update([], { names: ['Claude', 'Kimi'], active: 'Kimi' })
+    node.update({ names: ['Claude', 'Kimi'], active: 'Kimi' })
     expect(node.querySelector<HTMLSelectElement>('select[name=profile]')!.value).toBe('Kimi')
     node.remove()
   })
@@ -72,7 +72,7 @@ describe('NewSessionView fields across cards', () => {
   it('a_render_from_arriving_state_keeps_what_is_half_typed', () => {
     const node = view()
     type(node, '.chat-fields textarea[name=prompt]', 'half a thou')
-    node.update([{ feature: 'Order cancellation', status: 'draft' }], { names: ['Claude'], active: 'Claude' })
+    node.update({ names: ['Claude'], active: 'Claude' })
     expect(node.querySelector<HTMLTextAreaElement>('.chat-fields textarea[name=prompt]')!.value).toBe('half a thou')
     node.remove()
   })

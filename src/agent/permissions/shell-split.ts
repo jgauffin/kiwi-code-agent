@@ -15,12 +15,13 @@ export type ShellSegment = {
   tokens: string[]
   /** A redirect to something other than /dev/null or a file descriptor. */
   writesFile: boolean
+  /** A word of it came out of `$(…)`, backticks or `<(…)`: it holds the substitution as written, not what it will stand for. */
+  substituted: boolean
 }
 
 export type ShellCommand = {
+  /** Every simple command the line runs, the ones inside a substitution among them, each listed after the command whose word holds it. */
   segments: ShellSegment[]
-  /** `$(...)`, backticks or `<(...)`: a command runs that the tokens do not show. */
-  substitutes: boolean
 }
 
 export function splitShellCommand(command: string): ShellCommand {
@@ -34,12 +35,13 @@ const HEADER_WORDS = new Set(['for', 'select', 'case', 'esac', 'in'])
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*(\[[^\]]*\])?\+?$/
 const FD_PREFIX = /^(\d+|\{[A-Za-z_][A-Za-z0-9_]*\})$/
 
-type Word = { text: string; start: number; quoted: boolean; equalsAt: number }
+type Word = { text: string; start: number; quoted: boolean; substituted: boolean; equalsAt: number }
 type Heredoc = { delimiter: string; stripTabs: boolean; owner: number }
 
 class Splitter {
   private readonly segments: ShellSegment[] = []
-  private substitutes = false
+  /** Commands found in the substitutions of the segment being read; they are listed after it. */
+  private nested: ShellSegment[] = []
   private i = 0
 
   private words: Word[] = []
@@ -47,6 +49,7 @@ class Splitter {
   private wordStart = 0
   private inWord = false
   private wordQuoted = false
+  private wordSubstituted = false
   /** Offset in `word` of its first unquoted `=`, or -1. */
   private equalsAt = -1
   private redirectPending = false
@@ -184,7 +187,7 @@ class Splitter {
       this.i++
     }
     this.endSegment(src.length, src.length)
-    return { segments: this.segments, substitutes: this.substitutes }
+    return { segments: this.segments }
   }
 
   private add(c: string, quoted = false): void {
@@ -192,6 +195,7 @@ class Splitter {
       this.inWord = true
       this.wordStart = this.i
       this.wordQuoted = false
+      this.wordSubstituted = false
       this.equalsAt = -1
     }
     if (quoted) this.wordQuoted = true
@@ -269,10 +273,11 @@ class Splitter {
     this.i++
   }
 
-  /** `$(…)`, `<(…)` or `>(…)`: hides a command. Its text stays in the word; what it contains is not ours to split. */
+  /** `$(…)`, `<(…)` or `>(…)`: its text stays in the word, and the command it holds is listed on its own. */
   private substitution(): void {
-    this.substitutes = true
     const end = matchingParen(this.src, this.i + 2)
+    this.hide(this.src.slice(this.i + 2, this.src[end - 1] === ')' ? end - 1 : end))
+    this.markSubstituted()
     this.addRaw(this.src.slice(this.i, end))
     this.i = end
   }
@@ -281,7 +286,7 @@ class Splitter {
   private arithmeticExpansion(): void {
     const inner = matchingParen(this.src, this.i + 3)
     const end = this.src[inner] === ')' ? inner + 1 : inner
-    if (/\$\(|`|<\(|>\(/.test(this.src.slice(this.i + 3, inner - 1))) this.substitutes = true
+    this.hideIn(this.src.slice(this.i + 3, Math.max(this.i + 3, inner - 1)))
     this.addRaw(this.src.slice(this.i, end))
     this.i = end
   }
@@ -303,18 +308,38 @@ class Splitter {
       }
     }
     const inner = src.slice(this.i, j)
-    if (/\$\(|`/.test(inner)) this.substitutes = true
+    this.hideIn(inner)
     this.addRaw(inner)
     this.i = j
   }
 
   private backticks(): void {
-    this.substitutes = true
     let j = this.i + 1
     while (j < this.src.length && this.src[j] !== '`') j += this.src[j] === '\\' ? 2 : 1
     const end = Math.min(j + 1, this.src.length)
+    this.hide(this.src.slice(this.i + 1, Math.min(j, this.src.length)))
+    this.markSubstituted()
     this.addRaw(this.src.slice(this.i, end))
     this.i = end
+  }
+
+  /** The command a substitution holds: read on its own, and listed after the command whose word holds it. */
+  private hide(source: string): void {
+    this.nested.push(...splitShellCommand(source).segments)
+  }
+
+  /** An expansion is a word, but a `$(…)` or a backtick written inside one still runs. */
+  private hideIn(raw: string): void {
+    const hidden = hiddenCommands(raw)
+    if (hidden.length === 0) return
+    this.nested.push(...hidden)
+    this.markSubstituted()
+  }
+
+  /** The word being read stands for what a substitution prints, not for its own text. */
+  private markSubstituted(): void {
+    this.add('', true)
+    this.wordSubstituted = true
   }
 
   /** `[n]>`, `>>`, `>|`, `>&m`, `>&-`, `{var}>`. */
@@ -384,9 +409,10 @@ class Splitter {
   private openParen(): void {
     const src = this.src
     if (src[this.i + 1] === '(') {
-      // `(( … ))`: an arithmetic command, which runs nothing.
+      // `(( … ))`: an arithmetic command, which runs nothing of its own; a `$(…)` written inside it still runs.
       this.endWord()
       const end = matchingParen(src, this.i + 2)
+      this.nested.push(...hiddenCommands(src.slice(this.i + 2, Math.max(this.i + 2, end - 1))))
       this.i = src[end] === ')' ? end + 1 : end
       this.words = []
       return
@@ -449,9 +475,10 @@ class Splitter {
 
   private endWord(): void {
     if (!this.inWord) return
-    const word: Word = { text: this.word, start: this.wordStart, quoted: this.wordQuoted, equalsAt: this.equalsAt }
+    const word: Word = { text: this.word, start: this.wordStart, quoted: this.wordQuoted, substituted: this.wordSubstituted, equalsAt: this.equalsAt }
     this.word = ''
     this.inWord = false
+    this.wordSubstituted = false
     if (this.redirectPending) {
       if (!isHarmlessRedirectTarget(word.text)) this.writesFile = true
       this.redirectPending = false
@@ -475,8 +502,12 @@ class Splitter {
     const command = this.commandWords()
     if (command) {
       const text = this.src.slice(command.from, textEnd).trim() + this.heredocText
-      this.segments.push({ text, tokens: command.words.map((w) => w.text), writesFile: this.writesFile })
+      const substituted = command.words.some((w) => w.substituted)
+      this.segments.push({ text, tokens: command.words.map((w) => w.text), writesFile: this.writesFile, substituted })
     }
+    // What a substitution hides runs too, whether or not the command holding it turned out to be one.
+    this.segments.push(...this.nested)
+    this.nested = []
     this.words = []
     this.writesFile = false
     this.redirectPending = false
@@ -517,6 +548,42 @@ function isReserved(word: Word | undefined, text?: string): word is Word {
 
 function isAssignment(word: Word): boolean {
   return word.equalsAt > 0 && ASSIGNMENT.test(word.text.slice(0, word.equalsAt))
+}
+
+/**
+ * The commands written in the substitutions of a stretch of source that is a
+ * word rather than a command of its own: `${x:-$(ls)}`, `$(( $(ls | wc -l) ))`
+ * and `(( … ))`. The text around them decides nothing, so only what a
+ * substitution holds is read, and that as a command line in its own right.
+ */
+function hiddenCommands(raw: string): ShellSegment[] {
+  const found: ShellSegment[] = []
+  let i = 0
+  while (i < raw.length) {
+    const c = raw[i]!
+    const next = raw[i + 1]
+    if (c === '$' && next === '(' && raw[i + 2] === '(') {
+      const inner = matchingParen(raw, i + 3)
+      found.push(...hiddenCommands(raw.slice(i + 3, Math.max(i + 3, inner - 1))))
+      i = inner
+      continue
+    }
+    if ((c === '$' || c === '<' || c === '>') && next === '(') {
+      const end = matchingParen(raw, i + 2)
+      found.push(...splitShellCommand(raw.slice(i + 2, raw[end - 1] === ')' ? end - 1 : end)).segments)
+      i = end
+      continue
+    }
+    if (c === '`') {
+      let j = i + 1
+      while (j < raw.length && raw[j] !== '`') j += raw[j] === '\\' ? 2 : 1
+      found.push(...splitShellCommand(raw.slice(i + 1, Math.min(j, raw.length))).segments)
+      i = j + 1
+      continue
+    }
+    i += c === '\\' ? 2 : 1
+  }
+  return found
 }
 
 /** The index just past the `)` that closes a group opened before `from`, or the end; quotes are skipped, nesting counted. */

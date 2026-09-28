@@ -1,7 +1,7 @@
 import { permissionResolved, type CodeSession, type FileEditChange, type McpControl, type PermissionDecision, type SessionEvent, type TurnUsage } from '../session/code-session'
 import type { QuestionOutcome, UserQuestionRequest } from '../session/user-question'
 import type { SessionHooks, ToolUse } from '../session/hooks'
-import { denyReason, gateCall } from './tools/script-gate'
+import { confirmReason, denyReason, gateCall } from '../permissions/gate'
 import type { ModelProfile } from '../session/model-profile'
 import { AsyncQueue } from '../session/async-queue'
 import type { McpServers } from '../mcp/mcp-config'
@@ -289,6 +289,8 @@ export class OpenAiSession implements CodeSession {
       ask: (request) => this.askUser(callId, request),
       call: (name, input) => this.runTool({ id: nextId(), name, arguments: JSON.stringify(input) }, signal),
       authorize: (name, input) => denyReason(this.options.hooks, { toolName: name, input, toolUseId: nextId() }),
+      confirm: (name, input) =>
+        confirmReason(this.options.hooks, (id, n, v, shown) => this.askPermission(id, n, v, signal, shown), { toolName: name, input, toolUseId: nextId() }),
       review: (title, edits) => this.askPermission(nextId(), 'RunScript', { files: edits.map((e) => e.label) }, signal, { title, edits }),
     }
   }

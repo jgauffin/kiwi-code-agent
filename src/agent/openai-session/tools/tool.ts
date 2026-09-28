@@ -22,6 +22,8 @@ export type ToolContext = {
   call?: (name: string, input: unknown) => Promise<ToolOutput>
   /** The reason a call is refused outright, by a deny rule; undefined when nothing forbids it. Never asks the user. */
   authorize?: (name: string, input: unknown) => Promise<string | undefined>
+  /** The reason a call is refused, asking the user when the rules leave it open; undefined when it may go ahead. */
+  confirm?: (name: string, input: unknown) => Promise<string | undefined>
   /** Puts changes to files to the user as one decision. */
   review?: (title: string, edits: FileEditChange[]) => Promise<PermissionDecision>
 }

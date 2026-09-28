@@ -54,18 +54,58 @@ function argumentsMutate(command: string, args: string[]): boolean {
 const READ_ONLY_BY_ARGUMENTS = new Set(['find', 'sed'])
 
 export type ReadOnlyContext = {
-  /** Is this path inside the project? Decides `cd`; without it `cd` is presumed to leave. */
-  insideProject?: (path: string) => boolean
+  /**
+   * May the session stand in this directory: inside the project, or under a
+   * directory the user has allowed `cd` into. Decides `cd`; without it `cd` is
+   * presumed to leave.
+   */
+  canEnter?: (path: string) => boolean
+}
+
+/** Does this segment change directory, whether or not we can read where to? */
+export function isCdCommand(tokens: string[]): boolean {
+  const [raw] = unwrapCommand(tokens)
+  return raw !== undefined && commandName(raw) === 'cd'
+}
+
+/**
+ * The directory a segment changes to, when it is a plain `cd` to one place we
+ * can name. An expansion is left out: a rule written for `$HOME` would say
+ * nothing about where the session actually lands.
+ */
+export function cdTarget(tokens: string[]): string | undefined {
+  const [raw, ...args] = unwrapCommand(tokens)
+  if (!raw || commandName(raw) !== 'cd' || args.length !== 1) return undefined
+  const target = args[0]!
+  return /[$~`]/.test(target) ? undefined : target
+}
+
+/** The directory a `cd` rule allows, or undefined for any other pattern. `cd:*` is not one: it names no directory. */
+export function cdRuleDirectory(pattern: string): string | undefined {
+  return pattern.startsWith('cd ') ? pattern.slice(3).trim() || undefined : undefined
+}
+
+/**
+ * Does a substitution decide what this command is: `$(which rm) -rf x` runs
+ * whatever it prints, which neither the list below nor a rule can judge, so such
+ * a line is answered per call. The commands inside the substitution are listed
+ * and judged on their own; only a command word standing on one is hidden. The
+ * segment's flag is what tells `"$(ls)"` from the literal `'$(ls)'`.
+ */
+export function hidesCommandWord(segment: ShellSegment): boolean {
+  if (!segment.substituted) return false
+  const [raw] = unwrapCommand(segment.tokens)
+  return raw !== undefined && /\$\(|`|<\(|>\(/.test(raw)
 }
 
 export function isReadOnlySegment(segment: ShellSegment, context: ReadOnlyContext = {}): boolean {
-  if (segment.writesFile) return false
+  if (segment.writesFile || hidesCommandWord(segment)) return false
   // `timeout 30 ls` is a listing and `env FOO=1 rm -rf x` is a deletion: what runs is what counts.
   const [raw, ...args] = unwrapCommand(segment.tokens)
   if (!raw) return true
   const command = commandName(raw)
-  // Moving around inside the project changes nothing; leaving it is a prompt.
-  if (command === 'cd') return args.length === 1 && (context.insideProject?.(args[0]!) ?? false)
+  // Moving around inside the project changes nothing; going anywhere else needs a rule for that directory.
+  if (command === 'cd') return args.length === 1 && (context.canEnter?.(args[0]!) ?? false)
   if (READ_ONLY.has(command)) return true
   if (READ_ONLY_BY_ARGUMENTS.has(command)) return !argumentsMutate(command, args)
   const subs = READ_ONLY_SUBCOMMANDS[command]
@@ -76,9 +116,7 @@ export function isReadOnlySegment(segment: ShellSegment, context: ReadOnlyContex
   return false
 }
 
-/** True when every simple command in the line only inspects. */
+/** True when every simple command in the line only inspects, the ones a substitution holds among them. */
 export function isReadOnlyCommand(command: string, context: ReadOnlyContext = {}): boolean {
-  const parsed = splitShellCommand(command)
-  if (parsed.substitutes) return false
-  return parsed.segments.every((s) => isReadOnlySegment(s, context))
+  return splitShellCommand(command).segments.every((s) => isReadOnlySegment(s, context))
 }

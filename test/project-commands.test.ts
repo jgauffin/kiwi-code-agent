@@ -12,7 +12,7 @@ const cwd = process.platform === 'win32' ? 'D:\\work\\repo' : '/work/repo'
 const defined: ProjectCommands = { scripts: new Set(['build', 'test', 'typecheck']), verify: ['dotnet test "{project}" --nologo', 'npm test'] }
 
 const policy = (project: ProjectCommands, rules: { allow?: string[]; deny?: string[] } = {}) =>
-  new PermissionPolicy(cwd, () => ({ allow: rules.allow ?? [], deny: rules.deny ?? [] }), () => project)
+  new PermissionPolicy(cwd, () => ({ allow: rules.allow ?? [], deny: rules.deny ?? [] }), { project: () => project })
 
 const asks = (command: string, project: ProjectCommands = defined, rules?: { allow?: string[]; deny?: string[] }) =>
   policy(project, rules).preToolUse({ toolName: 'Bash', input: { command }, toolUseId: 't' })

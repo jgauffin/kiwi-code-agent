@@ -1,5 +1,6 @@
 import type { CommandLine, FileEditChange, PermissionDecision, SessionEvent } from '../../agent/session/code-session'
-import { isShellTool, projectRuleFor, ruleLabel } from '../../agent/permissions/permission-rules'
+import { projectRuleFor, ruleLabel } from '../../agent/permissions/permission-rules'
+import { isShellTool } from '../../agent/permissions/tool-classes'
 import type { RememberedRules } from '../protocol'
 import { editDiffView, fileLink } from './edit-diff'
 import { PermissionDecidedEvent } from './events'

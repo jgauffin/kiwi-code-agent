@@ -1,5 +1,5 @@
 import type { SessionEvent } from '../../agent/session/code-session'
-import { isShellTool } from '../../agent/permissions/permission-rules'
+import { isShellTool } from '../../agent/permissions/tool-classes'
 import { splitShellCommand } from '../../agent/permissions/shell-split'
 import { renderAnsi } from './ansi'
 import { editDiffView, fileLink } from './edit-diff'
