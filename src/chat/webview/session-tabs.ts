@@ -1,7 +1,7 @@
 import { compileTemplate } from '@relax.js/core/html'
 import type { ResumableChat, ResumablePlan, SessionTab } from '../protocol'
 import type { SessionStatus } from '../../agent/session/session-status'
-import { NewSessionViewRequestedEvent, PlanResumeRequestedEvent, SessionClosedEvent, SessionSelectedEvent } from './events'
+import { NewSessionRequestedEvent, NewSessionViewRequestedEvent, PlanResumeRequestedEvent, SessionClosedEvent, SessionSelectedEvent } from './events'
 
 const STATUS: Record<SessionStatus, { icon: string; label: string }> = {
   idle: { icon: '○', label: 'waiting for you' },
@@ -45,9 +45,18 @@ export class SessionTabs extends HTMLElement {
         <li class="tab new {{newState}}" title="New session" r-click="add()">+</li>
       </ul>
       <div class="menu">
-        <button type="button" class="old {{openState}}" title="Pick up a plan or an earlier chat" r-click="toggle(event)">↩</button>
+        <button type="button" class="old {{openState}} {{unfiledState}}" title="{{menuTitle}}" r-click="toggle(event)">↩<span class="count" if="unfiled">{{unfiled}}</span></button>
         <ul class="picks" if="open">
           <li class="empty" unless="any">Nothing to pick up yet.</li>
+          <li if="unfiled">
+            <button type="button" class="pick unfiled" title="Start a session that files them into the specs and docs they reach, each write confirmed by you." r-click="file()">
+              <span class="icon">🗂</span>
+              <span class="what">
+                <strong>{{unfiledLabel}}</strong>
+                <span class="hint">decided, not yet in the specs or docs</span>
+              </span>
+            </button>
+          </li>
           <li loop="p in plans">
             <button type="button" class="pick plan {{p.status}}" title="Open the plan session behind this spec, or start one on it." r-click="resume(p)">
               <span class="icon">📐</span>
@@ -74,6 +83,8 @@ export class SessionTabs extends HTMLElement {
   private creating = false
   private plans: PlanRow[] = []
   private chats: ChatRow[] = []
+  /** Decisions waiting to be filed: pending work, so the menu says so while it is closed. */
+  private unfiled = 0
   private open = false
   /** A click anywhere else is a click past the open list, and closes it. */
   private readonly dismiss = (event: Event): void => {
@@ -92,11 +103,12 @@ export class SessionTabs extends HTMLElement {
     document.removeEventListener('click', this.dismiss)
   }
 
-  update(tabs: SessionTab[], creating: boolean, pick: { plans: ResumablePlan[]; chats: ResumableChat[] }): void {
+  update(tabs: SessionTab[], creating: boolean, pick: { plans: ResumablePlan[]; chats: ResumableChat[]; unfiled: number }): void {
     this.tabs = tabs
     this.creating = creating
     this.plans = pick.plans.map((p) => ({ ...p, hint: STATUS_HINT[p.status] }))
     this.chats = pick.chats.map((c) => ({ ...c, hint: when(c.startedAt) }))
+    this.unfiled = pick.unfiled
     this.render()
   }
 
@@ -112,9 +124,13 @@ export class SessionTabs extends HTMLElement {
         newState: this.creating ? 'active' : '',
         open: this.open,
         openState: this.open ? 'active' : '',
-        any: this.plans.length + this.chats.length > 0,
+        any: this.plans.length + this.chats.length + this.unfiled > 0,
         plans: this.plans,
         chats: this.chats,
+        unfiled: this.unfiled,
+        unfiledState: this.unfiled > 0 ? 'waiting' : '',
+        unfiledLabel: `${this.unfiled} unfiled decision${this.unfiled === 1 ? '' : 's'}`,
+        menuTitle: this.unfiled > 0 ? `Pick up a plan or an earlier chat; ${this.unfiled} unfiled decision${this.unfiled === 1 ? '' : 's'} to file` : 'Pick up a plan or an earlier chat',
       },
       {
         select: (t: TabRow) => this.dispatchEvent(new SessionSelectedEvent(t.id)),
@@ -137,6 +153,11 @@ export class SessionTabs extends HTMLElement {
           this.open = false
           this.render()
           this.dispatchEvent(new SessionSelectedEvent(c.sessionId))
+        },
+        file: () => {
+          this.open = false
+          this.render()
+          this.dispatchEvent(new NewSessionRequestedEvent('file-decisions', undefined, undefined))
         },
       },
     )

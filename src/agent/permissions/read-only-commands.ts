@@ -1,18 +1,20 @@
-import { commandName, unwrapCommand } from './command-wrappers'
+import { commandName, runCommand, unwrapCommand } from './command-wrappers'
 import { splitShellCommand, type ShellSegment } from './shell-split'
 
 /**
- * Commands that only inspect: they never change files, the repository or
- * the machine, so running them needs no permission. Anything not listed is
- * presumed to mutate. A command that can go either way is judged by its
- * arguments below.
+ * Commands that only inspect, whatever their arguments: they never change
+ * files, the repository or the machine, so running them needs no permission.
+ * Anything not listed is presumed to mutate. A command that some argument
+ * turns into a write or a program launch is judged by its arguments below
+ * instead, so this list stays safe for arguments nobody can read, such as
+ * those `xargs` adds.
  */
 const READ_ONLY = new Set([
-  'ls', 'dir', 'cat', 'head', 'tail', 'less', 'more', 'wc', 'sort', 'uniq', 'cut', 'tr', 'tac', 'nl', 'column',
-  'grep', 'egrep', 'fgrep', 'rg', 'ag', 'diff', 'cmp', 'comm', 'jq', 'yq',
-  'cd', 'pwd', 'echo', 'printf', 'true', 'false', 'test', '[', 'which', 'type', 'where', 'whoami', 'hostname', 'date', 'uname',
+  'ls', 'dir', 'cat', 'head', 'tail', 'more', 'wc', 'cut', 'tr', 'tac', 'nl', 'column',
+  'grep', 'egrep', 'fgrep', 'diff', 'cmp', 'comm', 'jq',
+  'pwd', 'echo', 'printf', 'true', 'false', 'test', '[', 'which', 'type', 'where', 'whoami', 'uname',
   // `env` is not here: it runs a command, so it is unwrapped instead, and bare `env` that only prints comes out empty.
-  'printenv', 'stat', 'file', 'du', 'df', 'tree', 'basename', 'dirname', 'realpath', 'readlink',
+  'printenv', 'stat', 'du', 'df', 'basename', 'dirname', 'realpath', 'readlink',
   'md5sum', 'sha1sum', 'sha256sum', 'tasklist', 'ps', 'uptime',
   // Shell builtins that touch only the shell's own state. `eval`, `exec`, `source`, `.` and `trap` run code and are not here.
   ':', '[[', 'read', 'export', 'unset', 'set', 'shift', 'local', 'declare', 'typeset', 'readonly', 'break', 'continue', 'return', 'exit', 'wait', 'sleep',
@@ -35,23 +37,89 @@ function subcommandMutates(command: string, sub: string, args: string[]): boolea
     if (sub === 'remote') return args.length > 0 && args[0] !== '-v' && args[0] !== 'show' && args[0] !== 'get-url'
     if (sub === 'config') return !args.includes('--get') && !args.includes('--list') && !args.includes('-l') && !args.includes('--get-all')
     if (sub === 'reflog') return args.some((a) => a === 'expire' || a === 'delete')
+    if (sub === 'log' || sub === 'show' || sub === 'diff' || sub === 'shortlog') return args.some((a) => longFlag(a, '--output'))
+    // `-O` opens the matches in a program it names.
+    if (sub === 'grep') return args.some((a) => longFlag(a, '--open-files-in-pager') || shortFlags(a, 'efABCm').includes('O'))
   }
+  if (command === 'go' && sub === 'env') return args.some((a) => /^--?[wu](=|$)/.test(a))
   return false
 }
 
-/** Read-only commands that turn into writes or code execution with these arguments. */
+/** Commands that write a file or launch a program given these arguments, and only inspect otherwise. */
 function argumentsMutate(command: string, args: string[]): boolean {
   switch (command) {
     case 'find':
-      return args.some((a) => a === '-delete' || a === '-exec' || a === '-execdir' || a === '-ok' || a === '-okdir' || a === '-fprint')
+      return args.some((a) => ['-delete', '-exec', '-execdir', '-ok', '-okdir', '-fprint', '-fprint0', '-fprintf', '-fls'].includes(a))
     case 'sed':
       return args.some((a) => a === '-i' || a.startsWith('-i') || a === '--in-place' || a.startsWith('--in-place='))
+    case 'sort':
+      return args.some((a) => longFlag(a, '--output', '--compress-program') || shortFlags(a, 'ktSTo').includes('o'))
+    // `uniq IN OUT` writes OUT.
+    case 'uniq':
+      return operands(args, 'fsw', ['--skip-fields', '--skip-chars', '--check-chars']).length > 1
+    case 'tree':
+      return args.some((a) => /[oR]/.test(shortFlags(a, 'LPIoHT')))
+    case 'less':
+      return args.some((a) => a.startsWith('+') || longFlag(a, '--log-file', '--LOG-FILE') || /[oO]/.test(shortFlags(a, 'bhjkoOpPtTxyz')))
+    // Setting the clock, and an operand that is not a `+FORMAT` is a time to set it to.
+    case 'date':
+      return args.some((a) => longFlag(a, '--set') || shortFlags(a, 'dfrsI').includes('s')) || operands(args, 'dfr', ['--date', '--file', '--reference']).some((o) => !o.startsWith('+'))
+    // A name, or a file to read one from, sets the hostname.
+    case 'hostname':
+      return operands(args, '').length > 0 || args.some((a) => longFlag(a, '--file', '--boot') || /[Fb]/.test(shortFlags(a, 'F')))
+    // `--pre` runs a program over every file searched.
+    case 'rg':
+      return args.some((a) => longFlag(a, '--pre'))
+    case 'ag':
+      return args.some((a) => longFlag(a, '--pager'))
+    // `-i` edits in place and `-s` splits documents into files.
+    case 'yq':
+      return args.some((a) => longFlag(a, '--inplace', '--split-exp') || /[is]/.test(shortFlags(a, 'op')))
+    // `-C` compiles a magic file next to its source.
+    case 'file':
+      return args.some((a) => longFlag(a, '--compile') || shortFlags(a, 'eFfmP').includes('C'))
     default:
       return false
   }
 }
 
-const READ_ONLY_BY_ARGUMENTS = new Set(['find', 'sed'])
+const READ_ONLY_BY_ARGUMENTS = new Set(['find', 'sed', 'sort', 'uniq', 'tree', 'less', 'date', 'hostname', 'rg', 'ag', 'yq', 'file'])
+
+/** Does a `--name` word stand for one of these long flags? GNU tools take any unambiguous abbreviation of one. */
+function longFlag(arg: string, ...flags: string[]): boolean {
+  if (!arg.startsWith('--') || arg.length < 3) return false
+  const name = arg.split('=', 1)[0]!
+  return flags.some((flag) => flag.startsWith(name))
+}
+
+/** The letters a `-abc` word sets. A letter in `valued` takes the rest of the word as its value, and so does `=`. */
+function shortFlags(arg: string, valued: string): string {
+  if (!/^-[^-]/.test(arg)) return ''
+  let letters = ''
+  for (const letter of arg.slice(1)) {
+    if (letter === '=') break
+    letters += letter
+    if (valued.includes(letter)) break
+  }
+  return letters
+}
+
+/** The words that are neither a flag nor the value of one. */
+function operands(args: string[], valued: string, longValued: string[] = []): string[] {
+  const found: string[] = []
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!
+    if (arg === '--') return [...found, ...args.slice(i + 1)]
+    if (arg.startsWith('--')) {
+      if (!arg.includes('=') && longFlag(arg, ...longValued)) i++
+    } else if (arg.length > 1 && arg.startsWith('-')) {
+      const letters = shortFlags(arg, valued)
+      // A value letter that ends the word takes the next one.
+      if (valued.includes(letters.at(-1) ?? '-') && letters.length + 1 === arg.length) i++
+    } else found.push(arg)
+  }
+  return found
+}
 
 export type ReadOnlyContext = {
   /**
@@ -101,9 +169,12 @@ export function hidesCommandWord(segment: ShellSegment): boolean {
 export function isReadOnlySegment(segment: ShellSegment, context: ReadOnlyContext = {}): boolean {
   if (segment.writesFile || hidesCommandWord(segment)) return false
   // `timeout 30 ls` is a listing and `env FOO=1 rm -rf x` is a deletion: what runs is what counts.
-  const [raw, ...args] = unwrapCommand(segment.tokens)
+  const { tokens, argumentsFromInput } = runCommand(segment.tokens)
+  const [raw, ...args] = tokens
   if (!raw) return true
   const command = commandName(raw)
+  // Arguments nobody can read may be any at all, so only a command no argument turns into a write passes.
+  if (argumentsFromInput) return READ_ONLY.has(command)
   // Moving around inside the project changes nothing; going anywhere else needs a rule for that directory.
   if (command === 'cd') return args.length === 1 && (context.canEnter?.(args[0]!) ?? false)
   if (READ_ONLY.has(command)) return true

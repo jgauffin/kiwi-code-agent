@@ -29,6 +29,21 @@ describe('isReadOnlyCommand', () => {
       expect(isReadOnlyCommand(c), c).toBe(false)
   })
 
+  it('a_command_that_writes_or_runs_code_given_some_arguments_is_read_only_only_without_them', () => {
+    for (const c of [
+      'sort -n x', 'sort -k 2 -t , x', 'uniq -c x', 'uniq -f 2 x', 'tree -L 2 src', 'date +%Y', 'date -d yesterday', 'hostname', 'rg -n foo', 'ag foo',
+      'yq .a x.yaml', 'yq -o=json .a x', 'file x', 'git log --oneline', 'git grep -n foo', 'go env GOPATH', 'find . -name x -print',
+    ])
+      expect(isReadOnlyCommand(c), c).toBe(true)
+    for (const c of [
+      'sort -o out x', 'sort -no out x', 'sort --output=out x', 'sort --compress-program=sh x', 'uniq in out', 'uniq -c in out', 'tree -o out', 'tree -R -H . src',
+      'date -s 2020-01-01', 'date --set=now', 'date 0101000020', 'hostname evil', 'rg --pre ./run.sh foo', 'rg --pre=sh foo', 'ag --pager=sh foo',
+      'yq -i .a=1 x', 'yq -Pi .a=1 x', 'yq --inplace .a=1 x', 'yq -s .name x', 'file -C -m magic', 'git log --output=f', 'git diff --output f', 'git show --output=f',
+      'git grep -O foo', 'git grep --open-files-in-pager=vim foo', 'go env -w GOFLAGS=x', 'go env -u GOFLAGS', 'find . -fprintf out %p', 'find . -fls out', 'find . -fprint0 out',
+    ])
+      expect(isReadOnlyCommand(c), c).toBe(false)
+  })
+
   it('a_substitution_is_judged_by_the_command_it_holds_and_not_by_being_one', () => {
     for (const c of ['cat $(ls)', 'echo "x $(echo y | cut -c1-3)"', 'diff <(ls a) <(ls b)', 'X=$(git status) ls', 'echo $(( $(ls | wc -l) + 1 ))'])
       expect(isReadOnlyCommand(c), c).toBe(true)
@@ -56,6 +71,24 @@ describe('commands that wrap another command', () => {
     // Bare `env` prints the environment; `env -S` splits a string of its own into a command.
     for (const c of ['env', 'env FOO=1']) expect(isReadOnlyCommand(c), c).toBe(true)
     for (const c of ['env -S "rm -rf x"', 'env --unknown-flag ls', 'timeout --verbose']) expect(isReadOnlyCommand(c), c).toBe(false)
+  })
+
+  it('xargs_passes_only_a_command_that_no_argument_from_its_input_can_turn_into_a_write', () => {
+    for (const c of ['ls | xargs grep -n foo', 'find . -name "*.ts" | xargs wc -l', 'ls | xargs -0 cat', 'ls | xargs -n1 -P4 head -5', 'ls | xargs -I{} cat {}', 'ls | xargs -I {} cat {}', 'ls | xargs --max-args=2 cat', 'ls | xargs', 'ls | xargs timeout 5 cat'])
+      expect(isReadOnlyCommand(c), c).toBe(true)
+    // `echo -delete | xargs find .` deletes, and `echo -i | xargs sed s/a/b/ f` edits in place.
+    for (const c of ['ls | xargs rm', 'ls | xargs sed -n 1p', 'ls | xargs find .', 'ls | xargs sort', 'ls | xargs git log', 'ls | xargs cd', 'ls | xargs -I{} sh -c "cat {}"', 'ls | xargs --unknown cat', 'ls | xargs timeout 5 rm', 'timeout 5 xargs sort'])
+      expect(isReadOnlyCommand(c), c).toBe(false)
+  })
+
+  it('an_exact_rule_does_not_allow_a_command_xargs_may_hand_more_arguments_but_still_denies_it', async () => {
+    const ruled = (rules: Partial<PermissionRules>, command: string) =>
+      new PermissionPolicy(cwd, () => ({ allow: [], deny: [], ...rules })).preToolUse({ toolName: 'Bash', input: { command }, toolUseId: 't' })
+    expect(await ruled({ allow: ['Bash(git push origin main)'] }, 'git push origin main')).toEqual({ allow: true })
+    expect(await ruled({ allow: ['Bash(git push origin main)'] }, 'echo --force | xargs git push origin main')).toBeUndefined()
+    expect(await ruled({ allow: ['Bash(npm run:*)'] }, 'ls | xargs npm run lint')).toEqual({ allow: true })
+    expect(await ruled({ allow: ['Bash'], deny: ['Bash(npm publish)'] }, 'echo | xargs npm publish')).toMatchObject({ deny: expect.stringContaining('Bash(npm publish)') })
+    expect(await ruled({ allow: ['Bash'], deny: ['Bash(rm:*)'] }, 'ls | xargs rm')).toMatchObject({ deny: expect.stringContaining('Bash(rm:*)') })
   })
 
   it('a_rule_covers_the_command_it_names_however_it_is_wrapped', async () => {
@@ -346,6 +379,8 @@ describe('the Allow writes switch', () => {
     expect(await use(p, 'Bash', { command: 'rm -rf .' })).toBeUndefined()
     expect(await use(p, 'Bash', { command: 'rm -rf $BUILD' })).toBeUndefined()
     expect(await use(p, 'Bash', { command: 'rm -rf ~/cache' })).toBeUndefined()
+    // xargs adds paths the line does not name.
+    expect(await use(p, 'Bash', { command: 'echo ../other | xargs rm -rf src/a' })).toBeUndefined()
     // A redirect writes a file the words do not name, and a command that is neither read-only nor a write still asks.
     expect(await use(p, 'Bash', { command: 'mkdir dist > log.txt' })).toBeUndefined()
     expect(await use(p, 'Bash', { command: 'rm -rf dist && dotnet restore' })).toBeUndefined()

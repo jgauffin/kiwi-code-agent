@@ -10,6 +10,7 @@ const MODE_LABEL: Record<SessionMode, string> = {
   cleanup: 'Cleanup',
   docs: 'Evaluate docs',
   'docs-map': 'Docs map',
+  'file-decisions': 'File decisions',
 }
 
 const STATUS_ICON: Record<SessionStatus, { icon: string; color?: string }> = {

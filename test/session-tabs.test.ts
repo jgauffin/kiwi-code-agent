@@ -11,10 +11,10 @@ const TABS: SessionTab[] = [{ id: 's1', title: 'Orders', mode: 'plan', profileNa
 const PLAN: ResumablePlan = { feature: 'Order cancellation', status: 'draft' }
 const CHAT: ResumableChat = { sessionId: 's9', title: 'Why does the importer retry twice', startedAt: '2026-09-27T09:15:00.000Z' }
 
-function bar(plans: ResumablePlan[] = [PLAN], chats: ResumableChat[] = [CHAT]) {
+function bar(plans: ResumablePlan[] = [PLAN], chats: ResumableChat[] = [CHAT], unfiled = 0) {
   const node = new SessionTabs()
   document.body.appendChild(node)
-  node.update(TABS, false, { plans, chats })
+  node.update(TABS, false, { plans, chats, unfiled })
   return node
 }
 
@@ -81,7 +81,7 @@ describe('SessionTabs resume menu', () => {
     const node = bar()
     opener(node).click()
 
-    node.update(TABS, false, { plans: [{ ...PLAN, status: 'approved' }], chats: [CHAT] })
+    node.update(TABS, false, { plans: [{ ...PLAN, status: 'approved' }], chats: [CHAT], unfiled: 0 })
 
     expect(picks(node)[0]!.classList.contains('approved')).toBe(true)
     node.remove()
@@ -92,6 +92,35 @@ describe('SessionTabs resume menu', () => {
     opener(node).click()
 
     expect(node.querySelector('.menu .empty')!.textContent).toContain('Nothing to pick up')
+    node.remove()
+  })
+
+  it('unfiled_decisions_show_their_count_on_the_closed_menu_and_come_first_when_it_opens', () => {
+    const node = bar([PLAN], [], 3)
+    expect(opener(node).querySelector('.count')!.textContent).toBe('3')
+
+    opener(node).click()
+
+    expect(names(node)).toEqual(['3 unfiled decisions', 'Order cancellation'])
+    node.remove()
+  })
+
+  it('picking_the_unfiled_decisions_asks_for_a_filing_session', () => {
+    const node = bar([], [], 1)
+    let seen: unknown
+    node.addEventListener(events.NewSessionRequestedEvent.type, (e) => (seen = e.mode))
+
+    opener(node).click()
+    picks(node)[0]!.click()
+
+    expect(seen).toBe('file-decisions')
+    expect(node.querySelector('.menu .picks')).toBeNull()
+    node.remove()
+  })
+
+  it('with_nothing_unfiled_the_menu_shows_no_count', () => {
+    const node = bar()
+    expect(opener(node).querySelector('.count')).toBeNull()
     node.remove()
   })
 })

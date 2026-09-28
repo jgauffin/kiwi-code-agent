@@ -25,3 +25,7 @@ The Plan view is one card per scenario and follows the stage:
 The spec is committed; the review, decisions and tasks are working files under `.agent/plan/`. A week after they were last touched, the working files of a verified feature, or of a spec that is gone, are deleted when the extension starts, and the verified feature's spec is marked `status: implemented` first. A draft or a feature still being built keeps them however old.
 
 *KiwiAgent: Migrate plans* brings plans written before the contract into it; old ids become names until the planner is asked to name them.
+
+## Unfiled decisions
+
+What you decide outside planning reaches the next planner. An answer to an implementer's question amends the rules of the task it asked about. Anything that reaches other features, from an implement run, a plan session or a chat, goes into `plan/unfiled-decisions.md` (`### Title`, `- decided:`, `- affects:`), which the planner reads as your latest word. The ↩ menu shows how many are waiting; picking them starts *File decisions*, a session with the planner's read scope. It proposes where each entry goes, amends the specs and docs you pick, one confirmed write at a time, and deletes an entry once it is filed. An implemented spec is not amended: the change is a feature to plan.

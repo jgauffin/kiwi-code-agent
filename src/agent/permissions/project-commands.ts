@@ -1,4 +1,4 @@
-import { commandName, unwrapCommand } from './command-wrappers'
+import { commandName, runCommand } from './command-wrappers'
 import type { ShellSegment } from './shell-split'
 
 /**
@@ -34,7 +34,9 @@ const ELSEWHERE = /^(--prefix|-C|--dir|--cwd|-w|--workspace|--workspaces|-F|--fi
 export function projectCommandOf(segment: ShellSegment, project: ProjectCommands): string | undefined {
   // A redirect writes a file the command itself never names, whatever it runs.
   if (segment.writesFile) return undefined
-  const tokens = unwrapCommand(segment.tokens)
+  const { tokens, argumentsFromInput } = runCommand(segment.tokens)
+  // Arguments from input can send a script to another package, whose scripts are not the ones read.
+  if (argumentsFromInput) return undefined
   if (scriptOf(tokens, project.scripts)) return 'package.json script'
   if (project.verify.some((template) => runsTemplate(tokens, template))) return 'kiwiAgent.verify command'
   return undefined

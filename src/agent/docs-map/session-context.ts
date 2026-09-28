@@ -18,14 +18,15 @@ const DOCS_MAP = 'docs map'
 
 /**
  * The modes that start with the map: the blind planner, which has nothing but
- * the docs to work from, and the docs evaluation, which judges how they are
- * arranged. The map is derived from the docs alone, so a blind session reading
- * it stays blind.
+ * the docs to work from, the docs evaluation, which judges how they are
+ * arranged, and the filing of decisions, which finds the section each one
+ * belongs in. The map is derived from the docs alone, so a blind session
+ * reading it stays blind.
  *
  * The mode is taken as a plain string: this module is host-side and mechanical,
  * and reaches for nothing in the session layer.
  */
-export const wantsDocsMap = (mode: string): boolean => mode === 'plan' || mode === 'docs'
+export const wantsDocsMap = (mode: string): boolean => mode === 'plan' || mode === 'docs' || mode === 'file-decisions'
 
 export type DocsMapSource = GeneratedSource
 export type DocsMapContext = GeneratedContext

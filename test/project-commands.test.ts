@@ -37,6 +37,10 @@ describe('commands the project defines for itself', () => {
     }
   })
 
+  it('a_script_xargs_hands_arguments_prompts_because_they_may_send_it_to_another_package', async () => {
+    expect(await asks('echo --prefix=../other | xargs npm run build')).toBeUndefined()
+  })
+
   it('a_script_whose_output_is_redirected_into_a_file_prompts_for_the_file_it_writes', async () => {
     expect(await asks('npm run build > dist/log.txt')).toBeUndefined()
     // A redirect to nowhere writes nothing.

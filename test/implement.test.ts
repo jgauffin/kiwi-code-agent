@@ -3,6 +3,7 @@ import { IMPLEMENT_TOOLS, assertImplementable, fixKickoff, implementPrompt, impl
 import { decisions } from '../src/agent/phases/decisions'
 import type { SpecState } from '../src/agent/phases/spec-file'
 import { parseSpecText } from '../src/agent/phases/spec-model'
+import { UNFILED_DECISIONS } from '../src/agent/phases/unfiled-decisions'
 import { board as boardOf, task, tasksState as board } from './task-board-fixture'
 
 const cwd = process.platform === 'win32' ? 'D:\\work\\repo' : '/work/repo'
@@ -56,7 +57,7 @@ describe('implement phase', () => {
     expect(prompt).toContain('search only for what they do not answer')
     expect(prompt).toContain('docs/')
     expect(IMPLEMENT_TOOLS).toEqual([
-      'Read', 'Write', 'Edit', 'Move', 'Copy', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'MarkdownSearch', 'CodeOutline', 'CodeSearch', 'Bash', 'Skill', 'AskUser',
+      'Read', 'Write', 'Edit', 'Move', 'Copy', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'MarkdownSearch', 'CodeOutline', 'CodeSearch', 'Bash', 'RunScript', 'Skill', 'AskUser',
       'ReadTasks', 'UpdateTask',
     ])
   })
@@ -118,8 +119,15 @@ describe('implement phase', () => {
   })
 
   it('the_implementer_is_not_sent_to_the_decisions_file_since_its_kickoff_carries_the_rulings_it_needs', () => {
-    expect(implementPrompt('Order cancellation', cwd)).not.toContain('decisions.md')
+    expect(implementPrompt('Order cancellation', cwd)).not.toContain('.decisions.md')
     expect(taskKickoff(onBoard, 'Cancel', spec)).not.toContain('decisions')
+  })
+
+  it('an_answer_on_the_tasks_own_rules_amends_the_spec_and_one_reaching_further_is_left_unfiled_for_the_planner', () => {
+    const prompt = implementPrompt('Order cancellation', cwd)
+    expect(prompt).toContain(UNFILED_DECISIONS)
+    expect(prompt).toContain('a rule the task delivers')
+    expect(prompt).not.toContain('The spec and the decisions file are not yours to change')
   })
 })
 

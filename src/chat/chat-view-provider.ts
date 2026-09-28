@@ -61,6 +61,8 @@ import { buildRepoMap } from '../agent/repo-map/build-map'
 import { finishDocsMap, planDocsMap, readDocsSummary, startDocsMap, type DocsMapResult } from '../agent/docs-map/build'
 import { docsMapKickoff } from '../agent/phases/docs-map'
 import { docsEvaluationKickoff } from '../agent/phases/docs-evaluation'
+import { fileDecisionsKickoff } from '../agent/phases/file-decisions'
+import { readUnfiled } from '../agent/phases/unfiled-decisions'
 import { sharedBuild } from '../agent/session/generated-context'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative } from 'node:path'
@@ -326,7 +328,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       void this.sendState()
     }
     if (event.type === 'turn_done' && !event.isError && record?.mode === 'implement' && record.feature) {
-      void this.followBoard(record.feature)
+      const feature = record.feature
+      // A task run under the plan follows its amendment in followTask, before the next task starts.
+      if (record.parentId) void this.followBoard(feature)
+      else void this.followAmendment(feature).then(() => this.followBoard(feature))
     }
     if (event.type === 'turn_done' && record?.mode === 'plan' && record.feature) {
       // However the turn ended, the rulings are no longer in flight: Approve is the user's again, on the spec as it stands.
@@ -460,6 +465,22 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
+   * An implementer's turn ended with the spec changed under the board: the
+   * user's answer amended a rule. The board is derived again, keeping its
+   * progress, without a check against the code: the run that amended the rule
+   * has read that code already.
+   */
+  private async followAmendment(feature: string): Promise<void> {
+    const spec = await readSpecState(specPath(this.workspaceRoot, feature))
+    const path = tasksPath(this.workspaceRoot, feature)
+    if (!spec.exists || !tasksStale(spec, await readTasks(path))) return
+    const existing = await readBoard(path)
+    if (!existing) return
+    await writeBoard(path, deriveBoard(parseSpec(spec.body), existing))
+    await this.sendState()
+  }
+
+  /**
    * Runs the test commands over the tasks' files, records the outcome, and
    * hands a failure to the implementer, up to the budget of consecutive
    * failures; past it the failed record waits for the user. A manual run
@@ -572,14 +593,21 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   /**
    * A task run's turn ended. Its task settled: the run is closed and the next
    * task's run starts. Not settled: the run waits for the user, who can carry
-   * it on. A run that fixed a failed sweep hands the board back to the sweep.
+   * it on. A run that fixed a failed sweep is closed and hands the board back
+   * to the sweep.
    */
   private async followTask(record: SessionRecord, event: SessionEvent): Promise<void> {
     // The run moves its task on the board; the plan view shows the board, so it follows.
     if (event.type === 'tool_result' && this.underActiveTab(record)) void this.sendState()
     if (event.type !== 'turn_done' || event.isError) return
     const feature = record.feature!
-    if (record.task === undefined) return this.followBoard(feature)
+    await this.followAmendment(feature)
+    if (record.task === undefined) {
+      // A fix run is over once the board goes back to the test run; left open, it holds the plan's tab against the cleanup.
+      if (!verificationDue(await readTasks(tasksPath(this.workspaceRoot, feature)))) return
+      await this.sessions.close(record.id)
+      return this.verify(feature, false)
+    }
     const board = await readBoard(tasksPath(this.workspaceRoot, feature))
     if (!board || !taskSettled(board, record.task)) return
     await this.sessions.close(record.id)
@@ -647,12 +675,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
    * were one run per task, so none of them holds all of the feature's files.
    */
   private async runCleanup(feature: string, picked?: string[]): Promise<void> {
-    if (this.cleanups.get(feature)?.live) return
+    const refuse = (why: string) => void vscode.window.showWarningMessage(`KiwiAgent: cannot start the cleanup: ${why}`)
+    if (this.cleanups.get(feature)?.live) return refuse('one is already running')
     const relativeTo = (file: string) => relative(this.workspaceRoot, file).split('\\').join('/')
     const flagged = (this.sweeps.get(feature) ?? []).filter((u) => picked === undefined || picked.includes(relativeTo(u.path)))
-    if (flagged.length === 0) return
+    if (flagged.length === 0) return refuse('none of the picked files are in the last size sweep')
     const parent = this.sessions.latest('plan', feature) ?? this.sessions.list().find((r) => r.mode === 'implement' && r.feature === feature && !r.parentId)
-    if (!parent || this.sessions.liveChildOf(parent.id)) return
+    if (!parent) return refuse(`no plan session is left for "${feature}"`)
+    const busy = this.sessions.liveChildOf(parent.id)
+    if (busy) return refuse(`"${busy.title}" is still running under the plan; close it first`)
     const paths = [...new Set(flagged.map((u) => relativeTo(u.path)))]
     const child = await this.sessions.create(this.profileFor('cleanup'), 'cleanup', feature, { parentId: parent.id, files: paths })
     this.cleanups.set(feature, { live: true, text: 'Splitting oversized units…' })
@@ -977,10 +1008,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         await this.close(message.sessionId)
         return
       case 'new_session': {
+        // One filing at a time: a second would propose the same entries again.
+        const filing = message.mode === 'file-decisions' ? this.sessions.list().find((r) => r.mode === 'file-decisions' && this.sessions.isLive(r.id)) : undefined
+        if (filing) return this.open(filing.id)
         const prompt = withLinkedFiles(message.prompt ?? '', message.files ?? [])
-        // The docs card has nothing to fill in, so its session starts on the job rather than waiting for a prompt.
-        const first = prompt !== '' ? prompt : message.mode === 'docs' ? docsEvaluationKickoff() : undefined
-        await this.newSession(message.mode, message.feature, first)
+        // The docs card and the filing have nothing to fill in, so their sessions start on the job rather than waiting for a prompt.
+        const kickoff = message.mode === 'docs' ? docsEvaluationKickoff() : message.mode === 'file-decisions' ? fileDecisionsKickoff() : undefined
+        await this.newSession(message.mode, message.feature, prompt !== '' ? prompt : kickoff)
         return
       }
       case 'resume_plan':
@@ -1353,6 +1387,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       void vscode.window.showErrorMessage(`KiwiAgent: cannot list plans: ${error instanceof Error ? error.message : String(error)}`)
       return []
     })
+    const unfiled = await readUnfiled(this.workspaceRoot).catch((error: unknown) => {
+      void vscode.window.showErrorMessage(`KiwiAgent: cannot read the unfiled decisions: ${error instanceof Error ? error.message : String(error)}`)
+      return []
+    })
     // The switches belong to the run the person is talking to, not to the session the tab is keyed by.
     const run = this.activeRun()
     // Planning phases auto-allow their in-scope writes and deny the rest, so the switch has nothing to decide there.
@@ -1368,6 +1406,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       ...(active ? { currentRun: active } : {}),
       plans: plans.flatMap((p) => (p.status === 'verified' ? [] : [{ feature: p.feature, status: p.status }])),
       chats: this.pastChats(tabs),
+      unfiled: unfiled.length,
       profiles: this.profileDefaults.read(),
       models: this.registeredModels(),
     })

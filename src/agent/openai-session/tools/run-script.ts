@@ -50,7 +50,7 @@ export function runScriptTool(): Tool<typeof schema> {
   return {
     name: 'RunScript',
     description:
-      'Runs a JavaScript program that reads and analyses files or command output, or edits many files, in one step. It returns only what the program returns or logs, and edits are shown to the user together and applied only once approved. Before writing a script, call the Skill tool with name "run-script": it lists the functions available and gives examples.',
+      'Runs a JavaScript program (the body of an async function) that reads and analyses files or command output, or edits many files, in one step: the tool for what you would otherwise write in python, node or powershell through the shell. Its functions: read(path), readdir(path), exists(path), write(path, content), edit({ file_path, old_string, new_string, replace_all }), replace(path, regex, replacement, flags), preview(), glob({ pattern, path }), grep({ pattern, path, include }), jsonQuery(args), jsonSchema(args), codeOutline({ path, symbol }), bash({ command }); String, RegExp, JSON and the rest of plain JavaScript work, Node modules and the network do not. It returns only what the program returns or logs, and edits are shown to the user together and applied only once approved. The run-script skill has the details and examples.',
     schema,
     // A script can do nothing on its own; every call it makes is gated when made.
     readOnly: true,

@@ -1,4 +1,4 @@
-import { commandName, unwrapCommand } from './command-wrappers'
+import { commandName, runCommand } from './command-wrappers'
 import type { ShellSegment } from './shell-split'
 import { TRANSFER_TOOLS } from './tool-classes'
 
@@ -64,9 +64,12 @@ export function toolWriteTargets(toolName: string, input: unknown): WriteTargets
 export function commandWriteTargets(segment: ShellSegment): WriteTargets {
   // The redirect target is a second write this segment's words do not name.
   if (segment.writesFile) return undefined
-  const [raw, ...args] = unwrapCommand(segment.tokens)
+  const { tokens, argumentsFromInput } = runCommand(segment.tokens)
+  const [raw, ...args] = tokens
   if (!raw) return undefined
   if (!WRITE_COMMANDS.has(commandName(raw).toLowerCase())) return undefined
+  // `xargs rm` removes whatever its input names.
+  if (argumentsFromInput) return []
   const operands = args.filter((arg) => arg !== '--' && !arg.startsWith('-'))
   return operands.some((operand) => UNRESOLVABLE.test(operand)) ? [] : operands
 }

@@ -85,7 +85,8 @@ export function nextStatus(current: SessionStatus, mode: SessionMode, event: Ses
       if (event.isError) return 'error'
       // A card still on screen outlives the turn that asked: it is answered, late, on the session's next turn.
       if (current === 'needs_answer') return current
-      return mode === 'chat' ? 'idle' : 'needs_human'
+      // A cleanup's outcome is the plan bar's line; the user can chat on from there but owes it nothing.
+      return mode === 'chat' || mode === 'cleanup' ? 'idle' : 'needs_human'
     case 'error':
       return event.fatal ? 'error' : current
     case 'ended':

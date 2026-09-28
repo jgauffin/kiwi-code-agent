@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { buildSystemPrompt } from '../src/agent/openai-session/system-prompt'
+import { CHAT_DECISIONS } from '../src/agent/phases/unfiled-decisions'
 
 let cwd: string
 let home: string
@@ -50,5 +51,9 @@ describe('buildSystemPrompt', () => {
     await file(join(cwd, 'docs', 'prompt.md'), 'profile prompt')
     const prompt = await buildSystemPrompt(cwd, 'docs/prompt.md', home)
     expect(prompt.indexOf('project claude')).toBeLessThan(prompt.indexOf('profile prompt'))
+  })
+
+  it('a_decision_settled_in_chat_is_recorded_as_unfiled_for_the_blind_planner', async () => {
+    expect(await buildSystemPrompt(cwd, undefined, home)).toContain(CHAT_DECISIONS)
   })
 })

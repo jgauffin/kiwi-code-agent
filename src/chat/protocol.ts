@@ -125,6 +125,8 @@ export type ToWebview =
       plans: ResumablePlan[]
       /** Chats closed but not forgotten, newest first, for the same list. */
       chats: ResumableChat[]
+      /** Decisions in `plan/unfiled-decisions.md` waiting to be filed into the specs and docs, for the same list. */
+      unfiled: number
       /** The profiles by name and which of them new sessions get, for the new-session screen's pickers. */
       profiles: ProfileDefaults
       /** Every model a provider serves, for the composer's model switch on a chat session. */

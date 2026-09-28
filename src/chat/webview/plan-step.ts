@@ -25,6 +25,17 @@ export const STEP_LABEL: Record<Step, string> = {
   cleanup: 'Cleanup',
 }
 
+/** The runs whose conversations a step's chat holds: the planner and the check up to the build, the tasks through verification, the refactorings after. */
+export const STEP_RUNS: Record<Step, SessionMode[]> = {
+  plan: ['plan'],
+  review: ['plan'],
+  approve: ['plan', 'reconcile'],
+  rule: ['plan', 'reconcile'],
+  implement: ['implement'],
+  verify: ['implement'],
+  cleanup: ['cleanup'],
+}
+
 /** A tab of the plan view; each step works in one of them. */
 export type Tab = 'spec' | 'review' | 'decisions' | 'tasks' | 'cleanup'
 
@@ -65,6 +76,7 @@ const RUN_NOUN: Record<SessionMode, string> = {
   cleanup: 'the cleanup',
   docs: 'the docs session',
   'docs-map': 'the docs map',
+  'file-decisions': 'the filing session',
 }
 
 /** Who a step waits on while it is not the person's. */

@@ -29,8 +29,8 @@ describe('session status', () => {
     expect(run('implement', [{ type: 'user_message', text: 'x' }, turnDone()])).toEqual(['implementing', 'needs_human'])
   })
 
-  it('a_cleanup_run_is_implementing_and_its_stop_waits_for_the_host_like_the_human', () => {
-    expect(run('cleanup', [{ type: 'user_message', text: 'x' }, turnDone()])).toEqual(['implementing', 'needs_human'])
+  it('a_cleanup_run_is_implementing_and_its_stop_does_not_ask_for_the_human', () => {
+    expect(run('cleanup', [{ type: 'user_message', text: 'x' }, turnDone(), { type: 'ended' }])).toEqual(['implementing', 'idle', 'idle'])
   })
 
   it('a_pending_permission_is_its_own_status_until_it_is_answered', () => {

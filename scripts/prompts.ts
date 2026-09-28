@@ -18,6 +18,7 @@ import {
 } from '../src/agent/phases/blind-plan'
 import { CLEANUP_TOOLS, cleanupKickoff, cleanupPrompt } from '../src/agent/phases/cleanup'
 import { DOCS_EVALUATION_TOOLS, docsEvaluationKickoff, docsEvaluationPrompt } from '../src/agent/phases/docs-evaluation'
+import { FILE_DECISIONS_TOOLS, fileDecisionsKickoff, fileDecisionsPrompt } from '../src/agent/phases/file-decisions'
 import { DOCS_MAP_TOOLS, docsMapKickoff, docsMapPrompt } from '../src/agent/phases/docs-map'
 import { IMPLEMENT_TOOLS, implementKickoff, implementPrompt } from '../src/agent/phases/implement'
 import { RECONCILE_TOOLS, reconcileKickoff, reconcilePrompt } from '../src/agent/phases/reconcile'
@@ -104,6 +105,7 @@ async function main(): Promise<void> {
     `| plan | [blindPlanPrompt](#blindplanprompt) | docs map | ${BLIND_PLAN_TOOLS.join(', ')} |`,
     `| docs | [docsEvaluationPrompt](#docsevaluationprompt) | docs map | ${DOCS_EVALUATION_TOOLS.join(', ')} |`,
     `| docs-map | [docsMapPrompt](#docsmapprompt) | none | ${DOCS_MAP_TOOLS.join(', ')} |`,
+    `| file-decisions | [fileDecisionsPrompt](#filedecisionsprompt) | docs map | ${FILE_DECISIONS_TOOLS.join(', ')} |`,
     `| reconcile | [reconcilePrompt](#reconcileprompt) | repo map | ${RECONCILE_TOOLS.join(', ')} |`,
     `| implement | [implementPrompt](#implementprompt) | repo map | ${IMPLEMENT_TOOLS.join(', ')} |`,
     `| cleanup | [cleanupPrompt](#cleanupprompt) | none | ${CLEANUP_TOOLS.join(', ')} |`,
@@ -114,6 +116,7 @@ async function main(): Promise<void> {
     { title: 'blindPlanPrompt', source: at(`${phases}/blind-plan.ts`, 'export function blindPlanPrompt'), text: blindPlanPrompt(F, CWD) },
     { title: 'docsEvaluationPrompt', source: at(`${phases}/docs-evaluation.ts`, 'export function docsEvaluationPrompt'), text: docsEvaluationPrompt(CWD) },
     { title: 'docsMapPrompt', source: at(`${phases}/docs-map.ts`, 'export function docsMapPrompt'), text: docsMapPrompt(CWD) },
+    { title: 'fileDecisionsPrompt', source: at(`${phases}/file-decisions.ts`, 'export function fileDecisionsPrompt'), text: fileDecisionsPrompt(CWD) },
     { title: 'reconcilePrompt', source: at(`${phases}/reconcile.ts`, 'export function reconcilePrompt'), text: reconcilePrompt(F, CWD) },
     { title: 'implementPrompt', source: at(`${phases}/implement.ts`, 'export function implementPrompt'), note: 'Rendered with one example verify rule', text: implementPrompt(F, CWD, [verifyRule]) },
     { title: 'cleanupPrompt', source: at(`${phases}/cleanup.ts`, 'export function cleanupPrompt'), text: cleanupPrompt(F, CWD, { source: { functionLines: 25, typeLines: 200, fileLines: 400 }, tests: { functionLines: 60, typeLines: 600, fileLines: 1200 }, testGlobs: [] }) },
@@ -126,6 +129,7 @@ async function main(): Promise<void> {
 
   const messages: Entry[] = [
     { title: 'docsEvaluationKickoff', source: at(`${phases}/docs-evaluation.ts`, 'export function docsEvaluationKickoff'), text: docsEvaluationKickoff() },
+    { title: 'fileDecisionsKickoff', source: at(`${phases}/file-decisions.ts`, 'export function fileDecisionsKickoff'), text: fileDecisionsKickoff() },
     { title: 'docsMapKickoff', source: at(`${phases}/docs-map.ts`, 'export function docsMapKickoff'), text: docsMapKickoff(['docs/<doc>.md']) },
     { title: 'resumePlanPrompt', source: at(`${phases}/blind-plan.ts`, 'export function resumePlanPrompt'), text: resumePlanPrompt(F) },
     { title: 'migrateSpecPrompt', source: at(`${phases}/blind-plan.ts`, 'export function migrateSpecPrompt'), text: migrateSpecPrompt(F, ['<problem>']) },

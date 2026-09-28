@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { ScopeGuard, readableIn } from '../src/agent/phases/scope-guard'
 import { BLIND_PLAN_TOOLS, blindPlanPrompt, blindPlanScope, featureSlug, specPath } from '../src/agent/phases/blind-plan'
 import { composeHooks } from '../src/agent/session/hooks'
+import { fileDecisionsScope } from '../src/agent/phases/file-decisions'
+import { UNFILED_DECISIONS } from '../src/agent/phases/unfiled-decisions'
 
 const cwd = process.platform === 'win32' ? 'D:\\work\\repo' : '/work/repo'
 const guard = new ScopeGuard(cwd, blindPlanScope('Order cancellation', ['docs/api/**', 'docs/**/*.generated.md']))
@@ -90,6 +92,33 @@ describe('ScopeGuard for blind planning', () => {
     expect(await use('Read', { file_path: 'ReadMe.md' })).toBeUndefined()
     expect(await use('Read', { file_path: 'src/README.md' })).toMatchObject({ deny: expect.any(String) })
   })
+
+  it('the_unfiled_decisions_are_read_as_intent_and_a_decision_reaching_beyond_the_feature_is_added_without_a_prompt', async () => {
+    expect(await use('Read', { file_path: 'plan/unfiled-decisions.md' })).toBeUndefined()
+    expect(await use('Edit', { file_path: 'plan/unfiled-decisions.md' })).toEqual({ allow: true })
+  })
+})
+
+describe('ScopeGuard for filing decisions', () => {
+  const filing = new ScopeGuard(cwd, fileDecisionsScope(['docs/api/**']))
+  const file = (toolName: string, input: unknown) => filing.preToolUse({ toolName, input, toolUseId: 't' })
+
+  it('reads_what_a_planner_reads_and_never_the_code', async () => {
+    expect(await file('Read', { file_path: 'plan/unfiled-decisions.md' })).toBeUndefined()
+    expect(await file('Read', { file_path: 'plan/tenants.spec.md' })).toBeUndefined()
+    expect(await file('Read', { file_path: 'docs/intent/identity.md' })).toBeUndefined()
+    expect(await file('Read', { file_path: 'src/Tenants/Invite.cs' })).toMatchObject({ deny: expect.any(String) })
+    expect(await file('Read', { file_path: '.agent/plan/tenants.decisions.md' })).toMatchObject({ deny: expect.any(String) })
+    expect(await file('Read', { file_path: 'docs/api/tenants.md' })).toMatchObject({ deny: expect.any(String) })
+  })
+
+  it('removing_a_filed_entry_needs_no_prompt_but_every_spec_or_doc_write_is_asked', async () => {
+    expect(await file('Edit', { file_path: 'plan/unfiled-decisions.md' })).toEqual({ allow: true })
+    expect(await file('Edit', { file_path: 'plan/tenants.spec.md' })).toBeUndefined()
+    expect(await file('Write', { file_path: 'docs/intent/identity.md' })).toBeUndefined()
+    expect(await file('Write', { file_path: '.agent/plan/tenants.tasks.json' })).toMatchObject({ deny: expect.any(String) })
+    expect(await file('Bash', { command: 'ls' })).toMatchObject({ deny: expect.any(String) })
+  })
 })
 
 describe('blind plan helpers', () => {
@@ -131,6 +160,12 @@ describe('blind plan helpers', () => {
     expect(prompt).toContain('only when the user asks you to')
     expect(prompt).not.toContain('intent.md')
     expect(prompt).not.toContain('amendment')
+  })
+
+  it('prompt_reads_the_unfiled_decisions_as_the_users_latest_word_and_records_what_reaches_beyond_the_feature', () => {
+    const prompt = blindPlanPrompt('Order cancellation', cwd)
+    expect(prompt).toContain('plan/unfiled-decisions.md')
+    expect(prompt).toContain(UNFILED_DECISIONS)
   })
 })
 

@@ -1152,6 +1152,17 @@ chat-app {
           opacity: 1;
           border-bottom-color: var(--vscode-focusBorder);
         }
+
+        /* Decisions wait to be filed: the icon stands out with its count, in the bar's own colour. */
+        &.waiting {
+          opacity: 1;
+        }
+
+        & .count {
+          margin-left: 0.25rem;
+          font-size: 0.85em;
+          font-weight: 600;
+        }
       }
 
       & .picks {

@@ -5,7 +5,9 @@ import { DOC_READING } from '../openai-session/tools/markdown/outline-gate'
 import { CODE_OUTLINE_TOOL } from '../code-outline/code-outline-tool'
 import { CODE_READING } from '../code-outline/code-outline-gate'
 import { CODE_SEARCH_TOOL } from '../code-outline/code-search'
+import { SCRIPT_WRITING } from '../script/script-gate'
 import { rulingKind, type Decision } from './decisions'
+import { UNFILED_DECISIONS } from './unfiled-decisions'
 import type { SpecState } from './spec-file'
 import type { Item, Spec } from './spec-model'
 import { liveTasks, sameName, tasksDone, type Task, type TaskBoard, type TasksState } from './tasks-file'
@@ -14,7 +16,7 @@ import { verificationHandoffPrompt, type VerificationFailure, type VerifyRule } 
 
 /** AskUser is here so a fork the plan does not settle is ruled on by the user instead of blocking the task. */
 export const IMPLEMENT_TOOLS = [
-  'Read', 'Write', 'Edit', 'Move', 'Copy', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', MARKDOWN_SEARCH_TOOL, CODE_OUTLINE_TOOL, CODE_SEARCH_TOOL, 'Bash', 'Skill', ASK_USER_TOOL,
+  'Read', 'Write', 'Edit', 'Move', 'Copy', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', MARKDOWN_SEARCH_TOOL, CODE_OUTLINE_TOOL, CODE_SEARCH_TOOL, 'Bash', 'RunScript', 'Skill', ASK_USER_TOOL,
   READ_TASKS_TOOL, UPDATE_TASK_TOOL,
 ]
 
@@ -153,12 +155,15 @@ Narrow those same commands rather than commands of your own, so a green run of y
 
 Name every file you touched on the task's files, its tests included: the sweep runs over them, and tested is refused on a task that names none. When a decision only the user can make stands in the way (a fork the spec and the code leave open, which of two ways to take), put it with the \`${ASK_USER_TOOL}\` tool and carry on with the answer, rather than blocking the task or stopping.
 
+The next feature is planned blind from the docs and specs, so an answer that settles what the product does is recorded where that planner reads. An answer on a rule the task delivers amends the spec: the rule's text, or an edge case or a rule added in the task's scenario, in the spec's own shape and language, with every name kept. Prove it like any delivered rule. An answer that reaches beyond your task is recorded as unfiled: ${UNFILED_DECISIONS}
+
 Rules:
-- The spec and the decisions file are not yours to change.
+- The decisions file is not yours to change, and the spec only as above.
 - Never edit \`${DOCS_DIR}/\`: intent is the user's.
 - Read a file before editing it; read it again when a tool result says it changed underneath you. Do not re-explore what the hand-off already names.
 - ${DOC_READING}
 - ${CODE_READING} Before writing a test, outline the test file or folder it belongs in: the rule may already be proven, and the neighbouring tests show the pattern to follow.
+- ${SCRIPT_WRITING}
 - Shell commands already run in ${cwd}; do not cd there.
 - Tested means you ran the task's tests and they passed, not that you stopped. A task you marked tested without a run of your own is a false record.
 - When your task is tested or blocked, say in a sentence or two what you did and stop. The next task starts in a run of its own, and the full sweep runs once every task is tested; it is not your test run.`

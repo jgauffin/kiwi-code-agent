@@ -1,5 +1,6 @@
 import type { PlanState, RunRef, RunSection, ToWebview } from '../protocol'
 import type { SessionEvent } from '../../agent/session/code-session'
+import type { SessionMode } from '../../agent/session/session-manager'
 import { onMessage, post } from './vscode-api'
 import { ChatComposer } from './chat-composer'
 import { ChatTranscript } from './chat-transcript'
@@ -7,7 +8,7 @@ import { NewSessionView } from './new-session-view'
 import { PlanBar } from './plan-bar'
 import { PlanTabs } from './plan-tabs'
 import { PlanView } from './plan-view'
-import { planStep, tabFor, type Step, type Tab } from './plan-step'
+import { STEP_RUNS, planStep, tabFor, type Step, type Tab } from './plan-step'
 import { LinkedFilesRow } from './linked-files-row'
 import { SessionTabs } from './session-tabs'
 import {
@@ -46,7 +47,7 @@ import {
 } from './events'
 
 /** One run's section of the tab: the fold it sits in, and the conversation inside it. */
-type RunSectionView = { details: HTMLDetailsElement; transcript: ChatTranscript }
+type RunSectionView = { mode: SessionMode; details: HTMLDetailsElement; transcript: ChatTranscript }
 
 /**
  * Root of the chat UI. Talks to the extension host; children talk to it
@@ -74,6 +75,8 @@ export class ChatApp extends HTMLElement {
   private step: Step | undefined
   /** The conversation moved on while another tab was open; its tab is marked until the reader goes there. */
   private chatMoved = false
+  /** Runs that have spoken since the step began, shown even when the step's conversations are another run's. */
+  private readonly spoke = new Set<string>()
   /** The row waiting for the host to name the open file. */
   private linkTarget: LinkedFilesRow | undefined
 
@@ -157,7 +160,7 @@ export class ChatApp extends HTMLElement {
         const active = message.tabs.find((t) => t.active)
         this.activeSessionId = active?.id
         if (!active && !this.creating) this.showCreating(true)
-        this.tabs.update(message.tabs, this.creating, { plans: message.plans, chats: message.chats })
+        this.tabs.update(message.tabs, this.creating, { plans: message.plans, chats: message.chats, unfiled: message.unfiled })
         this.newSession.update(message.profiles)
         this.composer.setSwitches({
           allowWrites: message.allowWrites,
@@ -189,6 +192,8 @@ export class ChatApp extends HTMLElement {
         this.composer.setHeldByQuestion(this.anyOpenQuestion)
         // A run the reader has folded away still says that it moved, on its own header.
         if (!section.details.open) section.details.classList.add('moved')
+        this.spoke.add(message.run.sessionId)
+        this.scopeRuns()
         this.follow(message.event)
         break
       }
@@ -234,7 +239,7 @@ export class ChatApp extends HTMLElement {
     transcript.scrollHost = this.runs
     details.append(summary, transcript)
     this.runs.append(details)
-    const section = { details, transcript }
+    const section = { mode: run.mode, details, transcript }
     this.sections.set(run.sessionId, section)
     // A run that arrives while the tab is open is the newest: it takes the floor, and the one before it folds away.
     if (run.current || this.sections.size === 1) this.makeCurrent(section)
@@ -299,6 +304,7 @@ export class ChatApp extends HTMLElement {
     const step = planStep(this.plan).current
     if (step === this.step) return
     this.step = step
+    this.spoke.clear()
     this.planTab = tabFor(step, this.plan)
     if (this.view !== 'chat') this.view = this.planTab
   }
@@ -312,10 +318,37 @@ export class ChatApp extends HTMLElement {
   }
 
   private show(view: ViewTab): void {
+    const opening = view === 'chat' && this.view !== 'chat'
     this.view = view
     if (view !== 'chat') this.planTab = view
     else this.chatMoved = false
     this.layout()
+    if (opening) this.foldToFloor()
+  }
+
+  /**
+   * A feature's chat holds the step's conversations: the planner's while the
+   * spec is written, the tasks while they are built, the refactorings in
+   * cleanup. A run outside the step still shows while it asks the person
+   * something or has spoken since the step began, and the run that takes
+   * typing shows when the step has no conversation of its own, so nobody
+   * types into a hidden one.
+   */
+  private scopeRuns(): void {
+    const modes = this.plan ? STEP_RUNS[planStep(this.plan).current] : undefined
+    const inStep = (section: RunSectionView) => modes === undefined || modes.includes(section.mode)
+    const stepHasRuns = [...this.sections.values()].some(inStep)
+    for (const [id, section] of this.sections) {
+      const floorOfEmptyStep = !stepHasRuns && section.details.classList.contains('current')
+      section.details.hidden = !(inStep(section) || this.spoke.has(id) || floorOfEmptyStep || section.transcript.openCard() !== undefined)
+    }
+  }
+
+  /** Opening the chat shows the run in play and folds the rest, whatever the reader left open last time. */
+  private foldToFloor(): void {
+    const shown = [...this.sections.values()].filter((s) => !s.details.hidden)
+    const floor = shown.find((s) => s.details.classList.contains('current')) ?? shown.at(-1)
+    for (const section of shown) section.details.open = section === floor
   }
 
   /** A step, the bar's next-step link or a link between tabs opens a tab and lands somewhere on it; in the chat, on the card waiting for the person. */
@@ -337,6 +370,7 @@ export class ChatApp extends HTMLElement {
     const planShown = this.view !== 'chat' && plan?.body !== undefined
     this.planView.hidden = !planShown
     this.runs.hidden = this.creating || planShown
+    this.scopeRuns()
     this.planBar.update(plan)
     this.planTabs.update(plan, planShown ? this.view : 'chat', this.chatMoved)
     this.planView.update(plan, this.planTab)

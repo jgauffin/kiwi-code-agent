@@ -50,26 +50,69 @@ const WRAPPERS: Record<string, Unwrap> = {
   },
   /** `nohup COMMAND [ARG]...`. */
   nohup: (args) => args,
+  /** `xargs [OPTION]... [COMMAND [ARG]...]`; with no command it runs `echo`, which only prints. */
+  xargs: (args) => {
+    let i = 0
+    while (i < args.length && args[i]!.startsWith('-')) {
+      const arg = args[i]!
+      if (arg === '--') return args.slice(i + 1)
+      if (arg.startsWith('--')) {
+        const [name] = arg.split('=', 1)
+        if (XARGS_LONG_VALUED.has(name!)) i += arg.includes('=') ? 1 : 2
+        else if (XARGS_LONG_FLAGS.has(name!)) i += 1
+        else return undefined
+      } else if (XARGS_VALUED.includes(arg[1] ?? '-')) i += arg.length > 2 ? 1 : 2
+      else if (XARGS_OPTIONAL.includes(arg[1] ?? '-') || (arg.length > 1 && [...arg.slice(1)].every((flag) => XARGS_FLAGS.includes(flag)))) i += 1
+      else return undefined
+    }
+    return args.slice(Math.min(i, args.length))
+  },
 }
+
+/** xargs's single-letter flags: those that take no value, those that take one attached or next, and those whose value can only be attached. */
+const XARGS_FLAGS = '0prtxo'
+const XARGS_VALUED = 'adEILnPs'
+const XARGS_OPTIONAL = 'eil'
+/** Its long flags that take a value, attached with `=` or next; the rest take none, or one attached with `=` only. */
+const XARGS_LONG_VALUED = new Set(['--arg-file', '--delimiter', '--max-args', '--max-procs', '--max-chars', '--process-slot-var'])
+const XARGS_LONG_FLAGS = new Set(['--null', '--interactive', '--no-run-if-empty', '--verbose', '--exit', '--open-tty', '--eof', '--replace', '--max-lines'])
+
+/** Wrappers that add arguments of their own, read from input, to the command they run. */
+const FROM_INPUT = new Set(['xargs'])
 
 /** How many wrappers deep to look; each one takes at least its own name, so this is a bound, not a rule. */
 const DEPTH = 4
+
+/** The command a segment really runs. */
+export type RunCommand = {
+  tokens: string[]
+  /**
+   * A wrapper hands it arguments the line does not show, so it may run with
+   * any argument at all: `echo -delete | xargs find .` deletes.
+   */
+  argumentsFromInput: boolean
+}
 
 /**
  * The command a segment really runs, with any wrappers taken off. Empty tokens
  * mean nothing runs, which every caller already reads as harmless; a wrapper
  * that could not be read comes back untouched, so it is judged as itself.
  */
-export function unwrapCommand(tokens: string[]): string[] {
+export function runCommand(tokens: string[]): RunCommand {
   let current = tokens
+  let argumentsFromInput = false
   for (let depth = 0; depth < DEPTH; depth++) {
     const [raw, ...args] = current
-    if (raw === undefined) return current
+    if (raw === undefined) break
     const unwrap = WRAPPERS[commandName(raw)]
-    if (!unwrap) return current
+    if (!unwrap) break
     const wrapped = unwrap(args)
-    if (wrapped === undefined) return current
+    if (wrapped === undefined) break
+    argumentsFromInput ||= FROM_INPUT.has(commandName(raw))
     current = wrapped
   }
-  return current
+  return { tokens: current, argumentsFromInput }
 }
+
+/** The words of the command a segment really runs; see `runCommand`. */
+export const unwrapCommand = (tokens: string[]): string[] => runCommand(tokens).tokens

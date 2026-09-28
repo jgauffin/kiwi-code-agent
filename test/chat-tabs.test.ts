@@ -35,9 +35,11 @@ function plan(): PlanState {
 }
 
 const SESSION = 's1'
-const IMPLEMENT = 's2'
+const CHECK = 's2'
+const IMPLEMENT = 's6'
 
 const planRun = (current = true): RunRef => ({ sessionId: SESSION, mode: 'plan', title: 'Plan: Orders', current })
+const checkRun = (current = true): RunRef => ({ sessionId: CHECK, mode: 'reconcile', title: 'Check: Orders', current })
 const implementRun = (current = true): RunRef => ({ sessionId: IMPLEMENT, mode: 'implement', title: 'Implement: Orders', current })
 
 const state = (): Extract<ToWebview, { type: 'state' }> => ({
@@ -46,6 +48,7 @@ const state = (): Extract<ToWebview, { type: 'state' }> => ({
   plan: plan(),
   plans: [],
   chats: [],
+  unfiled: 0,
   profiles: { names: ['Claude'], active: 'Claude' },
   models: [],
 })
@@ -109,11 +112,11 @@ describe('the runs of one feature under one tab', () => {
   it('every_run_has_its_own_conversation_and_only_the_current_one_is_open', () => {
     const node = app([
       { ...planRun(false), events: [] },
-      { ...implementRun(), events: [] },
+      { ...checkRun(), events: [] },
     ])
     tab(node, 'Chat').click()
 
-    expect(sections(node).map((s) => s.querySelector('.run-head')?.textContent)).toEqual(['Plan: Orders', 'Implement: Orders'])
+    expect(sections(node).map((s) => s.querySelector('.run-head')?.textContent)).toEqual(['Plan: Orders', 'Check: Orders'])
     expect(sections(node).map((s) => s.open)).toEqual([false, true])
     node.remove()
   })
@@ -121,7 +124,7 @@ describe('the runs of one feature under one tab', () => {
   it('an_event_lands_in_the_run_that_sent_it_and_marks_that_run_when_it_is_folded_away', () => {
     const node = app([
       { ...planRun(false), events: [] },
-      { ...implementRun(), events: [] },
+      { ...checkRun(), events: [] },
     ])
     tab(node, 'Chat').click()
 
@@ -129,7 +132,7 @@ describe('the runs of one feature under one tab', () => {
 
     expect(section(node, SESSION).classList.contains('moved')).toBe(true)
     expect(section(node, SESSION).querySelector('.transcript')!.textContent).toContain('working')
-    expect(section(node, IMPLEMENT).querySelector('.transcript')!.textContent).not.toContain('working')
+    expect(section(node, CHECK).querySelector('.transcript')!.textContent).not.toContain('working')
     node.remove()
   })
 
@@ -137,10 +140,10 @@ describe('the runs of one feature under one tab', () => {
     const node = app()
     tab(node, 'Chat').click()
 
-    event(speaking, implementRun())
+    event(speaking, checkRun())
 
-    expect(sections(node).map((s) => s.dataset.session)).toEqual([SESSION, IMPLEMENT])
-    expect(section(node, IMPLEMENT).open).toBe(true)
+    expect(sections(node).map((s) => s.dataset.session)).toEqual([SESSION, CHECK])
+    expect(section(node, CHECK).open).toBe(true)
     expect(section(node, SESSION).open).toBe(false)
     node.remove()
   })
@@ -148,11 +151,11 @@ describe('the runs of one feature under one tab', () => {
   it('the_run_the_host_says_takes_typing_is_the_only_one_open', () => {
     const node = app([
       { ...planRun(false), events: [] },
-      { ...implementRun(), events: [] },
+      { ...checkRun(), events: [] },
     ])
     tab(node, 'Chat').click()
 
-    // The task run closed without a last word: the state alone says the planner has the floor again.
+    // The check closed without a last word: the state alone says the planner has the floor again.
     send({ ...state(), currentRun: SESSION })
 
     expect(sections(node).map((s) => s.open)).toEqual([true, false])
@@ -163,12 +166,12 @@ describe('the runs of one feature under one tab', () => {
   it('reading_an_earlier_run_is_not_folded_away_while_the_current_one_streams', () => {
     const node = app([
       { ...planRun(false), events: [] },
-      { ...implementRun(), events: [] },
+      { ...checkRun(), events: [] },
     ])
     tab(node, 'Chat').click()
     section(node, SESSION).open = true
 
-    event(speaking, implementRun())
+    event(speaking, checkRun())
 
     expect(section(node, SESSION).open).toBe(true)
     node.remove()
@@ -177,7 +180,7 @@ describe('the runs of one feature under one tab', () => {
   it('an_answer_is_addressed_to_the_run_that_asked', () => {
     const node = app([
       { ...planRun(false), events: [] },
-      { ...implementRun(), events: [] },
+      { ...checkRun(), events: [] },
     ])
     tab(node, 'Chat').click()
     sent.length = 0
@@ -187,6 +190,94 @@ describe('the runs of one feature under one tab', () => {
 
     // The card sits in the planner's section, so the decision goes there and not to the run holding the floor.
     expect(posted(sent, 'permission')).toMatchObject({ sessionId: SESSION, requestId: 'r1' })
+    node.remove()
+  })
+})
+
+describe('the chat holds the conversations of the step the flow is at', () => {
+  const TASK_1 = 's3'
+  const TASK_2 = 's4'
+  const CLEANUP = 's5'
+  const taskRun = (sessionId: string, current: boolean): RunRef => ({ sessionId, mode: 'implement', title: `Task ${sessionId}`, current })
+  const cleanupRun = (current = false): RunRef => ({ sessionId: CLEANUP, mode: 'cleanup', title: 'Cleanup: Orders', current })
+  const shown = (node: HTMLElement) => sections(node).filter((s) => !s.hidden).map((s) => s.dataset.session)
+
+  function appAt(at: Partial<PlanState>, runs: RunSection[]) {
+    const node = new ChatApp()
+    document.body.appendChild(node)
+    send({ ...state(), plan: { ...plan(), ...at } })
+    send({ type: 'transcript', sessionId: SESSION, runs })
+    return node
+  }
+
+  const implementing: Partial<PlanState> = { stage: 'under_development', status: 'approved' }
+  const cleaning: Partial<PlanState> = { stage: 'verified', status: 'implemented' }
+
+  it('cleanup_shows_only_the_refactorings', () => {
+    const node = appAt(cleaning, [
+      { ...planRun(false), events: [] },
+      { ...implementRun(true), events: [] },
+      { ...cleanupRun(), events: [] },
+    ])
+    tab(node, 'Chat').click()
+
+    expect(shown(node)).toEqual([CLEANUP])
+    node.remove()
+  })
+
+  it('implementation_shows_the_tasks_with_only_the_running_one_open', () => {
+    const node = appAt(implementing, [
+      { ...planRun(false), events: [] },
+      { ...checkRun(false), events: [] },
+      { ...implementRun(false), events: [] },
+      { ...taskRun(TASK_1, false), events: [] },
+      { ...taskRun(TASK_2, true), events: [] },
+    ])
+    tab(node, 'Chat').click()
+
+    expect(shown(node)).toEqual([IMPLEMENT, TASK_1, TASK_2])
+    expect(sections(node).filter((s) => !s.hidden).map((s) => s.open)).toEqual([false, false, true])
+    node.remove()
+  })
+
+  it('opening_the_chat_again_folds_what_the_reader_opened_back_to_the_running_task', () => {
+    const node = appAt(implementing, [
+      { ...taskRun(TASK_1, false), events: [] },
+      { ...taskRun(TASK_2, true), events: [] },
+    ])
+    tab(node, 'Chat').click()
+    section(node, TASK_1).open = true
+
+    tab(node, 'Spec').click()
+    tab(node, 'Chat').click()
+
+    expect(section(node, TASK_1).open).toBe(false)
+    expect(section(node, TASK_2).open).toBe(true)
+    node.remove()
+  })
+
+  it('a_run_outside_the_step_that_speaks_is_shown_so_nobody_answers_into_a_hidden_conversation', () => {
+    const node = appAt(cleaning, [
+      { ...implementRun(true), events: [] },
+      { ...cleanupRun(), events: [] },
+    ])
+    tab(node, 'Chat').click()
+    expect(shown(node)).toEqual([CLEANUP])
+
+    event(speaking, implementRun(true))
+
+    expect(shown(node)).toEqual([IMPLEMENT, CLEANUP])
+    node.remove()
+  })
+
+  it('a_step_with_no_conversation_of_its_own_shows_the_run_that_takes_typing', () => {
+    const node = appAt(cleaning, [
+      { ...planRun(false), events: [] },
+      { ...implementRun(true), events: [] },
+    ])
+    tab(node, 'Chat').click()
+
+    expect(shown(node)).toEqual([IMPLEMENT])
     node.remove()
   })
 })

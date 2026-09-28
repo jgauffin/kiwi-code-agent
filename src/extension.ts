@@ -28,6 +28,7 @@ import { skillTool } from './agent/openai-session/tools/skill'
 import { copyTool, moveTool } from './agent/openai-session/tools/move-copy'
 import { codeOutlineTool } from './agent/code-outline/code-outline-tool'
 import { CODE_READING, CodeOutlineGate } from './agent/code-outline/code-outline-gate'
+import { SCRIPT_WRITING, ScriptGate } from './agent/script/script-gate'
 import { codeSearchTool } from './agent/code-outline/code-search'
 import type { Tool } from './agent/openai-session/tools/tool'
 import { indexSkills } from './agent/skills/skill-index'
@@ -57,6 +58,8 @@ import { renderOutlineMap } from './agent/docs-map/outline-map'
 import { DOCS_MAP_TOOLS, docsMapPrompt, docsMapScope } from './agent/phases/docs-map'
 import { DocsMapContract } from './agent/docs-map/entry'
 import { DOCS_EVALUATION_TOOLS, docsEvaluationPrompt, docsEvaluationScope } from './agent/phases/docs-evaluation'
+import { FILE_DECISIONS_TOOLS, fileDecisionsPrompt, fileDecisionsScope } from './agent/phases/file-decisions'
+import { CHAT_DECISIONS, UnfiledContract } from './agent/phases/unfiled-decisions'
 import type { VerifyRule } from './agent/phases/verification'
 import {
   CHAT_PANEL_TYPE,
@@ -231,9 +234,10 @@ export function activate(context: vscode.ExtensionContext): void {
     editRecorders.set(record.id, recorder)
     // After the mode's scope, so a doc the session may not read is never outlined. The docs map
     // describes every section, so it reads docs whole; plan files are the work and are read whole too.
-    const gate = record.mode === 'docs-map' ? [] : [new OutlineGate(workspaceRoot, [`${PLAN_DIR}/**`]), new CodeOutlineGate(workspaceRoot)]
-    // The permission rules apply to every session; a mode's own hooks may still deny.
-    return { ...setup, hooks: composeHooks(policyFor(record.id), ...(setup.hooks ? [setup.hooks] : []), ...gate, recorder) }
+    const gate: SessionHooks[] = record.mode === 'docs-map' ? [] : [new OutlineGate(workspaceRoot, [`${PLAN_DIR}/**`]), new CodeOutlineGate(workspaceRoot)]
+    if (!setup.toolNames || setup.toolNames.includes('RunScript')) gate.push(new ScriptGate())
+    // The permission rules apply to every session; a mode's own hooks may still deny. Any session may record an unfiled decision.
+    return { ...setup, hooks: composeHooks(policyFor(record.id), ...(setup.hooks ? [setup.hooks] : []), ...gate, new UnfiledContract(workspaceRoot), recorder) }
   }
 
   const modeSetup = async (record: SessionRecord, onProgress: StartProgress): Promise<ModeSetup> => {
@@ -243,7 +247,8 @@ export function activate(context: vscode.ExtensionContext): void {
       case 'implement': {
         if (!record.feature) throw new Error('An implement session needs a feature name')
         return {
-          hooks: new TaskBoardGuard(workspaceRoot, record.feature),
+          // The user's answers amend the task's rules, held to the contract like the planner's writes.
+          hooks: composeHooks(new TaskBoardGuard(workspaceRoot, record.feature), new SpecContract(workspaceRoot)),
           systemPrompt: await withMap(record, implementPrompt(record.feature, workspaceRoot, verifier.rules()), onProgress),
           toolNames: IMPLEMENT_TOOLS,
         }
@@ -265,6 +270,15 @@ export function activate(context: vscode.ExtensionContext): void {
           hooks: new ScopeGuard(workspaceRoot, scope),
           systemPrompt: await withDocs(record, docsEvaluationPrompt(workspaceRoot), onProgress),
           toolNames: DOCS_EVALUATION_TOOLS,
+          readable: readableIn(scope),
+        }
+      }
+      case 'file-decisions': {
+        const scope = fileDecisionsScope(planIgnore())
+        return {
+          hooks: composeHooks(new ScopeGuard(workspaceRoot, scope), new SpecContract(workspaceRoot)),
+          systemPrompt: await withDocs(record, fileDecisionsPrompt(workspaceRoot), onProgress),
+          toolNames: FILE_DECISIONS_TOOLS,
           readable: readableIn(scope),
         }
       }
@@ -369,7 +383,7 @@ export function activate(context: vscode.ExtensionContext): void {
           // corporate proxy asking for NTLM, leaving 407s in the session diagnostics.
           env: { CLAUDE_AGENT_SDK_CLIENT_APP: 'kiwi-agent-vscode/0.0.1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' },
           ...(setup.hooks ? { hooks: setup.hooks } : {}),
-          ...(setup.systemPrompt !== undefined ? { systemPrompt: setup.systemPrompt } : { appendSystemPrompt: `${DOC_READING}\n${CODE_READING}` }),
+          ...(setup.systemPrompt !== undefined ? { systemPrompt: setup.systemPrompt } : { appendSystemPrompt: `${DOC_READING}\n${CODE_READING}\n${SCRIPT_WRITING}\n${CHAT_DECISIONS}` }),
           ...(setup.toolNames ? { tools: setup.toolNames } : {}),
           query,
           onStderr: (chunk) => output.append(chunk),

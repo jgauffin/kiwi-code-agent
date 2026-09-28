@@ -4,6 +4,7 @@ import { MARKDOWN_SEARCH_TOOL } from '../openai-session/tools/markdown-search'
 import { DOC_READING } from '../openai-session/tools/markdown/outline-gate'
 import { KEEP_RULING } from './ruling'
 import type { Scope } from './scope-guard'
+import { UNFILED_DECISIONS, UNFILED_FILE } from './unfiled-decisions'
 
 export const DOCS_DIR = 'docs'
 export const PLAN_DIR = 'plan'
@@ -38,8 +39,9 @@ export function blindPlanScope(feature: string, ignored: string[] = []): Scope {
   // The decisions file holds what the mapping found; the planner proposes on it and reads the rulings from it.
   const own = [`${PLAN_DIR}/${slug}.spec.md`, `${WORK_DIR}/${slug}.review.md`, `${WORK_DIR}/${slug}.decisions.md`]
   return {
-    readable: [`${DOCS_DIR}/**`, README_GLOB, SPECS_GLOB, ...own],
-    writable: own,
+    readable: [`${DOCS_DIR}/**`, README_GLOB, SPECS_GLOB, UNFILED_FILE, ...own],
+    // An answer that reaches beyond this feature is recorded for the features it reaches.
+    writable: [...own, UNFILED_FILE],
     // The docs are the user's: the planner edits them only when asked, one confirmed write at a time.
     askable: [`${DOCS_DIR}/**`],
     ignored,
@@ -68,7 +70,9 @@ disagreement instead of silently absorbing it.
 
 What you may read: \`${DOCS_DIR}/**\` (product intent: goals, ubiquitous language, rules, constraints, feature descriptions), the README in the 
 workspace root (what the product is, in its own words), every feature's spec under \`${SPECS_GLOB}\` (an approved or implemented spec is that 
-feature's definition, as settled as a doc; a draft is a proposal still being planned) and your own plan files. Nothing else exists for you; do not try. 
+feature's definition, as settled as a doc; a draft is a proposal still being planned), \`${UNFILED_FILE}\` (decisions the user made while building
+or in chat, not yet filed into the specs and docs they reach: the user's latest word, so an entry outweighs a doc or a spec that says otherwise)
+and your own plan files. Nothing else exists for you; do not try.
 Use Glob with path \`${DOCS_DIR}\` and with path \`${PLAN_DIR}\` to see what is there, then search them with \`${MARKDOWN_SEARCH_TOOL}\` for the 
 feature's terms rather than reading doc after doc. ${DOC_READING} A rule in another spec is what the product does; its Decisions, if any, are history 
 and say nothing you need. Where a doc and an approved spec disagree, ask: the user knows which is current, you do not.
@@ -112,6 +116,7 @@ Rules:
 - To the point, not complete. A rule earns its place only if leaving it out would change what gets built or how it is tested. Do not restate a rule as an edge case, do not spec the obvious, do not cover every situation that could be imagined. A feature described in two sentences is usually a page, not five.
 - No tasks: the build takes one per scenario, and what to do and where is settled against the code. A task written blind would only restate the rules.
 - Settle what you can. Where intent is silent but a sensible default exists, take it and say so in the direction; a question is for what only the user can answer, and you put it with the \`${ASK_USER_TOOL}\` tool and carry on with the answer rather than writing it down and stopping.
+- The user's answers become rules in this spec. The part of an answer that reaches features other than this one is recorded for them: ${UNFILED_DECISIONS}
 - Every rule, edge case and question has a name, the bold lead-in of its line: a few words that say what it is about, unique in the spec, the way a test or a function is named. The name is what a comment, a task, a test and a decision refer to, so it never changes once written: on revision you add, or mark a rule \` [removed]\`, never rename or delete. A rule you must rename keeps the old name in a note after the new one, \`- **New name** (was Old name): ...\`, and the extension follows the rename through every file. Moving a rule to another scenario keeps its name.
 - A rule that comes from a section of \`${DOCS_DIR}/**\` or of another feature's spec ends with its citation in parentheses, as \`(path#Heading)\`, after the text. A rule without a citation is your own default. The citation is what a later check against the code reads instead of the docs, so it must be exact.
 - No code paths, class names or code: that is the implementation's business and you cannot know it.

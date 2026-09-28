@@ -101,7 +101,7 @@ export class PermissionPolicy implements SessionHooks {
   private denies(rule: PermissionRule, tool: ToolUse): boolean {
     if (!ruleCoversTool(rule.tool, tool.toolName)) return false
     if (rule.pattern === undefined) return true
-    if (isShellTool(tool.toolName)) return splitShellCommand(this.command(tool)).segments.some((s) => bashPatternMatches(rule.pattern!, s.tokens))
+    if (isShellTool(tool.toolName)) return splitShellCommand(this.command(tool)).segments.some((s) => bashPatternMatches(rule.pattern!, s.tokens, 'deny'))
     if (FILE_TOOLS.has(tool.toolName)) return this.relativePaths(tool).some((path) => matchesGlob(path, rule.pattern!))
     return false
   }
@@ -124,7 +124,7 @@ export class PermissionPolicy implements SessionHooks {
         (isReadOnlySegment(s, context) ||
           (writes && writesInProject(commandWriteTargets(s), this.paths.below)) ||
           projectCommandOf(s, project) !== undefined ||
-          rules.some((r) => r.pattern === undefined || bashPatternMatches(r.pattern, s.tokens)))
+          rules.some((r) => r.pattern === undefined || bashPatternMatches(r.pattern, s.tokens, 'allow')))
       return parsed.segments.every(covered)
     }
     const paths = this.relativePaths(tool)

@@ -8,13 +8,14 @@ import { nextStatus, underWay, type SessionStatus } from './session-status'
  * `plan` writes a feature's spec blind, `reconcile` checks it against the code
  * (together: planning), `implement` builds the approved spec, `cleanup` splits
  * what the implementation left oversized. `docs` judges how the docs a blind
- * planner reads are arranged, and `docs-map` describes them so it can find its
- * way; neither belongs to a feature.
+ * planner reads are arranged, `docs-map` describes them so it can find its
+ * way, and `file-decisions` files the user's unfiled decisions into the specs
+ * and docs; none of those belongs to a feature.
  */
-export type SessionMode = 'chat' | 'plan' | 'reconcile' | 'implement' | 'cleanup' | 'docs' | 'docs-map'
+export type SessionMode = 'chat' | 'plan' | 'reconcile' | 'implement' | 'cleanup' | 'docs' | 'docs-map' | 'file-decisions'
 
 /** Work in the intent rather than the code: no blanket allow for writes. */
-export const isPlanning = (mode: SessionMode): boolean => mode === 'plan' || mode === 'reconcile' || mode === 'docs'
+export const isPlanning = (mode: SessionMode): boolean => mode === 'plan' || mode === 'reconcile' || mode === 'docs' || mode === 'file-decisions'
 
 /**
  * The steps a profile names a model for, in the order the settings page lists
@@ -29,10 +30,11 @@ export const STEPS: { step: SessionMode; label: string; hint: string }[] = [
   { step: 'cleanup', label: 'Cleanup', hint: 'Split what the implementation left oversized.' },
   { step: 'docs', label: 'Evaluate docs', hint: 'Judge how the docs a blind planner reads are arranged.' },
   { step: 'docs-map', label: 'Docs map', hint: 'Describe the docs so a blind planner can find its way.' },
+  { step: 'file-decisions', label: 'File decisions', hint: "File the user's unfiled decisions into the specs and docs they belong in." },
 ]
 
 /** The modes that stand on their own rather than on a feature's plan files. */
-export const isFeatureless = (mode: SessionMode): boolean => mode === 'chat' || mode === 'docs' || mode === 'docs-map'
+export const isFeatureless = (mode: SessionMode): boolean => mode === 'chat' || mode === 'docs' || mode === 'docs-map' || mode === 'file-decisions'
 
 /** A build, not a conversation: it has no tab and no entry of its own, and nobody prompts it. */
 export const isBuild = (mode: SessionMode): boolean => mode === 'docs-map'
@@ -71,6 +73,7 @@ function titleFor(mode: SessionMode, feature: string | undefined): string {
   // Named before the feature is looked at: neither stands on one.
   if (mode === 'docs') return 'Docs evaluation'
   if (mode === 'docs-map') return 'Docs map'
+  if (mode === 'file-decisions') return 'Filing decisions'
   if (!feature) return 'New session'
   switch (mode) {
     case 'plan':

@@ -1,4 +1,4 @@
-import { commandName, unwrapCommand } from './command-wrappers'
+import { commandName, runCommand, unwrapCommand } from './command-wrappers'
 import { NO_PROJECT_COMMANDS, projectCommandOf, type ProjectCommands } from './project-commands'
 import type { ProjectPaths } from './project-paths'
 import { cdTarget, hidesCommandWord, isCdCommand, isReadOnlySegment, type ReadOnlyContext } from './read-only-commands'
@@ -87,7 +87,7 @@ export function commandLines(
     if (covers && writesInProject(commandWriteTargets(segment), covers)) return { text, passes: 'the Allow writes switch' }
     const defined = projectCommandOf(segment, project)
     if (defined) return { text, passes: defined }
-    const covering = patterns.find((r) => bashPatternMatches(r.pattern!, segment.tokens))
+    const covering = patterns.find((r) => bashPatternMatches(r.pattern!, segment.tokens, 'allow'))
     if (covering) return { text, passes: formatRule(covering) }
     const directory = cdTarget(segment.tokens)
     if (directory) return { text, rule: formatRule({ tool: toolName, pattern: `cd ${directory}` }) }
@@ -121,14 +121,16 @@ export function ruleLabel(rule: string): string {
 /**
  * Does a Bash rule pattern cover this segment? Both sides are judged on the
  * command that runs, so a rule for `npm test` covers `timeout 300 npm test`
- * and a deny rule for `rm` is not walked past by wrapping it.
+ * and a deny rule for `rm` is not walked past by wrapping it. A command that
+ * takes arguments from its input may run with more words than the line shows,
+ * so an exact rule still denies it but no longer allows it.
  */
-export function bashPatternMatches(pattern: string, tokens: string[]): boolean {
+export function bashPatternMatches(pattern: string, tokens: string[], use: 'allow' | 'deny'): boolean {
   const prefix = pattern.endsWith(':*')
   const words = unwrapCommand(splitShellCommand(prefix ? pattern.slice(0, -2) : pattern).segments[0]?.tokens ?? [])
-  const run = unwrapCommand(tokens)
+  const { tokens: run, argumentsFromInput } = runCommand(tokens)
   if (words.length === 0) return false
-  if (!prefix && run.length !== words.length) return false
+  if (!prefix && (run.length !== words.length || (argumentsFromInput && use === 'allow'))) return false
   if (run.length < words.length) return false
   return words.every((w, i) => (i === 0 ? commandName(w) === commandName(run[i]!) : w === run[i]))
 }
