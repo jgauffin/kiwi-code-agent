@@ -16,6 +16,9 @@ nothing else from the run reaches you, so return a summary, not raw contents.
 Reading and searching, no prompt:
 
 - `read(path)`: the whole file as text, not numbered and not cut.
+- `readdir(path = '.')`: the names in a directory, sorted, each directory marked by a trailing
+  slash. `exists(path)`: whether there is anything at the path. Both are free within the project;
+  a path outside it is put to the user.
 - `glob({ pattern, path? })`, `grep({ pattern, path?, include?, case_insensitive?, output_mode? })`:
   the same as the Glob and Grep tools, returning their text.
 - `jsonQuery(args)`, `jsonSchema(args)`, `codeOutline({ path, symbol })`: the same as the tools of that name.
@@ -44,6 +47,19 @@ const files = (await glob({ pattern: 'src/**/*.ts' })).split('\n').filter(Boolea
 let total = 0
 for (const f of files) total += (await replace(f, '\\bgetUser\\(', 'fetchUser(')).matches
 return `${total} calls in ${files.length} files`
+```
+
+Summarise a log in every run directory that has one:
+
+```js
+const rows = []
+for (const dir of await readdir('.agent/runs')) {
+  const file = `.agent/runs/${dir}events.jsonl`
+  if (!(await exists(file))) continue
+  const events = (await read(file)).split('\n').filter(Boolean).map((l) => JSON.parse(l))
+  rows.push(`${dir} ${events.length} events`)
+}
+return rows.join('\n')
 ```
 
 Find files that import a module but never use its default export:

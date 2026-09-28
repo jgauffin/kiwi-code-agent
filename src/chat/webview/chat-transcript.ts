@@ -1,9 +1,9 @@
 import type { SessionEvent } from '../../agent/session/code-session'
-import { isShellTool } from '../../agent/permissions/permission-rules'
+import { isShellTool } from '../../agent/permissions/tool-classes'
 import { splitShellCommand } from '../../agent/permissions/shell-split'
 import { renderAnsi } from './ansi'
 import { editDiffView, fileLink } from './edit-diff'
-import { formatUsage } from './format-usage'
+import { compact, formatUsage } from './format-usage'
 import { fillCode } from './highlight'
 import { PromptSubmittedEvent } from './events'
 import { renderMarkdown } from './markdown'
@@ -213,6 +213,9 @@ export class ChatTranscript extends HTMLElement {
         if (event.status === 'requesting') this.activity = atWork(WAITING_ON_MODEL)
         if (event.status === 'compacting') this.activity = atWork('Compacting context')
         break
+      case 'compacted':
+        this.insert(compactionMarker(event))
+        break
       case 'turn_done': {
         this.activity = undefined
         const line = document.createElement('p')
@@ -383,6 +386,21 @@ function showEdit(details: HTMLDetailsElement, change: Parameters<typeof editDif
   const input = details.querySelector('pre.input')
   if (input instanceof HTMLElement) input.hidden = true
   details.appendChild(editDiffView(change))
+}
+
+/** Where the conversation was folded, with the summary to hand for anyone who wants to see what was kept. */
+function compactionMarker(event: Extract<SessionEvent, { type: 'compacted' }>): HTMLElement {
+  const sizes =
+    event.preTokens === undefined
+      ? ''
+      : ` · ${compact(event.preTokens)}${event.postTokens === undefined ? ' before' : ` → ${compact(event.postTokens)}`}`
+  if (!event.summary) return block('turn compaction', `Context compacted${sizes}`)
+  const details = document.createElement('details')
+  details.className = 'turn compaction'
+  const summary = document.createElement('summary')
+  summary.textContent = `Context compacted${sizes}`
+  details.append(summary, block('compaction-summary', event.summary))
+  return details
 }
 
 function block(className: string, text: string, render: (text: string, into: HTMLElement) => void = plainText): HTMLElement {

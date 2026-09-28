@@ -1,7 +1,10 @@
 import { commandName, unwrapCommand } from './command-wrappers'
 import { NO_PROJECT_COMMANDS, projectCommandOf, type ProjectCommands } from './project-commands'
-import { isReadOnlySegment, type ReadOnlyContext } from './read-only-commands'
-import { splitShellCommand } from './shell-split'
+import type { ProjectPaths } from './project-paths'
+import { cdTarget, hidesCommandWord, isCdCommand, isReadOnlySegment, type ReadOnlyContext } from './read-only-commands'
+import { splitShellCommand, type ShellSegment } from './shell-split'
+import { WRITE_TOOLS } from './tool-classes'
+import { commandWriteTargets, writesInProject } from './write-targets'
 
 /**
  * A rule is `Tool` (every use), `Tool(pattern)` where the pattern is a glob on
@@ -28,21 +31,6 @@ export function ruleCoversTool(ruleTool: string, toolName: string): boolean {
 export function formatRule(rule: PermissionRule): string {
   return rule.pattern === undefined ? rule.tool : `${rule.tool}(${rule.pattern})`
 }
-
-/** Tools that take a file from one path to another; their input names both ends. */
-export const TRANSFER_TOOLS: ReadonlySet<string> = new Set(['Move', 'Copy'])
-
-/** Tools that write a file. A write is answered per call or per session, never remembered for the project. */
-export const WRITE_TOOLS: ReadonlySet<string> = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'RunScript', ...TRANSFER_TOOLS])
-
-/**
- * Tools that run a command line. Both are judged, prompted and remembered
- * command by command, each under its own tool name: a rule for one shell says
- * nothing about the other.
- */
-const SHELL_TOOLS: ReadonlySet<string> = new Set(['Bash', 'PowerShell'])
-
-export const isShellTool = (toolName: string): boolean => SHELL_TOOLS.has(toolName)
 
 /** Tools whose command word takes a subcommand that decides what they do. */
 const SUBCOMMAND_TOOLS = new Set(['npm', 'npx', 'pnpm', 'yarn', 'git', 'dotnet', 'cargo', 'go', 'docker', 'gh', 'az', 'kubectl'])
@@ -74,23 +62,53 @@ export type CommandLine = {
 }
 
 /**
- * A shell call line by line, against the allow rules in force. A substitution
- * runs a command no line shows, so then nothing passes and no rule is offered:
- * such a call is allowed per call or not at all.
+ * A shell call line by line, against the allow rules in force. A command a
+ * substitution holds gets a line of its own and is judged like any other; only
+ * a line whose command word is a substitution passes nothing and is offered no
+ * rule, since no rule can name what it will run. `writes` is given only while
+ * "Allow writes" is on, and then decides which file-changing lines the switch
+ * already covers.
  */
-export function commandLines(toolName: string, command: string, allow: string[], context: ReadOnlyContext = {}, project: ProjectCommands = NO_PROJECT_COMMANDS): CommandLine[] {
+export function commandLines(
+  toolName: string,
+  command: string,
+  allow: string[],
+  context: ReadOnlyContext = {},
+  project: ProjectCommands = NO_PROJECT_COMMANDS,
+  writes?: ProjectPaths,
+): CommandLine[] {
   const parsed = splitShellCommand(command)
   const patterns = allow.map(parseRule).filter((r) => r.tool === toolName && r.pattern !== undefined)
+  const covers = writes && staysInProject(parsed.segments, writes) ? writes.below : undefined
   return parsed.segments.map((segment) => {
     const { text } = segment
-    if (parsed.substitutes) return { text }
+    if (hidesCommandWord(segment)) return { text }
     if (isReadOnlySegment(segment, context)) return { text, passes: 'read-only' }
+    if (covers && writesInProject(commandWriteTargets(segment), covers)) return { text, passes: 'the Allow writes switch' }
     const defined = projectCommandOf(segment, project)
     if (defined) return { text, passes: defined }
     const covering = patterns.find((r) => bashPatternMatches(r.pattern!, segment.tokens))
     if (covering) return { text, passes: formatRule(covering) }
+    const directory = cdTarget(segment.tokens)
+    if (directory) return { text, rule: formatRule({ tool: toolName, pattern: `cd ${directory}` }) }
     const prefix = commandPrefix(segment.tokens)
     return prefix.length ? { text, rule: formatRule({ tool: toolName, pattern: `${prefix.join(' ')}:*` }) } : { text }
+  })
+}
+
+/**
+ * Does the whole call stay in the project? Every path a command names is read
+ * from the project root, but a `cd` moves the directory the shell reads them
+ * from, so `cd /elsewhere && rm -rf data` would otherwise be judged on
+ * `<project>/data` while it removes `/elsewhere/data`. A `cd` that stays in the
+ * project is harmless here: it can only push the root deeper, and a relative
+ * path that lands in the project from the root lands in it from deeper still.
+ */
+export function staysInProject(segments: ShellSegment[], paths: ProjectPaths): boolean {
+  return segments.every((segment) => {
+    if (!isCdCommand(segment.tokens)) return true
+    const target = cdTarget(segment.tokens)
+    return target !== undefined && paths.inside(target)
   })
 }
 

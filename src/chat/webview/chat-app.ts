@@ -157,8 +157,8 @@ export class ChatApp extends HTMLElement {
         const active = message.tabs.find((t) => t.active)
         this.activeSessionId = active?.id
         if (!active && !this.creating) this.showCreating(true)
-        this.tabs.update(message.tabs, this.creating)
-        this.newSession.update(message.plans, message.profiles)
+        this.tabs.update(message.tabs, this.creating, { plans: message.plans, chats: message.chats })
+        this.newSession.update(message.profiles)
         this.composer.setSwitches({
           allowWrites: message.allowWrites,
           mcp: message.mcp,

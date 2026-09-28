@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import type { ToolDefinition } from '../chat-messages'
 import type { ReadTracker } from './read-tracker'
+import type { FileLedger } from '../file-ledger'
 import type { QuestionOutcome, UserQuestionRequest } from '../../session/user-question'
 import type { FileEditChange } from '../../edits/file-edit-diff'
 import type { PermissionDecision } from '../../session/code-session'
@@ -16,12 +17,20 @@ export type ToolContext = {
   cwd: string
   signal: AbortSignal
   files: ReadTracker
+  /**
+   * Where the session has been in the workspace; survives the compaction that
+   * folds the reads away. Absent on an engine that compacts for itself and has
+   * no use for one.
+   */
+  ledger?: FileLedger
   /** Absent in a session whose user never sees its transcript; the question tool then has nobody to ask. */
   ask?: QuestionAsker
   /** Runs another tool as if the model had called it: same permission gate, same result. Absent where tools cannot call tools. */
   call?: (name: string, input: unknown) => Promise<ToolOutput>
   /** The reason a call is refused outright, by a deny rule; undefined when nothing forbids it. Never asks the user. */
   authorize?: (name: string, input: unknown) => Promise<string | undefined>
+  /** The reason a call is refused, asking the user when the rules leave it open; undefined when it may go ahead. */
+  confirm?: (name: string, input: unknown) => Promise<string | undefined>
   /** Puts changes to files to the user as one decision. */
   review?: (title: string, edits: FileEditChange[]) => Promise<PermissionDecision>
 }

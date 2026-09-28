@@ -41,7 +41,7 @@ import { FileEditRecorder } from './agent/edits/file-edit-recorder'
 import { packageScripts } from './agent/permissions/package-scripts'
 import { PermissionPolicy, type PermissionRules } from './agent/permissions/permission-policy'
 import type { ProjectCommands } from './agent/permissions/project-commands'
-import { WriteAllowance } from './agent/permissions/write-allowance'
+import { readOnlyTools } from './agent/permissions/tool-classes'
 import { ScopeGuard, readableIn } from './agent/phases/scope-guard'
 import { BLIND_PLAN_TOOLS, PLAN_DIR, blindPlanPrompt, blindPlanScope } from './agent/phases/blind-plan'
 import { markdownSearchTool } from './agent/openai-session/tools/markdown-search'
@@ -138,10 +138,8 @@ export function activate(context: vscode.ExtensionContext): void {
     setEnabled: (id, enabled) => void writesAllowed.set(id, enabled),
   }
 
-  /** The composer's per-session switch: writes without a prompt. */
-  const switchableHooks = (record: SessionRecord): { hooks: SessionHooks } => ({
-    hooks: new WriteAllowance(workspaceRoot, () => allowWritesControl.isEnabled(record.id)),
-  })
+  /** Per session, the tools it was given: what tells the permission policy which of them only look. */
+  const sessionTools = new Map<string, readonly Tool[]>()
 
   /** Per session, what captures the file it is about to edit and turns it into the diff the chat shows. */
   const editRecorders = new Map<string, FileEditRecorder>()
@@ -161,7 +159,11 @@ export function activate(context: vscode.ExtensionContext): void {
         const { allow, deny } = permissionRules()
         return { allow: [...allow, ...(sessionAllowed.get(sessionId) ?? [])], deny }
       },
-      projectCommands,
+      {
+        readOnly: readOnlyTools(() => sessionTools.get(sessionId) ?? []),
+        project: projectCommands,
+        writesAllowed: () => allowWritesControl.isEnabled(sessionId),
+      },
     )
     policies.set(sessionId, policy)
     return policy
@@ -237,11 +239,11 @@ export function activate(context: vscode.ExtensionContext): void {
   const modeSetup = async (record: SessionRecord, onProgress: StartProgress): Promise<ModeSetup> => {
     switch (record.mode) {
       case 'chat':
-        return switchableHooks(record)
+        return {}
       case 'implement': {
         if (!record.feature) throw new Error('An implement session needs a feature name')
         return {
-          hooks: composeHooks(new TaskBoardGuard(workspaceRoot, record.feature), switchableHooks(record).hooks),
+          hooks: new TaskBoardGuard(workspaceRoot, record.feature),
           systemPrompt: await withMap(record, implementPrompt(record.feature, workspaceRoot, verifier.rules()), onProgress),
           toolNames: IMPLEMENT_TOOLS,
         }
@@ -350,9 +352,11 @@ export function activate(context: vscode.ExtensionContext): void {
       case 'claude-sdk':
         // Until the engine reports in, the wait is on its own start-up.
         onProgress('Starting Claude Code')
+        const scriptTools = [globTool, grepTool, bashTool(), jsonSchemaTool, jsonQueryTool, codeOutlineTool]
+        sessionTools.set(record.id, [...allowed(ownTools), ...scriptTools])
         return new SdkSession({
           ownTools: allowed(ownTools),
-          scriptTools: [globTool, grepTool, bashTool(), jsonSchemaTool, jsonQueryTool, codeOutlineTool],
+          scriptTools,
           ...(mcpServers ? { mcpServers } : {}),
           id: record.id,
           profile,
@@ -361,7 +365,9 @@ export function activate(context: vscode.ExtensionContext): void {
           pluginPath,
           runtime: nodeRuntime(),
           ...(record.engineSessionId ? { resumeEngineSessionId: record.engineSessionId } : {}),
-          env: { CLAUDE_AGENT_SDK_CLIENT_APP: 'kiwi-agent-vscode/0.0.1' },
+          // Telemetry posts go through axios, which cannot authenticate against a
+          // corporate proxy asking for NTLM, leaving 407s in the session diagnostics.
+          env: { CLAUDE_AGENT_SDK_CLIENT_APP: 'kiwi-agent-vscode/0.0.1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' },
           ...(setup.hooks ? { hooks: setup.hooks } : {}),
           ...(setup.systemPrompt !== undefined ? { systemPrompt: setup.systemPrompt } : { appendSystemPrompt: `${DOC_READING}\n${CODE_READING}` }),
           ...(setup.toolNames ? { tools: setup.toolNames } : {}),
@@ -388,6 +394,8 @@ export function activate(context: vscode.ExtensionContext): void {
           : undefined
         if (resume) traceStart(record, `${resume.history.length} messages of history rebuilt`)
         traceStart(record, `building the session: ${allowed(allTools).map((t) => t.name).join(', ')}`)
+        sessionTools.set(record.id, allowed(allTools))
+        const contextWindow = vscode.workspace.getConfiguration('kiwiAgent').get<Record<string, number>>('contextWindows', {})[profile.model]
         return new OpenAiSession({
           id: record.id,
           profile,
@@ -396,6 +404,7 @@ export function activate(context: vscode.ExtensionContext): void {
           tools: allowed(allTools),
           systemPrompt: setup.systemPrompt ?? (await buildSystemPrompt(workspaceRoot, profile.systemPromptFile)),
           ...(resume ? { resume } : {}),
+          ...(contextWindow ? { contextWindow } : {}),
           ...(setup.hooks ? { hooks: setup.hooks } : {}),
           ...(mcpServers
             ? { mcp: { host: new McpToolHost(connectMcp(workspaceRoot, (server, chunk) => output.append(`[mcp ${server}] ${chunk}`))), servers: mcpServers } }

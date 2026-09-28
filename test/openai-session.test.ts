@@ -9,11 +9,11 @@ import type { McpConnector, McpToolInfo } from '../src/agent/mcp/mcp-connection'
 import type { McpServers } from '../src/agent/mcp/mcp-config'
 import { McpToolHost } from '../src/agent/mcp/mcp-tool-host'
 
-/** A scripted model: each call to stream() plays the next scripted reply. */
+/** A scripted model: each call to stream() plays the next scripted reply, or throws it. */
 class ScriptedModel implements ChatCompletionClient {
   readonly requests: CompletionRequest[] = []
-  private readonly replies: CompletionDelta[][]
-  constructor(...replies: CompletionDelta[][]) {
+  private readonly replies: (CompletionDelta[] | Error)[]
+  constructor(...replies: (CompletionDelta[] | Error)[]) {
     this.replies = replies
   }
   async *stream(request: CompletionRequest): AsyncIterable<CompletionDelta> {
@@ -21,6 +21,7 @@ class ScriptedModel implements ChatCompletionClient {
     this.requests.push({ ...request, messages: structuredClone(request.messages) })
     const reply = this.replies.shift()
     if (!reply) throw new Error('no scripted reply left')
+    if (reply instanceof Error) throw reply
     for (const d of reply) {
       if (request.signal.aborted) throw new DOMException('aborted', 'AbortError')
       yield d
@@ -33,10 +34,10 @@ const text = (t: string, usage = { promptTokens: 10, completionTokens: 2, cached
   { type: 'done', finishReason: 'stop', usage },
 ]
 
-const toolCall = (id: string, name: string, args: string): CompletionDelta[] => [
+const toolCall = (id: string, name: string, args: string, usage = { promptTokens: 5, completionTokens: 1, cachedTokens: 0 }): CompletionDelta[] => [
   { type: 'tool_call_start', index: 0, id, name },
   { type: 'tool_call_arguments', index: 0, text: args },
-  { type: 'done', finishReason: 'tool_calls', usage: { promptTokens: 5, completionTokens: 1, cachedTokens: 0 } },
+  { type: 'done', finishReason: 'tool_calls', usage },
 ]
 
 const echoSchema = z.object({ value: z.string() })
@@ -59,6 +60,26 @@ function session(model: ChatCompletionClient, tools: Tool[] = [echoTool as Tool,
     client: model,
     tools,
     systemPrompt: 'sys',
+  })
+}
+
+/** A session with a tiny window and a bulky earlier turn in it: one more request and it has to compact. */
+function crowdedSession(model: ChatCompletionClient) {
+  return new OpenAiSession({
+    id: 's1',
+    profile: { name: 'GLM', engine: 'openai-compatible', model: 'glm' },
+    cwd: process.cwd(),
+    client: model,
+    tools: [echoTool as Tool],
+    systemPrompt: 'sys',
+    contextWindow: 100,
+    resume: {
+      engineSessionId: 's1',
+      history: [
+        { role: 'user', content: 'old ask' },
+        { role: 'assistant', content: 'x'.repeat(4000), toolCalls: [] },
+      ],
+    },
   })
 }
 
@@ -271,6 +292,36 @@ describe('OpenAiSession', () => {
     expect(model.requests).toHaveLength(3)
     expect(events.find((e) => e.type === 'error')).toMatchObject({ resumable: true })
     expect(events.at(-1)).toMatchObject({ type: 'turn_done', isError: true, errors: ['max tool rounds'] })
+    await s.dispose()
+  })
+
+  it('a_nearly_full_window_is_compacted_before_the_next_request', async () => {
+    const model = new ScriptedModel(
+      toolCall('c1', 'Echo', '{"value":"a"}', { promptTokens: 95, completionTokens: 1, cachedTokens: 0 }),
+      text('the story so far'),
+      text('ok'),
+    )
+    const s = crowdedSession(model)
+    s.send('go')
+    const events = await untilTurnDone(s)
+    expect(events.filter((e) => e.type === 'status').map((e) => e.status)).toContain('compacting')
+    const summarising = model.requests[1]!
+    const afterwards = model.requests[2]!
+    expect(summarising.tools).toEqual([])
+    expect(summarising.messages.at(-1)!.content).toContain('old ask')
+    expect(afterwards.messages[1]!.content).toContain('the story so far')
+    expect(JSON.stringify(afterwards.messages)).not.toContain('xxxx')
+    await s.dispose()
+  })
+
+  it('a_provider_that_says_the_conversation_is_too_long_gets_one_compacted_retry', async () => {
+    const model = new ScriptedModel(new Error("API error 400: maximum context length is 128000 tokens"), text('the story so far'), text('ok'))
+    const s = crowdedSession(model)
+    s.send('go')
+    const events = await untilTurnDone(s)
+    expect(events.filter((e) => e.type === 'error')).toEqual([])
+    expect(events.at(-1)).toMatchObject({ type: 'turn_done', isError: false })
+    expect(model.requests[2]!.messages[1]!.content).toContain('the story so far')
     await s.dispose()
   })
 

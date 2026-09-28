@@ -103,8 +103,11 @@ export type RunRef = { sessionId: string; mode: SessionMode; title: string; curr
 
 export type RunSection = RunRef & { events: SessionEvent[] }
 
-/** A plan on disk the new-session screen offers to pick up; verified ones are finished and not offered. */
+/** A plan on disk the tab bar offers to pick up; verified ones are finished and not offered. */
 export type ResumablePlan = { feature: string; status: 'draft' | 'approved' }
+
+/** A chat with no tab in play the tab bar offers to reopen; its transcript is the context it comes back with. */
+export type ResumableChat = { sessionId: string; title: string; startedAt: string }
 
 export type ToWebview =
   | {
@@ -118,8 +121,10 @@ export type ToWebview =
       plan?: PlanState
       /** The run under the active tab that what the user types reaches; its section is the one open. */
       currentRun?: string
-      /** Plans under `plan/` still in progress, for the new-session screen. */
+      /** Plans under `plan/` still in progress, for the tab bar's resume list. */
       plans: ResumablePlan[]
+      /** Chats closed but not forgotten, newest first, for the same list. */
+      chats: ResumableChat[]
       /** The profiles by name and which of them new sessions get, for the new-session screen's pickers. */
       profiles: ProfileDefaults
       /** Every model a provider serves, for the composer's model switch on a chat session. */

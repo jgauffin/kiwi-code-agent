@@ -13,13 +13,16 @@ import { grepTool } from '../src/agent/openai-session/tools/grep'
 import { bashTool } from '../src/agent/openai-session/tools/bash'
 import { askUserSchema, askUserTool } from '../src/agent/openai-session/tools/ask-user'
 import { toDefinition, type ToolContext } from '../src/agent/openai-session/tools/tool'
+import { FileLedger } from '../src/agent/openai-session/file-ledger'
 
 let dir: string
 let ctx: ToolContext
+let ledger: FileLedger
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'tools-'))
-  ctx = { cwd: dir, signal: new AbortController().signal, files: new ReadTracker() }
+  ledger = new FileLedger()
+  ctx = { cwd: dir, signal: new AbortController().signal, files: new ReadTracker(), ledger }
 })
 
 afterEach(() => rm(dir, { recursive: true, force: true }))
@@ -75,6 +78,22 @@ describe('Edit', () => {
     expect(await readFile(path, 'utf8')).toBe('x y x')
   })
 
+  it('tells_the_ledger_which_lines_it_changed', async () => {
+    const path = join(dir, 'a.txt')
+    await writeFile(path, 'one\ntwo\nthree\nfour\nfive')
+    await readTool.execute({ file_path: 'a.txt' }, ctx)
+    await editTool.execute({ file_path: 'a.txt', old_string: 'three', new_string: 'THREE' }, ctx)
+    expect(ledger.render(dir)).toContain('a.txt: read in full; edited 3')
+  })
+
+  it('a_replacement_that_adds_lines_reports_the_range_it_grew_into', async () => {
+    const path = join(dir, 'a.txt')
+    await writeFile(path, 'one\ntwo\nthree')
+    await readTool.execute({ file_path: 'a.txt' }, ctx)
+    await editTool.execute({ file_path: 'a.txt', old_string: 'two', new_string: 'two\nextra\nmore' }, ctx)
+    expect(ledger.render(dir)).toContain('edited 2-4')
+  })
+
   it('an_edit_counts_as_a_read_so_the_next_edit_is_allowed', async () => {
     const path = join(dir, 'a.txt')
     await writeFile(path, 'one')
@@ -82,6 +101,18 @@ describe('Edit', () => {
     await editTool.execute({ file_path: 'a.txt', old_string: 'one', new_string: 'two' }, ctx)
     const again = await editTool.execute({ file_path: 'a.txt', old_string: 'two', new_string: 'three' }, ctx)
     expect(again.isError).toBe(false)
+  })
+})
+
+describe('ReadTracker', () => {
+  it('forgetting_all_but_the_named_files_sends_the_rest_back_to_be_read', async () => {
+    await writeFile(join(dir, 'a.txt'), 'a')
+    await writeFile(join(dir, 'b.txt'), 'b')
+    await readTool.execute({ file_path: 'a.txt' }, ctx)
+    await readTool.execute({ file_path: 'b.txt' }, ctx)
+    ctx.files.forgetExcept([join(dir, 'a.txt')])
+    expect(await ctx.files.staleness(join(dir, 'a.txt'))).toBeUndefined()
+    expect(await ctx.files.staleness(join(dir, 'b.txt'))).toContain('not been read')
   })
 })
 

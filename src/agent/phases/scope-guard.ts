@@ -1,5 +1,6 @@
-import { isAbsolute, matchesGlob, relative, resolve } from 'node:path'
+import { matchesGlob } from 'node:path'
 import type { PreToolUseOutcome, SessionHooks, ToolUse } from '../session/hooks'
+import { projectPaths, type ProjectPaths } from '../permissions/project-paths'
 import { MARKDOWN_SEARCH_TOOL } from '../openai-session/tools/markdown-search'
 import { CODE_OUTLINE_TOOL } from '../code-outline/code-outline-tool'
 import { CODE_SEARCH_TOOL } from '../code-outline/code-search'
@@ -32,10 +33,14 @@ export function readableIn(scope: Scope): (relPath: string) => boolean {
  * permission prompt.
  */
 export class ScopeGuard implements SessionHooks {
+  private readonly paths: ProjectPaths
+
   constructor(
-    private readonly cwd: string,
+    cwd: string,
     private readonly scope: Scope,
-  ) {}
+  ) {
+    this.paths = projectPaths(cwd)
+  }
 
   async preToolUse(tool: ToolUse): Promise<PreToolUseOutcome> {
     const input = (typeof tool.input === 'object' && tool.input !== null ? tool.input : {}) as Record<string, unknown>
@@ -72,9 +77,8 @@ export class ScopeGuard implements SessionHooks {
 
   private check(raw: unknown, globs: string[], verb: string, directory = false): PreToolUseOutcome {
     if (typeof raw !== 'string') return { deny: `Cannot ${verb}: no path given.` }
-    const absolute = isAbsolute(raw) ? raw : resolve(this.cwd, raw)
-    const rel = relative(this.cwd, absolute).split('\\').join('/')
-    if (rel.startsWith('..')) return { deny: `Cannot ${verb} outside the workspace: ${raw}` }
+    if (!this.paths.inside(raw)) return { deny: `Cannot ${verb} outside the workspace: ${raw}` }
+    const rel = this.paths.relative(raw)
     const ignored = (this.scope.ignored ?? []).find((g) => matchesGlob(rel, g) || (directory && matchesGlob(`${rel}/x`, g)))
     if (ignored) return { deny: `Cannot ${verb} ${raw}: excluded from this phase by the ignore setting (${ignored}).` }
     // A search directory must itself lie inside the allowed tree, or be the

@@ -48,26 +48,32 @@ describe('splitShellCommand', () => {
   })
 
   describe('expansions', () => {
-    it('command_substitution_and_process_substitution_flag_the_whole_command', () => {
-      expect(splitShellCommand('echo $(rm -rf x)').substitutes).toBe(true)
-      expect(splitShellCommand('echo `rm x`').substitutes).toBe(true)
-      expect(splitShellCommand('diff <(ls a) <(ls b)').substitutes).toBe(true)
-      expect(splitShellCommand('echo "$(ls)"').substitutes).toBe(true)
-      expect(splitShellCommand("echo '$(ls)'").substitutes).toBe(false)
-      expect(splitShellCommand('ls').substitutes).toBe(false)
+    it('a_substitution_stays_in_its_word_and_the_command_it_holds_is_listed_after_it', () => {
+      expect(tokens('echo $(rm -rf x)')).toEqual([['echo', '$(rm -rf x)'], ['rm', '-rf', 'x']])
+      expect(tokens('echo `rm x`')).toEqual([['echo', '`rm x`'], ['rm', 'x']])
+      expect(tokens('diff <(ls a) <(ls b)')).toEqual([['diff', '<(ls a)', '<(ls b)'], ['ls', 'a'], ['ls', 'b']])
+      expect(tokens('echo "$(ls)"')).toEqual([['echo', '$(ls)'], ['ls']])
+      expect(tokens("echo '$(ls)'")).toEqual([['echo', '$(ls)']])
+    })
+
+    it('only_the_words_that_came_from_a_substitution_are_marked_as_standing_for_one', () => {
+      expect(splitShellCommand('echo "$(ls)"').segments[0]!.substituted).toBe(true)
+      expect(splitShellCommand("echo '$(ls)'").segments[0]!.substituted).toBe(false)
+      expect(splitShellCommand('ls').segments[0]!.substituted).toBe(false)
+      expect(splitShellCommand('echo $(ls)').segments[1]!.substituted).toBe(false)
     })
 
     it('operators_inside_a_substitution_belong_to_it_and_do_not_split_the_command', () => {
-      expect(tokens('echo $(ls; rm x | wc) done')).toEqual([['echo', '$(ls; rm x | wc)', 'done']])
-      expect(tokens('echo "$(echo ")"; ls)" && pwd')).toEqual([['echo', '$(echo ")"; ls)'], ['pwd']])
-      expect(tokens('echo `ls; rm x` && pwd')).toEqual([['echo', '`ls; rm x`'], ['pwd']])
+      expect(tokens('echo $(ls; rm x | wc) done')).toEqual([['echo', '$(ls; rm x | wc)', 'done'], ['ls'], ['rm', 'x'], ['wc']])
+      expect(tokens('echo "$(echo ")"; ls)" && pwd')).toEqual([['echo', '$(echo ")"; ls)'], ['echo', ')'], ['ls'], ['pwd']])
+      expect(tokens('echo `ls; rm x` && pwd')).toEqual([['echo', '`ls; rm x`'], ['ls'], ['rm', 'x'], ['pwd']])
     })
 
-    it('parameter_and_arithmetic_expansions_are_words_and_run_nothing_unless_they_substitute', () => {
-      const plain = splitShellCommand('echo ${x:-a;b} $((1+2)) && pwd')
-      expect(plain.segments.map((s) => s.tokens)).toEqual([['echo', '${x:-a;b}', '$((1+2))'], ['pwd']])
-      expect(plain.substitutes).toBe(false)
-      expect(splitShellCommand('echo $(( $(ls | wc -l) + 1 ))').substitutes).toBe(true)
+    it('parameter_and_arithmetic_expansions_are_words_but_a_substitution_written_in_one_still_runs', () => {
+      expect(tokens('echo ${x:-a;b} $((1+2)) && pwd')).toEqual([['echo', '${x:-a;b}', '$((1+2))'], ['pwd']])
+      expect(tokens('echo $(( $(ls | wc -l) + 1 ))')).toEqual([['echo', '$(( $(ls | wc -l) + 1 ))'], ['ls'], ['wc', '-l']])
+      expect(tokens('echo ${x:-$(rm y)}')).toEqual([['echo', '${x:-$(rm y)}'], ['rm', 'y']])
+      expect(tokens('(( $(rm y) ))')).toEqual([['rm', 'y']])
     })
   })
 
@@ -100,11 +106,10 @@ describe('splitShellCommand', () => {
     })
 
     it('a_heredoc_body_belongs_to_its_command_and_its_lines_are_not_commands', () => {
-      const { segments, substitutes } = splitShellCommand(`cat > /tmp/t.mts <<'EOF'\nimport { x } from './y'\nconst a = $(ls) && rm -rf /\nEOF\nnpx tsx /tmp/t.mts 2>&1`)
+      const { segments } = splitShellCommand(`cat > /tmp/t.mts <<'EOF'\nimport { x } from './y'\nconst a = $(ls) && rm -rf /\nEOF\nnpx tsx /tmp/t.mts 2>&1`)
       expect(segments.map((s) => s.tokens)).toEqual([['cat'], ['npx', 'tsx', '/tmp/t.mts']])
       expect(segments[0]!.writesFile).toBe(true)
       expect(segments[0]!.text).toBe(`cat > /tmp/t.mts <<'EOF'\nimport { x } from './y'\nconst a = $(ls) && rm -rf /\nEOF`)
-      expect(substitutes).toBe(false)
     })
 
     it('heredoc_delimiters_may_be_quoted_or_dash_prefixed_and_a_here_string_is_not_a_heredoc', () => {
@@ -137,9 +142,9 @@ describe('splitShellCommand', () => {
       expect(tokens('"if" x')).toEqual([['if', 'x']])
     })
 
-    it('a_for_or_select_header_runs_nothing_and_its_body_runs_as_written', () => {
+    it('a_for_or_select_header_runs_nothing_itself_but_a_substitution_in_it_does', () => {
       expect(tokens('for f in a b; do rm $f; done')).toEqual([['rm', '$f']])
-      expect(tokens('for f in $(ls); do echo $f; done')).toEqual([['echo', '$f']])
+      expect(tokens('for f in $(ls); do echo $f; done')).toEqual([['ls'], ['echo', '$f']])
       expect(tokens('for ((i=0; i<3; i++)); do echo $i; done')).toEqual([['echo', '$i']])
       expect(tokens('select x in a b; do rm $x; done')).toEqual([['rm', '$x']])
     })
@@ -163,7 +168,7 @@ describe('splitShellCommand', () => {
 
     it('a_conditional_expression_is_one_command_whatever_operators_it_holds', () => {
       expect(tokens('[[ $a < $b && ( -f x || -d y ) ]] && rm x')).toEqual([['[[', '$a', '<', '$b', '&&', '(', '-f', 'x', '||', '-d', 'y', ')', ']]'], ['rm', 'x']])
-      expect(splitShellCommand('[[ $(ls) == x ]]').substitutes).toBe(true)
+      expect(tokens('[[ $(ls) == x ]]')).toEqual([['[[', '$(ls)', '==', 'x', ']]'], ['ls']])
     })
 
     it('a_function_definition_runs_nothing_but_its_body_is_listed', () => {
@@ -179,7 +184,7 @@ describe('splitShellCommand', () => {
       expect(tokens('CI=1 NODE_ENV=test npm test')).toEqual([['npm', 'test']])
       expect(tokens('X=1; Y+=2; arr[0]=3; ls')).toEqual([['ls']])
       expect(tokens('X="a b" rm x')).toEqual([['rm', 'x']])
-      expect(splitShellCommand('X=$(ls)').substitutes).toBe(true)
+      expect(tokens('X=$(ls)')).toEqual([['ls']])
       expect(tokens('echo a=b')).toEqual([['echo', 'a=b']])
       expect(tokens('=x')).toEqual([['=x']])
     })

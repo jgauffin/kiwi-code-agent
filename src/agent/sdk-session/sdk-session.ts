@@ -19,7 +19,7 @@ import { spawnWithRuntime, type NodeRuntime } from './node-runtime'
 import { bareToolName, toolServer } from './tool-server'
 import { ReadTracker } from '../openai-session/tools/read-tracker'
 import { fail, type Tool, type ToolContext } from '../openai-session/tools/tool'
-import { denyReason, gateCall, type AskPermission, type PermissionShown } from '../openai-session/tools/script-gate'
+import { confirmReason, denyReason, gateCall, type AskPermission, type PermissionShown } from '../permissions/gate'
 import type { QuestionOutcome, UserQuestionRequest } from '../session/user-question'
 
 type QueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>; options?: Options }) => Query
@@ -319,7 +319,7 @@ export class SdkSession implements CodeSession {
    * engine's process, out of reach, so a script's calls run our own
    * implementations of them here, through the same permission gate.
    */
-  private scriptAccess(): Pick<ToolContext, 'call' | 'authorize' | 'review'> {
+  private scriptAccess(): Pick<ToolContext, 'call' | 'authorize' | 'confirm' | 'review'> {
     const ask: AskPermission = (id, toolName, input, shown) => this.askScriptPermission(id, toolName, input, shown)
     const use = (toolName: string, input: unknown) => ({ toolName, input, toolUseId: crypto.randomUUID() })
     return {
@@ -337,6 +337,7 @@ export class SdkSession implements CodeSession {
         }
       },
       authorize: (name, input) => denyReason(this.options.hooks, use(name, input)),
+      confirm: (name, input) => confirmReason(this.options.hooks, ask, use(name, input)),
       review: (title, edits) => ask(crypto.randomUUID(), 'RunScript', { files: edits.map((e) => e.label) }, { title, edits }),
     }
   }

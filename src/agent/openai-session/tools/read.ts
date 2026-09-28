@@ -24,6 +24,7 @@ export const readTool: Tool<typeof schema> = {
       return fail(`Cannot read ${path}: ${(error as Error).message}`)
     }
     await ctx.files.markRead(path)
+    ctx.ledger?.read(path, input.offset, input.limit)
     const lines = content.split('\n')
     const start = (input.offset ?? 1) - 1
     const end = input.limit ? start + input.limit : lines.length

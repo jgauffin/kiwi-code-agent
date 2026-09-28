@@ -83,6 +83,13 @@ export type SessionEvent =
    * speak for itself. Its `detail` names the phase the start-up is in.
    */
   | { type: 'status'; status: 'starting' | 'requesting' | 'compacting' | 'idle'; detail?: string }
+  /**
+   * The conversation was folded into a summary to make room. What the engine
+   * does not say it does not carry: the Claude engine reports the sizes but
+   * keeps the summary to itself, the own loop has the summary but only knows
+   * what the prompt cost before.
+   */
+  | { type: 'compacted'; summary?: string; preTokens?: number; postTokens?: number }
   /** The session's MCP servers as of now; the newest replaces the last. */
   | { type: 'mcp_servers'; servers: McpServerState[] }
   | { type: 'turn_done'; usage?: TurnUsage; durationMs?: number; isError: boolean; errors: string[] }

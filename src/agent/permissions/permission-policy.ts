@@ -1,63 +1,100 @@
-import { isAbsolute, matchesGlob, relative, resolve } from 'node:path'
+import { matchesGlob } from 'node:path'
 import type { PreToolUseOutcome, SessionHooks, ToolUse } from '../session/hooks'
 import type { SessionEvent } from '../session/code-session'
 import { NO_PROJECT_COMMANDS, projectCommandOf, type ProjectCommands } from './project-commands'
-import { isReadOnlyCommand, isReadOnlySegment, type ReadOnlyContext } from './read-only-commands'
-import { bashPatternMatches, commandLines, isShellTool, parseRule, ruleCoversTool, TRANSFER_TOOLS, type PermissionRule } from './permission-rules'
+import { cdRuleDirectory, hidesCommandWord, isReadOnlyCommand, isReadOnlySegment, type ReadOnlyContext } from './read-only-commands'
+import { bashPatternMatches, commandLines, parseRule, ruleCoversTool, staysInProject, type PermissionRule } from './permission-rules'
+import { projectPaths, type ProjectPaths } from './project-paths'
 import { splitShellCommand, type ShellSegment } from './shell-split'
+import { FILE_TOOLS, isShellTool, readOnlyTools, TRANSFER_TOOLS, WITHIN_PROJECT_TOOLS, type ReadOnlyTools } from './tool-classes'
+import { commandWriteTargets, toolWriteTargets, writesInProject } from './write-targets'
 
 export type PermissionRules = { allow: string[]; deny: string[] }
 
-/**
- * Tools that only look; their calls never prompt unless a deny rule names them.
- * `AskUser` changes nothing either: the person answers the question itself
- * rather than first being asked whether it may be put to them. The task board
- * tools write only the session's own board, never the code.
- */
-const READ_ONLY_TOOLS = new Set([
-  'Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'MarkdownSearch', 'CodeOutline', 'CodeSearch', 'LS', 'NotebookRead', 'TodoRead', 'TodoWrite', 'AskUser', 'RunScript',
-  'ReadTasks', 'UpdateTask',
-])
-
-const FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'NotebookRead', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'MarkdownSearch', 'CodeOutline', 'CodeSearch', 'LS', ...TRANSFER_TOOLS])
+/** What the policy has to ask the session about, beyond the rules themselves. */
+export type PolicyContext = {
+  /** Which tools only look. Without it only the engine's built-ins are known, so everything else is asked about. */
+  readOnly?: ReadOnlyTools
+  /** The commands the project defines for itself; they run without a prompt. */
+  project?: () => ProjectCommands
+  /** Is the session's "Allow writes" switch on? */
+  writesAllowed?: () => boolean
+}
 
 /**
  * Decides tool calls before any permission prompt, on every engine: a deny
- * rule blocks, a read-only call, a command the project defines for itself or
- * one covered by the project's allow rules goes through, everything else is
- * asked. Rules and defined commands are read on each call, so a rule allowed
- * for the session or the project, or a script just added, applies to the next
- * call.
+ * rule blocks, a read-only call, a write the session's switch covers, a
+ * command the project defines for itself or one covered by the project's allow
+ * rules goes through, everything else is asked. Everything it consults is read
+ * on each call, so a rule allowed for the session or the project, a script just
+ * added, or the switch just turned on, applies to the next call.
  */
 export class PermissionPolicy implements SessionHooks {
-  private readonly readOnlyContext: ReadOnlyContext
+  private readonly paths: ProjectPaths
+  private readonly readOnly: ReadOnlyTools
+  private readonly project: () => ProjectCommands
+  private readonly writesAllowed: () => boolean
 
   constructor(
-    private readonly cwd: string,
+    cwd: string,
     private readonly rules: () => PermissionRules,
-    private readonly project: () => ProjectCommands = () => NO_PROJECT_COMMANDS,
+    context: PolicyContext = {},
   ) {
-    this.readOnlyContext = { insideProject: (path) => !this.relativeTo(path).startsWith('..') }
+    this.paths = projectPaths(cwd)
+    this.readOnly = context.readOnly ?? readOnlyTools(() => [])
+    this.project = context.project ?? (() => NO_PROJECT_COMMANDS)
+    this.writesAllowed = context.writesAllowed ?? (() => false)
   }
 
   async preToolUse(tool: ToolUse): Promise<PreToolUseOutcome> {
     const { allow, deny } = this.rules()
     const denied = deny.find((rule) => this.denies(parseRule(rule), tool))
     if (denied) return { deny: `Blocked by the project's permission rule ${denied} (kiwiAgent.permissions.deny).` }
-    if (this.isReadOnly(tool)) return { allow: true }
-    if (this.allows(allow, tool)) return { allow: true }
+    const context = this.enterContext(tool.toolName, allow)
+    if (this.isReadOnly(tool, context)) return { allow: true }
+    if (this.switchCovers(tool)) return { allow: true }
+    if (this.allows(allow, tool, context)) return { allow: true }
     return undefined
   }
 
   /** A prompt for a shell call is asked line by line: each command with what the rules in force make of it. */
   decorate(event: SessionEvent): SessionEvent {
     if (event.type !== 'permission_request' || !isShellTool(event.toolName)) return event
-    return { ...event, commands: commandLines(event.toolName, this.command(event), this.rules().allow, this.readOnlyContext, this.project()) }
+    const { allow } = this.rules()
+    const writes = this.writesAllowed() ? this.paths : undefined
+    return { ...event, commands: commandLines(event.toolName, this.command(event), allow, this.enterContext(event.toolName, allow), this.project(), writes) }
   }
 
-  private isReadOnly(tool: ToolUse): boolean {
-    if (READ_ONLY_TOOLS.has(tool.toolName)) return true
-    return isShellTool(tool.toolName) && isReadOnlyCommand(this.command(tool), this.readOnlyContext)
+  /**
+   * Where this shell may stand: in the project, or in a directory a `cd` rule
+   * in force names. The rule carries the directory rather than `cd` itself, so
+   * allowing one place to work from does not allow every other.
+   */
+  private enterContext(toolName: string, allow: string[]): ReadOnlyContext {
+    const directories = allow
+      .map(parseRule)
+      .filter((rule) => rule.pattern !== undefined && ruleCoversTool(rule.tool, toolName))
+      .map((rule) => cdRuleDirectory(rule.pattern!))
+      .filter((directory): directory is string => directory !== undefined)
+    return { canEnter: (path) => this.paths.inside(path) || directories.some((directory) => this.paths.under(directory, path)) }
+  }
+
+  private isReadOnly(tool: ToolUse, context: ReadOnlyContext): boolean {
+    if (isShellTool(tool.toolName)) return isReadOnlyCommand(this.command(tool), context)
+    if (WITHIN_PROJECT_TOOLS.has(tool.toolName)) {
+      const paths = this.relativePaths(tool)
+      return paths.length > 0 && paths.every((path) => this.paths.inside(path))
+    }
+    return this.readOnly(tool.toolName)
+  }
+
+  /**
+   * The session's "Allow writes" switch, for a call that names its paths. A
+   * shell call is covered command by command instead, in `allows` below, since
+   * one line may mix a write with anything else.
+   */
+  private switchCovers(tool: ToolUse): boolean {
+    return this.writesAllowed() && writesInProject(toolWriteTargets(tool.toolName, tool.input), this.paths.below)
   }
 
   /** One part is enough: a segment of a shell call, or either end of a move. */
@@ -70,19 +107,24 @@ export class PermissionPolicy implements SessionHooks {
   }
 
   /**
-   * Every segment of a shell call has to be let through, but not by the same
-   * rule: rules allowed one at a time add up, which is what the prompt shows
-   * line by line. A substitution hides a command, so no rule can cover it. A
-   * move touches both its ends, so one rule must cover both.
+   * Every segment of a shell call has to be let through, the ones a
+   * substitution holds among them, but not by the same rule: rules allowed one
+   * at a time add up, which is what the prompt shows line by line. A command
+   * word that is itself a substitution is named by no rule, so it is asked
+   * about. A move touches both its ends, so one rule must cover both.
    */
-  private allows(allow: string[], tool: ToolUse): boolean {
+  private allows(allow: string[], tool: ToolUse, context: ReadOnlyContext): boolean {
     const rules = allow.map(parseRule).filter((rule) => ruleCoversTool(rule.tool, tool.toolName))
     if (isShellTool(tool.toolName)) {
       const parsed = splitShellCommand(this.command(tool))
-      if (parsed.substitutes) return false
       const project = this.project()
+      const writes = this.writesAllowed() && staysInProject(parsed.segments, this.paths)
       const covered = (s: ShellSegment) =>
-        isReadOnlySegment(s, this.readOnlyContext) || projectCommandOf(s, project) !== undefined || rules.some((r) => r.pattern === undefined || bashPatternMatches(r.pattern, s.tokens))
+        !hidesCommandWord(s) &&
+        (isReadOnlySegment(s, context) ||
+          (writes && writesInProject(commandWriteTargets(s), this.paths.below)) ||
+          projectCommandOf(s, project) !== undefined ||
+          rules.some((r) => r.pattern === undefined || bashPatternMatches(r.pattern, s.tokens)))
       return parsed.segments.every(covered)
     }
     const paths = this.relativePaths(tool)
@@ -100,11 +142,6 @@ export class PermissionPolicy implements SessionHooks {
   private relativePaths(tool: ToolUse): string[] {
     const input = (tool.input ?? {}) as Record<string, unknown>
     const raw = TRANSFER_TOOLS.has(tool.toolName) ? [input['source'], input['destination']] : [input['file_path'] ?? input['notebook_path'] ?? input['path']]
-    return raw.filter((p): p is string => typeof p === 'string').map((p) => this.relativeTo(p))
-  }
-
-  private relativeTo(raw: string): string {
-    const absolute = isAbsolute(raw) ? raw : resolve(this.cwd, raw)
-    return relative(this.cwd, absolute).split('\\').join('/')
+    return raw.filter((p): p is string => typeof p === 'string').map((p) => this.paths.relative(p))
   }
 }

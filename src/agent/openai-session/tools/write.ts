@@ -24,6 +24,7 @@ export const writeTool: Tool<typeof schema> = {
     await mkdir(dirname(path), { recursive: true })
     await writeFile(path, input.content, 'utf8')
     await ctx.files.markRead(path)
+    ctx.ledger?.written(path)
     return ok(`Wrote ${path}`)
   },
 }

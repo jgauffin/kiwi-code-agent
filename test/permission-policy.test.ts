@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { isReadOnlyCommand } from '../src/agent/permissions/read-only-commands'
 import { PermissionPolicy, type PermissionRules } from '../src/agent/permissions/permission-policy'
 import { commandLines, projectRuleFor, ruleLabel } from '../src/agent/permissions/permission-rules'
-import { WriteAllowance } from '../src/agent/permissions/write-allowance'
-import { composeHooks, type SessionHooks } from '../src/agent/session/hooks'
+import { readOnlyTools } from '../src/agent/permissions/tool-classes'
+import type { SessionHooks } from '../src/agent/session/hooks'
 import { ASK_USER_TOOL } from '../src/agent/openai-session/tools/ask-user'
 import { BLIND_PLAN_TOOLS, blindPlanPrompt } from '../src/agent/phases/blind-plan'
 import { IMPLEMENT_TOOLS, implementPrompt } from '../src/agent/phases/implement'
@@ -25,8 +25,22 @@ describe('isReadOnlyCommand', () => {
   })
 
   it('anything_that_writes_runs_code_or_mutates_git_is_not', () => {
-    for (const c of ['rm x', 'npm test', 'git commit -m x', 'git branch -D x', 'echo hi > f', 'find . -delete', 'find . -exec rm {} \\;', 'sed -i s/a/b/ f', 'ls; rm x', 'cat $(ls)', 'bash -c ls', 'xargs rm', 'node -e 1'])
+    for (const c of ['rm x', 'npm test', 'git commit -m x', 'git branch -D x', 'echo hi > f', 'find . -delete', 'find . -exec rm {} \\;', 'sed -i s/a/b/ f', 'ls; rm x', 'bash -c ls', 'xargs rm', 'node -e 1'])
       expect(isReadOnlyCommand(c), c).toBe(false)
+  })
+
+  it('a_substitution_is_judged_by_the_command_it_holds_and_not_by_being_one', () => {
+    for (const c of ['cat $(ls)', 'echo "x $(echo y | cut -c1-3)"', 'diff <(ls a) <(ls b)', 'X=$(git status) ls', 'echo $(( $(ls | wc -l) + 1 ))'])
+      expect(isReadOnlyCommand(c), c).toBe(true)
+    for (const c of ['echo $(rm x)', 'cat `rm x`', 'echo ${x:-$(rm y)}', '(( $(rm y) ))', 'cat $(ls > out)'])
+      expect(isReadOnlyCommand(c), c).toBe(false)
+  })
+
+  it('a_command_word_a_substitution_supplies_is_not_read_only_whatever_it_prints', () => {
+    for (const c of ['$(which ls)', 'timeout 30 $(which ls)', '`which ls` -la'])
+      expect(isReadOnlyCommand(c), c).toBe(false)
+    // Quoted, it is text the command reads, not a command the shell runs.
+    expect(isReadOnlyCommand("echo '$(rm x)'")).toBe(true)
   })
 })
 
@@ -93,8 +107,16 @@ describe('commandLines', () => {
     expect(commandLines('PowerShell', 'npm run build', ['PowerShell(npm run:*)'])).toEqual([{ text: 'npm run build', passes: 'PowerShell(npm run:*)' }])
   })
 
-  it('a_substitution_hides_a_command_so_no_line_passes_and_none_can_be_remembered', () => {
-    expect(commandLines('Bash', 'ls && echo $(rm x)', ['Bash(ls:*)'])).toEqual([{ text: 'ls' }, { text: 'echo $(rm x)' }])
+  it('a_command_a_substitution_holds_is_a_line_of_its_own', () => {
+    expect(commandLines('Bash', 'ls && echo $(rm x)', ['Bash(ls:*)'])).toEqual([
+      { text: 'ls', passes: 'read-only' },
+      { text: 'echo $(rm x)', passes: 'read-only' },
+      { text: 'rm x', rule: 'Bash(rm:*)' },
+    ])
+  })
+
+  it('a_line_whose_command_word_is_a_substitution_passes_nothing_and_is_offered_no_rule', () => {
+    expect(commandLines('Bash', '$(which rm) -rf x', ['Bash(rm:*)'])).toEqual([{ text: '$(which rm) -rf x' }, { text: 'which rm', passes: 'read-only' }])
   })
 
   it('other_tools_are_remembered_by_tool_and_a_file_write_never_for_the_project', () => {
@@ -108,8 +130,15 @@ describe('commandLines', () => {
   })
 })
 
+/** The tools of a session, as the policy learns which of them only look. */
+const readOnly = readOnlyTools(() => [
+  { name: 'MarkdownSearch', readOnly: true },
+  { name: ASK_USER_TOOL, readOnly: true },
+  { name: 'Write', readOnly: false },
+])
+
 describe('PermissionPolicy', () => {
-  const policy = (rules: Partial<PermissionRules>) => new PermissionPolicy(cwd, () => ({ allow: [], deny: [], ...rules }))
+  const policy = (rules: Partial<PermissionRules>) => new PermissionPolicy(cwd, () => ({ allow: [], deny: [], ...rules }), { readOnly })
   const use = (p: PermissionPolicy, toolName: string, input: unknown) => p.preToolUse({ toolName, input, toolUseId: 't' })
 
   it('read_only_tools_and_read_only_commands_pass_without_a_prompt', async () => {
@@ -124,13 +153,42 @@ describe('PermissionPolicy', () => {
     expect(await use(policy({ allow: ['PowerShell(npm test)'] }), 'PowerShell', { command: 'npm test' })).toEqual({ allow: true })
   })
 
+  it('listing_and_testing_a_path_is_free_inside_the_project_and_asked_outside_it', async () => {
+    const p = policy({})
+    const outside = process.platform === 'win32' ? 'E:/elsewhere' : '/elsewhere'
+    for (const name of ['ReadDir', 'Exists']) {
+      expect(await use(p, name, { path: '.' })).toEqual({ allow: true })
+      expect(await use(p, name, { path: 'src/agent' })).toEqual({ allow: true })
+      expect(await use(p, name, { path: '../sibling' })).toBeUndefined()
+      expect(await use(p, name, { path: outside })).toBeUndefined()
+      // A rule the user kept still covers the path it names, and a deny rule still blocks.
+      expect(await use(policy({ allow: [`${name}(${outside}/**)`] }), name, { path: `${outside}/logs` })).toEqual({ allow: true })
+      expect(await use(policy({ deny: [`${name}(**/.ssh)`] }), name, { path: '.ssh' })).toMatchObject({ deny: expect.stringContaining('.ssh') })
+    }
+  })
+
   it('cd_inside_the_project_is_read_only_and_cd_elsewhere_prompts', async () => {
     const p = policy({})
     expect(await use(p, 'Bash', { command: `cd "${cwd.replace(/\\/g, '/')}" && git log --oneline -15 && echo "---" && git status --short | head -30` })).toEqual({ allow: true })
     expect(await use(p, 'Bash', { command: 'cd src && ls' })).toEqual({ allow: true })
     expect(await use(p, 'Bash', { command: 'cd .. && ls' })).toBeUndefined()
     expect(await use(p, 'Bash', { command: 'cd && ls' })).toBeUndefined()
-    expect(commandLines('Bash', 'cd .. && ls', [])).toEqual([{ text: 'cd ..', rule: 'Bash(cd:*)' }, { text: 'ls', passes: 'read-only' }])
+    expect(commandLines('Bash', 'cd .. && ls', [])).toEqual([{ text: 'cd ..', rule: 'Bash(cd ..)' }, { text: 'ls', passes: 'read-only' }])
+  })
+
+  it('a_cd_rule_allows_its_own_directory_and_below_it_and_no_other', async () => {
+    const outside = process.platform === 'win32' ? 'E:/elsewhere' : '/elsewhere'
+    const p = policy({ allow: [`Bash(cd ${outside})`] })
+    expect(await use(p, 'Bash', { command: `cd ${outside} && ls` })).toEqual({ allow: true })
+    expect(await use(p, 'Bash', { command: `cd ${outside}/deep/nested && ls` })).toEqual({ allow: true })
+    // A directory allowed for one shell says nothing about a sibling, a parent or the other shell.
+    expect(await use(p, 'Bash', { command: `cd ${outside}/../other && ls` })).toBeUndefined()
+    expect(await use(p, 'Bash', { command: 'cd .. && ls' })).toBeUndefined()
+    expect(await use(p, 'PowerShell', { command: `cd ${outside}; ls` })).toBeUndefined()
+    // The prompt offers the directory, not `cd` as such, so allowing one place is not allowing every place.
+    expect(commandLines('Bash', `cd ${outside}`, [])).toEqual([{ text: `cd ${outside}`, rule: `Bash(cd ${outside})` }])
+    // A target we cannot read is no directory to name, so the blunt rule is all that is left.
+    expect(commandLines('Bash', 'cd $HOME', [])).toEqual([{ text: 'cd $HOME', rule: 'Bash(cd:*)' }])
   })
 
   it('a_shell_prompt_is_decorated_with_its_lines_under_the_rules_in_force_and_nothing_else_is_touched', () => {
@@ -195,8 +253,16 @@ describe('PermissionPolicy', () => {
     expect(await use(p, 'Bash', { command: 'ls' })).toEqual({ allow: true })
   })
 
-  it('command_substitution_always_prompts_because_the_inner_command_is_unknown', async () => {
-    expect(await use(policy({ allow: ['Bash'] }), 'Bash', { command: 'echo $(ls)' })).toBeUndefined()
+  it('a_substitution_holding_only_read_only_commands_needs_no_prompt', async () => {
+    expect(await use(policy({}), 'Bash', { command: 'echo "count: $(ls | wc -l)"' })).toEqual({ allow: true })
+  })
+
+  it('a_rule_is_needed_for_what_a_substitution_runs_and_no_rule_covers_a_command_word_it_supplies', async () => {
+    expect(await use(policy({ allow: ['Bash'] }), 'Bash', { command: 'echo $(rm x)' })).toEqual({ allow: true })
+    expect(await use(policy({ allow: ['Bash(echo:*)'] }), 'Bash', { command: 'echo $(rm x)' })).toBeUndefined()
+    expect(await use(policy({ allow: ['Bash'] }), 'Bash', { command: '$(which rm) -rf x' })).toBeUndefined()
+    // A deny rule reaches inside a substitution too.
+    expect(await use(policy({ allow: ['Bash'], deny: ['Bash(rm:*)'] }), 'Bash', { command: 'echo $(rm x)' })).toMatchObject({ deny: expect.stringContaining('Bash(rm:*)') })
   })
 
   it('asking_the_user_a_question_is_never_put_to_a_permission_prompt_first', async () => {
@@ -226,44 +292,88 @@ describe('which sessions may ask', () => {
   })
 })
 
-describe('WriteAllowance', () => {
+describe('the Allow writes switch', () => {
   const use = (h: SessionHooks, toolName: string, input: unknown) => h.preToolUse!({ toolName, input, toolUseId: 't' })
+  const switched = (on: () => boolean, rules: Partial<PermissionRules> = {}) =>
+    new PermissionPolicy(cwd, () => ({ allow: [], deny: [], ...rules }), { readOnly, writesAllowed: on })
 
   it('file_writes_pass_without_a_prompt_while_the_session_switch_is_on', async () => {
     let on = false
-    const allowance = new WriteAllowance(cwd, () => on)
-    expect(await use(allowance, 'Edit', { file_path: 'src/a.ts' })).toBeUndefined()
+    const p = switched(() => on)
+    expect(await use(p, 'Edit', { file_path: 'src/a.ts' })).toBeUndefined()
     on = true
-    for (const tool of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']) expect(await use(allowance, tool, { file_path: 'src/a.ts' }), tool).toEqual({ allow: true })
-    expect(await use(allowance, 'Bash', { command: 'echo hi > f' })).toBeUndefined()
+    for (const tool of ['Write', 'Edit', 'MultiEdit']) expect(await use(p, tool, { file_path: 'src/a.ts' }), tool).toEqual({ allow: true })
+    expect(await use(p, 'NotebookEdit', { notebook_path: 'src/a.ipynb' })).toEqual({ allow: true })
+    // The switch is for the project's own files: a write anywhere else is still a question.
+    expect(await use(p, 'Write', { file_path: '../other/a.ts' })).toBeUndefined()
+    expect(await use(p, 'Bash', { command: 'echo hi > f' })).toBeUndefined()
   })
 
   it('a_move_or_copy_passes_under_the_switch_only_when_both_ends_are_inside_the_project', async () => {
     let on = false
-    const allowance = new WriteAllowance(cwd, () => on)
+    const p = switched(() => on)
     const outside = process.platform === 'win32' ? 'E:\\elsewhere\\a.ts' : '/elsewhere/a.ts'
-    expect(await use(allowance, 'Move', { source: 'src/a.ts', destination: 'lib/a.ts' })).toBeUndefined()
+    expect(await use(p, 'Move', { source: 'src/a.ts', destination: 'lib/a.ts' })).toBeUndefined()
     on = true
     for (const tool of ['Move', 'Copy']) {
-      expect(await use(allowance, tool, { source: 'src/a.ts', destination: `${cwd}/lib/a.ts` }), tool).toEqual({ allow: true })
-      expect(await use(allowance, tool, { source: 'src/a.ts', destination: '../other/a.ts' }), tool).toBeUndefined()
-      expect(await use(allowance, tool, { source: outside, destination: 'src/a.ts' }), tool).toBeUndefined()
-      expect(await use(allowance, tool, { source: '.', destination: 'copy' }), tool).toBeUndefined()
+      expect(await use(p, tool, { source: 'src/a.ts', destination: `${cwd}/lib/a.ts` }), tool).toEqual({ allow: true })
+      expect(await use(p, tool, { source: 'src/a.ts', destination: '../other/a.ts' }), tool).toBeUndefined()
+      expect(await use(p, tool, { source: outside, destination: 'src/a.ts' }), tool).toBeUndefined()
+      expect(await use(p, tool, { source: '.', destination: 'copy' }), tool).toBeUndefined()
     }
   })
 
   it('a_move_is_denied_when_a_deny_rule_names_either_end_and_allowed_only_when_a_rule_covers_both', async () => {
-    const p = new PermissionPolicy(cwd, () => ({ allow: ['Move(src/**)'], deny: ['Move(**/.env)'] }))
+    const p = new PermissionPolicy(cwd, () => ({ allow: ['Move(src/**)'], deny: ['Move(**/.env)'] }), { readOnly })
     expect(await use(p, 'Move', { source: 'src/a.ts', destination: 'src/b.ts' })).toEqual({ allow: true })
     expect(await use(p, 'Move', { source: 'src/a.ts', destination: 'lib/a.ts' })).toBeUndefined()
     expect(await use(p, 'Move', { source: 'src/a.ts', destination: 'config/.env' })).toMatchObject({ deny: expect.stringContaining('Move(**/.env)') })
     expect(projectRuleFor('Move')).toBeUndefined()
   })
 
+  it('file_changing_commands_pass_under_the_switch_when_every_path_is_inside_the_project', async () => {
+    let on = false
+    const p = switched(() => on)
+    expect(await use(p, 'Bash', { command: 'rm -rf local-feed' })).toBeUndefined()
+    on = true
+    expect(await use(p, 'Bash', { command: 'rm -rf local-feed' })).toEqual({ allow: true })
+    expect(await use(p, 'Bash', { command: 'mkdir -p src/SampleApi && touch src/SampleApi/a.cs' })).toEqual({ allow: true })
+    expect(await use(p, 'Bash', { command: 'cp src/a.ts src/b.ts && ls' })).toEqual({ allow: true })
+    expect(await use(p, 'PowerShell', { command: 'Remove-Item -Recurse -Force local-feed' })).toEqual({ allow: true })
+    // The switch covers the project's own files; anything else is still a question.
+    expect(await use(p, 'Bash', { command: 'rm -rf ../other' })).toBeUndefined()
+    expect(await use(p, 'Bash', { command: 'mv src/a.ts /tmp/a.ts' })).toBeUndefined()
+    expect(await use(p, 'Bash', { command: 'rm -rf .' })).toBeUndefined()
+    expect(await use(p, 'Bash', { command: 'rm -rf $BUILD' })).toBeUndefined()
+    expect(await use(p, 'Bash', { command: 'rm -rf ~/cache' })).toBeUndefined()
+    // A redirect writes a file the words do not name, and a command that is neither read-only nor a write still asks.
+    expect(await use(p, 'Bash', { command: 'mkdir dist > log.txt' })).toBeUndefined()
+    expect(await use(p, 'Bash', { command: 'rm -rf dist && dotnet restore' })).toBeUndefined()
+  })
+
+  it('a_cd_out_of_the_project_takes_the_switch_off_the_rest_of_the_line', async () => {
+    const outside = process.platform === 'win32' ? 'E:/elsewhere' : '/elsewhere'
+    const p = switched(() => true, { allow: [`Bash(cd ${outside})`] })
+    // `data` would be read from the project root, but the shell removes it from wherever the `cd` left it.
+    expect(await use(p, 'Bash', { command: `cd ${outside} && rm -rf data` })).toBeUndefined()
+    expect(await use(p, 'Bash', { command: 'cd src && rm -rf data' })).toEqual({ allow: true })
+    const request = { type: 'permission_request' as const, requestId: 'r', toolName: 'Bash', input: { command: `cd ${outside} && rm -rf data` } }
+    expect(p.decorate(request)).toMatchObject({ commands: [{ text: `cd ${outside}`, passes: 'read-only' }, { text: 'rm -rf data', rule: 'Bash(rm:*)' }] })
+  })
+
+  it('a_deny_rule_still_blocks_a_command_the_switch_would_allow_and_the_prompt_names_the_switch', async () => {
+    const denied = switched(() => true, { deny: ['Bash(rm:*)'] })
+    expect(await use(denied, 'Bash', { command: 'rm -rf dist' })).toMatchObject({ deny: expect.stringContaining('Bash(rm:*)') })
+    const p = switched(() => true)
+    const request = { type: 'permission_request' as const, requestId: 'r', toolName: 'Bash', input: { command: 'rm -rf dist && dotnet restore' } }
+    expect(p.decorate(request)).toMatchObject({
+      commands: [{ text: 'rm -rf dist', passes: 'the Allow writes switch' }, { text: 'dotnet restore', rule: 'Bash(dotnet restore:*)' }],
+    })
+  })
+
   it('a_deny_rule_still_blocks_a_write_the_switch_would_allow', async () => {
-    const policy = new PermissionPolicy(cwd, () => ({ allow: [], deny: ['Write(**/.env)'] }))
-    const hooks = composeHooks(policy, new WriteAllowance(cwd, () => true))
-    expect(await use(hooks, 'Write', { file_path: 'config/.env' })).toMatchObject({ deny: expect.stringContaining('Write(**/.env)') })
-    expect(await use(hooks, 'Write', { file_path: 'src/a.ts' })).toEqual({ allow: true })
+    const p = switched(() => true, { deny: ['Write(**/.env)'] })
+    expect(await use(p, 'Write', { file_path: 'config/.env' })).toMatchObject({ deny: expect.stringContaining('Write(**/.env)') })
+    expect(await use(p, 'Write', { file_path: 'src/a.ts' })).toEqual({ allow: true })
   })
 })

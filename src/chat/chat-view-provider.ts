@@ -65,7 +65,18 @@ import { sharedBuild } from '../agent/session/generated-context'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative } from 'node:path'
 import { linkedFilePath, withLinkedFiles } from './linked-files'
-import type { CleanupSweep, CleanupUnit, FromWebview, PlanState, RunRef, RunSection, RunState, SessionTab, ToWebview } from './protocol'
+import type {
+  CleanupSweep,
+  CleanupUnit,
+  FromWebview,
+  PlanState,
+  ResumableChat,
+  RunRef,
+  RunSection,
+  RunState,
+  SessionTab,
+  ToWebview,
+} from './protocol'
 import { webviewHtml } from './webview-html'
 import type { ProfileDefaults } from '../settings/settings-store'
 
@@ -1347,17 +1358,34 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     // Planning phases auto-allow their in-scope writes and deny the rest, so the switch has nothing to decide there.
     const writesAsked = run !== undefined && !isPlanning(run.mode)
     const active = run?.id
+    const tabs = this.tabs()
     this.broadcast({
       type: 'state',
-      tabs: this.tabs(),
+      tabs,
       ...(active && writesAsked ? { allowWrites: this.allowWrites.isEnabled(active) } : {}),
       ...(active && this.mcpServers.has(active) ? { mcp: this.mcpServers.get(active)! } : {}),
       ...(plan ? { plan } : {}),
       ...(active ? { currentRun: active } : {}),
       plans: plans.flatMap((p) => (p.status === 'verified' ? [] : [{ feature: p.feature, status: p.status }])),
+      chats: this.pastChats(tabs),
       profiles: this.profileDefaults.read(),
       models: this.registeredModels(),
     })
+  }
+
+  /**
+   * The chats with no tab in play: closing one stops its engine but keeps its
+   * record and its transcript, so it is offered back rather than lost. Only so
+   * many, newest first: the state goes out on every status change, and a
+   * workspace's whole history would ride along with it.
+   */
+  private pastChats(tabs: SessionTab[]): ResumableChat[] {
+    const shown = new Set(tabs.map((t) => t.id))
+    return this.sessions
+      .list()
+      .filter((r) => r.mode === 'chat' && !shown.has(r.id))
+      .slice(0, 20)
+      .map((r) => ({ sessionId: r.id, title: r.title, startedAt: r.createdAt }))
   }
 
   /** The tab's history: every run under it, oldest first, each its own conversation. */

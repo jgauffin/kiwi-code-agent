@@ -1,7 +1,7 @@
 import { permissionResolved, type CodeSession, type FileEditChange, type McpControl, type PermissionDecision, type SessionEvent, type TurnUsage } from '../session/code-session'
 import type { QuestionOutcome, UserQuestionRequest } from '../session/user-question'
 import type { SessionHooks, ToolUse } from '../session/hooks'
-import { denyReason, gateCall } from './tools/script-gate'
+import { confirmReason, denyReason, gateCall } from '../permissions/gate'
 import type { ModelProfile } from '../session/model-profile'
 import { AsyncQueue } from '../session/async-queue'
 import type { McpServers } from '../mcp/mcp-config'
@@ -10,6 +10,9 @@ import type { ChatCompletionClient, ChatMessage, ToolCall, ToolDefinition, Usage
 import { ReadTracker } from './tools/read-tracker'
 import { toDefinition, type Tool, type ToolContext, type ToolOutput } from './tools/tool'
 import { UNANSWERED_TOOL_RESULT } from './history'
+import { isAbsolute, resolve } from 'node:path'
+import { COMPACT_AT, compact, DEFAULT_CONTEXT_WINDOW, isContextTooLong, KEEP_SHARE, pathsReadIn, SUMMARY_MAX_TOKENS, SUMMARY_PROMPT } from './compaction'
+import { FileLedger } from './file-ledger'
 
 /**
  * Room for a reasoning model to think through a task and then write a whole
@@ -30,6 +33,8 @@ export type OpenAiSessionOptions = {
   hooks?: SessionHooks
   /** Tool rounds per user turn before the engine gives up; a runaway loop costs money. */
   maxRoundsPerTurn?: number
+  /** Tokens this model's context holds; a model nobody configured is treated as 128k. */
+  contextWindow?: number
   /** The workspace's MCP servers and the host that connects to them; absent on a session that takes none. */
   mcp?: { host: McpToolHost; servers: McpServers }
 }
@@ -46,6 +51,8 @@ export class OpenAiSession implements CodeSession {
   private readonly messages: ChatMessage[]
   private readonly queue: string[] = []
   private readonly files = new ReadTracker()
+  /** Where the session has been in the workspace; outlives the messages that say so. */
+  private readonly ledger = new FileLedger()
   private readonly pending = new Map<string, (d: PermissionDecision) => void>()
   /** Questions the model put to the user, by the id of the tool call that asked. */
   private readonly questions = new Map<string, (outcome: QuestionOutcome) => void>()
@@ -59,6 +66,8 @@ export class OpenAiSession implements CodeSession {
   private running = false
   private disposed = false
   private turnCounter = 0
+  /** What the last completion said its prompt cost: how full the window is now. */
+  private promptTokens = 0
 
   constructor(private readonly options: OpenAiSessionOptions) {
     this.id = options.id
@@ -161,14 +170,25 @@ export class OpenAiSession implements CodeSession {
     const usage: TurnUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
     const started = Date.now()
     const maxRounds = this.options.maxRoundsPerTurn ?? 50
+    /** The turn gets one compaction to rescue it from a provider that says the conversation is too long. */
+    let rescued = false
     try {
       for (let round = 1; ; round++) {
         if (round > maxRounds) {
           this.emit({ type: 'error', message: `Stopped after ${maxRounds} tool rounds in one turn`, fatal: false, resumable: true })
           return this.finishTurn(usage, started, true, ['max tool rounds'])
         }
+        if (this.promptTokens >= this.contextWindow * COMPACT_AT) await this.compactNow(signal, usage)
         this.emit({ type: 'status', status: 'requesting' })
-        const { assistant, finishReason } = await this.complete(`${turn}.${round}`, signal, usage)
+        let completion: Awaited<ReturnType<OpenAiSession['complete']>>
+        try {
+          completion = await this.complete(`${turn}.${round}`, signal, usage)
+        } catch (error) {
+          if (rescued || signal.aborted || !isContextTooLong(error) || !(await this.compactNow(signal, usage))) throw error
+          rescued = true
+          continue
+        }
+        const { assistant, finishReason } = completion
         this.messages.push(assistant)
         // A reply cut mid-thought has not decided anything, and a tool call cut mid-arguments is not the call the model meant.
         if (finishReason === 'length') {
@@ -229,7 +249,10 @@ export class OpenAiSession implements CodeSession {
           break
         }
         case 'done':
-          if (delta.usage) addUsage(usage, delta.usage)
+          if (delta.usage) {
+            addUsage(usage, delta.usage)
+            this.promptTokens = delta.usage.promptTokens
+          }
           finishReason = delta.finishReason
           break
       }
@@ -246,6 +269,47 @@ export class OpenAiSession implements CodeSession {
       })
     }
     return { assistant: { role: 'assistant', content: text, ...(reasoning ? { reasoning } : {}), toolCalls }, finishReason }
+  }
+
+  private get contextWindow(): number {
+    return this.options.contextWindow ?? DEFAULT_CONTEXT_WINDOW
+  }
+
+  /**
+   * Folds the older turns into a summary. False when there was nothing old
+   * enough to fold: the caller is then out of room and has to say so.
+   */
+  private async compactNow(signal: AbortSignal, usage: TurnUsage): Promise<boolean> {
+    this.emit({ type: 'status', status: 'compacting' })
+    const before = this.promptTokens
+    const ledger = this.ledger.render(this.options.cwd)
+    const result = await compact(this.messages, (t) => this.summarise(t, signal, usage), this.contextWindow * KEEP_SHARE, ledger)
+    if (!result) return false
+    this.messages.splice(0, this.messages.length, ...result.messages)
+    // A file whose read was folded away is one the model can no longer see, whatever the ledger says it once knew.
+    this.files.forgetExcept(pathsReadIn(result.kept).map((p) => (isAbsolute(p) ? p : resolve(this.options.cwd, p))))
+    this.promptTokens = 0
+    this.emit({ type: 'compacted', summary: result.summary, preTokens: before })
+    return true
+  }
+
+  /** The summary that stands in for the folded turns, written by the session's own model without tools. */
+  private async summarise(transcript: string, signal: AbortSignal, usage: TurnUsage): Promise<string> {
+    let summary = ''
+    for await (const delta of this.options.client.stream({
+      model: this.options.profile.model,
+      messages: [
+        { role: 'system', content: SUMMARY_PROMPT },
+        { role: 'user', content: transcript },
+      ],
+      tools: [],
+      maxTokens: SUMMARY_MAX_TOKENS,
+      signal,
+    })) {
+      if (delta.type === 'text') summary += delta.text
+      if (delta.type === 'done' && delta.usage) addUsage(usage, delta.usage)
+    }
+    return summary
   }
 
   private async runTool(call: ToolCall, signal: AbortSignal): Promise<ToolOutput> {
@@ -286,9 +350,12 @@ export class OpenAiSession implements CodeSession {
       cwd: this.options.cwd,
       signal,
       files: this.files,
+      ledger: this.ledger,
       ask: (request) => this.askUser(callId, request),
       call: (name, input) => this.runTool({ id: nextId(), name, arguments: JSON.stringify(input) }, signal),
       authorize: (name, input) => denyReason(this.options.hooks, { toolName: name, input, toolUseId: nextId() }),
+      confirm: (name, input) =>
+        confirmReason(this.options.hooks, (id, n, v, shown) => this.askPermission(id, n, v, signal, shown), { toolName: name, input, toolUseId: nextId() }),
       review: (title, edits) => this.askPermission(nextId(), 'RunScript', { files: edits.map((e) => e.label) }, signal, { title, edits }),
     }
   }

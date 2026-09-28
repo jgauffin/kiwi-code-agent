@@ -63,7 +63,7 @@ export class NewSessionRequestedEvent extends Event {
   }
 }
 
-/** The new-session screen's pick of a plan already on disk. */
+/** The tab bar's pick of a plan already on disk. */
 export class PlanResumeRequestedEvent extends Event {
   static readonly type = 'plan-resume-requested'
   constructor(public readonly feature: string) {
@@ -191,6 +191,14 @@ export class ImplementRequestedEvent extends Event {
   }
 }
 
+/** A comment or ruling box closed: the text as written, or nothing when it was cancelled. */
+export class EditorClosedEvent extends Event {
+  static readonly type = 'editor-closed'
+  constructor(public readonly text?: string) {
+    super(EditorClosedEvent.type, { bubbles: true })
+  }
+}
+
 /** Any review gesture on the plan view, on its way to the extension host. */
 export class ReviewActionEvent extends Event {
   static readonly type = 'review-action'
@@ -296,6 +304,7 @@ declare global {
     [ImplementRequestedEvent.type]: ImplementRequestedEvent
     [PlanViewSelectedEvent.type]: PlanViewSelectedEvent
     [ReviewActionEvent.type]: ReviewActionEvent
+    [EditorClosedEvent.type]: EditorClosedEvent
     [SessionRemovedEvent.type]: SessionRemovedEvent
     [AllowWritesToggledEvent.type]: AllowWritesToggledEvent
     [SessionModelChangedEvent.type]: SessionModelChangedEvent

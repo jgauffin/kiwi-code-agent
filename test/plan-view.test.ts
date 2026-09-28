@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PlanState } from '../src/chat/protocol'
 import type { Spec } from '../src/agent/phases/spec-model'
 import type { ReviewRound } from '../src/agent/phases/plan-review'
@@ -44,7 +44,17 @@ function view(state: PlanState, tab: Tab = 'spec'): InstanceType<typeof PlanView
 
 const buttons = (node: HTMLElement, label: string) => [...node.querySelectorAll<HTMLButtonElement>('button')].filter((b) => b.textContent === label)
 
+/** Every error Relaxjs reports lands here first, whichever of its bundles reported it. */
+const relaxErrors: Error[] = ((globalThis as Record<string, unknown>).relaxErrors ??= [] as Error[]) as Error[]
+
 describe('PlanView', () => {
+  // A template that cannot resolve a path renders empty and reports rather than throwing, so a
+  // mistyped binding would otherwise show up as a blank element with no reason for it. Read the
+  // global rather than captureRelaxErrors: @relax.js/core/testing and /html are separate bundles
+  // with a handler slot each, so the capture never sees what a template reports.
+  beforeEach(() => (relaxErrors.length = 0))
+  afterEach(() => expect(relaxErrors.map((e) => e.message)).toEqual([]))
+
   it('shows_the_tab_it_is_given_and_falls_back_to_the_spec_when_that_tab_has_nothing', () => {
     const node = view(plan({ tasks: [task()] }), 'tasks')
     expect(node.querySelector('.tasks')).not.toBeNull()

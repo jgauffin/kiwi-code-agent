@@ -35,7 +35,7 @@ export function applyEdits(before: string, toolName: string, input: unknown): st
   const record = asRecord(input)
   switch (toolName) {
     case 'Write':
-      return typeof record['content'] === 'string' ? [before, record['content']] : undefined
+      return typeof record['content'] === 'string' ? [before, before.includes('\r\n') ? crlf(record['content']) : record['content']] : undefined
     case 'Edit': {
       const after = replace(before, record)
       return after === undefined ? undefined : [before, after]
@@ -62,10 +62,15 @@ function replace(text: string, edit: Record<string, unknown>): string | undefine
   if (typeof oldString !== 'string' || typeof newString !== 'string') return undefined
   // An empty match is how a new file is written through Edit: there is nothing to find.
   if (oldString === '') return text === '' ? newString : undefined
-  if (!text.includes(oldString)) return undefined
-  if (edit['replace_all'] === true) return text.split(oldString).join(newString)
-  return text.replace(oldString, () => newString)
+  // A model writes its lines with \n, which a file kept in CRLF does not contain;
+  // the edit is matched and written in the endings the file already uses.
+  const [needle, replacement] = text.includes(oldString) ? [oldString, newString] : [crlf(oldString), crlf(newString)]
+  if (!text.includes(needle)) return undefined
+  if (edit['replace_all'] === true) return text.split(needle).join(replacement)
+  return text.replace(needle, () => replacement)
 }
+
+const crlf = (text: string): string => text.replace(/\r?\n/g, '\r\n')
 
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {}

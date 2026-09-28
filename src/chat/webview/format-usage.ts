@@ -7,7 +7,8 @@ export function formatUsage(usage: TurnUsage): string {
   return `${input} / ${compact(usage.outputTokens)} out`
 }
 
-function compact(n: number): string {
+/** A token count at a glance: thousands and millions rather than every digit. */
+export function compact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1000) return `${(n / 1000).toFixed(1)}K`
   return String(n)
