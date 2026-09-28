@@ -93,7 +93,7 @@ export class SettingsStore {
 
   async snapshot(): Promise<SettingsSnapshot> {
     const { providers, profiles, activeProfile } = this.models()
-    const names = providers.filter((p) => p.engine === 'openai-compatible').map((p) => p.name)
+    const names = providers.map((p) => p.name)
     return {
       providers,
       profiles,
@@ -131,7 +131,7 @@ export class SettingsStore {
     await this.write('providers', [...providers.slice(0, index), saved, ...providers.slice(index + 1)])
     if (previous && previous.name !== saved.name) {
       await this.renameProvider(previous.name, saved.name)
-      if (previous.engine === 'openai-compatible') await this.secrets.move(previous.name, saved.name)
+      await this.secrets.move(previous.name, saved.name)
     }
   }
 
@@ -142,7 +142,7 @@ export class SettingsStore {
     const users = profiles.filter((profile) => choices(profile).some((c) => c.provider === provider.name)).map((p) => p.name)
     if (users.length > 0) throw new Error(`"${provider.name}" is the provider for ${users.join(', ')}; point those profiles elsewhere first.`)
     await this.write('providers', providers.filter((_, i) => i !== index))
-    if (provider.engine === 'openai-compatible') await this.secrets.delete(provider.name)
+    await this.secrets.delete(provider.name)
   }
 
   /** Saves the profile at `index`, or adds it at the end; a rename follows into the default that named it. */
@@ -168,7 +168,8 @@ export class SettingsStore {
 
   async setApiKey(name: string, value: string): Promise<void> {
     if (!name.trim()) throw new Error('An API key needs the provider it belongs to.')
-    await this.secrets.store(name, value)
+    // Empty means no key: a Claude provider then runs on the editor's login again.
+    await (value === '' ? this.secrets.delete(name) : this.secrets.store(name, value))
   }
 
   private models(): ModelSettings {

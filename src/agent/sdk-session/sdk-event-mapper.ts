@@ -1,4 +1,4 @@
-import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
+import type { SDKAssistantMessageError, SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { SessionEvent, TurnUsage } from '../session/code-session'
 import { bareToolName } from './tool-server'
 
@@ -82,7 +82,7 @@ export class SdkEventMapper {
     const parent = parentOf(msg.parent_tool_use_id)
     const events: SessionEvent[] = []
     if (msg.error) {
-      events.push({ type: 'error', message: `Assistant error: ${msg.error}`, fatal: false })
+      events.push({ type: 'error', message: ASSISTANT_ERRORS[msg.error] ?? `Assistant error: ${msg.error}`, fatal: false })
     }
     const textParts: string[] = []
     for (const block of msg.message.content) {
@@ -129,6 +129,13 @@ export class SdkEventMapper {
     if (msg.subtype !== 'success' && errors.length === 0) errors.push(msg.subtype)
     return [{ type: 'turn_done', usage, durationMs: msg.duration_ms, isError: msg.is_error, errors }]
   }
+}
+
+/** The refusals a new user meets first, told as what to do about them rather than as a code. */
+const ASSISTANT_ERRORS: Partial<Record<SDKAssistantMessageError, string>> = {
+  authentication_failed:
+    'Claude is not logged in. Add an Anthropic API key to the Claude provider in KiwiAgent settings (the gear icon), then start a new session.',
+  billing_error: 'Anthropic refused the request for billing reasons: check the credit or plan of the account the Claude provider uses.',
 }
 
 function parentOf(parentToolUseId: string | null): { parentToolUseId?: string } {

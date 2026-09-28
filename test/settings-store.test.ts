@@ -202,6 +202,29 @@ describe('SettingsStore api keys', () => {
     expect(JSON.stringify(snapshot)).not.toContain('sk-')
   })
 
+  it('snapshot_tells_whether_a_claude_provider_has_a_key_since_one_replaces_the_editor_login', async () => {
+    const { store: s } = store(withModels([claudeProvider, bergetProvider], [], ''), { secrets: ['Claude'] })
+    expect((await s.snapshot()).keys).toEqual([
+      { name: 'Claude', stored: true },
+      { name: 'berget', stored: false },
+    ])
+  })
+
+  it('an_empty_key_removes_the_stored_one_so_claude_falls_back_to_the_editor_login', async () => {
+    const { store: s, secrets } = store(withModels([claudeProvider], [], ''), { secrets: ['Claude'] })
+    await s.setApiKey('Claude', '')
+    expect(secrets.has('Claude')).toBe(false)
+  })
+
+  it('renaming_a_claude_provider_carries_its_key_and_removing_it_deletes_the_key', async () => {
+    const { store: s, secrets } = store(withModels([claudeProvider], [], ''), { secrets: ['Claude'] })
+    await s.saveProvider(0, { ...claudeProvider, name: 'Anthropic' })
+    expect(secrets.has('Anthropic')).toBe(true)
+    expect(secrets.has('Claude')).toBe(false)
+    await s.removeProvider(0)
+    expect(secrets.has('Anthropic')).toBe(false)
+  })
+
   it('profile_defaults_names_every_profile_and_the_one_in_use', () => {
     const { store: s } = store(withModels([claudeProvider, bergetProvider], [opus, kimi], 'Kimi'))
     expect(s.profileDefaults()).toEqual({ names: ['Opus', 'Kimi'], active: 'Kimi' })

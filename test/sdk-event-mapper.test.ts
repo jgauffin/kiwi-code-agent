@@ -51,6 +51,35 @@ describe('SdkEventMapper', () => {
     ])
   })
 
+  it('a_failed_login_points_at_the_api_key_setting_instead_of_naming_the_error_code', () => {
+    const msg = {
+      type: 'assistant',
+      error: 'authentication_failed',
+      parent_tool_use_id: null,
+      uuid: 'u',
+      session_id: 's',
+      message: { id: 'msg_1', content: [{ type: 'text', text: 'Invalid API key · Please run /login' }] },
+    } as unknown as SDKMessage
+    const [error] = new SdkEventMapper().map(msg)
+    expect(error).toMatchObject({ type: 'error', fatal: false })
+    expect((error as { message: string }).message).toContain('API key')
+    expect((error as { message: string }).message).toContain('KiwiAgent settings')
+  })
+
+  it('a_billing_refusal_says_it_is_the_account_not_the_login', () => {
+    const msg = {
+      type: 'assistant',
+      error: 'billing_error',
+      parent_tool_use_id: null,
+      uuid: 'u',
+      session_id: 's',
+      message: { id: 'msg_1', content: [] },
+    } as unknown as SDKMessage
+    const [error] = new SdkEventMapper().map(msg)
+    expect((error as { message: string }).message).toContain('billing')
+    expect((error as { message: string }).message).not.toContain('billing_error')
+  })
+
   it('subagent_output_is_tagged_with_its_parent_tool_use', () => {
     const msg = {
       type: 'assistant',

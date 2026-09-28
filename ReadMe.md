@@ -8,7 +8,7 @@
 
 A VS Code coding agent that plans a feature before it reads your code, and calls nothing done until a test proves each rule.
 
-> **Early days.** KiwiAgent is young and you will hit bugs. Things are changing frequently, use at own risk! [Report them](https://github.com/jgauffin/kiwi-code-agent/issues); they usally get fixed fast.
+> **Early days.** KiwiAgent is young and you will hit bugs. Things are changing frequently, use at own risk! [Report them](https://github.com/jgauffin/kiwi-code-agent/issues); they usually get fixed fast.
 
 ## Why it's different
 
@@ -40,7 +40,12 @@ A VS Code coding agent that plans a feature before it reads your code, and calls
 
 Install **KiwiAgent** from the [Marketplace](https://marketplace.visualstudio.com/items?itemName=CoderrAB.kiwi-agent). Windows only (x64, arm64).
 
-Open KiwiAgent in the activity bar, press `+`, pick **Plan** and describe the feature. For a non-Claude model, add a provider on the settings page (gear icon).
+Claude sessions need one of:
+
+- an **Anthropic API key**, added to the Claude provider on the settings page (gear icon), or
+- a **Claude Code login** already on this machine, used when no key is set.
+
+Open KiwiAgent in the activity bar, press `+`, pick **Plan** and describe the feature. For a non-Claude model, add a provider on the settings page.
 
 ## More
 

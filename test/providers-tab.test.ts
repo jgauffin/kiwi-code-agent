@@ -49,13 +49,51 @@ const set = (form: HTMLFormElement, name: string, value: string) => {
 }
 
 describe('ProvidersTab cards', () => {
-  it('base_url_and_key_name_show_only_for_the_openai_engine', () => {
+  it('base_url_shows_only_for_the_openai_engine', () => {
     const node = tab()
     const form = edit(node, 0)
     const openai = form.querySelector<HTMLElement>('.openai')!
     expect(openai.hidden).toBe(true)
     set(form, 'engine', 'openai-compatible')
     expect(openai.hidden).toBe(false)
+    node.remove()
+  })
+
+  it('a_claude_provider_takes_an_optional_key_that_replaces_the_editor_login', () => {
+    const node = tab()
+    const form = edit(node, 0)
+    let key: unknown
+    node.addEventListener(events.ApiKeySetEvent.type, (e) => (key = [e.name, e.value]))
+    set(form, 'apiKeyValue', 'sk-ant-1')
+    form.dispatchEvent(new Event('submit', { cancelable: true }))
+    expect(key).toEqual(['Claude', 'sk-ant-1'])
+    node.remove()
+  })
+
+  it('a_claude_card_without_a_key_says_it_runs_on_the_editor_login_not_that_a_key_is_missing', () => {
+    const node = tab(snapshot({ keys: [{ name: 'Claude', stored: false }, { name: 'berget', stored: false }] }))
+    const chips = [...cards(node)[0]!.querySelectorAll('.chip')].map((c) => c.textContent)
+    expect(chips).toContain('editor login')
+    expect(chips).not.toContain('key missing')
+    node.update(snapshot({ keys: [{ name: 'Claude', stored: true }, { name: 'berget', stored: false }] }))
+    expect([...cards(node)[0]!.querySelectorAll('.chip')].map((c) => c.textContent)).toContain('key stored')
+    node.remove()
+  })
+
+  it('a_stored_key_can_be_removed_from_the_form_so_claude_falls_back_to_the_editor_login', () => {
+    const node = tab(snapshot({ keys: [{ name: 'Claude', stored: true }, { name: 'berget', stored: false }] }))
+    const form = edit(node, 0)
+    let key: unknown
+    node.addEventListener(events.ApiKeySetEvent.type, (e) => (key = [e.name, e.value]))
+    ;[...form.querySelectorAll('button')].find((b) => b.textContent === 'Remove key')!.click()
+    expect(key).toEqual(['Claude', ''])
+    node.remove()
+  })
+
+  it('no_remove_key_button_is_offered_when_nothing_is_stored', () => {
+    const node = tab()
+    const form = edit(node, 0)
+    expect([...form.querySelectorAll('button')].some((b) => b.textContent === 'Remove key')).toBe(false)
     node.remove()
   })
 

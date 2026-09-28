@@ -12,11 +12,16 @@ const profile: Profile = {
 
 describe('resolveStep', () => {
   it('a_step_with_no_entry_of_its_own_runs_the_default', () => {
-    expect(resolveStep(profile, [claude], 'implement')).toEqual({ name: 'Balanced', engine: 'claude-sdk', model: 'claude-sonnet-5' })
+    expect(resolveStep(profile, [claude], 'implement')).toMatchObject({ name: 'Balanced', engine: 'claude-sdk', model: 'claude-sonnet-5' })
   })
 
   it('a_step_with_an_entry_overrides_the_default', () => {
-    expect(resolveStep(profile, [claude], 'plan')).toEqual({ name: 'Balanced', engine: 'claude-sdk', model: 'claude-opus-5', effort: 'high' })
+    expect(resolveStep(profile, [claude], 'plan')).toMatchObject({ name: 'Balanced', engine: 'claude-sdk', model: 'claude-opus-5', effort: 'high' })
+  })
+
+  it('a_claude_provider_names_its_optional_key_so_a_stored_one_replaces_the_editor_login', () => {
+    expect(resolveStep(profile, [claude], 'chat')).toEqual({ name: 'Balanced', engine: 'claude-sdk', model: 'claude-sonnet-5', apiKeySecret: 'Claude' })
+    expect(providerModel(claude, 'claude-opus-5').apiKeySecret).toBe('Claude')
   })
 
   it('an_openai_compatible_provider_carries_its_endpoint_and_its_own_name_as_the_key_into_the_resolved_profile', () => {

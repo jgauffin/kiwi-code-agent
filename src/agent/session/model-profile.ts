@@ -6,10 +6,10 @@ export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 /**
  * Where models come from: an endpoint, the key that opens it, and what it
- * serves. The Claude engine inherits the editor's login, so it carries
- * neither a base URL nor a key. An OpenAI-compatible provider's key lives in
- * secret storage under the provider's own name; renaming the provider moves
- * it, so there is nothing else to name.
+ * serves. A key lives in secret storage under the provider's own name;
+ * renaming the provider moves it, so there is nothing else to name. The
+ * Claude engine has no base URL, and its key is optional: without one it runs
+ * on the editor's Claude login.
  */
 export type Provider = {
   name: string
@@ -50,7 +50,7 @@ export type ModelProfile = {
   model: string
   /** OpenAI-compatible engines only. */
   baseUrl?: string
-  /** Name under which the API key is stored in secret storage. */
+  /** Name under which the API key is stored in secret storage; required for OpenAI-compatible engines, optional for Claude. */
   apiKeySecret?: string
   effort?: Effort
   systemPromptFile?: string
@@ -73,7 +73,7 @@ export function resolveStep(profile: Profile, providers: Provider[], step: Step)
     engine: provider.engine,
     model: choice.model,
     ...(provider.baseUrl ? { baseUrl: provider.baseUrl } : {}),
-    ...(provider.engine === 'openai-compatible' ? { apiKeySecret: provider.name } : {}),
+    apiKeySecret: provider.name,
     ...(choice.effort ? { effort: choice.effort } : {}),
     ...(choice.systemPromptFile ? { systemPromptFile: choice.systemPromptFile } : {}),
   }
@@ -86,6 +86,6 @@ export function providerModel(provider: Provider, model: string): ModelProfile {
     engine: provider.engine,
     model,
     ...(provider.baseUrl ? { baseUrl: provider.baseUrl } : {}),
-    ...(provider.engine === 'openai-compatible' ? { apiKeySecret: provider.name } : {}),
+    apiKeySecret: provider.name,
   }
 }

@@ -1,5 +1,5 @@
 import * as esbuild from 'esbuild'
-import { cpSync, mkdirSync } from 'node:fs'
+import { cpSync, mkdirSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 
@@ -12,6 +12,9 @@ const require = createRequire(import.meta.url)
 // <its own dir>/vendor/ripgrep/<arch>-<platform>/. It is ES module syntax,
 // so it gets the .mjs extension outside its own package.
 const sdkDir = dirname(require.resolve('@anthropic-ai/claude-agent-sdk'))
+// Chunk names carry a content hash, so a build never overwrites the last one's
+// chunks; without a clean start every old mermaid chunk ends up in the .vsix.
+if (!watch) rmSync('dist', { recursive: true, force: true })
 mkdirSync('dist', { recursive: true })
 cpSync(join(sdkDir, 'cli.js'), 'dist/cli.mjs')
 cpSync(join(sdkDir, 'vendor', 'ripgrep', 'COPYING'), 'dist/vendor/ripgrep/COPYING')

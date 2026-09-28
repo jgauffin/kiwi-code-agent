@@ -1,6 +1,6 @@
 # Settings
 
-*KiwiAgent: Settings* (or the gear in the Sessions and Chat views) opens a page in the editor with four tabs: Models and Advanced write to user settings, Permissions and Project to the workspace. Models has its own Providers and Profiles sub-tabs. API keys go to the editor's secret storage from the Providers sub-tab, under the provider's own name; a rename carries the stored key with it, so nothing else names it.
+*KiwiAgent: Settings* (or the gear in the Sessions and Chat views) opens a page in the editor with four tabs: Models and Advanced write to user settings, Permissions and Project to the workspace. Models has its own Providers and Profiles sub-tabs. API keys go to the editor's secret storage from the Providers sub-tab, under the provider's own name; a rename carries the stored key with it, so nothing else names it. A `claude-sdk` provider's key is optional: with one, Claude sessions use that Anthropic API key; without one, they use the Claude Code login on this machine.
 
 The keys, for settings.json:
 

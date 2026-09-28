@@ -366,6 +366,9 @@ export function activate(context: vscode.ExtensionContext): void {
       case 'claude-sdk':
         // Until the engine reports in, the wait is on its own start-up.
         onProgress('Starting Claude Code')
+        // A key stored on the provider is the user's choice over the editor's Claude login; none leaves that login in charge.
+        const anthropicKey = profile.apiKeySecret ? await context.secrets.get(secretKey(profile.apiKeySecret)) : undefined
+        traceStart(record, anthropicKey ? `using the API key "${profile.apiKeySecret}"` : 'no API key stored, using the editor login')
         const scriptTools = [globTool, grepTool, bashTool(), jsonSchemaTool, jsonQueryTool, codeOutlineTool]
         sessionTools.set(record.id, [...allowed(ownTools), ...scriptTools])
         return new SdkSession({
@@ -381,7 +384,11 @@ export function activate(context: vscode.ExtensionContext): void {
           ...(record.engineSessionId ? { resumeEngineSessionId: record.engineSessionId } : {}),
           // Telemetry posts go through axios, which cannot authenticate against a
           // corporate proxy asking for NTLM, leaving 407s in the session diagnostics.
-          env: { CLAUDE_AGENT_SDK_CLIENT_APP: 'kiwi-agent-vscode/0.0.1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' },
+          env: {
+            CLAUDE_AGENT_SDK_CLIENT_APP: 'kiwi-agent-vscode/0.0.1',
+            CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+            ...(anthropicKey ? { ANTHROPIC_API_KEY: anthropicKey } : {}),
+          },
           ...(setup.hooks ? { hooks: setup.hooks } : {}),
           ...(setup.systemPrompt !== undefined ? { systemPrompt: setup.systemPrompt } : { appendSystemPrompt: `${DOC_READING}\n${CODE_READING}\n${SCRIPT_WRITING}\n${CHAT_DECISIONS}` }),
           ...(setup.toolNames ? { tools: setup.toolNames } : {}),

@@ -4,11 +4,19 @@ import { ApiKeySetEvent, ModelsRefreshRequestedEvent, ProviderRemovedEvent, Prov
 import { button, el, field, heading, note, select, settingsFileLink, textInput } from './fields'
 
 const ENGINES: { value: Engine; label: string }[] = [
-  { value: 'claude-sdk', label: 'Claude (Agent SDK, editor login)' },
+  { value: 'claude-sdk', label: 'Claude (Agent SDK)' },
   { value: 'openai-compatible', label: 'OpenAI-compatible (own loop, API key)' },
 ]
 
 const engineLabel = (engine: Engine): string => ENGINES.find((e) => e.value === engine)?.label ?? engine
+
+type KeyState = 'stored' | 'missing' | 'login'
+
+/** A Claude provider with no key is not missing one: it runs on the editor's Claude login. */
+const keyState = (engine: Engine | undefined, stored: boolean): KeyState => (stored ? 'stored' : engine === 'claude-sdk' ? 'login' : 'missing')
+
+/** A class for the chip or badge that shows a key's state; the login state is neutral, neither good nor bad. */
+const keyClass = (state: KeyState): string => (state === 'login' ? '' : state)
 
 /**
  * What models come from: an engine, an endpoint and its key, and the models
@@ -63,10 +71,8 @@ export class ProvidersTab extends HTMLElement {
     const chips = el('div', 'chips')
     chips.append(el('span', 'chip', engineLabel(provider.engine)))
     if (provider.baseUrl) chips.append(el('span', 'chip', provider.baseUrl))
-    if (provider.engine === 'openai-compatible') {
-      const stored = snapshot.keys.find((k) => k.name === provider.name)?.stored ?? false
-      chips.append(el('span', `chip ${stored ? 'stored' : 'missing'}`, stored ? 'key stored' : 'key missing'))
-    }
+    const state = keyState(provider.engine, snapshot.keys.find((k) => k.name === provider.name)?.stored ?? false)
+    chips.append(el('span', `chip ${keyClass(state)}`.trim(), state === 'login' ? 'editor login' : `key ${state}`))
     chips.append(el('span', 'chip', provider.models.length === 1 ? '1 model' : `${provider.models.length} models`))
     const controls = el('div', 'controls')
     controls.append(
@@ -105,7 +111,7 @@ export class ProvidersTab extends HTMLElement {
       const saved = current()
       this.dispatchEvent(new ProviderSavedEvent(index, saved))
       // Saved first, so a rename's move of the old secret happens before a freshly typed one overwrites it.
-      if (saved.engine === 'openai-compatible' && saved.name && apiKeyValue.value !== '') {
+      if (saved.name && apiKeyValue.value !== '') {
         this.dispatchEvent(new ApiKeySetEvent(saved.name, apiKeyValue.value))
       }
     }
@@ -121,13 +127,29 @@ export class ProvidersTab extends HTMLElement {
     apiKeyValue.addEventListener('input', updateRefresh)
     openai.append(
       field('Base URL', baseUrlInput),
-      field('API key', apiKeyValue, {
-        hint: key?.stored ? 'Stored under this provider’s name. Leave blank to keep it.' : 'Stored in the editor’s secret storage, under this provider’s name, never in settings.',
-      }),
       refresh,
       el('span', 'hint', 'Refresh saves the provider first, so a failed request never costs what you typed.'),
     )
-    engine.addEventListener('change', () => (openai.hidden = engine.value !== 'openai-compatible'))
+    const keyField = field('API key', apiKeyValue, { hint: ' ' })
+    const keyHint = keyField.querySelector<HTMLElement>('.hint')!
+    const describeKey = () => {
+      const claude = engine.value === 'claude-sdk'
+      keyHint.textContent = key?.stored
+        ? `Stored under this provider’s name. Leave blank to keep it${claude ? ', or remove it to use the editor’s Claude login' : ''}.`
+        : claude
+          ? 'Optional: an Anthropic API key. Without one, sessions use the editor’s Claude login. Stored in the editor’s secret storage, never in settings.'
+          : 'Stored in the editor’s secret storage, under this provider’s name, never in settings.'
+    }
+    describeKey()
+    const keyControls: HTMLElement[] = [keyField]
+    if (key?.stored) {
+      const removeKey = button('Remove key', () => this.dispatchEvent(new ApiKeySetEvent(provider.name, '')), 'remove')
+      keyControls.push(removeKey)
+    }
+    engine.addEventListener('change', () => {
+      openai.hidden = engine.value !== 'openai-compatible'
+      describeKey()
+    })
     const cancel = button('Cancel', () => {
       this.editing = undefined
       this.draw(snapshot)
@@ -138,7 +160,7 @@ export class ProvidersTab extends HTMLElement {
     save.textContent = 'Save'
     const controls = el('div', 'controls')
     controls.append(save, cancel)
-    form.append(field('Name', name), field('Engine', engine), openai, field('Models', models), controls)
+    form.append(field('Name', name), field('Engine', engine), openai, ...keyControls, field('Models', models), controls)
     form.addEventListener('submit', (event) => {
       event.preventDefault()
       this.editing = undefined
@@ -158,10 +180,11 @@ export class ProvidersTab extends HTMLElement {
   private keys(snapshot: SettingsSnapshot): HTMLElement {
     const section = el('section', 'keys')
     section.append(el('h3', '', 'API keys'))
-    if (snapshot.keys.length === 0) section.append(note('No OpenAI-compatible provider is configured. Keys are stored in the editor’s secret storage, never in settings.'))
+    if (snapshot.keys.length === 0) section.append(note('No provider is configured. Keys are stored in the editor’s secret storage, never in settings.'))
     for (const key of snapshot.keys) {
+      const state = keyState(snapshot.providers.find((p) => p.name === key.name)?.engine, key.stored)
       const row = el('div', 'key')
-      row.append(el('strong', 'name', key.name), el('span', `badge ${key.stored ? 'stored' : 'missing'}`, key.stored ? 'stored' : 'missing'))
+      row.append(el('strong', 'name', key.name), el('span', `badge ${keyClass(state)}`.trim(), state === 'login' ? 'editor login' : state))
       section.append(row)
     }
     return section

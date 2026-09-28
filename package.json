@@ -450,10 +450,10 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "prompts": "esbuild scripts/prompts.ts --bundle --platform=node --format=cjs --target=node22 --external:vscode --log-level=warning --outfile=dist/prompts.cjs && node dist/prompts.cjs",
-    "package": "npm run typecheck && npm run build && vsce package --no-dependencies",
+    "package": "npm run typecheck && npm run build && vsce package --no-dependencies --target win32-x64 && vsce package --no-dependencies --target win32-arm64",
     "link-dev": "node scripts/link-dev.mjs",
     "unlink-dev": "node scripts/link-dev.mjs --unlink",
-    "publish": "npm run typecheck && npm run build && vsce publish --no-dependencies"
+    "publish": "npm run typecheck && npm run build && vsce publish --no-dependencies --target win32-x64 win32-arm64"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.2.112",
