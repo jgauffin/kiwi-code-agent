@@ -32,8 +32,29 @@ export const editTool: Tool<typeof schema> = {
       : content.replace(input.old_string, () => input.new_string)
     await writeFile(path, updated, 'utf8')
     await ctx.files.markRead(path)
+    ctx.ledger?.edited(path, changedLines(content, input.old_string, input.new_string, occurrences))
     return ok(`Edited ${path} (${occurrences} replacement${occurrences === 1 ? '' : 's'})`)
   },
+}
+
+/**
+ * Where the replacement landed in the new text, 1-based and inclusive: the
+ * first match's line to the last match's end, moved by the lines each
+ * replacement adds or removes. The arguments carry no line numbers, so this is
+ * what tells the ledger where the work was.
+ */
+function changedLines(before: string, oldString: string, newString: string, occurrences: number): { from: number; to: number } {
+  const from = lineAt(before, before.indexOf(oldString))
+  const end = lineAt(before, before.lastIndexOf(oldString) + oldString.length)
+  return { from, to: end + (countNewlines(newString) - countNewlines(oldString)) * occurrences }
+}
+
+const lineAt = (text: string, index: number): number => countNewlines(text.slice(0, Math.max(0, index))) + 1
+
+function countNewlines(text: string): number {
+  let n = 0
+  for (let i = text.indexOf('\n'); i !== -1; i = text.indexOf('\n', i + 1)) n++
+  return n
 }
 
 function count(haystack: string, needle: string): number {

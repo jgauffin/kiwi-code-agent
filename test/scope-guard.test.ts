@@ -7,6 +7,13 @@ const cwd = process.platform === 'win32' ? 'D:\\work\\repo' : '/work/repo'
 const guard = new ScopeGuard(cwd, blindPlanScope('Order cancellation', ['docs/api/**', 'docs/**/*.generated.md']))
 const use = (toolName: string, input: unknown) => guard.preToolUse({ toolName, input, toolUseId: 't' })
 
+/**
+ * The prompt with its hard wrapping flattened. Its prose paragraphs are
+ * wrapped in the source, so a sentence may break anywhere; an assertion on
+ * one must not depend on where. Assertions on layout read the prompt itself.
+ */
+const flowed = (prompt: string): string => prompt.replace(/\s+/g, ' ')
+
 describe('ScopeGuard for blind planning', () => {
   it('docs_are_readable_source_is_not', async () => {
     expect(await use('Read', { file_path: 'docs/intent/orders.md' })).toBeUndefined()
@@ -102,7 +109,7 @@ describe('blind plan helpers', () => {
     expect(prompt).toContain('status: draft')
     expect(prompt).toContain('it never changes once written')
     expect(prompt).toContain('(was Old name)')
-    expect(prompt).toContain('Write nothing until the user says go')
+    expect(flowed(prompt)).toContain('Write nothing until the user says go')
     expect(BLIND_PLAN_TOOLS).toEqual(['Read', 'Glob', 'MarkdownSearch', 'JsonSchema', 'JsonQuery', 'Write', 'Edit', 'AskUser', 'RedoMapping'])
   })
 
@@ -117,8 +124,8 @@ describe('blind plan helpers', () => {
   it('prompt_reads_the_other_specs_as_intent_and_asks_when_a_doc_and_a_spec_disagree', () => {
     const prompt = blindPlanPrompt('Order cancellation', cwd)
     expect(prompt).toContain('plan/*.spec.md')
-    expect(prompt).toContain("an approved or implemented spec is that feature's definition")
-    expect(prompt).toContain('Where a doc and an approved spec disagree, ask')
+    expect(flowed(prompt)).toContain("an approved or implemented spec is that feature's definition")
+    expect(flowed(prompt)).toContain('Where a doc and an approved spec disagree, ask')
     expect(prompt).toContain('or of another feature\'s spec ends with its citation')
     // The docs are edited only on request, and never by way of an amendment file.
     expect(prompt).toContain('only when the user asks you to')

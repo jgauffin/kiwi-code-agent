@@ -196,6 +196,14 @@
           "scope": "resource",
           "description": "Tool calls blocked outright, same rule shape as permissions.allow. Wins over allow rules and over read-only calls: Read(**/.env), Bash(curl:*)."
         },
+        "kiwiAgent.contextWindows": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": {
+            "type": "number"
+          },
+          "description": "Context window in tokens per model id, for OpenAI-compatible providers. The agent loop folds the older turns into a summary once the prompt reaches 90% of this. A model not listed here is treated as 128000. The Claude engine compacts on its own and ignores this."
+        },
         "kiwiAgent.traceEngine": {
           "type": "boolean",
           "default": false,

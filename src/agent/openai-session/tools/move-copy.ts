@@ -38,5 +38,6 @@ async function transfer(input: z.infer<typeof schema>, ctx: ToolContext, kind: '
   await rename(source, destination)
   // What was read at the old path says nothing about the new one: an edit there reads it first.
   ctx.files.forget(source)
+  ctx.ledger?.forget(source)
   return ok(`Moved ${source} to ${destination}`)
 }

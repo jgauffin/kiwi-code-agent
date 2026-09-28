@@ -396,6 +396,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (resume) traceStart(record, `${resume.history.length} messages of history rebuilt`)
         traceStart(record, `building the session: ${allowed(allTools).map((t) => t.name).join(', ')}`)
         sessionTools.set(record.id, allowed(allTools))
+        const contextWindow = vscode.workspace.getConfiguration('kiwiAgent').get<Record<string, number>>('contextWindows', {})[profile.model]
         return new OpenAiSession({
           id: record.id,
           profile,
@@ -404,6 +405,7 @@ export function activate(context: vscode.ExtensionContext): void {
           tools: allowed(allTools),
           systemPrompt: setup.systemPrompt ?? (await buildSystemPrompt(workspaceRoot, profile.systemPromptFile)),
           ...(resume ? { resume } : {}),
+          ...(contextWindow ? { contextWindow } : {}),
           ...(setup.hooks ? { hooks: setup.hooks } : {}),
           ...(mcpServers
             ? { mcp: { host: new McpToolHost(connectMcp(workspaceRoot, (server, chunk) => output.append(`[mcp ${server}] ${chunk}`))), servers: mcpServers } }

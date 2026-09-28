@@ -1,3 +1,4 @@
+import { compileTemplate } from '@relax.js/core/html'
 import type { SessionEvent } from '../../agent/session/code-session'
 import {
   canSubmit,
@@ -11,13 +12,28 @@ import {
   type UserQuestionRequest,
 } from '../../agent/session/user-question'
 import { ASK_USER_TOOL } from '../../agent/openai-session/tools/ask-user'
-import { el } from './dom'
 import { QuestionAnsweredEvent } from './events'
 
 type QuestionRequest = Extract<SessionEvent, { type: 'question_request' }>
 
 /** The engine prefixes its own tools; the card answers for the question tool under either name. */
 export const isQuestionTool = (name: string): boolean => name === ASK_USER_TOOL || name.endsWith(`__${ASK_USER_TOOL}`)
+
+type OptionRow = { label: string; explanation: string; checked: boolean }
+
+type QuestionRow = {
+  index: number
+  header: string
+  ask: string
+  hidden: boolean
+  hasOptions: boolean
+  inputType: string
+  name: string
+  otherLabel: string
+  options: OptionRow[]
+}
+
+type SummaryRow = { header: string; ask: string; answer: string; answered: boolean }
 
 /**
  * One card per question request, asked one question at a time in the order
@@ -27,41 +43,83 @@ export const isQuestionTool = (name: string): boolean => name === ASK_USER_TOOL 
  * resolved the form gives way to each question and its answer as text.
  */
 export class QuestionCard extends HTMLElement {
+  /**
+   * The free-text fields carry no `value` binding: a render would write the
+   * property back and move the caret of the field being typed in. Their text
+   * lives in `answers` instead, read from the DOM only as it is typed.
+   */
+  private readonly template = compileTemplate(`
+    <div class="questions">
+      <section loop="q in questions" class="question" hidden="{{q.hidden}}">
+        <strong class="header">{{q.header}}</strong>
+        <p class="ask">{{q.ask}}</p>
+        <ul class="options" if="q.hasOptions">
+          <li loop="o in q.options">
+            <label>
+              <input type="{{q.inputType}}" name="{{q.name}}" value="{{o.label}}" checked="{{o.checked}}" r-change="chose(q, o, event)">
+              <span class="label">{{o.label}}</span>
+            </label>
+            <span class="explanation" if="o.explanation">{{o.explanation}}</span>
+          </li>
+        </ul>
+        <label class="other">
+          <span>{{q.otherLabel}}</span>
+          <textarea rows="2" class="other-text" r-input="typed(q, event)"></textarea>
+        </label>
+      </section>
+    </div>
+    <div class="actions">
+      <span class="step" if="multi">{{step}}</span>
+      <button type="button" class="back" hidden="{{backHidden}}" r-click="back()">Back</button>
+      <button type="button" class="next" hidden="{{nextHidden}}" disabled="{{nextDisabled}}" r-click="next()">Next</button>
+      <button type="button" class="submit" hidden="{{submitHidden}}" disabled="{{submitDisabled}}" r-click="answer()">Submit</button>
+      <button type="button" class="skip" title="Give no answer; the model is told to ask again or work on something else." r-click="skip()">Skip</button>
+      <span class="missing">{{missing}}</span>
+    </div>
+  `)
   private requestId = ''
   private request: UserQuestionRequest = { questions: [] }
   private answers: QuestionAnswer[] = []
   private current = 0
   private resolved = false
-  private groups: HTMLElement[] = []
-  private step!: HTMLElement
-  private back!: HTMLButtonElement
-  private next!: HTMLButtonElement
-  private submit!: HTMLButtonElement
-  private hint!: HTMLElement
 
   show(event: QuestionRequest): void {
     this.requestId = event.requestId
     this.request = event.request
     this.answers = event.request.questions.map(() => ({ chosen: [] }))
     this.current = 0
+    if (this.childElementCount === 0) this.appendChild(this.template.content)
     this.render()
   }
 
   /** The request ended: the card becomes the record of what was asked and what was answered. */
   resolve(outcome: QuestionOutcome): void {
     this.resolved = true
-    const summary = document.createElement('div')
-    summary.className = outcome.kind === 'answered' ? 'answered' : 'asked'
-    this.request.questions.forEach((question, index) => {
-      const row = document.createElement('section')
-      row.className = 'question'
-      row.append(el('strong', 'header', question.header), el('p', 'ask', question.question))
-      if (outcome.kind === 'answered') row.appendChild(el('p', 'answer', answerLine(question, outcome.answers[index])))
-      summary.appendChild(row)
+    const summary = compileTemplate(`
+      <div class="{{kind}}">
+        <section loop="r in rows" class="question">
+          <strong class="header">{{r.header}}</strong>
+          <p class="ask">{{r.ask}}</p>
+          <p class="answer" if="r.answered">{{r.answer}}</p>
+        </section>
+      </div>
+      <p class="unanswered" if="unanswered">{{unansweredText}}</p>
+    `)
+    const answered = outcome.kind === 'answered'
+    const rows: SummaryRow[] = this.request.questions.map((question, index) => ({
+      header: question.header,
+      ask: question.question,
+      answer: answered ? answerLine(question, outcome.answers[index]) : '',
+      answered,
+    }))
+    const reason = !answered && outcome.reason ? ` (${outcome.reason.toLowerCase()})` : ''
+    summary.render({
+      kind: answered ? 'answered' : 'asked',
+      rows,
+      unanswered: !answered,
+      unansweredText: `Not answered${reason}.`,
     })
-    if (outcome.kind === 'answered') return this.replaceChildren(summary)
-    const reason = el('p', 'unanswered', `Not answered${outcome.reason ? ` (${outcome.reason.toLowerCase()})` : ''}.`)
-    this.replaceChildren(summary, reason)
+    this.replaceChildren(summary.content)
   }
 
   get isResolved(): boolean {
@@ -69,69 +127,59 @@ export class QuestionCard extends HTMLElement {
   }
 
   private render(): void {
-    const body = document.createElement('div')
-    body.className = 'questions'
-    this.groups = this.request.questions.map((question, index) => this.group(question, index))
-    body.append(...this.groups)
-    const actions = document.createElement('div')
-    actions.className = 'actions'
-    this.step = el('span', 'step')
-    this.back = button('back', 'Back', () => this.goTo(this.current - 1))
-    this.next = button('next', 'Next', () => this.goTo(this.current + 1))
-    this.submit = button('submit', 'Submit', () => this.answer())
-    const skip = button('skip', 'Skip', () => this.leaveUnanswered())
-    skip.title = 'Give no answer; the model is told to ask again or work on something else.'
-    this.hint = el('span', 'missing')
-    actions.append(this.back, this.next, this.submit, skip, this.hint)
-    if (this.groups.length > 1) actions.prepend(this.step)
-    this.replaceChildren(body, actions)
-    this.goTo(0)
+    const questions: QuestionRow[] = this.request.questions.map((question, index) => {
+      const options = question.options ?? []
+      const chosen = this.answers[index]?.chosen ?? []
+      return {
+        index,
+        header: question.header,
+        ask: question.question,
+        hidden: index !== this.current,
+        hasOptions: options.length > 0,
+        inputType: question.multiSelect ? 'checkbox' : 'radio',
+        name: `${this.requestId}-${index}`,
+        otherLabel: options.length > 0 ? `${OTHER_LABEL}:` : 'Your answer:',
+        options: options.map((option) => ({
+          label: option.label,
+          explanation: option.explanation ?? '',
+          checked: chosen.includes(option.label),
+        })),
+      }
+    })
+    const count = questions.length
+    const last = this.current === count - 1
+    this.template.render(
+      {
+        questions,
+        multi: count > 1,
+        step: `${this.current + 1} of ${count}`,
+        backHidden: this.current === 0,
+        nextHidden: last,
+        nextDisabled: !isAnswered(this.answers[this.current]),
+        submitHidden: !last,
+        submitDisabled: !canSubmit(this.request, this.answers),
+        missing: last ? missingAnswersMessage(this.request, this.answers) : '',
+      },
+      {
+        chose: (q: QuestionRow, o: OptionRow, event: Event) => this.chose(q.index, o.label, (event.target as HTMLInputElement).checked),
+        typed: (q: QuestionRow, event: Event) => this.typed(q.index, (event.target as HTMLTextAreaElement).value),
+        back: () => this.goTo(this.current - 1),
+        next: () => this.goTo(this.current + 1),
+        answer: () => this.answer(),
+        skip: () => this.leaveUnanswered(),
+      },
+    )
   }
 
   private goTo(index: number): void {
-    if (index < 0 || index >= this.groups.length) return
+    if (index < 0 || index >= this.request.questions.length) return
     this.current = index
-    this.groups.forEach((group, i) => (group.hidden = i !== index))
-    this.step.textContent = `${index + 1} of ${this.groups.length}`
-    this.followAnswers()
+    this.render()
   }
 
-  private group(question: Question, index: number): HTMLElement {
-    const group = document.createElement('section')
-    group.className = 'question'
-    group.append(el('strong', 'header', question.header), el('p', 'ask', question.question))
-    const options = question.options ?? []
-    if (options.length > 0) {
-      const list = document.createElement('ul')
-      list.className = 'options'
-      for (const option of options) {
-        const item = document.createElement('li')
-        const label = document.createElement('label')
-        const input = document.createElement('input')
-        input.type = question.multiSelect ? 'checkbox' : 'radio'
-        input.name = `${this.requestId}-${index}`
-        input.value = option.label
-        input.addEventListener('change', () => this.chose(question, index, option.label, input.checked))
-        label.append(input, el('span', 'label', option.label))
-        item.appendChild(label)
-        if (option.explanation) item.appendChild(el('span', 'explanation', option.explanation))
-        list.appendChild(item)
-      }
-      group.appendChild(list)
-    }
-    // Every question takes an answer in the user's own words, whatever it offered.
-    const other = document.createElement('label')
-    other.className = 'other'
-    const field = document.createElement('textarea')
-    field.rows = 2
-    field.className = 'other-text'
-    field.addEventListener('input', () => this.typed(question, index, field.value))
-    other.append(el('span', '', options.length > 0 ? `${OTHER_LABEL}:` : 'Your answer:'), field)
-    group.appendChild(other)
-    return group
-  }
-
-  private chose(question: Question, index: number, label: string, checked: boolean): void {
+  private chose(index: number, label: string, checked: boolean): void {
+    const question = this.request.questions[index]
+    if (!question) return
     const answer = this.answers[index] ?? { chosen: [] }
     const chosen = question.multiSelect
       ? checked
@@ -139,29 +187,17 @@ export class QuestionCard extends HTMLElement {
         : answer.chosen.filter((c) => c !== label)
       : [label]
     this.answers[index] = { ...answer, chosen }
-    this.followAnswers()
+    this.render()
   }
 
-  private typed(question: Question, index: number, text: string): void {
+  private typed(index: number, text: string): void {
+    const question = this.request.questions[index]
+    if (!question) return
     const answer = this.answers[index] ?? { chosen: [] }
     this.answers[index] = { ...answer, other: text }
     // On a question that takes one answer, words of the user's own replace the choice they were offered.
-    if (!question.multiSelect && text.trim() !== '' && answer.chosen.length > 0) {
-      this.answers[index] = { chosen: [], other: text }
-      for (const input of this.groups[index]?.querySelectorAll('input') ?? []) input.checked = false
-    }
-    this.followAnswers()
-  }
-
-  /** Next waits for the question on screen; Submit, on the last, for every question, and says which are not. */
-  private followAnswers(): void {
-    const last = this.current === this.groups.length - 1
-    this.back.hidden = this.current === 0
-    this.next.hidden = last
-    this.next.disabled = !isAnswered(this.answers[this.current])
-    this.submit.hidden = !last
-    this.submit.disabled = !canSubmit(this.request, this.answers)
-    this.hint.textContent = last ? missingAnswersMessage(this.request, this.answers) : ''
+    if (!question.multiSelect && text.trim() !== '' && answer.chosen.length > 0) this.answers[index] = { chosen: [], other: text }
+    this.render()
   }
 
   private answer(): void {
@@ -181,15 +217,6 @@ function answerLine(question: Question, answer: QuestionAnswer | undefined): str
   const { chosen, other } = normalizeAnswer(question, answer ?? { chosen: [] })
   const parts = [...chosen, ...(other ? [other] : [])]
   return parts.length ? parts.join(', ') : 'Not answered.'
-}
-
-function button(className: string, label: string, onClick: () => void): HTMLButtonElement {
-  const element = document.createElement('button')
-  element.type = 'button'
-  element.className = className
-  element.textContent = label
-  element.addEventListener('click', onClick)
-  return element
 }
 
 customElements.define('question-card', QuestionCard)

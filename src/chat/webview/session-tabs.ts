@@ -1,5 +1,5 @@
 import { compileTemplate } from '@relax.js/core/html'
-import type { ResumablePlan, SessionTab } from '../protocol'
+import type { ResumableChat, ResumablePlan, SessionTab } from '../protocol'
 import type { SessionStatus } from '../../agent/session/session-status'
 import { NewSessionViewRequestedEvent, PlanResumeRequestedEvent, SessionClosedEvent, SessionSelectedEvent } from './events'
 
@@ -23,10 +23,15 @@ type TabRow = SessionTab & { icon: string; label: string; state: string }
 
 type PlanRow = ResumablePlan & { hint: string }
 
+type ChatRow = ResumableChat & { hint: string }
+
+/** The chat's own date and time, as short as the reader's locale writes them. */
+const when = (iso: string): string => new Date(iso).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
+
 /**
- * Tabs for the sessions in play plus "+", and at the far right the plans on
- * disk to pick up. They are not sessions until one is picked, so they hang off
- * the bar rather than taking a tab of their own.
+ * Tabs for the sessions in play plus "+", and at the far right what can be
+ * picked up again: the plans on disk, and the chats closed but not forgotten.
+ * Neither has a tab until it is picked, so they hang off the bar instead.
  */
 export class SessionTabs extends HTMLElement {
   private readonly template = compileTemplate(`
@@ -40,13 +45,25 @@ export class SessionTabs extends HTMLElement {
         <li class="tab new {{newState}}" title="New session" r-click="add()">+</li>
       </ul>
       <div class="menu">
-        <button type="button" class="old {{openState}}" title="Resume a plan under plan/" r-click="toggle(event)">↩</button>
-        <ul class="plans" if="open">
-          <li class="empty" unless="hasPlans">No plan under plan/ is in progress.</li>
+        <button type="button" class="old {{openState}}" title="Pick up a plan or an earlier chat" r-click="toggle(event)">↩</button>
+        <ul class="picks" if="open">
+          <li class="empty" unless="any">Nothing to pick up yet.</li>
           <li loop="p in plans">
-            <button type="button" class="plan {{p.status}}" title="Open the plan session behind this spec, or start one on it." r-click="resume(p)">
-              <strong>{{p.feature}}</strong>
-              <span class="hint">{{p.hint}}</span>
+            <button type="button" class="pick plan {{p.status}}" title="Open the plan session behind this spec, or start one on it." r-click="resume(p)">
+              <span class="icon">📐</span>
+              <span class="what">
+                <strong>{{p.feature}}</strong>
+                <span class="hint">{{p.hint}}</span>
+              </span>
+            </button>
+          </li>
+          <li loop="c in chats">
+            <button type="button" class="pick chat" title="Open this chat again, with its conversation as it stands." r-click="reopen(c)">
+              <span class="icon">🔧</span>
+              <span class="what">
+                <strong>{{c.title}}</strong>
+                <span class="hint">{{c.hint}}</span>
+              </span>
             </button>
           </li>
         </ul>
@@ -56,6 +73,7 @@ export class SessionTabs extends HTMLElement {
   private tabs: SessionTab[] = []
   private creating = false
   private plans: PlanRow[] = []
+  private chats: ChatRow[] = []
   private open = false
   /** A click anywhere else is a click past the open list, and closes it. */
   private readonly dismiss = (event: Event): void => {
@@ -74,10 +92,11 @@ export class SessionTabs extends HTMLElement {
     document.removeEventListener('click', this.dismiss)
   }
 
-  update(tabs: SessionTab[], creating: boolean, plans: ResumablePlan[]): void {
+  update(tabs: SessionTab[], creating: boolean, pick: { plans: ResumablePlan[]; chats: ResumableChat[] }): void {
     this.tabs = tabs
     this.creating = creating
-    this.plans = plans.map((p) => ({ ...p, hint: STATUS_HINT[p.status] }))
+    this.plans = pick.plans.map((p) => ({ ...p, hint: STATUS_HINT[p.status] }))
+    this.chats = pick.chats.map((c) => ({ ...c, hint: when(c.startedAt) }))
     this.render()
   }
 
@@ -93,8 +112,9 @@ export class SessionTabs extends HTMLElement {
         newState: this.creating ? 'active' : '',
         open: this.open,
         openState: this.open ? 'active' : '',
-        hasPlans: this.plans.length > 0,
+        any: this.plans.length + this.chats.length > 0,
         plans: this.plans,
+        chats: this.chats,
       },
       {
         select: (t: TabRow) => this.dispatchEvent(new SessionSelectedEvent(t.id)),
@@ -112,6 +132,11 @@ export class SessionTabs extends HTMLElement {
           this.open = false
           this.render()
           this.dispatchEvent(new PlanResumeRequestedEvent(p.feature))
+        },
+        reopen: (c: ChatRow) => {
+          this.open = false
+          this.render()
+          this.dispatchEvent(new SessionSelectedEvent(c.sessionId))
         },
       },
     )

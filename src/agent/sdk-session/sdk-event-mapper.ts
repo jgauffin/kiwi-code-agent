@@ -47,7 +47,14 @@ export class SdkEventMapper {
       case 'status':
         return [{ type: 'status', status: msg.status ?? 'idle' }]
       case 'compact_boundary':
-        return [{ type: 'status', status: 'idle' }]
+        return [
+          {
+            type: 'compacted',
+            preTokens: msg.compact_metadata.pre_tokens,
+            ...(msg.compact_metadata.post_tokens !== undefined ? { postTokens: msg.compact_metadata.post_tokens } : {}),
+          },
+          { type: 'status', status: 'idle' },
+        ]
       default:
         return []
     }

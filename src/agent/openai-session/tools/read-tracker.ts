@@ -24,4 +24,14 @@ export class ReadTracker {
   forget(path: string): void {
     this.readAt.delete(path)
   }
+
+  /**
+   * Forgets every file but these. Compaction folds the reads out of the
+   * conversation, and a file the model can no longer see is a file it never
+   * read: an edit written from memory has to read it again first.
+   */
+  forgetExcept(paths: Iterable<string>): void {
+    const keep = new Set(paths)
+    for (const path of [...this.readAt.keys()]) if (!keep.has(path)) this.readAt.delete(path)
+  }
 }

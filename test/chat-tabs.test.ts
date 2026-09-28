@@ -46,6 +46,7 @@ const state = (): Extract<ToWebview, { type: 'state' }> => ({
   tabs: [{ id: SESSION, title: 'Orders', mode: 'plan', profileName: 'Claude', status: 'idle', active: true }],
   plan: plan(),
   plans: [],
+  chats: [],
   profiles: { names: ['Claude'], active: 'Claude' },
   models: [],
 })

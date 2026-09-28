@@ -1,3 +1,4 @@
+import { compileTemplate } from '@relax.js/core/html'
 import type { CommandLine, FileEditChange, PermissionDecision, SessionEvent } from '../../agent/session/code-session'
 import { projectRuleFor, ruleLabel } from '../../agent/permissions/permission-rules'
 import { isShellTool } from '../../agent/permissions/tool-classes'
@@ -11,6 +12,18 @@ type PermissionRequest = Extract<SessionEvent, { type: 'permission_request' }>
 /** How one line of a shell call was answered; a line that already passes needs no answer. */
 type LineAnswer = 'session' | 'project' | 'once' | 'deny'
 
+type LineRow = {
+  index: number
+  hasRule: boolean
+  label: string
+  settled: boolean
+  status: string
+  statusClass: string
+  sessionTitle: string
+  projectTitle: string
+  allowTitle: string
+}
+
 /**
  * One tool permission prompt. A shell call is answered command by command,
  * each allowed for the session or the project, or denied; the call runs once
@@ -18,13 +31,49 @@ type LineAnswer = 'session' | 'project' | 'once' | 'deny'
  * answered as a whole. Emits the decision; the parent forwards it.
  */
 export class PermissionCard extends HTMLElement {
+  /**
+   * The deny reason carries no `value` binding, so answering one command leaves
+   * what the user has typed, and their caret, alone. It is read from the field
+   * when the decision goes out.
+   */
+  private readonly template = compileTemplate(`
+    <pre class="command" if="settled"></pre>
+    <div class="prompt" unless="settled">
+      <strong>{{heading}}</strong>
+      <p class="description" if="hasDescription">{{description}}</p>
+      <ul class="commands" if="isShell">
+        <li loop="l in lines" class="command">
+          <code></code>
+          <span class="line-status {{l.statusClass}}" if="l.settled">{{l.status}}</span>
+          <span class="line-actions" unless="l.settled">
+            <button type="button" class="allow-session" if="l.hasRule" title="{{l.sessionTitle}}" r-click="answerLine(l, 'session')">Allow {{l.label}} for session</button>
+            <button type="button" class="allow-project" if="l.hasRule" title="{{l.projectTitle}}" r-click="answerLine(l, 'project')">Allow {{l.label}} for project</button>
+            <button type="button" class="allow" unless="l.hasRule" title="{{l.allowTitle}}" r-click="answerLine(l, 'once')">Allow</button>
+            <button type="button" class="deny" r-click="answerLine(l, 'deny')">Deny</button>
+          </span>
+        </li>
+      </ul>
+      <div class="whole" unless="isShell">
+        <div class="body"></div>
+        <div class="actions" if="pending">
+          <button type="button" class="allow-session" if="wholeRule" title="{{sessionTitle}}" r-click="allowWhole('session')">Allow {{wholeLabel}} for session</button>
+          <button type="button" class="allow-project" if="wholeRule" title="{{projectTitle}}" r-click="allowWhole('project')">Allow {{wholeLabel}} for project</button>
+          <button type="button" class="allow" unless="wholeRule" r-click="allowWhole('once')">Allow</button>
+          <button type="button" class="deny" r-click="denyWhole()">Deny</button>
+        </div>
+      </div>
+      <input type="text" class="deny-reason" placeholder="Reason if denied (optional)" if="pending">
+    </div>
+    <p class="decision" unless="settled" hidden="{{pending}}">{{outcome}}</p>
+  `)
   private request: PermissionRequest | undefined
   private lines: CommandLine[] = []
   private answers: (LineAnswer | undefined)[] = []
   private decision: PermissionDecision['kind'] | undefined
   private remembered: RememberedRules = { session: [], project: [] }
-  /** Why the user denies, typed before any Deny is pressed; it reaches the model so it need not guess what to do instead. */
+  /** Only ever what the host reports back, since the field itself is gone by then. */
   private reason = ''
+  private filled = false
 
   show(request: PermissionRequest): void {
     this.request = request
@@ -51,34 +100,59 @@ export class PermissionCard extends HTMLElement {
   private render(): void {
     const r = this.request
     if (!r) return
+    if (this.childElementCount === 0) this.appendChild(this.template.content)
     // Once every command is allowed there is nothing left to answer: the call reads as the command it runs.
     const settled = this.decision === 'allow' && isShellTool(r.toolName)
+    const isShell = isShellTool(r.toolName) && this.lines.length > 0
+    // A tool is allowed as a whole, whatever its arguments; a file write per call, the session's "Allow writes" covers the rest.
+    const wholeRule = isShell ? undefined : projectRuleFor(r.toolName)
     this.classList.toggle('allowed', settled)
+    this.template.render(
+      {
+        settled,
+        heading: this.heading(r),
+        hasDescription: Boolean(r.description) && !isShellTool(r.toolName),
+        description: r.description ?? '',
+        isShell,
+        lines: this.lines.map((line, index) => this.lineRow(line, index)),
+        wholeRule: wholeRule ?? '',
+        wholeLabel: wholeRule ? ruleLabel(wholeRule) : '',
+        sessionTitle: `Later calls of ${wholeRule} pass without asking, until this session's host is restarted.`,
+        projectTitle: `Writes ${wholeRule} to kiwiAgent.permissions.allow in this workspace.`,
+        pending: this.decision === undefined,
+        outcome: this.outcomeText(),
+      },
+      {
+        answerLine: (l: LineRow, answer: LineAnswer) => this.answer(l.index, answer),
+        allowWhole: (scope: 'session' | 'project') => {
+          if (wholeRule) this.remembered[scope].push(wholeRule)
+          this.decide({ kind: 'allow' })
+        },
+        denyWhole: () => this.decide({ kind: 'deny' }),
+      },
+    )
+    this.fill(r, settled, isShell)
+  }
+
+  /**
+   * Highlighted code and diffs the template does not own: each command line, the
+   * complete command once the call settles, and the change a file edit asks
+   * about. Filled once, since none of it changes as the card is answered.
+   */
+  private fill(r: PermissionRequest, settled: boolean, isShell: boolean): void {
     if (settled) {
-      const command = document.createElement('pre')
-      command.className = 'command'
-      fillCode(command, (r.input as { command?: unknown })?.command?.toString() ?? '', 'bash')
-      this.replaceChildren(command)
+      const command = this.querySelector<HTMLElement>('pre.command')
+      if (command?.childElementCount === 0) fillCode(command, (r.input as { command?: unknown })?.command?.toString() ?? '', 'bash')
       return
     }
-    const prompt = document.createElement('div')
-    prompt.className = 'prompt'
-    const title = document.createElement('strong')
-    title.textContent = this.heading(r)
-    prompt.appendChild(title)
-    if (r.description && !isShellTool(r.toolName)) {
-      const description = document.createElement('p')
-      description.className = 'description'
-      description.textContent = r.description
-      prompt.appendChild(description)
+    if (this.filled) return
+    this.filled = true
+    if (isShell) {
+      this.querySelectorAll<HTMLElement>('li.command > code').forEach((code, index) => fillCode(code, this.lines[index]?.text ?? '', 'bash'))
+      return
     }
-    prompt.appendChild(this.body(r))
-    if (this.decision === undefined) prompt.appendChild(this.reasonField())
-    const outcome = document.createElement('p')
-    outcome.className = 'decision'
-    outcome.hidden = this.decision === undefined
-    outcome.textContent = this.outcomeText()
-    this.replaceChildren(prompt, outcome)
+    // A file edit is asked about as the change it would make, decided or not: its arguments are never what the user answers.
+    this.querySelector('div.body')?.appendChild(r.edits ? changeList(r.edits) : r.edit ? editDiffView(r.edit) : jsonInput(r.input))
   }
 
   /** A shell call is named by what it is for, as the model described it; another call by its tool. */
@@ -88,99 +162,29 @@ export class PermissionCard extends HTMLElement {
     return typeof described === 'string' && described.trim() ? described : (r.description ?? 'Run a command')
   }
 
-  private body(r: PermissionRequest): HTMLElement {
-    if (isShellTool(r.toolName) && this.lines.length) return this.commandList()
-    const wrapper = document.createElement('div')
-    // A file edit is asked about as the change it would make, decided or not: its arguments are never what the user answers.
-    wrapper.append(r.edits ? changeList(r.edits) : r.edit ? editDiffView(r.edit) : jsonInput(r.input), this.wholeCallActions(r))
-    return wrapper
-  }
-
-  private wholeCallActions(r: PermissionRequest): HTMLElement {
-    const actions = document.createElement('div')
-    actions.className = 'actions'
-    if (this.decision !== undefined) return actions
-    // A tool is allowed as a whole, whatever its arguments; a file write per call, the session's "Allow writes" covers the rest.
-    const rule = projectRuleFor(r.toolName)
-    if (rule) {
-      const label = ruleLabel(rule)
-      const session = button('allow-session', `Allow ${label} for session`, () => {
-        this.remembered.session.push(rule)
-        this.decide({ kind: 'allow' })
-      })
-      session.title = `Later calls of ${rule} pass without asking, until this session's host is restarted.`
-      const project = button('allow-project', `Allow ${label} for project`, () => {
-        this.remembered.project.push(rule)
-        this.decide({ kind: 'allow' })
-      })
-      project.title = `Writes ${rule} to kiwiAgent.permissions.allow in this workspace.`
-      actions.append(session, project)
-    } else {
-      actions.appendChild(button('allow', 'Allow', () => this.decide({ kind: 'allow' })))
-    }
-    actions.appendChild(button('deny', 'Deny', () => this.decide({ kind: 'deny' })))
-    return actions
-  }
-
-  private reasonField(): HTMLInputElement {
-    const input = document.createElement('input')
-    input.type = 'text'
-    input.className = 'deny-reason'
-    input.placeholder = 'Reason if denied (optional)'
-    input.value = this.reason
-    input.addEventListener('input', () => (this.reason = input.value))
-    return input
-  }
-
-  private commandList(): HTMLElement {
-    const list = document.createElement('ul')
-    list.className = 'commands'
-    this.lines.forEach((line, index) => {
-      const item = document.createElement('li')
-      item.className = 'command'
-      const text = document.createElement('code')
-      fillCode(text, line.text, 'bash')
-      item.append(text, this.lineStatus(line, index))
-      list.appendChild(item)
-    })
-    return list
-  }
-
   /** What the line still needs from the user, or what settled it. */
-  private lineStatus(line: CommandLine, index: number): HTMLElement {
+  private lineRow(line: CommandLine, index: number): LineRow {
     const answer = this.answers[index]
     const settled = line.passes ? passesText(line.passes) : answer ? answerText(answer, line.rule) : undefined
-    // A resolved card takes no more input; a line it never got to says nothing.
-    if (settled !== undefined || this.decision !== undefined) {
-      const status = document.createElement('span')
-      status.className = `line-status ${answer === 'deny' ? 'denied' : 'allowed'}`
-      status.textContent = settled ?? ''
-      return status
+    return {
+      index,
+      hasRule: Boolean(line.rule),
+      label: line.rule ? ruleLabel(line.rule) : '',
+      // A resolved card takes no more input; a line it never got to says nothing.
+      settled: settled !== undefined || this.decision !== undefined,
+      status: settled ?? '',
+      statusClass: answer === 'deny' ? 'denied' : 'allowed',
+      sessionTitle: `Later calls covered by ${line.rule} pass without asking, until this session's host is restarted.`,
+      projectTitle: `Writes ${line.rule} to kiwiAgent.permissions.allow in this workspace.`,
+      allowTitle: 'Runs a command the line does not show, so it can only be allowed for this call.',
     }
-    const actions = document.createElement('span')
-    actions.className = 'line-actions'
-    if (line.rule) {
-      const label = ruleLabel(line.rule)
-      const session = button('allow-session', `Allow ${label} for session`, () => this.answer(index, 'session'))
-      session.title = `Later calls covered by ${line.rule} pass without asking, until this session's host is restarted.`
-      const project = button('allow-project', `Allow ${label} for project`, () => this.answer(index, 'project'))
-      project.title = `Writes ${line.rule} to kiwiAgent.permissions.allow in this workspace.`
-      actions.append(session, project)
-    } else {
-      const once = button('allow', 'Allow', () => this.answer(index, 'once'))
-      once.title = 'Runs a command the line does not show, so it can only be allowed for this call.'
-      actions.appendChild(once)
-    }
-    actions.appendChild(button('deny', 'Deny', () => this.answer(index, 'deny')))
-    return actions
   }
 
   private answer(index: number, answer: LineAnswer): void {
     if (this.decision !== undefined) return
     this.answers[index] = answer
     const rule = this.lines[index]?.rule
-    if (rule && answer === 'session') this.remembered.session.push(rule)
-    if (rule && answer === 'project') this.remembered.project.push(rule)
+    if (rule && (answer === 'session' || answer === 'project')) this.remembered[answer].push(rule)
     // One rule may cover several lines; answering one answers them all.
     if (rule && answer !== 'deny') {
       this.lines.forEach((line, i) => {
@@ -197,7 +201,7 @@ export class PermissionCard extends HTMLElement {
     const r = this.request
     if (!r || this.decision !== undefined) return
     const remember = this.remembered
-    const message = this.reason.trim()
+    const message = this.querySelector<HTMLInputElement>('input.deny-reason')?.value.trim() ?? ''
     const reasoned = decision.kind === 'deny' && message ? { ...decision, message } : decision
     const decided = remember.session.length || remember.project.length ? { ...reasoned, remember } : reasoned
     this.dispatchEvent(new PermissionDecidedEvent(r.requestId, decided))
@@ -249,15 +253,6 @@ function answerText(answer: LineAnswer, rule: string | undefined): string {
     case 'deny':
       return 'denied'
   }
-}
-
-function button(className: string, text: string, onClick: () => void): HTMLButtonElement {
-  const element = document.createElement('button')
-  element.type = 'button'
-  element.className = className
-  element.textContent = text
-  element.addEventListener('click', onClick)
-  return element
 }
 
 customElements.define('permission-card', PermissionCard)

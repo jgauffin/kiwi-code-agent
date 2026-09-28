@@ -19,6 +19,11 @@ body {
   display: none !important;
 }
 
+/* A custom element is inline by default, and block markdown holds paragraphs and lists. */
+markdown-text[block] {
+  display: block;
+}
+
 chat-app {
   display: flex;
   flex-direction: column;
@@ -1138,7 +1143,7 @@ chat-app {
       }
     }
 
-    /* The plans on disk: an icon at the far right, and the list it drops. */
+    /* What can be picked up again: an icon at the far right, and the list it drops. */
     & .menu {
       position: relative;
       flex: none;
@@ -1164,7 +1169,7 @@ chat-app {
         }
       }
 
-      & .plans {
+      & .picks {
         position: absolute;
         right: 0;
         top: 100%;
@@ -1172,12 +1177,13 @@ chat-app {
         list-style: none;
         margin: 0;
         padding: 0.3rem;
-        min-width: 16rem;
+        min-width: 18rem;
+        max-width: 26rem;
         max-height: 60vh;
         overflow-y: auto;
         display: flex;
         flex-direction: column;
-        gap: 0.3rem;
+        gap: 0.1rem;
         background: var(--vscode-dropdown-background, var(--vscode-editor-background));
         border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border));
         border-radius: 6px;
@@ -1190,12 +1196,11 @@ chat-app {
         white-space: nowrap;
       }
 
-      & .plan {
+      & .pick {
         width: 100%;
         display: flex;
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 0.1rem;
+        align-items: baseline;
+        gap: 0.5rem;
         text-align: left;
         padding: 0.4rem 0.6rem;
         background: none;
@@ -1206,6 +1211,20 @@ chat-app {
 
         &:hover {
           background: var(--vscode-list-hoverBackground);
+        }
+
+        /* The name over what it says about itself, so a long chat title has the row to itself. */
+        & .what {
+          display: flex;
+          flex-direction: column;
+          gap: 0.1rem;
+          min-width: 0;
+        }
+
+        & strong {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
 
         & .hint {
@@ -1771,6 +1790,21 @@ chat-app {
       &.error {
         color: var(--vscode-errorForeground);
         opacity: 1;
+      }
+    }
+
+    & .compaction {
+      text-align: left;
+
+      & > summary {
+        cursor: pointer;
+        text-align: right;
+      }
+
+      & .compaction-summary {
+        margin-top: 0.25rem;
+        opacity: 1;
+        white-space: pre-wrap;
       }
     }
 

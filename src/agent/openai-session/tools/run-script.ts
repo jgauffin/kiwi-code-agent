@@ -209,6 +209,7 @@ async function applyStaged(ctx: ToolContext, staged: Map<string, Staged>): Promi
     await mkdir(dirname(path), { recursive: true })
     await writeFile(path, s.after, 'utf8')
     await ctx.files.markRead(path)
+    ctx.ledger?.written(path)
   }
   return { text: `Applied changes to ${files.length} file${files.length === 1 ? '' : 's'}: ${files.map(([p]) => label(ctx, p)).join(', ')}`, isError: false }
 }
