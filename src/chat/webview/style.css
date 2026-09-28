@@ -114,12 +114,11 @@ chat-app {
       animation: pulse 1.2s ease-in-out infinite;
     }
 
+    /* An outcome is read in full: it wraps onto its own lines rather than being cut at the panel's edge. */
     & .ran {
       opacity: 0.75;
       min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      overflow-wrap: anywhere;
 
       &.failed {
         opacity: 1;
