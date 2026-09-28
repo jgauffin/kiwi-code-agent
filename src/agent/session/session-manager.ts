@@ -24,7 +24,7 @@ export const isPlanning = (mode: SessionMode): boolean => mode === 'plan' || mod
 export const STEPS: { step: SessionMode; label: string; hint: string }[] = [
   { step: 'chat', label: 'Chat', hint: 'Work in the code with the full tool set.' },
   { step: 'plan', label: 'Plan', hint: 'Write the spec from the intent docs, blind to the code.' },
-  { step: 'reconcile', label: 'Map against code', hint: 'Name each disagreement between the spec and the code, and what it costs.' },
+  { step: 'reconcile', label: 'Check against code', hint: 'Name each disagreement between the approved spec and the code before it is built.' },
   { step: 'implement', label: 'Implement', hint: 'Build the approved spec, task by task, with a test per rule.' },
   { step: 'cleanup', label: 'Cleanup', hint: 'Split what the implementation left oversized.' },
   { step: 'docs', label: 'Evaluate docs', hint: 'Judge how the docs a blind planner reads are arranged.' },

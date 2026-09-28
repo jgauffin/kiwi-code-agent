@@ -36,9 +36,8 @@ import {
   SessionModelChangedEvent,
   SessionSelectedEvent,
   SpecApprovedEvent,
-  SpecMapRequestedEvent,
-  SpecMapStoppedEvent,
-  SpecRemapRequestedEvent,
+  SpecCheckRequestedEvent,
+  SpecCheckStoppedEvent,
   SpecRepairRequestedEvent,
   SweepRequestedEvent,
   VerifyRequestedEvent,
@@ -100,9 +99,8 @@ export class ChatApp extends HTMLElement {
       if (this.plan) this.focusPlan(tabFor(e.step, this.plan))
     })
     this.addEventListener(PlanFocusRequestedEvent.type, (e) => this.focusPlan(e.tab, e.where))
-    this.addEventListener(SpecMapRequestedEvent.type, () => post({ type: 'map_spec' }))
-    this.addEventListener(SpecMapStoppedEvent.type, () => post({ type: 'stop_map' }))
-    this.addEventListener(SpecRemapRequestedEvent.type, (e) => post({ type: 'redo_map', ...(e.note ? { note: e.note } : {}) }))
+    this.addEventListener(SpecCheckRequestedEvent.type, () => post({ type: 'check_spec' }))
+    this.addEventListener(SpecCheckStoppedEvent.type, () => post({ type: 'stop_check' }))
     this.addEventListener(CleanupStoppedEvent.type, () => post({ type: 'stop_cleanup' }))
     this.addEventListener(CleanupDecidedEvent.type, (e) => post({ type: 'cleanup_decision', decision: e.decision, ...(e.paths ? { paths: e.paths } : {}) }))
     this.addEventListener(SweepRequestedEvent.type, () => post({ type: 'sweep_sizes' }))

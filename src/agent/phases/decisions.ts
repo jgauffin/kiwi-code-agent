@@ -6,8 +6,8 @@ import { KEEP_RULING } from './ruling'
 export { KEEP_RULING }
 
 /**
- * The decisions file, `.agent/plan/<feature>.decisions.md`: what the mapping run
- * found in the code that the spec has to answer for, the planner's change
+ * The decisions file, `.agent/plan/<feature>.decisions.md`: what the check of
+ * the approved spec found in the code that the spec has to answer for, the planner's change
  * options, and what the user rules. A temporal state beside the spec, so the
  * spec holds rules only and never a path or a symbol. Rulings are written here
  * by the extension, so a click on the plan view is a line in the file and
@@ -172,10 +172,10 @@ export async function readDecisions(path: string): Promise<Decision[]> {
 /** Decisions the user has yet to rule on. */
 export const openDecisions = (all: Decision[]): Decision[] => all.filter((d) => d.state === 'open')
 
-/** Decisions not yet applied to the rules: ruled or still open. The board is not re-mapped over one. */
+/** Decisions not yet applied to the rules: ruled or still open. The spec is not checked again over one. */
 export const pendingDecisions = (all: Decision[]): Decision[] => all.filter((d) => d.state === 'open' || d.state === 'ruled')
 
-/** Approval covers the rules as revised from the rulings, so a pending decision refuses it; Send rulings is the way past. */
+/** A draft an earlier mapping left decisions on is approved only once they are applied; Send rulings is the way past. */
 export function assertRulingsSent(all: Decision[]): void {
   const pending = pendingDecisions(all).length
   if (pending > 0) throw new Error(`Send the rulings first: ${pending === 1 ? 'a decision is' : `${pending} decisions are`} pending.`)

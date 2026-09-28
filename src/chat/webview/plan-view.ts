@@ -72,7 +72,7 @@ export class PlanView extends HTMLElement {
             decisions: plan.decisions,
             applyingRulings: plan.applyingRulings,
             // What the step is read from beyond the files: a run in flight (not its progress line, which ticks), an implement session to start.
-            mapping: plan.mapping?.live,
+            check: plan.check?.live,
             verification: plan.verification?.live,
             // The cleanup's line ticks on the Cleanup tab, not only in the bar, so its text counts here.
             cleanup: plan.cleanup,
@@ -376,7 +376,8 @@ export class PlanView extends HTMLElement {
 
   /** A decision to make: what the code and the spec disagree on, and the ways to settle it, each a button. */
   private decisionCard(decision: Decision, plan: PlanState): HTMLElement {
-    const rulable = plan.commentable
+    // The check runs after approval, so an approved spec takes rulings; only an implemented one is settled.
+    const rulable = plan.status === 'draft' || plan.status === 'approved'
     const card = el('article', `decision ${decision.state}${rulable && decision.state === 'open' && decision.proposals.length > 0 ? ' attention' : ''}`)
     const head = el('header', 'head')
     head.append(el('h3', 'title', decision.title))
@@ -612,12 +613,13 @@ export class PlanView extends HTMLElement {
   }
 
   /**
-   * A task as work the reader can judge: what it does in the mapper's own
-   * sentence, where it stands, the paths it changes and the ones it reads, and
-   * the build steps on demand. A bare list of paths explains nothing.
+   * A task as work the reader can judge: what it does in one sentence, where
+   * it stands, the paths it changed, and what a mapping run left on a board
+   * from before the build derived them. A bare list of paths explains nothing.
    */
   private taskRow(task: Task, plan: PlanState): HTMLElement {
-    const started = plan.stage !== 'mapped'
+    // The build owns the board once the spec is approved; a draft's board is a plan, not progress.
+    const started = plan.status !== 'draft'
     const row = el('li', `task ${task.state}${task.removed ? ' removed' : ''}`)
     const line = el('div', 'line')
     line.append(named(task.name, task.text))
@@ -822,10 +824,10 @@ function note(text: string): HTMLElement {
   return el('p', 'note', text)
 }
 
-/** The re-map waits for the rulings to be applied: a board mapped under a pending decision would go stale on the revision. */
+/** The re-check waits for the rulings to be applied: the planner's revision of the rules is what it has to see. */
 function staleNote(pendingDecisions: string[]): string {
-  if (pendingDecisions.length === 0) return 'The tasks predate the last change to the spec; they are re-mapped when the plan session’s turn ends.'
-  return `The tasks predate the last change to the spec; they are re-mapped once ${pendingDecisions.map((t) => `"${t}"`).join(', ')} ${pendingDecisions.length === 1 ? 'is' : 'are'} ruled on and applied.`
+  if (pendingDecisions.length === 0) return 'The tasks predate the last change to the spec; the spec is checked against the code again and the tasks derived anew.'
+  return `The tasks predate the last change to the spec; they are derived anew once ${pendingDecisions.map((t) => `"${t}"`).join(', ')} ${pendingDecisions.length === 1 ? 'is' : 'are'} ruled on and applied.`
 }
 
 /** The reason is what the badge should say. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { planStep, presentTabs, tabFor, tabLabel } from '../src/chat/webview/plan-step'
+import { planStep, presentTabs, shownSteps, tabFor, tabLabel } from '../src/chat/webview/plan-step'
 import type { CleanupUnit } from '../src/chat/protocol'
 import type { Decision } from '../src/agent/phases/decisions'
 import type { Task } from '../src/agent/phases/tasks-file'
@@ -27,16 +27,16 @@ describe('planStep', () => {
   })
 
   it('an_implemented_spec_whose_working_files_are_swept_is_done_and_opens_on_the_spec', () => {
-    const implemented = plan({ status: 'implemented', stage: 'verified', mappable: false, commentable: false })
+    const implemented = plan({ status: 'implemented', stage: 'verified', commentable: false })
     const step = planStep(implemented)
     expect(step.next).toMatchObject({ kind: 'done' })
     expect(tabFor(step.current, implemented)).toBe('spec')
   })
 
-  it('an_uncommented_spec_offers_mapping_from_the_review_step', () => {
-    const step = planStep(plan())
-    expect(step.current).toBe('review')
-    expect(step.next).toMatchObject({ kind: 'action', action: 'map' })
+  it('a_draft_with_no_comment_open_offers_approve', () => {
+    const step = planStep(plan({ approvable: true }))
+    expect(step.current).toBe('approve')
+    expect(step.next).toMatchObject({ kind: 'action', action: 'approve' })
   })
 
   it('a_pending_round_offers_submit_with_its_count', () => {
@@ -45,8 +45,8 @@ describe('planStep', () => {
   })
 
   it('an_empty_pending_round_is_not_a_review', () => {
-    const step = planStep(plan({ review: { rounds: [round({})] } }))
-    expect(step.next).toMatchObject({ kind: 'action', action: 'map' })
+    const step = planStep(plan({ approvable: true, review: { rounds: [round({})] } }))
+    expect(step.next).toMatchObject({ kind: 'action', action: 'approve' })
   })
 
   it('a_submitted_round_waits_on_the_planner', () => {
@@ -61,14 +61,14 @@ describe('planStep', () => {
     expect(step.next).toMatchObject({ kind: 'goto', tab: 'review', label: '2 answers to read' })
   })
 
-  it('a_live_mapping_shows_its_progress', () => {
-    const step = planStep(plan({ mapping: { live: true, text: 'reading src/orders' } }))
-    expect(step.current).toBe('map')
+  it('a_live_check_shows_its_progress_under_approve', () => {
+    const step = planStep(plan({ stage: 'checking', status: 'approved', commentable: false, check: { live: true, text: 'reading src/orders' } }))
+    expect(step.current).toBe('approve')
     expect(step.next).toEqual({ kind: 'waiting', text: 'reading src/orders' })
   })
 
   it('a_decision_without_a_proposal_waits_on_the_planner', () => {
-    const step = planStep(plan({ stage: 'mapped', decisions: [decision({})], pendingDecisions: 1 }))
+    const step = planStep(plan({ stage: 'ruling', status: 'approved', decisions: [decision({})], pendingDecisions: 1 }))
     expect(step.current).toBe('rule')
     expect(step.next).toEqual({ kind: 'waiting', text: 'the planner is proposing on 1 decision' })
   })
@@ -76,38 +76,33 @@ describe('planStep', () => {
   it('an_open_decision_links_to_the_wizard_and_send_rulings_waits_for_every_ruling', () => {
     const open = decision({ proposals: ['drop it', 'narrow it'] })
     const ruled = decision({ title: 'Refund', proposals: ['queue it'], state: 'ruled', ruling: 'keep' })
-    const step = planStep(plan({ stage: 'mapped', decisions: [open, ruled], pendingDecisions: 2 }))
+    const step = planStep(plan({ stage: 'ruling', status: 'approved', decisions: [open, ruled], pendingDecisions: 2 }))
     expect(step.current).toBe('rule')
     expect(step.next).toMatchObject({ kind: 'goto', tab: 'decisions', label: '1 to rule on' })
-    const allRuled = planStep(plan({ stage: 'mapped', decisions: [{ ...open, state: 'ruled', ruling: 'drop it' }, ruled], pendingDecisions: 2 }))
+    const allRuled = planStep(plan({ stage: 'ruling', status: 'approved', decisions: [{ ...open, state: 'ruled', ruling: 'drop it' }, ruled], pendingDecisions: 2 }))
     expect(allRuled.next).toMatchObject({ kind: 'action', action: 'send_rulings', label: 'Send rulings (2)' })
     expect(allRuled.goto).toBeUndefined()
   })
 
   it('rulings_with_the_planner_wait', () => {
-    const step = planStep(plan({ stage: 'mapped', pendingDecisions: 2, applyingRulings: true }))
+    const step = planStep(plan({ stage: 'ruling', status: 'approved', pendingDecisions: 2, applyingRulings: true }))
     expect(step.next).toEqual({ kind: 'waiting', text: 'the planner is applying 2 rulings' })
   })
 
-  it('a_stale_board_waits_for_the_re_map', () => {
-    const step = planStep(plan({ stage: 'mapped', stale: true }))
-    expect(step.current).toBe('map')
-    expect(step.next).toMatchObject({ kind: 'waiting' })
-  })
-
-  it('a_clean_mapped_draft_offers_approve', () => {
-    const step = planStep(plan({ stage: 'mapped', approvable: true }))
-    expect(step.current).toBe('approve')
-    expect(step.next).toMatchObject({ kind: 'action', action: 'approve' })
+  it('a_draft_an_earlier_mapping_left_decisions_on_is_ruled_before_it_is_approved', () => {
+    const step = planStep(plan({ approvable: true, decisions: [decision({ proposals: ['drop it'] })], pendingDecisions: 1 }))
+    expect(step.current).toBe('rule')
+    expect(step.next).toMatchObject({ kind: 'goto', tab: 'decisions' })
   })
 
   it('an_approved_plan_offers_implement_only_while_nothing_is_building_the_tasks', () => {
-    expect(planStep(plan({ stage: 'mapped', status: 'approved', commentable: false, implementable: true })).next).toMatchObject({ action: 'implement' })
-    expect(planStep(plan({ stage: 'mapped', status: 'approved', commentable: false })).next).toEqual({ kind: 'waiting', text: 'the implementer is starting' })
+    const derived = { stage: 'under_development' as const, status: 'approved' as const, commentable: false, tasks: [task('open')] }
+    expect(planStep(plan({ ...derived, implementable: true })).next).toMatchObject({ action: 'implement', label: 'Implement' })
+    expect(planStep(plan(derived)).next).toEqual({ kind: 'waiting', text: '0 of 1 tested' })
   })
 
-  it('right_after_approval_the_planner_lists_what_the_docs_should_say_and_the_implementation_follows_it', () => {
-    const step = planStep(plan({ stage: 'mapped', status: 'approved', commentable: false, reviewingDocs: true }))
+  it('right_after_the_clean_check_the_planner_lists_what_the_docs_should_say_and_the_implementation_follows_it', () => {
+    const step = planStep(plan({ stage: 'under_development', status: 'approved', commentable: false, reviewingDocs: true, tasks: [task('open')] }))
     expect(step.current).toBe('approve')
     expect(step.next).toEqual({ kind: 'waiting', text: 'the planner is listing what the docs should now say; the implementation starts after it' })
   })
@@ -162,13 +157,16 @@ describe('planStep', () => {
     expect(step.next).toEqual({ kind: 'waiting', text: 'Read src/a.ts' })
   })
 
-  it('review_stays_reachable_on_a_mapped_draft', () => {
-    expect(planStep(plan({ stage: 'mapped', approvable: true })).reached).toContain('review')
+  it('review_stays_reachable_on_a_draft_ready_to_approve', () => {
+    expect(planStep(plan({ approvable: true })).reached).toContain('review')
   })
 
-  it('after_approval_only_passed_steps_are_reached', () => {
-    const reached = planStep(plan({ stage: 'under_development', status: 'approved', commentable: false, tasks: [task('done')] })).reached
-    expect(reached).toEqual(['plan', 'review', 'map', 'rule', 'approve', 'implement'])
+  it('after_approval_only_passed_steps_are_reached_and_rule_only_when_the_check_found_something', () => {
+    const building = { stage: 'under_development' as const, status: 'approved' as const, commentable: false, tasks: [task('done')] }
+    expect(planStep(plan(building)).reached).toEqual(['plan', 'review', 'approve', 'implement'])
+    const ruled = decision({ state: 'applied', ruling: 'keep' })
+    expect(planStep(plan({ ...building, decisions: [ruled] })).reached).toEqual(['plan', 'review', 'approve', 'rule', 'implement'])
+    expect(shownSteps(plan(building))).not.toContain('rule')
   })
 })
 
@@ -184,7 +182,7 @@ describe('whose turn it is', () => {
 
   it('a_permission_prompt_points_at_the_chat_over_any_other_act', () => {
     const open = decision({ proposals: ['drop it'] })
-    const step = planStep(plan({ stage: 'mapped', decisions: [open], pendingDecisions: 1, blocked: { on: 'approval', mode: 'plan' } }))
+    const step = planStep(plan({ stage: 'ruling', status: 'approved', decisions: [open], pendingDecisions: 1, blocked: { on: 'approval', mode: 'plan' } }))
     expect(step.next).toMatchObject({ kind: 'goto', tab: 'chat', label: 'Allow or deny: the planner' })
     expect(step.goto).toBeUndefined()
   })
@@ -211,14 +209,15 @@ describe('whose turn it is', () => {
     expect(answering.yours).toBe(true)
   })
 
-  it('a_stale_board_nobody_is_re_mapping_offers_to_map_again', () => {
-    expect(planStep(plan({ stage: 'mapped', stale: true, atWork: false })).next).toMatchObject({ kind: 'action', action: 'map', label: 'Map again' })
+  it('a_check_that_failed_or_was_stopped_offers_to_check_again', () => {
+    const idle = { stage: 'checking' as const, status: 'approved' as const, commentable: false, atWork: false }
+    expect(planStep(plan({ ...idle, checkable: true })).next).toMatchObject({ kind: 'action', action: 'check', label: 'Check again' })
   })
 
   it('a_step_at_work_is_the_agents_and_an_act_or_an_offer_is_yours', () => {
-    expect(planStep(plan({ mapping: { live: true, text: 'reading src' } })).yours).toBe(false)
+    expect(planStep(plan({ stage: 'checking', status: 'approved', check: { live: true, text: 'reading src' } })).yours).toBe(false)
     expect(planStep(plan(building)).yours).toBe(false)
-    expect(planStep(plan({ stage: 'mapped', approvable: true })).yours).toBe(true)
+    expect(planStep(plan({ approvable: true })).yours).toBe(true)
     const verified = { stage: 'verified' as const, status: 'approved' as const, commentable: false, atWork: false }
     expect(planStep(plan({ ...verified, cleanupSweep: { units: [unit()] } })).yours).toBe(true)
     expect(planStep(plan({ ...verified, cleanupSweep: { units: [] } })).yours).toBe(false)
@@ -234,7 +233,6 @@ describe('tabFor', () => {
   it('each_step_opens_the_tab_it_works_in', () => {
     const mapped = plan({ tasks: [task('open')] })
     expect(tabFor('rule', mapped)).toBe('decisions')
-    expect(tabFor('map', mapped)).toBe('tasks')
     expect(tabFor('approve', mapped)).toBe('spec')
     expect(tabFor('implement', mapped)).toBe('tasks')
   })

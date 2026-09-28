@@ -22,7 +22,6 @@ import { globTool } from './agent/openai-session/tools/glob'
 import { grepTool } from './agent/openai-session/tools/grep'
 import { bashTool } from './agent/openai-session/tools/bash'
 import { askUserTool } from './agent/openai-session/tools/ask-user'
-import { redoMappingTool } from './agent/openai-session/tools/redo-mapping'
 import { TaskBoardGuard, taskBoardTools } from './agent/openai-session/tools/task-board'
 import { jsonQueryTool, jsonSchemaTool } from './agent/openai-session/tools/json'
 import { skillTool } from './agent/openai-session/tools/skill'
@@ -91,7 +90,7 @@ function configPort(): ConfigPort {
  * and shell tools. A mode's tool set decides which of them it is offered; a
  * chat session names none, so it gets them all.
  */
-const OWN_TOOLS: Tool[] = [jsonSchemaTool, jsonQueryTool, codeOutlineTool, askUserTool, moveTool, copyTool, redoMappingTool, runScriptTool()]
+const OWN_TOOLS: Tool[] = [jsonSchemaTool, jsonQueryTool, codeOutlineTool, askUserTool, moveTool, copyTool, runScriptTool()]
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('KiwiAgent')

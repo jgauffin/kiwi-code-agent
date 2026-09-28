@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { parseSpec, specFingerprint } from '../src/agent/phases/spec-model'
 import {
   deliveredBy,
+  deriveBoard,
   nextTask,
   parseBoard,
   provenBy,
@@ -11,27 +13,13 @@ import {
   tasksDone,
   tasksFile,
   tasksFresh,
-  undeliveredItems,
   unprovenItems,
   updateTask,
-  upsertTasks,
   withCleanupDecision,
   withRecord,
   withSpecFingerprint,
-  type MappedTask,
 } from '../src/agent/phases/tasks-file'
 import { board, task } from './task-board-fixture'
-
-const mapped = (name: string, over: Partial<MappedTask> = {}): MappedTask => ({
-  name,
-  text: `${name.toLowerCase()} as mapped`,
-  delivers: [],
-  files: [],
-  newFiles: [],
-  context: [],
-  how: '',
-  ...over,
-})
 
 describe('tasks board', () => {
   it('a_board_reads_back_as_it_was_written', () => {
@@ -75,10 +63,9 @@ describe('tasks board', () => {
     expect(provenBy(tasks, 'Shipped order')).toBeUndefined()
     // One is marked tested but Shipped order has no test named: a finish the evidence does not back.
     expect(unprovenItems(tasks)).toEqual(['Shipped order'])
-    expect(undeliveredItems(tasks, ['Cancel command', 'Refund', 'Release', 'Shipped order', 'Nowhere'])).toEqual(['Release', 'Nowhere'])
   })
 
-  it('the_board_remembers_the_spec_it_was_mapped_from', () => {
+  it('the_board_remembers_the_spec_it_was_derived_from', () => {
     const unstamped = stateOfBoard(board(task('A')))
     const stamped = stateOfBoard(withSpecFingerprint(board(task('A')), 'abc12345'))
     if (!stamped.exists || !unstamped.exists) throw new Error('a board exists')
@@ -156,6 +143,11 @@ describe('the implementer moves a task along', () => {
     expect(updateTask(blocked, 'A', { state: 'in_progress' }).tasks[0]!.blockedReason).toBeUndefined()
   })
 
+  it('a_task_is_not_tested_until_it_names_the_files_the_sweep_runs_over', () => {
+    expect(() => updateTask(start, 'B', { state: 'tested' })).toThrow(/names no file/)
+    expect(updateTask(start, 'B', { state: 'tested', files: ['src/b.ts'] }).tasks[1]!.state).toBe('tested')
+  })
+
   it('an_unknown_task_is_refused_with_the_names_on_the_board', () => {
     expect(() => updateTask(start, 'C', { state: 'done' })).toThrow('No task named "C". The board has: A, B.')
   })
@@ -188,49 +180,62 @@ describe('the next task to build', () => {
   })
 })
 
-describe('the mapper writes tasks by name', () => {
-  it('a_remap_keeps_the_implementers_progress_on_a_task_it_rewrites', () => {
-    const worked = board(
-      task('A', { state: 'tested', proves: [{ item: 'R', file: 't.ts', test: 'r' }], note: 'departed from how', built: 'the A type', files: ['src/a.ts'] }),
-    )
-    const { board: next, updated } = upsertTasks(worked, [mapped('a', { files: ['src/a.ts', 'src/b.ts'], how: 'new how' })])
-    expect(updated).toEqual(['a'])
-    expect(next.tasks[0]).toMatchObject({
-      name: 'a',
+describe('the board derived from the spec', () => {
+  const spec = (text: string) => parseSpec(`# Orders\n\n## Goal\nOrders.\n\n${text}`)
+  const two = spec(
+    [
+      '## Cancelling an order',
+      'The customer changes their mind.',
+      '- **Cancel command**: an open order can be cancelled',
+      '  - **Shipped order**: a shipped order cannot',
+      '- **Old rule**: gone [removed]',
+      '',
+      '## Refunding',
+      '- **Refund on cancel**: a cancelled order is refunded',
+      '',
+      '## Dropped',
+      '- **Dropped rule**: struck [removed]',
+    ].join('\n'),
+  )
+
+  it('is_one_task_per_scenario_delivering_its_live_rules_and_edges', () => {
+    const derived = deriveBoard(two)
+    expect(derived.tasks.map((t) => [t.name, t.group, t.delivers, t.text, t.state])).toEqual([
+      ['Cancelling an order', 'Cancelling an order', ['Cancel command', 'Shipped order'], 'The customer changes their mind.', 'open'],
+      ['Refunding', 'Refunding', ['Refund on cancel'], 'Refunding', 'open'],
+    ])
+    expect(derived.spec).toBe(specFingerprint(two))
+  })
+
+  it('deriving_again_keeps_the_implementers_progress_and_files', () => {
+    const worked = updateTask(deriveBoard(two), 'Refunding', { state: 'tested', files: ['src/refund.ts'], built: 'Refund type', note: 'n' })
+    const revised = spec('## Refunding\n- **Refund on cancel**: refunded\n- **Partial refund**: partly refunded')
+    const again = deriveBoard(revised, worked)
+    expect(again.tasks.find((t) => t.name === 'Refunding')).toMatchObject({
+      delivers: ['Refund on cancel', 'Partial refund'],
       state: 'tested',
-      proves: [{ item: 'R' }],
-      note: 'departed from how',
-      built: 'the A type',
-      files: ['src/a.ts', 'src/b.ts'],
-      how: 'new how',
+      files: ['src/refund.ts'],
+      built: 'Refund type',
+      removed: false,
     })
   })
 
-  it('a_new_task_joins_the_end_of_its_group_and_a_new_group_goes_last', () => {
-    const grouped = board(task('A', { group: 'One' }), task('B', { group: 'Two' }))
-    const { board: next, added } = upsertTasks(grouped, [mapped('C', { group: 'One' }), mapped('D', { group: 'Three' })])
-    expect(added).toEqual(['C', 'D'])
-    expect(next.tasks.map((t) => [t.name, t.group, t.state])).toEqual([
-      ['A', 'One', 'open'],
-      ['C', 'One', 'open'],
-      ['B', 'Two', 'open'],
-      ['D', 'Three', 'open'],
+  it('a_scenario_gone_from_the_spec_leaves_its_task_on_the_board_marked_removed', () => {
+    const again = deriveBoard(spec('## Refunding\n- **Refund on cancel**: refunded'), deriveBoard(two))
+    expect(again.tasks.find((t) => t.name === 'Cancelling an order')?.removed).toBe(true)
+  })
+
+  it('a_mapped_task_already_worked_on_keeps_its_rules_and_an_untouched_one_gives_way', () => {
+    const mappedBoard = board(
+      task('Cancel command', { group: 'Cancelling an order', delivers: ['Cancel command'], state: 'tested' }),
+      task('Shipped guard', { group: 'Cancelling an order', delivers: ['Shipped order'] }),
+    )
+    const derived = deriveBoard(two, mappedBoard)
+    expect(derived.tasks.map((t) => [t.name, t.delivers, t.removed])).toEqual([
+      ['Cancel command', ['Cancel command'], false],
+      ['Shipped guard', ['Shipped order'], true],
+      ['Cancelling an order', ['Shipped order'], false],
+      ['Refunding', ['Refund on cancel'], false],
     ])
-  })
-
-  it('a_removed_task_stays_on_the_board_marked_removed_and_an_unknown_one_is_reported', () => {
-    const { board: next, removed, unknown } = upsertTasks(board(task('A', { state: 'done' }), task('B')), [], ['a', 'Z'])
-    expect(removed).toEqual(['A'])
-    expect(unknown).toEqual(['Z'])
-    expect(next.tasks[0]).toMatchObject({ name: 'A', removed: true, state: 'done' })
-  })
-
-  it('a_task_sent_again_after_removal_is_live_again', () => {
-    const { board: next } = upsertTasks(board(task('A', { removed: true })), [mapped('A')])
-    expect(next.tasks[0]!.removed).toBe(false)
-  })
-
-  it('a_name_given_twice_in_one_write_is_refused', () => {
-    expect(() => upsertTasks(board(), [mapped('A'), mapped('a')])).toThrow(/given twice/)
   })
 })

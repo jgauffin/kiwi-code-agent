@@ -5,6 +5,7 @@ import { DOC_READING } from '../openai-session/tools/markdown/outline-gate'
 import { CODE_OUTLINE_TOOL } from '../code-outline/code-outline-tool'
 import { CODE_READING } from '../code-outline/code-outline-gate'
 import { CODE_SEARCH_TOOL } from '../code-outline/code-search'
+import { rulingKind, type Decision } from './decisions'
 import type { SpecState } from './spec-file'
 import type { Item, Spec } from './spec-model'
 import { liveTasks, sameName, tasksDone, type Task, type TaskBoard, type TasksState } from './tasks-file'
@@ -21,8 +22,9 @@ export const IMPLEMENT_TOOLS = [
  * Each task is built by a run of its own, started on what the board hands
  * over rather than on a conversation that grew through every task before it:
  * a long run fills its context with finished work, compacts, loses what it
- * read and reads it again. What crosses the boundary is explicit: the task as
- * the mapping wrote it, the rules it delivers, and what earlier tasks built.
+ * read and reads it again. What crosses the boundary is explicit: the task,
+ * the rules it delivers, the findings ruled to keep on them, and what earlier
+ * tasks built.
  */
 
 /** The task is finished for this run: tested, blocked, or gone from the board. */
@@ -31,13 +33,21 @@ export function taskSettled(board: TaskBoard, name: string): boolean {
   return task === undefined || task.removed || task.state === 'tested' || task.state === 'blocked'
 }
 
-/** The first prompt of a task's run: the task in full, the text of its rules, and what the tasks before it left. */
-export function taskKickoff(board: TaskBoard, name: string, spec: Spec): string {
+/**
+ * The first prompt of a task's run: the task in full, the text of its rules,
+ * the findings the user ruled to keep on those rules, and what the tasks
+ * before it left.
+ */
+export function taskKickoff(board: TaskBoard, name: string, spec: Spec, decisions: Decision[] = []): string {
   const task = board.tasks.find((t) => sameName(t.name, name))
   if (!task) throw new Error(`No task named "${name}" on the board.`)
   const rules = rulesOf(spec, task.delivers)
   const lines = ['Your task:', '', detail(task)]
   if (rules.length > 0) lines.push('', 'The rules it delivers, as the spec states them:', ...rules.map((r) => `- **${r.name}**: ${r.text}`))
+  const kept = keptFindings(decisions, task.delivers)
+  if (kept.length > 0) {
+    lines.push('', 'Where the code disagrees with these rules, the user ruled that the spec stands and the code changes:', ...kept.map((d) => `- ${d.title} (on ${d.on.join(', ')}): ${d.finding}`))
+  }
   lines.push(...handOff(board, [task]))
   lines.push('', `Do this task only. Move it along with ${UPDATE_TASK_TOOL}, and stop when it is tested or blocked.`)
   return lines.join('\n')
@@ -69,6 +79,11 @@ function handOff(board: TaskBoard, shown: Task[]): string[] {
   return ['', 'What earlier tasks left:', ...worked.map(line)]
 }
 
+/** Applied `keep` rulings on a rule the task delivers: work for this task that the spec does not spell out, since the spec already said it. */
+function keptFindings(decisions: Decision[], delivers: string[]): Decision[] {
+  return decisions.filter((d) => d.state === 'applied' && rulingKind(d) === 'keep' && d.on.some((rule) => delivers.some((name) => sameName(name, rule))))
+}
+
 /** The spec's live rules and edge cases by name, in the order the task names them. */
 function rulesOf(spec: Spec, names: string[]): Item[] {
   const items = spec.scenarios.flatMap((s) => s.behaviours.flatMap((b) => [b, ...b.edges])).filter((i) => !i.removed)
@@ -84,7 +99,7 @@ export function assertImplementable(spec: SpecState, tasks: TasksState): void {
   if (!spec.exists) throw new Error('No spec to implement: plan the feature first.')
   if (spec.status === 'implemented') throw new Error('The feature is implemented: plan the next change as its own feature.')
   if (spec.status !== 'approved') throw new Error('The spec is not approved: rule on the decisions and approve it first.')
-  if (!tasks.exists) throw new Error('No tasks to implement: map the spec against the code first.')
+  if (!tasks.exists) throw new Error('No tasks to implement yet: the board is derived once the spec is checked against the code.')
   if (tasksDone(tasks.tasks)) {
     throw new Error('Every task is tested: plan the next change as its own feature rather than reopening this one.')
   }
@@ -117,11 +132,11 @@ function verifyCommands(rules: VerifyRule[]): string {
  */
 export function implementPrompt(feature: string, cwd: string, rules: VerifyRule[] = []): string {
   const spec = `${PLAN_DIR}/${featureSlug(feature)}.spec.md`
-  return `You are implementing one task of the feature "${feature}", from its approved spec at \`${spec}\` under ${cwd}. The first message hands you the task in full from the board, the text of the spec rules it delivers, and what earlier tasks left: what each one built, by name and file. Earlier tasks were built by runs of their own and later ones will be; this run does its one task and stops. A run started on a failed test sweep has the failure as its task instead, and the tasks it names.
+  return `You are implementing one task of the feature "${feature}", from its approved spec at \`${spec}\` under ${cwd}. The first message hands you the task in full from the board, the text of the spec rules it delivers, any finding in the code the user ruled to change so the spec stands, and what earlier tasks left: what each one built, by name and file. Earlier tasks were built by runs of their own and later ones will be; this run does its one task and stops. A run started on a failed test sweep has the failure as its task instead, and the tasks it names.
 
 The spec is the contract: goal, rules and edge cases. Every rule has a name, the bold lead-in of its line. A human approved it; do not reinterpret it. Where the code and the spec disagree, the spec wins. Where the spec is silent, do the simplest thing that satisfies it and record the choice in the task's note.
 
-The board is read with ${READ_TASKS_TOOL} and moved along with ${UPDATE_TASK_TOOL}; it is not a file you read or edit. Your task names the rules it delivers, the files it touches, what was read to arrive at it (context: the modules those files lean on, the test that shows the pattern, where the term already lives) and what reading would not tell you (how: the pattern to follow, a constraint the code imposes, what not to touch). The design within that is yours. The mapping has been done: read the task's files and its context in one message, as parallel Reads, and search the code only for what they do not answer. Every request carries the whole conversation, so a batch of reads costs one request where reading one file at a time costs one each. Build on what earlier tasks left rather than finding it again; open another task's files only where your task needs them. Follow the how; depart from it only where the code as you read it says it cannot be done that way, and say so in the task's note.
+The board is read with ${READ_TASKS_TOOL} and moved along with ${UPDATE_TASK_TOOL}; it is not a file you read or edit. Your task is one scenario of the spec and names the rules it delivers; where and how to build it is yours to find in the code. Read in batches, several Reads in one message: every request carries the whole conversation, so a batch costs one request where reading one file at a time costs one each. Build on what earlier tasks left rather than finding it again; open another task's files only where your task needs them. A task that already names files, context or a how was mapped before the build: start from those and search only for what they do not answer, and depart from the how only where the code says it cannot be done that way, saying so in the task's note.
 
 Your task is already in_progress. Record where it ends with ${UPDATE_TASK_TOOL}:
 - tested when every rule the task delivers is proven by a test named in its proves, passing in a run you narrowed to it. In the same call give the proves and built: what this task left that a later task builds on (the types, functions, tables and test helpers it added or changed, by name and file). The next task starts from those lines, not from your conversation;
@@ -136,12 +151,12 @@ Build and test as you go, and narrowly, because you are the one proving the task
 - ${verifyCommands(rules)}
 Narrow those same commands rather than commands of your own, so a green run of yours means what a green sweep means.
 
-Keep the task's files true to what you touched: add a file you needed that the board did not name. When a decision only the user can make stands in the way (a fork the spec and the board leave open, which of two ways to take), put it with the \`${ASK_USER_TOOL}\` tool and carry on with the answer, rather than blocking the task or stopping.
+Name every file you touched on the task's files, its tests included: the sweep runs over them, and tested is refused on a task that names none. When a decision only the user can make stands in the way (a fork the spec and the code leave open, which of two ways to take), put it with the \`${ASK_USER_TOOL}\` tool and carry on with the answer, rather than blocking the task or stopping.
 
 Rules:
 - The spec and the decisions file are not yours to change.
 - Never edit \`${DOCS_DIR}/\`: intent is the user's.
-- Read a file before editing it; read it again when a tool result says it changed underneath you. Do not re-explore what the task's context already names.
+- Read a file before editing it; read it again when a tool result says it changed underneath you. Do not re-explore what the hand-off already names.
 - ${DOC_READING}
 - ${CODE_READING} Before writing a test, outline the test file or folder it belongs in: the rule may already be proven, and the neighbouring tests show the pattern to follow.
 - Shell commands already run in ${cwd}; do not cd there.

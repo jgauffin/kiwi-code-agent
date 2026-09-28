@@ -50,30 +50,17 @@ describe('reconcile prompt', () => {
     // The kind of a finding is nothing the user acts on, so it is not written into the file.
     expect(prompt).not.toContain('- kind:')
     expect(prompt).not.toContain('amendment')
-    expect(RECONCILE_TOOLS).toEqual([
-      'Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'MarkdownSearch', 'CodeOutline', 'CodeSearch', 'Edit', 'Write', 'Skill',
-      'ReadTasks', 'WriteTasks',
-    ])
+    expect(RECONCILE_TOOLS).toEqual(['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'MarkdownSearch', 'CodeOutline', 'CodeSearch', 'Edit', 'Write', 'Skill'])
   })
 
-  it('a_run_continuing_the_last_mapping_is_told_the_spec_changed_and_keeps_what_it_read', () => {
+  it('a_run_continuing_the_last_check_is_told_the_spec_changed_and_keeps_what_it_read', () => {
     const fresh = reconcileKickoff(false)
-    expect(fresh).toContain('Map the spec against the code')
+    expect(fresh).toContain('Check the spec against the code')
     const again = reconcileKickoff(true)
-    expect(again).toContain('changed since you mapped it')
+    expect(again).toContain('changed since you checked it')
     expect(again).toContain('Read it again')
     expect(again).toContain('unless a tool result says')
     expect(again).not.toBe(fresh)
-  })
-
-  it('a_redo_note_is_guidance_for_the_mapping_itself_appended_to_either_kickoff', () => {
-    const fresh = reconcileKickoff(false, 'keep findings to one short sentence')
-    expect(fresh).toContain('Map the spec against the code')
-    expect(fresh).toContain('Also: keep findings to one short sentence')
-    const again = reconcileKickoff(true, 'less detail')
-    expect(again).toContain('changed since you mapped it')
-    expect(again).toContain('Also: less detail')
-    expect(reconcileKickoff(true)).not.toContain('Also:')
   })
 
   it('the_spec_stands_in_for_the_docs_and_the_other_specs_so_the_check_does_not_read_them_again', () => {
@@ -86,7 +73,7 @@ describe('reconcile prompt', () => {
   it('a_finding_is_the_disagreement_at_one_symbol_and_leaves_the_remedy_to_the_proposal', () => {
     expect(prompt).toContain('The finding is one or two sentences')
     expect(prompt).toContain('at the one path and symbol that shows it')
-    expect(prompt).toContain('not what the spec should say instead, not the task')
+    expect(prompt).toContain('not what the spec should say instead, not how to build it')
     // The decision card shows the rule verbatim beside the finding, so restating it is duplication.
     expect(prompt).toContain('Do not quote or restate a rule')
     // The example is at the target length, since the example is what gets copied.
@@ -98,57 +85,25 @@ describe('reconcile prompt', () => {
   it('the_proposals_and_the_ruling_belong_to_others_and_the_run_ends_silently', () => {
     expect(prompt).toContain('The `proposed`, `recommended` and `because` lines are the planner\'s and the `ruling` line is the user\'s')
     expect(prompt).toContain('The spec is not yours to write')
-    expect(prompt).toContain('When both outputs are written, stop.')
+    expect(prompt).toContain('When the decisions are written, or there are none, stop.')
     expect(prompt).not.toContain('summarise')
   })
 
-  it('writes_the_task_board_through_its_tool_after_the_decisions', () => {
-    expect(prompt).toContain('written with WriteTasks')
+  it('writes_decisions_only_since_the_board_is_derived_from_the_spec', () => {
     expect(prompt).not.toContain('.tasks.')
-    expect(RECONCILE_TOOLS).toEqual(expect.arrayContaining(['ReadTasks', 'WriteTasks']))
-    expect(RECONCILE_TOOLS).not.toContain('UpdateTask')
-    // A task under an unruled decision would pre-empt the ruling.
-    expect(prompt).toContain('No task for what a pending decision puts in question')
-  })
-
-  it('a_re_map_sends_tasks_by_name_and_the_tool_keeps_the_implementers_progress', () => {
-    expect(prompt).toContain('send a task that still holds under its name with what changed')
-    expect(prompt).toContain("The implementer's progress on a task is kept by the tool")
-  })
-
-  it('starts_from_one_task_per_scenario_in_its_group_and_covers_every_rule', () => {
-    expect(prompt).toContain('One task per scenario is the default')
-    expect(prompt).toContain('a task in the group "Cancelling an order"')
-    expect(prompt).toContain('a group "Foundation"')
-    expect(prompt).toContain('Every rule and edge case of the spec is delivered by some task')
-    // The reading the run did is handed on, so the implementer does not do it again.
-    expect(prompt).toContain('- context:')
-    expect(prompt).toContain('would otherwise have to find again')
-  })
-
-  it('a_how_holds_only_what_reading_the_files_would_not_tell', () => {
-    expect(prompt).toContain('- how:')
-    expect(prompt).toContain('what the implementer would not learn from reading its files and context')
-    // The implementer reads the same code and designs the signatures; spelling them out plans the work twice.
-    expect(prompt).toContain('Not the steps, signatures, fields or columns')
-    expect(prompt).not.toContain('the symbols to add or change by path and name')
-    // The line the person reads stays short; the detail is beneath it.
-    expect(prompt).toContain('one sentence, for the person')
-  })
-
-  it('a_scenario_is_split_only_when_it_cannot_be_built_in_one_sitting', () => {
-    expect(prompt).toContain('too big to build and test in one sitting')
-    expect(prompt).toContain('a group of rules is not a reason to split')
+    expect(prompt).not.toContain('WriteTasks')
+    // A clean check starts the build without a word to the person, so no file is the answer.
+    expect(prompt).toContain('With no decision to report, write no file')
   })
 
   it('code_the_feature_leaves_alone_is_not_a_finding', () => {
-    expect(prompt).toContain('code the tasks will change or build on')
+    expect(prompt).toContain('code the feature will change or build on')
     expect(prompt).toContain('Behaviour in code the feature leaves alone is not a finding')
     // Where to build decides which code is in play, so it is ruled before the findings it would make moot.
     expect(prompt).toContain('where the feature is built is itself open')
   })
 
-  it('a_how_question_goes_to_the_task_not_to_a_decision', () => {
+  it('a_how_question_is_the_implementers_not_a_decision', () => {
     expect(prompt).toContain('changes how a rule is built but not what it does is not a decision')
   })
 })
@@ -174,7 +129,7 @@ describe('the handoffs to the planner', () => {
     expect(prompt).toContain('Then stop')
   })
 
-  it('hands_the_rulings_over_to_be_applied_and_marked_and_says_approval_follows_the_revision', () => {
+  it('hands_the_rulings_over_to_be_applied_to_the_approved_spec_and_marked', () => {
     const prompt = rulingsHandoffPrompt('Order cancellation', [
       { title: 'Shipped orders cannot be cancelled', ruling: 'a shipped order is refused' },
       { title: 'Refunds are asynchronous', ruling: 'keep' },
@@ -185,7 +140,9 @@ describe('the handoffs to the planner', () => {
     expect(prompt).toContain('the text of a proposal replaces the rule verbatim')
     expect(prompt).toContain('[applied]')
     expect(prompt).not.toContain('amendment')
-    expect(prompt).toContain('the user approves after reading the revised spec')
+    // The ruling is the person's own words, so asking them to approve it again would be ceremony.
+    expect(prompt).toContain('amend it without a second approval')
+    expect(prompt).toContain('checked against the code again when your turn ends')
   })
 
   it('on_approval_the_planner_lists_what_the_docs_should_now_say_and_edits_only_when_asked', () => {
@@ -215,7 +172,6 @@ describe('progress line', () => {
     expect(progressLine({ type: 'tool_call', toolUseId: 't', name: 'UpdateTask', input: { task: 'Cancel command', state: 'in_progress' } })).toBe(
       'Cancel command: in progress',
     )
-    expect(progressLine({ type: 'tool_call', toolUseId: 't', name: 'WriteTasks', input: { tasks: [] } })).toBe('Writing the tasks')
   })
 
   it('an_assistant_message_shows_its_first_line_clipped', () => {

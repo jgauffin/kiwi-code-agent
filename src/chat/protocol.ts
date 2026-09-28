@@ -37,17 +37,15 @@ export type PlanState = {
   body?: string
   /** The spec as the contract reads it; absent while no spec is written. */
   spec?: Spec
-  /** The board predates the spec as it stands; it is re-mapped when the plan session's turn ends. */
+  /** The board predates the spec as it stands; the spec is checked again and the board re-derived. */
   stale: boolean
   /** The spec is off contract and can be repaired: a plan session is active to do it. */
   repairable: boolean
-  /** Mapping can be started from here: a plan session with a draft spec nobody has commented on, and no run live. */
-  mappable: boolean
-  /** The mapping run under this plan session: what it is doing, or how the last one ended. Absent before the first. */
-  mapping?: RunState
-  /** The mapping can be redone, as feedback on itself rather than on the spec: it has run before, the spec is still a draft, and no run is live. */
-  remappable: boolean
-  /** Implementation can be started from here: a plan session with an approved, mapped spec whose board is not all tested. */
+  /** The check against the code can be started again from here: the approved spec needs one, nothing is pending and no check is live. */
+  checkable: boolean
+  /** The check against the code under this plan session: what it is doing, or how the last one ended. Absent before the first. */
+  check?: RunState
+  /** Implementation can be started from here: a plan session with an approved spec whose derived board is not all tested. */
   implementable: boolean
   /** The test run can be started from here: every task is tested and no run is live. */
   verifiable: boolean
@@ -61,23 +59,23 @@ export type PlanState = {
   cleanupDecision?: CleanupDecision
   /** The newest record in the tasks file, the outcome that stands. */
   lastVerification?: VerificationRecord
-  /** The task board; empty until the spec is mapped. */
+  /** The task board; empty until the approved spec is checked clean. */
   tasks: Task[]
   /** Comments, strikes and resolutions so far; kept after approval as the record of how the plan was reached. */
   review: Review
   /** Comments can be attached: the artifact is a draft. */
   commentable: boolean
-  /** The plan is mapped and no comment is open, so it may be approved. */
+  /** A draft with no comment open, so it may be approved. */
   approvable: boolean
-  /** What the mapping found, in file order, with the planner's options and the user's rulings; empty until the spec is mapped. */
+  /** What the check found, in file order, with the planner's options and the user's rulings; empty until it found something. */
   decisions: Decision[]
   /** Decisions not yet applied to the rules: the open ones and those ruled but still with the planner. */
   pendingDecisions: number
-  /** The rulings are with the planner; Approve is offered again once that turn ends. */
+  /** The rulings are with the planner; the check runs again once that turn ends. */
   applyingRulings: boolean
-  /** The planner is listing what the docs should now say, right after approval; Implement is offered once that turn ends. */
+  /** The planner is listing what the docs should now say, right after the clean check; the build starts once that turn ends. */
   reviewingDocs: boolean
-  /** Some run of the feature is at work: a turn in flight, or a mapping, test run or cleanup live. False means the next act is the dev's. */
+  /** Some run of the feature is at work: a turn in flight, or a check, test run or cleanup live. False means the next act is the dev's. */
   atWork: boolean
   /** A run of the feature is stopped mid-turn on the dev: a question to answer or a call to allow or deny. */
   blocked?: RunBlock
@@ -184,17 +182,15 @@ export type FromWebview =
   | { type: 'set_default_profile'; name: string }
   /** Opens the plan session behind a spec on disk, or starts one on it when none remains; what it offers follows the spec's status. */
   | { type: 'resume_plan'; feature: string }
-  /** Approves the mapped draft; refused while a decision is pending or a comment open. */
+  /** Approves the draft and starts its check against the code; refused while a comment is open. */
   | { type: 'approve_spec' }
   /** Hands the rulings to the plan session to apply; refused while a decision is still open. */
   | { type: 'send_rulings' }
   | ReviewAction
-  /** Maps the active plan session's spec against the code as a run under it; the plan bar shows its progress. */
-  | { type: 'map_spec' }
-  /** Stops the mapping running under the active plan session. */
-  | { type: 'stop_map' }
-  /** Redoes the mapping as a continuation of its own conversation, with an optional note on how it should differ; refused while a mapping is already live. */
-  | { type: 'redo_map'; note?: string }
+  /** Checks the active plan session's approved spec against the code again, after a check failed or was stopped. */
+  | { type: 'check_spec' }
+  /** Stops the check running under the active plan session. */
+  | { type: 'stop_check' }
   /** Stops the cleanup running on the active feature. */
   | { type: 'stop_cleanup' }
   /** What to do with the units the size sweep found: split them now, leave the offer for later, or settle the feature without splitting. `paths` narrows a split to the files picked; absent means every one. */

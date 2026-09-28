@@ -154,13 +154,28 @@ function toWire(message: ChatMessage): Record<string, unknown> {
               tool_calls: message.toolCalls.map((c) => ({
                 id: c.id,
                 type: 'function',
-                function: { name: c.name, arguments: c.arguments },
+                function: { name: c.name, arguments: validJson(c.arguments) },
               })),
             }
           : {}),
       }
     case 'tool':
       return { role: 'tool', tool_call_id: message.toolCallId, content: message.content }
+  }
+}
+
+/**
+ * vLLM parses the arguments of every past tool call to render the chat
+ * template and rejects the whole request when one is malformed, so a call the
+ * model botched would fail every later turn. Its tool result already tells
+ * the model what went wrong.
+ */
+function validJson(args: string): string {
+  try {
+    JSON.parse(args)
+    return args
+  } catch {
+    return '{}'
   }
 }
 

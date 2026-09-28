@@ -11,16 +11,15 @@ import type { RunBlock } from '../../agent/session/session-status'
  * an agent at work, with none at work, is the person's.
  */
 
-export type Step = 'plan' | 'review' | 'map' | 'rule' | 'approve' | 'implement' | 'verify' | 'cleanup'
+export type Step = 'plan' | 'review' | 'approve' | 'rule' | 'implement' | 'verify' | 'cleanup'
 
-export const STEPS: Step[] = ['plan', 'review', 'map', 'rule', 'approve', 'implement', 'verify', 'cleanup']
+export const STEPS: Step[] = ['plan', 'review', 'approve', 'rule', 'implement', 'verify', 'cleanup']
 
 export const STEP_LABEL: Record<Step, string> = {
   plan: 'Plan',
   review: 'Review',
-  map: 'Map',
-  rule: 'Rule',
   approve: 'Approve',
+  rule: 'Rule',
   implement: 'Implement',
   verify: 'Verify',
   cleanup: 'Cleanup',
@@ -32,7 +31,7 @@ export type Tab = 'spec' | 'review' | 'decisions' | 'tasks' | 'cleanup'
 /** A tab of the strip: a plan tab, or the conversation. */
 export type ViewTab = Tab | 'chat'
 
-export type NextAction = 'map' | 'submit_review' | 'send_rulings' | 'approve' | 'implement' | 'verify' | 'sweep'
+export type NextAction = 'check' | 'submit_review' | 'send_rulings' | 'approve' | 'implement' | 'verify' | 'sweep'
 
 export type NextStep =
   /** A button in the bar: the act moves the plan on. */
@@ -61,7 +60,7 @@ const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' 
 const RUN_NOUN: Record<SessionMode, string> = {
   chat: 'the session',
   plan: 'the planner',
-  reconcile: 'the mapping',
+  reconcile: 'the check',
   implement: 'the implementer',
   cleanup: 'the cleanup',
   docs: 'the docs session',
@@ -72,9 +71,8 @@ const RUN_NOUN: Record<SessionMode, string> = {
 const STEP_AGENT: Record<Step, string> = {
   plan: 'planner',
   review: 'planner',
-  map: 'mapping',
+  approve: 'check',
   rule: 'planner',
-  approve: 'planner',
   implement: 'implementer',
   verify: 'test run',
   cleanup: 'cleanup',
@@ -118,8 +116,8 @@ function stopped(current: Step, plan: PlanState): Derived {
     const who = RUN_NOUN[plan.failure.mode]
     return { current, next: { kind: 'goto', tab: 'chat', label: `${capitalized(who)} failed`, hint: failureText(plan.failure) } }
   }
-  if (current === 'map' && plan.status === 'draft') {
-    return { current, next: { kind: 'action', action: 'map', label: 'Map again', hint: 'The board predates the spec and no mapping is running: map the spec as it stands.' } }
+  if (plan.checkable) {
+    return { current, next: { kind: 'action', action: 'check', label: 'Check again', hint: 'No check is running and the approved spec still needs one: check it against the code as it stands.' } }
   }
   const who = STEP_AGENT[current]
   return {
@@ -165,37 +163,41 @@ function derive(plan: PlanState): Derived {
     const open = plan.review.rounds.flatMap((r) => r.comments).filter((c) => !c.closed).length
     return {
       current: 'review',
-      next: { kind: 'goto', tab: 'review', label: `${plural(open, 'answer')} to read`, hint: 'Read what the planner answered and resolve each comment; the last one maps the spec against the code.' },
+      next: { kind: 'goto', tab: 'review', label: `${plural(open, 'answer')} to read`, hint: 'Read what the planner answered and resolve each comment; then the spec can be approved.' },
     }
   }
 
   if (plan.stage === 'created') {
-    if (plan.mapping?.live) return { current: 'map', next: { kind: 'waiting', text: plan.mapping.text } }
+    // A draft an earlier mapping left decisions on is ruled before it is approved.
+    if (plan.pendingDecisions > 0) return ruling(plan)
+    if (!plan.approvable) return { current: 'approve', next: { kind: 'waiting', text: 'the planner is revising the spec' } }
     return {
-      current: 'review',
+      current: 'approve',
       next: {
         kind: 'action',
-        action: 'map',
-        label: 'Map against code',
-        hint: 'Comment on the spec first, or map it as it stands: the mapping reads the code and writes what contradicts the spec as decisions, and the tasks with the files they touch.',
+        action: 'approve',
+        label: 'Approve',
+        hint: 'Comment on the spec first, or approve it as it stands: the code is checked against it, and the build starts unless the code disagrees.',
       },
     }
   }
 
-  if (plan.stage === 'mapped' && plan.status === 'draft') return mappedDraft(plan)
+  if (plan.stage === 'checking') {
+    if (plan.check?.live) return { current: 'approve', next: { kind: 'waiting', text: plan.check.text } }
+    if (plan.applyingRulings) return { current: 'rule', next: { kind: 'waiting', text: `the planner is applying ${plural(plan.pendingDecisions, 'ruling')}` } }
+    return { current: 'approve', next: { kind: 'waiting', text: 'the spec is checked against the code' } }
+  }
 
-  if (plan.stage === 'mapped') {
+  if (plan.stage === 'ruling') return ruling(plan)
+
+  if (plan.stage === 'under_development') {
     if (plan.reviewingDocs) return { current: 'approve', next: { kind: 'waiting', text: 'the planner is listing what the docs should now say; the implementation starts after it' } }
-    if (plan.implementable) {
-      // Approval starts the build: this is the way back in when nothing is building the tasks.
+    const live = plan.tasks.filter((t) => !t.removed)
+    if (plan.implementable && !live.some((t) => t.state !== 'open')) {
+      // The clean check starts the build: this is the way back in when nothing is building the tasks.
       if (plan.failure) return { current: 'implement', next: tryAgain(plan.failure) }
       return { current: 'implement', next: { kind: 'action', action: 'implement', label: 'Implement', hint: 'Nothing is building the tasks: pick the board up in a session that builds them one by one.' } }
     }
-    return { current: 'implement', next: { kind: 'waiting', text: 'the implementer is starting' } }
-  }
-
-  if (plan.stage === 'under_development') {
-    const live = plan.tasks.filter((t) => !t.removed)
     const tested = live.filter((t) => t.state === 'tested').length
     const blocked = live.filter((t) => t.state === 'blocked').length
     // The scenario under way is what the person wants to know; the count is how far along it is.
@@ -235,7 +237,8 @@ function cleanupNext(plan: PlanState): NextStep {
   return { kind: 'action', action: 'sweep', label: 'Check sizes', hint: 'Measure the files this feature touched against the size limits.' }
 }
 
-function mappedDraft(plan: PlanState): Derived {
+/** The check found what the person rules on: proposals first, then the rulings, then the planner applies them. */
+function ruling(plan: PlanState): Derived {
   const unproposed = plan.decisions.filter((d) => d.state === 'open' && d.proposals.length === 0).length
   if (unproposed > 0) return { current: 'rule', next: { kind: 'waiting', text: `the planner is proposing on ${plural(unproposed, 'decision')}` } }
   if (plan.applyingRulings) return { current: 'rule', next: { kind: 'waiting', text: `the planner is applying ${plural(plan.pendingDecisions, 'ruling')}` } }
@@ -249,21 +252,23 @@ function mappedDraft(plan: PlanState): Derived {
         kind: 'action',
         action: 'send_rulings',
         label: `Send rulings (${plan.pendingDecisions})`,
-        hint: 'Hand the rulings to the planner, which revises the rules; then the plan can be approved.',
+        hint: 'Hand the rulings to the planner, which revises the rules; the spec is then checked again and the build starts.',
       },
     }
   }
-  if (plan.stale) {
-    return { current: 'map', next: { kind: 'waiting', text: plan.mapping?.live ? plan.mapping.text : "re-mapped when the planner's turn ends" } }
-  }
-  return { current: 'approve', next: { kind: 'action', action: 'approve', label: 'Approve', hint: 'Approve this plan: the spec and its tasks.' } }
+  return { current: 'rule', next: { kind: 'waiting', text: 'the spec is checked against the code' } }
 }
 
 /** Every step up to the current one; a draft can always take a comment, so Review stays open on one. */
 function reached(current: Step, plan: PlanState): Step[] {
-  const steps = STEPS.slice(0, STEPS.indexOf(current) + 1)
+  const steps = shownSteps(plan).slice(0, shownSteps(plan).indexOf(current) + 1)
   if (plan.status === 'draft' && !steps.includes('review')) steps.push('review')
   return steps
+}
+
+/** The steps the stepper shows: Rule only once the check found something, since a clean check asks nothing of the person. */
+export function shownSteps(plan: PlanState): Step[] {
+  return STEPS.filter((step) => step !== 'rule' || plan.decisions.length > 0)
 }
 
 const TAB_ORDER: Tab[] = ['spec', 'review', 'decisions', 'tasks', 'cleanup']
@@ -320,8 +325,6 @@ export function tabFor(step: Step, plan: PlanState): Tab {
   switch (step) {
     case 'review':
       return plan.review.rounds.length > 0 ? 'review' : 'spec'
-    case 'map':
-      return plan.tasks.length > 0 ? 'tasks' : 'spec'
     case 'rule':
       return 'decisions'
     case 'implement':

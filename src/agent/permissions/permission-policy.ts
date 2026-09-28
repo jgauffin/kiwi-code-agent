@@ -16,7 +16,7 @@ export type PermissionRules = { allow: string[]; deny: string[] }
  */
 const READ_ONLY_TOOLS = new Set([
   'Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'MarkdownSearch', 'CodeOutline', 'CodeSearch', 'LS', 'NotebookRead', 'TodoRead', 'TodoWrite', 'AskUser', 'RunScript',
-  'ReadTasks', 'UpdateTask', 'WriteTasks',
+  'ReadTasks', 'UpdateTask',
 ])
 
 const FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'NotebookRead', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'MarkdownSearch', 'CodeOutline', 'CodeSearch', 'LS', ...TRANSFER_TOOLS])

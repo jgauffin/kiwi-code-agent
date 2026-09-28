@@ -133,21 +133,6 @@ chat-app {
       border: 1px solid var(--vscode-inputValidation-warningBorder);
     }
 
-    & .remap {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.3rem;
-
-      & input[type='text'] {
-        background: var(--vscode-input-background);
-        color: var(--vscode-input-foreground);
-        border: 1px solid var(--vscode-input-border, transparent);
-        border-radius: 2px;
-        padding: 0.15rem 0.4rem;
-        min-width: 12rem;
-      }
-    }
-
     /* The one next step: a button when it moves the plan on, green when it is the gate; a link when the act is on a row; text while someone else works. */
     & .next {
       white-space: nowrap;

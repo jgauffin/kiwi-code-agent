@@ -152,7 +152,7 @@ describe('PlanView', () => {
   })
 
   it('a_task_without_context_or_how_shows_neither', () => {
-    const node = view(plan({ stage: 'mapped', status: 'approved', commentable: false, tasks: [task({ files: ['src/orders/cancel.ts'] })] }), 'tasks')
+    const node = view(plan({ stage: 'under_development', status: 'approved', commentable: false, tasks: [task({ files: ['src/orders/cancel.ts'] })] }), 'tasks')
     expect(node.querySelector('.task ul.context')).toBeNull()
     expect(node.querySelector('.task details.how')).toBeNull()
     expect(node.querySelectorAll('.task .paths')).toHaveLength(1)
@@ -214,7 +214,7 @@ describe('PlanView', () => {
       { title: 'Refund', on: [], finding: 'f', proposals: ['queue it'], state: 'ruled' as const, ruling: 'keep', line: 0, end: 0 },
       { title: 'Shipped', on: ['Cancel command'], finding: 'the code refuses; the spec allows', proposals: ['refuse it', 'allow it'], state: 'open' as const, line: 0, end: 0 },
     ]
-    const node = view(plan({ stage: 'mapped', tasks: [task()], decisions, pendingDecisions: 2 }), 'decisions')
+    const node = view(plan({ stage: 'ruling', status: 'approved', commentable: false, decisions, pendingDecisions: 2 }), 'decisions')
     expect(node.querySelector('.wizard .count')!.textContent).toBe('Decision 2 of 2')
     expect(node.querySelector('.decision .title')!.textContent).toBe('Shipped')
     expect(node.querySelectorAll('.decision.attention')).toHaveLength(1)
@@ -233,7 +233,7 @@ describe('PlanView', () => {
       { title: 'Refund', on: [], finding: 'f', proposals: ['queue it'], state: 'ruled' as const, ruling: 'queue it', line: 0, end: 0 },
       { title: 'Shipped', on: [], finding: 'f', proposals: ['refuse it'], state: 'ruled' as const, ruling: 'do both', line: 0, end: 0 },
     ]
-    const node = view(plan({ stage: 'mapped', tasks: [task()], decisions, pendingDecisions: 2 }), 'decisions')
+    const node = view(plan({ stage: 'ruling', status: 'approved', commentable: false, decisions, pendingDecisions: 2 }), 'decisions')
     expect(node.querySelector('.wizard .left')!.textContent).toBe('all ruled')
     expect(node.querySelector('.decision .title')!.textContent).toBe('Refund')
     expect(node.querySelector('.option.chosen .text')!.textContent).toBe('queue it')
@@ -249,7 +249,7 @@ describe('PlanView', () => {
     const decisions = [
       { title: 'Shipped', on: ['Cancel command', 'Shipped order', 'Renamed away'], finding: '`Order.cancel` refuses it', proposals: [], state: 'open' as const, line: 0, end: 0 },
     ]
-    const node = view(plan({ stage: 'mapped', tasks: [task()], decisions, pendingDecisions: 1 }), 'decisions')
+    const node = view(plan({ stage: 'ruling', status: 'approved', commentable: false, decisions, pendingDecisions: 1 }), 'decisions')
     const rules = [...node.querySelectorAll('.sides .spec .rule')].map((r) => r.textContent)
     expect(rules).toEqual(['Cancel command: an open order can be cancelled', 'Shipped order: refused', 'Renamed away'])
     expect(node.querySelector('.sides .finding .text')!.innerHTML).toContain('<code>Order.cancel</code>')
@@ -264,7 +264,7 @@ describe('PlanView', () => {
   it('an_option_shows_the_rules_new_text_without_repeating_the_name_of_the_rule_it_rewrites', () => {
     const proposal = '**Cancel command**: an open order can be cancelled *until* it ships'
     const decisions = [{ title: 'Shipped', on: ['Cancel command'], finding: 'f', proposals: [proposal], state: 'open' as const, line: 0, end: 0 }]
-    const node = view(plan({ stage: 'mapped', tasks: [task()], decisions, pendingDecisions: 1 }), 'decisions')
+    const node = view(plan({ stage: 'ruling', status: 'approved', commentable: false, decisions, pendingDecisions: 1 }), 'decisions')
     const text = node.querySelector('.option.change .text')!
     expect(text.textContent).toBe('an open order can be cancelled until it ships')
     expect(text.innerHTML).toContain('<em>until</em>')
@@ -289,7 +289,7 @@ describe('PlanView', () => {
         end: 0,
       },
     ]
-    const node = view(plan({ stage: 'mapped', tasks: [task()], decisions, pendingDecisions: 1 }), 'decisions')
+    const node = view(plan({ stage: 'ruling', status: 'approved', commentable: false, decisions, pendingDecisions: 1 }), 'decisions')
     expect([...node.querySelectorAll('.option.change .index')].map((i) => i.textContent)).toEqual(['1', '2'])
     const pick = node.querySelector('.recommendation')!
     expect(pick.querySelector('.which')!.textContent).toBe('Option 2')
@@ -302,10 +302,10 @@ describe('PlanView', () => {
   it('an_option_names_the_rule_it_rewrites_only_when_the_options_rewrite_different_rules', () => {
     const on = ['Cancel command', 'Shipped order']
     const sameRule = [{ title: 'Shipped', on, finding: 'f', proposals: ['**Shipped order**: refused', '**Shipped order**: refused with a reason'], state: 'open' as const, line: 0, end: 0 }]
-    const node = view(plan({ stage: 'mapped', tasks: [task()], decisions: sameRule, pendingDecisions: 1 }), 'decisions')
+    const node = view(plan({ stage: 'ruling', status: 'approved', commentable: false, decisions: sameRule, pendingDecisions: 1 }), 'decisions')
     expect(node.querySelector('.option.change .rule')).toBeNull()
     const twoRules = [{ ...sameRule[0]!, proposals: ['**Shipped order**: refused', '**Cancel command**: cancelled until it ships'] }]
-    node.update(plan({ stage: 'mapped', tasks: [task()], decisions: twoRules, pendingDecisions: 1 }), 'decisions')
+    node.update(plan({ stage: 'ruling', status: 'approved', commentable: false, decisions: twoRules, pendingDecisions: 1 }), 'decisions')
     expect([...node.querySelectorAll('.option.change .rule')].map((r) => r.textContent)).toEqual(['Shipped order', 'Cancel command'])
     expect(node.querySelector('.option.change .text')!.textContent).toBe('refused')
   })
@@ -315,7 +315,7 @@ describe('PlanView', () => {
       { title: 'F1', on: ['B5'], finding: 'the code counts nothing', proposals: ['say keywords'], state: 'applied' as const, ruling: 'keep', line: 0, end: 0 },
       { title: 'F2', on: [], finding: 'gone', proposals: [], state: 'withdrawn' as const, line: 0, end: 0 },
     ]
-    const node = view(plan({ stage: 'mapped', tasks: [task()], decisions }), 'decisions')
+    const node = view(plan({ stage: 'ruling', status: 'approved', commentable: false, decisions }), 'decisions')
     expect(node.querySelectorAll('.decisions > .decision')).toHaveLength(0)
     expect(node.querySelector('.wizard')).toBeNull()
     const history = node.querySelector<HTMLDetailsElement>('.history')!

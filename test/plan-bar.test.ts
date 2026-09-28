@@ -30,7 +30,7 @@ const dispatched = (node: HTMLElement, type: string, act: () => void): boolean =
 
 describe('PlanBar next step', () => {
   it('a_bar_action_is_a_button_that_dispatches_its_event', () => {
-    const node = bar(plan({ stage: 'mapped', approvable: true }))
+    const node = bar(plan({ approvable: true }))
     const slot = next(node)!
     expect(slot.tagName).toBe('BUTTON')
     expect(slot.textContent).toBe('Approve')
@@ -42,7 +42,7 @@ describe('PlanBar next step', () => {
     expect(next(submit)!.textContent).toBe('Submit review (1)')
     expect(dispatched(submit, events.ReviewSubmittedEvent.type, () => next(submit)!.click())).toBe(true)
 
-    const rulings = bar(plan({ stage: 'mapped', decisions: [decision({ state: 'ruled', ruling: 'drop' })], pendingDecisions: 1 }))
+    const rulings = bar(plan({ stage: 'ruling', status: 'approved', decisions: [decision({ state: 'ruled', ruling: 'drop' })], pendingDecisions: 1 }))
     const button = rulings.querySelector<HTMLElement>('.next.send_rulings')!
     expect(button.textContent).toBe('Send rulings (1)')
     expect(dispatched(rulings, events.RulingsSentEvent.type, () => button.click())).toBe(true)
@@ -61,17 +61,17 @@ describe('PlanBar next step', () => {
   })
 
   it('an_open_decision_links_to_the_wizard_instead_of_offering_send_rulings', () => {
-    const node = bar(plan({ stage: 'mapped', decisions: [decision({}), decision({ title: 'Refund', state: 'ruled', ruling: 'keep' })], pendingDecisions: 2 }))
+    const node = bar(plan({ stage: 'ruling', status: 'approved', decisions: [decision({}), decision({ title: 'Refund', state: 'ruled', ruling: 'keep' })], pendingDecisions: 2 }))
     expect(node.querySelector('.next.goto')!.textContent).toContain('1 to rule on')
     expect(node.querySelector('.next.send_rulings')).toBeNull()
   })
 
   it('waiting_is_text_and_yields_to_a_running_line', () => {
-    const waiting = bar(plan({ stage: 'mapped', pendingDecisions: 1, applyingRulings: true }))
+    const waiting = bar(plan({ stage: 'ruling', status: 'approved', pendingDecisions: 1, applyingRulings: true }))
     expect(next(waiting)!.tagName).toBe('SPAN')
     expect(next(waiting)!.textContent).toContain('applying 1 ruling')
 
-    const running = bar(plan({ mapping: { live: true, text: 'reading src' } }))
+    const running = bar(plan({ stage: 'checking', status: 'approved', check: { live: true, text: 'reading src' } }))
     expect(running.querySelector('.next.waiting')).toBeNull()
     expect(running.querySelector('.running')!.textContent).toBe('reading src')
     expect(running.querySelector('.stop')).not.toBeNull()
@@ -84,13 +84,13 @@ describe('PlanBar next step', () => {
   })
 
   it('the_last_run_outcome_stays_beside_the_steps_until_the_stage_moves_on', () => {
-    const node = bar(plan({ stage: 'mapped', approvable: true, mapping: { live: false, text: 'Mapped: 6 tasks, the code is clear' } }))
-    expect(node.querySelector('.ran')!.textContent).toBe('Mapped: 6 tasks, the code is clear')
+    const node = bar(plan({ stage: 'under_development', status: 'approved', check: { live: false, text: 'Checked: the code is clear' } }))
+    expect(node.querySelector('.ran')!.textContent).toBe('Checked: the code is clear')
     expect(node.querySelector('.running')).toBeNull()
   })
 
   it('a_run_that_failed_says_so_beside_the_steps_with_the_reason', () => {
-    const node = bar(plan({ stage: 'mapped', implementable: true, failure: { mode: 'implement', message: 'API error 401: invalid_token' } }))
+    const node = bar(plan({ stage: 'under_development', status: 'approved', implementable: true, failure: { mode: 'implement', message: 'API error 401: invalid_token' } }))
     expect(node.querySelector('.failed')!.textContent).toBe('The implementer failed: API error 401: invalid_token')
   })
 
@@ -101,35 +101,27 @@ describe('PlanBar next step', () => {
     expect(next(node)).not.toBeNull()
   })
 
-  it('redo_mapping_offers_a_note_and_carries_it_on_the_event', () => {
-    const node = bar(plan({ stage: 'mapped', approvable: true, remappable: true }))
-    const input = node.querySelector<HTMLInputElement>('.remap input')!
-    input.value = 'keep findings to one short sentence'
-    input.dispatchEvent(new Event('input'))
-    let note: string | undefined
-    node.addEventListener(events.SpecRemapRequestedEvent.type, (e) => (note = (e as InstanceType<typeof events.SpecRemapRequestedEvent>).note))
-    node.querySelector<HTMLElement>('.remap-go')!.click()
-    expect(note).toBe('keep findings to one short sentence')
-  })
+  it('a_stopped_check_is_offered_again_and_a_live_one_can_be_stopped', () => {
+    const idle = bar(plan({ stage: 'checking', status: 'approved', atWork: false, checkable: true }))
+    const again = idle.querySelector<HTMLElement>('.next.check')!
+    expect(again.textContent).toBe('Check again')
+    expect(dispatched(idle, events.SpecCheckRequestedEvent.type, () => again.click())).toBe(true)
 
-  it('redo_mapping_is_hidden_while_a_mapping_is_live_or_none_has_run_yet', () => {
-    const notMapped = bar(plan({ stage: 'created', remappable: false }))
-    expect(notMapped.querySelector('.remap')).toBeNull()
-
-    const running = bar(plan({ mapping: { live: true, text: 'reading src' }, remappable: false }))
-    expect(running.querySelector('.remap')).toBeNull()
+    const running = bar(plan({ stage: 'checking', status: 'approved', check: { live: true, text: 'reading src' } }))
+    expect(dispatched(running, events.SpecCheckStoppedEvent.type, () => running.querySelector<HTMLElement>('.stop')!.click())).toBe(true)
   })
 })
 
 describe('PlanBar steps', () => {
-  it('marks_the_current_step_and_the_ones_behind_it', () => {
-    const node = bar(plan({ stage: 'mapped', approvable: true }))
-    const classes = [...node.querySelectorAll<HTMLElement>('.step')].map((s) => `${s.textContent}:${s.className.replace('step ', '')}`)
-    expect(classes).toEqual(['Plan:done', 'Review:done', 'Map:done', 'Rule:done', 'Approve:current yours', 'Implement:future', 'Verify:future', 'Cleanup:future'])
+  it('marks_the_current_step_and_the_ones_behind_it_and_shows_rule_only_with_decisions', () => {
+    const steps = (node: HTMLElement) => [...node.querySelectorAll<HTMLElement>('.step')].map((s) => `${s.textContent}:${s.className.replace('step ', '')}`)
+    expect(steps(bar(plan({ approvable: true })))).toEqual(['Plan:done', 'Review:done', 'Approve:current yours', 'Implement:future', 'Verify:future', 'Cleanup:future'])
+    const ruling = bar(plan({ stage: 'ruling', status: 'approved', commentable: false, decisions: [decision({})], pendingDecisions: 1 }))
+    expect(steps(ruling)).toEqual(['Plan:done', 'Review:done', 'Approve:done', 'Rule:current yours', 'Implement:future', 'Verify:future', 'Cleanup:future'])
   })
 
   it('the_current_step_is_marked_yours_only_while_the_act_is_the_devs', () => {
-    const running = bar(plan({ mapping: { live: true, text: 'reading src' } }))
+    const running = bar(plan({ stage: 'checking', status: 'approved', check: { live: true, text: 'reading src' } }))
     expect(running.querySelector('.step.current')).not.toBeNull()
     expect(running.querySelector('.step.yours')).toBeNull()
     const offered = bar(plan({ stage: 'verified', status: 'approved', commentable: false, atWork: false, cleanupSweep: { units: [{ path: 'src/a.ts', line: 1, name: 'a', kind: 'function', lines: 60, threshold: 25 }] } }))
@@ -147,7 +139,7 @@ describe('PlanBar steps', () => {
   })
 
   it('a_reached_step_is_a_button_that_names_itself', () => {
-    const node = bar(plan({ stage: 'mapped', approvable: true }))
+    const node = bar(plan({ approvable: true }))
     let step: string | undefined
     node.addEventListener(events.PlanStepSelectedEvent.type, (e) => (step = (e as InstanceType<typeof events.PlanStepSelectedEvent>).step))
     const review = [...node.querySelectorAll<HTMLElement>('.step')].find((s) => s.textContent === 'Review')!

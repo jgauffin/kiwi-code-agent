@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { IMPLEMENT_TOOLS, assertImplementable, fixKickoff, implementPrompt, implementationStarts, taskKickoff, taskSettled } from '../src/agent/phases/implement'
+import { decisions } from '../src/agent/phases/decisions'
 import type { SpecState } from '../src/agent/phases/spec-file'
 import { parseSpecText } from '../src/agent/phases/spec-model'
 import { board as boardOf, task, tasksState as board } from './task-board-fixture'
@@ -17,8 +18,8 @@ describe('implement phase', () => {
     expect(() => assertImplementable(approved, board(open))).not.toThrow()
   })
 
-  it('refuses_to_start_before_the_spec_is_mapped_against_the_code', () => {
-    expect(() => assertImplementable(approved, { exists: false })).toThrow(/map the spec/i)
+  it('refuses_to_start_before_the_spec_is_checked_against_the_code', () => {
+    expect(() => assertImplementable(approved, { exists: false })).toThrow(/checked against the code/i)
   })
 
   it('refuses_to_start_again_on_a_board_whose_every_task_is_tested', () => {
@@ -51,8 +52,8 @@ describe('implement phase', () => {
     expect(prompt).toContain('already in_progress')
     // Tested is backed by evidence the user reads on the spec: a test named per delivered rule.
     expect(prompt).toContain('one entry per delivered rule')
-    // The mapping's reading is the starting point, not a search of the code.
-    expect(prompt).toContain('search the code only for what they do not answer')
+    // A board carried over from a mapping run hands on its reading, and that is the starting point.
+    expect(prompt).toContain('search only for what they do not answer')
     expect(prompt).toContain('docs/')
     expect(IMPLEMENT_TOOLS).toEqual([
       'Read', 'Write', 'Edit', 'Move', 'Copy', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'MarkdownSearch', 'CodeOutline', 'CodeSearch', 'Bash', 'Skill', 'AskUser',
@@ -69,16 +70,20 @@ describe('implement phase', () => {
 
   it('a_departure_from_the_how_is_recorded_in_the_tasks_note', () => {
     const prompt = implementPrompt('Order cancellation', cwd)
-    expect(prompt).toContain('Follow the how')
-    expect(prompt).toContain("say so in the task's note")
+    expect(prompt).toContain('depart from the how only where')
+    expect(prompt).toContain("saying so in the task's note")
   })
 
-  it('a_run_does_its_one_task_and_reads_its_files_in_one_batch', () => {
+  it('a_run_does_its_one_task_and_reads_in_batches', () => {
     const prompt = implementPrompt('Order cancellation', cwd)
     expect(prompt).toContain('one task')
-    // One request for the task's reading instead of one per file: each request re-sends the whole context.
-    expect(prompt).toContain('in one message')
+    // One request for several reads instead of one per file: each request re-sends the whole context.
+    expect(prompt).toContain('several Reads in one message')
     expect(prompt).toContain('what earlier tasks left')
+  })
+
+  it('every_file_touched_is_named_since_the_sweep_runs_over_them', () => {
+    expect(implementPrompt('Order cancellation', cwd)).toContain('the sweep runs over them')
   })
 
   it('the_prompt_names_the_configured_test_commands_so_the_implementer_narrows_those', () => {
@@ -112,9 +117,46 @@ describe('implement phase', () => {
     expect(prompt).not.toContain('the whole test suite is run for you')
   })
 
-  it('the_implementer_is_not_sent_to_the_decisions_file_since_the_board_carries_every_ruling', () => {
+  it('the_implementer_is_not_sent_to_the_decisions_file_since_its_kickoff_carries_the_rulings_it_needs', () => {
     expect(implementPrompt('Order cancellation', cwd)).not.toContain('decisions.md')
     expect(taskKickoff(onBoard, 'Cancel', spec)).not.toContain('decisions')
+  })
+})
+
+describe('a finding the user ruled to keep', () => {
+  const ruled = decisions(
+    [
+      '### Order.cancel refuses shipped orders [applied]',
+      '- on: Shipped order',
+      '- finding: `Order.cancel` in src/order.ts refuses outright.',
+      '- ruling: keep',
+      '',
+      '### Refunds are batched [applied]',
+      '- on: Refund',
+      '- finding: `RefundJob` refunds nightly.',
+      '- ruling: keep',
+      '',
+      '### Cancel is admin only [applied]',
+      '- on: Cancel command',
+      '- finding: `CancelEndpoint` requires the admin role.',
+      '- proposed: only admins cancel',
+      '- ruling: only admins cancel',
+      '',
+      '### Old finding [withdrawn]',
+      '- on: Cancel command',
+      '- finding: gone.',
+      '- ruling: keep',
+    ].join('\n'),
+  )
+
+  it('reaches_the_task_that_delivers_its_rule_and_no_other', () => {
+    const kickoff = taskKickoff(onBoard, 'Cancel', spec, ruled)
+    expect(kickoff).toContain('`Order.cancel` in src/order.ts refuses outright.')
+    expect(kickoff).toContain('the spec stands and the code changes')
+    expect(kickoff).not.toContain('RefundJob')
+    // A ruling that changed the spec is in the rules already; a withdrawn finding no longer holds.
+    expect(kickoff).not.toContain('CancelEndpoint')
+    expect(kickoff).not.toContain('gone.')
   })
 })
 

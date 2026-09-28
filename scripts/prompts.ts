@@ -39,7 +39,6 @@ import { bashTool } from '../src/agent/openai-session/tools/bash'
 import { jsonQueryTool, jsonSchemaTool } from '../src/agent/openai-session/tools/json'
 import { askUserTool } from '../src/agent/openai-session/tools/ask-user'
 import { copyTool, moveTool } from '../src/agent/openai-session/tools/move-copy'
-import { redoMappingTool } from '../src/agent/openai-session/tools/redo-mapping'
 import { runScriptTool } from '../src/agent/openai-session/tools/run-script'
 import { markdownSearchTool } from '../src/agent/openai-session/tools/markdown-search'
 import { skillTool } from '../src/agent/openai-session/tools/skill'
@@ -135,7 +134,7 @@ async function main(): Promise<void> {
     { title: 'rulingsHandoffPrompt', source: at(`${phases}/blind-plan.ts`, 'export function rulingsHandoffPrompt'), text: rulingsHandoffPrompt(F, [{ title: '<decision title>', ruling: '<ruling>' }]) },
     { title: 'docsReviewPrompt', source: at(`${phases}/blind-plan.ts`, 'export function docsReviewPrompt'), text: docsReviewPrompt(F) },
     { title: 'reconcileKickoff (fresh)', source: at(`${phases}/reconcile.ts`, 'export function reconcileKickoff'), text: reconcileKickoff(false) },
-    { title: 'reconcileKickoff (continued, with note)', source: at(`${phases}/reconcile.ts`, 'export function reconcileKickoff'), text: reconcileKickoff(true, '<note>') },
+    { title: 'reconcileKickoff (continued)', source: at(`${phases}/reconcile.ts`, 'export function reconcileKickoff'), text: reconcileKickoff(true) },
     { title: 'implementKickoff (fresh)', source: at(`${phases}/implement.ts`, 'export function implementKickoff'), text: implementKickoff(undefined) },
     { title: 'implementKickoff (continuing the mapping)', source: at(`${phases}/implement.ts`, 'export function implementKickoff'), text: implementKickoff('mapping') },
     { title: 'implementKickoff (continuing an implementer)', source: at(`${phases}/implement.ts`, 'export function implementKickoff'), text: implementKickoff('implement') },
@@ -163,7 +162,6 @@ async function main(): Promise<void> {
     toolEntry(bashTool('bash'), `${tools}/bash.ts`),
     toolEntry(runScriptTool(), `${tools}/run-script.ts`),
     toolEntry(askUserTool, `${tools}/ask-user.ts`),
-    toolEntry(redoMappingTool, `${tools}/redo-mapping.ts`),
     toolEntry(skillTool([{ name: '<skill>', description: '<skill description>', dir: '<dir>' }]), `${tools}/skill.ts`),
   ]
 

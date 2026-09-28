@@ -3,12 +3,13 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import { readOptional } from '../workspace-files'
 import { WORK_DIR, featureSlug } from './blind-plan'
+import { specFingerprint, type Scenario, type Spec } from './spec-model'
 
 /**
- * The feature's task board, `.agent/plan/<slug>.tasks.json`: what to build and
- * where, written by the mapping run through its tool once the spec is settled,
- * and moved along by the implementer through its own. The file is the only
- * state: it survives a fresh session and the plan view reads it as it is.
+ * The feature's task board, `.agent/plan/<slug>.tasks.json`: derived from the
+ * spec once the check against the code is clean, and moved along by the
+ * implementer through its tool. The file is the only state: it survives a
+ * fresh session and the plan view reads it as it is.
  */
 
 /** `blocked` is unfinished work with a reason; only `tested` is a finish. */
@@ -26,13 +27,13 @@ export type Task = {
   delivers: string[]
   /** The scenario the task delivers, as the board groups it; absent on a flat board. */
   group?: string
-  /** Workspace-relative paths the task touches; what verification runs over. */
+  /** Workspace-relative paths the task touched, as the implementer names them; what verification runs over. */
   files: string[]
-  /** Of `files`, those the mapping said the task creates. */
+  /** Of `files`, those a mapping run said the task creates; empty on a derived board. */
   newFiles: string[]
-  /** Paths the mapping run read to reach the task: what the implementer starts from and does not have to find again. */
+  /** Paths a mapping run read to reach the task; empty on a derived board. */
   context: string[]
-  /** The mapper's note to the implementer, markdown: what reading the files would not tell (the pattern to follow, a constraint the code imposes, what not to touch). Empty when the board carries none. */
+  /** A mapping run's note to the implementer, markdown; empty on a derived board. */
   how: string
   /** What the implementer proved, item by item. */
   proves: Proof[]
@@ -43,7 +44,7 @@ export type Task = {
   state: TaskState
   /** Why a blocked task cannot be finished; present only while it is blocked. */
   blockedReason?: string
-  /** The mapping run says the task is gone. */
+  /** Its scenario is gone from the spec; kept for the implementer's record. */
   removed: boolean
 }
 
@@ -58,7 +59,7 @@ export type VerificationRecord = { at: string; ok: boolean; text: string }
 export type CleanupDecision = 'postponed' | 'skipped' | 'done'
 
 export type TaskBoard = {
-  /** Fingerprint of the spec the board was mapped from; absent on a board migrated from before the stamp existed. */
+  /** Fingerprint of the spec the board was derived from; absent on a board migrated from before the stamp existed. */
   spec?: string
   cleanup?: CleanupDecision
   tasks: Task[]
@@ -101,9 +102,9 @@ const boardSchema = z.object({
       delivers: z.array(z.string()),
       group: z.string().optional(),
       files: z.array(z.string()),
-      newFiles: z.array(z.string()),
-      context: z.array(z.string()),
-      how: z.string(),
+      newFiles: z.array(z.string()).default([]),
+      context: z.array(z.string()).default([]),
+      how: z.string().default(''),
       proves: z.array(z.object({ item: z.string(), file: z.string(), test: z.string() })),
       note: z.string(),
       built: z.string().default(''),
@@ -201,17 +202,12 @@ export function unprovenItems(tasks: Task[]): string[] {
     .flatMap((t) => t.delivers.filter((item) => !t.proves.some((p) => sameName(p.item, item))))
 }
 
-/** Of the given rule names, those no live task delivers. */
-export function undeliveredItems(tasks: Task[], items: string[]): string[] {
-  return items.filter((item) => deliveredBy(tasks, item) === undefined)
-}
-
-/** The board was mapped from the spec as it stands now. A board without a stamp is taken as fresh: it predates the stamp. */
+/** The board was derived from the spec as it stands now. A board without a stamp is taken as fresh: it predates the stamp. */
 export function tasksFresh(tasks: Extract<TasksState, { exists: true }>, fingerprint: string): boolean {
   return tasks.spec === undefined || tasks.spec === fingerprint
 }
 
-/** What the implementer may change on a task; everything else is the mapper's. */
+/** What the implementer may change on a task; everything else is derived from the spec. */
 export type TaskProgress = {
   state?: TaskState
   blockedReason?: string
@@ -235,6 +231,8 @@ export function updateTask(board: TaskBoard, name: string, change: TaskProgress)
   if (state === 'blocked' && !reason) throw new Error(`A blocked task needs a reason: say what stands in the way of "${current.name}".`)
   const { blockedReason: _, ...rest } = current
   const files = change.files ?? current.files
+  // The test sweep runs over the files the tasks name: a tested task naming none would pass it with nothing run.
+  if (state === 'tested' && files.length === 0) throw new Error(`"${current.name}" names no file: give files, every file the task touched, with its tests.`)
   const next: Task = {
     ...rest,
     state,
@@ -248,61 +246,42 @@ export function updateTask(board: TaskBoard, name: string, change: TaskProgress)
   return { ...board, tasks: board.tasks.map((t, i) => (i === index ? next : t)) }
 }
 
-/** What the mapper says about a task; the implementer's progress on it is not the mapper's to write. */
-export type MappedTask = {
-  name: string
-  text: string
-  delivers: string[]
-  group?: string
-  files: string[]
-  newFiles: string[]
-  context: string[]
-  how: string
-}
-
-export type Upsert = { board: TaskBoard; added: string[]; updated: string[]; removed: string[]; unknown: string[] }
-
 /**
- * Writes the mapper's tasks onto the board by name. A task already there keeps
- * its state, proofs, note and hand-off, so a re-map never undoes work; a new one goes at
- * the end of its group, or of the board when its group is new. A removed task
- * stays on the board marked removed, so the implementer's record of it is kept.
+ * The board as the spec defines it: one task per scenario, named and grouped
+ * by its title, delivering its live rules and edge cases, so every rule is
+ * delivered by construction. Deriving again keeps each task's progress and
+ * files; a scenario gone from the spec leaves its task marked removed. A task
+ * a mapping run wrote before boards were derived keeps its rules once work on
+ * it has started, and gives way while it is still open.
  */
-export function upsertTasks(board: TaskBoard, mapped: MappedTask[], remove: string[] = []): Upsert {
-  const seen = new Set<string>()
-  for (const task of mapped) {
-    const key = task.name.trim().toLowerCase()
-    if (seen.has(key)) throw new Error(`Task "${task.name}" is given twice: a name is unique on the board.`)
-    seen.add(key)
+export function deriveBoard(spec: Spec, board: TaskBoard = emptyBoard()): TaskBoard {
+  const scenarioTask = (t: Task) => sameName(t.group ?? '', t.name) || spec.scenarios.some((s) => sameName(s.title, t.name))
+  const kept = board.tasks.filter((t) => !t.removed && !scenarioTask(t) && t.state !== 'open')
+  const derived = new Map<string, { scenario: Scenario; delivers: string[] }>()
+  for (const scenario of spec.scenarios) {
+    const items = scenario.behaviours.flatMap((b) => [b, ...b.edges]).filter((i) => !i.removed)
+    const delivers = items.map((i) => i.name).filter((name) => deliveredBy(kept, name) === undefined)
+    if (delivers.length > 0) derived.set(scenario.title.trim().toLowerCase(), { scenario, delivers })
   }
-  const result: Upsert = { board, added: [], updated: [], removed: [], unknown: [] }
-  let tasks = [...board.tasks]
-  for (const task of mapped) {
-    const index = tasks.findIndex((t) => sameName(t.name, task.name))
-    const { group, ...fields } = task
-    if (index !== -1) {
-      const { group: _, ...current } = tasks[index]!
-      tasks[index] = { ...current, ...fields, ...(group !== undefined ? { group } : {}), removed: false }
-      result.updated.push(task.name)
-      continue
-    }
-    const created: Task = { ...fields, ...(group !== undefined ? { group } : {}), proves: [], note: '', built: '', state: 'open', removed: false }
-    const last = tasks.map((t) => t.group).lastIndexOf(group)
-    tasks = last === -1 ? [...tasks, created] : [...tasks.slice(0, last + 1), created, ...tasks.slice(last + 1)]
-    result.added.push(task.name)
+  const tasks: Task[] = board.tasks.map((t) => {
+    if (kept.includes(t)) return t
+    const entry = derived.get(t.name.trim().toLowerCase())
+    if (!entry) return t.removed ? t : { ...t, removed: true }
+    derived.delete(t.name.trim().toLowerCase())
+    return { ...t, ...fromScenario(entry.scenario, entry.delivers), removed: false }
+  })
+  for (const { scenario, delivers } of derived.values()) {
+    tasks.push({ ...fromScenario(scenario, delivers), files: [], newFiles: [], context: [], how: '', proves: [], note: '', built: '', state: 'open', removed: false })
   }
-  for (const name of remove) {
-    const index = tasks.findIndex((t) => sameName(t.name, name))
-    if (index === -1) {
-      result.unknown.push(name)
-      continue
-    }
-    tasks[index] = { ...tasks[index]!, removed: true }
-    result.removed.push(tasks[index]!.name)
-  }
-  result.board = { ...board, tasks }
-  return result
+  return { ...board, tasks, spec: specFingerprint(spec) }
 }
+
+const fromScenario = (scenario: Scenario, delivers: string[]) => ({
+  name: scenario.title,
+  group: scenario.title,
+  text: scenario.intro.trim() || scenario.title,
+  delivers,
+})
 
 export const withSpecFingerprint = (board: TaskBoard, fingerprint: string): TaskBoard => ({ ...board, spec: fingerprint })
 

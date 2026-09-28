@@ -5,7 +5,7 @@ import type { SessionStatus } from '../agent/session/session-status'
 const MODE_LABEL: Record<SessionMode, string> = {
   chat: 'Chat',
   plan: 'Plan',
-  reconcile: 'Map against code',
+  reconcile: 'Check against code',
   implement: 'Implement',
   cleanup: 'Cleanup',
   docs: 'Evaluate docs',

@@ -17,26 +17,25 @@ import {
 import { assertAllRuled, assertRulingsSent, compactAppliedDecisions, decisionsFile, decisionsPath, openDecisions, pendingDecisions, readDecisions, withRuling } from '../agent/phases/decisions'
 import { listPlans } from '../agent/phases/plan-list'
 import { progressLine, reconcileKickoff } from '../agent/phases/reconcile'
-import { REDO_MAPPING_TOOL } from '../agent/openai-session/tools/redo-mapping'
 import { TASK_CARRY_ON, assertImplementable, fixKickoff, implementationStarts, taskKickoff, taskSettled } from '../agent/phases/implement'
 import { cleanupKickoff } from '../agent/phases/cleanup'
 import { anyLimit, oversizedFiles, sizeReport, type Limits, type Oversized } from '../agent/cleanup/oversized'
 import { editedFiles } from '../agent/edits/edited-files'
-import { isApprovable, isMappable, planStage, remapDue, tasksStale } from '../agent/phases/plan-stage'
-import { parseSpec, specFingerprint } from '../agent/phases/spec-model'
+import { checkDue, isApprovable, planStage, tasksStale } from '../agent/phases/plan-stage'
+import { parseSpec } from '../agent/phases/spec-model'
 import { followRenames, migratePlan, type MigrationReport } from '../agent/phases/migrate-plan'
 import {
   changeBoard,
-  liveTasks,
+  deriveBoard,
   nextTask,
   readBoard,
   readTasks,
   recordCleanupDecision,
   sameName,
-  stampSpecFingerprint,
   tasksDone,
   tasksPath,
   updateTask,
+  writeBoard,
   type TasksState,
 } from '../agent/phases/tasks-file'
 import { describeCommand, runVerification, verificationDue, type CommandRunner, type VerificationFailure, type VerifyRule } from '../agent/phases/verification'
@@ -47,7 +46,6 @@ import {
   editComment,
   emptyReview,
   isCommentable,
-  openComments,
   readReview,
   removeComment,
   resolveComment,
@@ -117,8 +115,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private readonly statuses = new Map<string, SessionStatus>()
   /** Per session, why its last turn failed; absent once a turn goes through or the next prompt is sent. */
   private readonly failures = new Map<string, string>()
-  /** The mapping run under each plan session, by the plan session's id: the current step, or how the last run ended. */
-  private readonly mappings = new Map<string, RunState>()
+  /** The check against the code under each plan session, by the plan session's id: the current step, or how the last run ended. */
+  private readonly checks = new Map<string, RunState>()
   /** The test run per feature: what it is doing, or how the last one ended. */
   private readonly verifications = new Map<string, RunState>()
   /** Consecutive failed test runs per feature; a pass or a manual run resets it. */
@@ -296,7 +294,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     if (record?.parentId) {
       if (record.mode === 'cleanup') this.followCleanup(record, event)
       else if (record.mode === 'implement') void this.followTask(record, event)
-      else this.followMapping(record, event)
+      else this.followCheck(record, event)
     }
     if (record && this.underActiveTab(record)) {
       this.broadcast({ type: 'event', sessionId: this.tabIdOf(record), run: this.runRef(record, this.currentRun(record)), event })
@@ -316,11 +314,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       // The session just wrote a plan file (a revision, proposals, a task's progress); the plan bar and view must follow.
       void this.sendState()
     }
-    if (event.type === 'tool_call' && event.name === REDO_MAPPING_TOOL && record?.mode === 'plan' && record.feature) {
-      // The planner decided on its own, mid-conversation, that the mapping should run again; same button, same guardrails.
-      const note = typeof (event.input as { note?: unknown } | null)?.note === 'string' ? ((event.input as { note: string }).note || undefined) : undefined
-      void this.startMapping(record, note)
-    }
     if (event.type === 'turn_done' && !event.isError && record?.mode === 'implement' && record.feature) {
       void this.followBoard(record.feature)
     }
@@ -329,7 +322,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       const applied = this.applying.delete(record.feature)
       const reviewed = this.reviewingDocs.delete(record.feature)
       if (applied || reviewed) void this.sendState()
-      // Approval is the go-ahead for the build; the docs listing was the last thing between it and the implementer.
+      // The clean check was the go-ahead for the build; the docs listing was the last thing between it and the implementer.
       if (reviewed && !event.isError) void this.implementAfterApproval(record)
       if (!event.isError) void this.followPlan(record)
     }
@@ -338,7 +331,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   /**
    * A plan turn ended: renames are followed and applied decisions cut to
    * their record, a repair the planner was asked for is finished
-   * mechanically, and a board the turn left behind the spec is re-mapped.
+   * mechanically, and an approved spec the turn revised (rulings applied, or
+   * a change asked for) is checked against the code again.
    */
   private async followPlan(record: SessionRecord): Promise<void> {
     const feature = record.feature!
@@ -352,79 +346,96 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }
     const spec = await readSpecState(specPath(this.workspaceRoot, feature))
     const tasks = await readTasks(tasksPath(this.workspaceRoot, feature))
-    const review = await readReview(reviewPath(this.workspaceRoot, feature)).catch(() => emptyReview())
     const decisions = await readDecisions(decisionsPath(this.workspaceRoot, feature))
-    // With a review in flight the accept of its last comment maps; here it is a ruling or a repair that moved the spec.
-    if (remapDue(spec, review, tasks, decisions)) await this.startMapping(record)
+    if (checkDue(spec, tasks, decisions)) await this.startCheck(record)
   }
 
-  /** A mapping run has no transcript in the UI: its events become the one line the plan bar shows. */
-  private followMapping(child: SessionRecord, event: SessionEvent): void {
+  /** A check has no transcript in the UI: its events become the one line the plan bar shows. */
+  private followCheck(child: SessionRecord, event: SessionEvent): void {
     const parentId = child.parentId!
-    const mapping = this.mappings.get(parentId)
-    if (!mapping?.live) return
+    const check = this.checks.get(parentId)
+    if (!check?.live) return
     if (event.type === 'turn_done') {
-      void this.finishMapping(child, event.isError ? (event.errors.length > 0 ? event.errors : ['the run ended with an error']) : [])
+      void this.finishCheck(child, event.isError ? (event.errors.length > 0 ? event.errors : ['the run ended with an error']) : [])
       return
     }
     if (event.type === 'error' && event.fatal) {
-      void this.finishMapping(child, [event.message])
+      void this.finishCheck(child, [event.message])
       return
     }
     const line = progressLine(event)
-    if (line === undefined || line === mapping.text) return
-    this.mappings.set(parentId, { live: true, text: line })
+    if (line === undefined || line === check.text) return
+    this.checks.set(parentId, { live: true, text: line })
     void this.sendState()
   }
 
   /**
-   * Maps the plan session's draft spec against the code as a run under it;
-   * nothing happens while one is live. A re-map continues the last mapping's
-   * conversation where the engine resumes, so the code it read is not read
-   * again. A note is guidance for the mapping itself, not a spec change: the
-   * button ("Redo mapping") and the planner's own tool call both land here.
+   * Checks the plan session's approved spec against the code as a run under
+   * it; nothing happens while one is live. A re-check continues the last
+   * check's conversation where the engine resumes, so the code it read is not
+   * read again.
    */
-  private async startMapping(record: SessionRecord, note?: string): Promise<void> {
+  private async startCheck(record: SessionRecord): Promise<void> {
     if (record.mode !== 'plan' || !record.feature || this.sessions.liveChildOf(record.id)) return
     const spec = await readSpecState(specPath(this.workspaceRoot, record.feature))
-    if (!spec.exists || spec.status !== 'draft') return
+    if (!spec.exists || spec.status !== 'approved') return
     const previous = this.sessions.latest('reconcile', record.feature)
     const child = await this.sessions.create(this.profileFor('reconcile'), 'reconcile', record.feature, { parentId: record.id, continues: previous })
-    this.mappings.set(record.id, { live: true, text: 'Mapping the spec against the code…' })
+    this.checks.set(record.id, { live: true, text: 'Checking the spec against the code…' })
     await this.sendState()
-    await this.sessions.send(child.id, reconcileKickoff(child.engineSessionId !== undefined, note))
+    await this.sessions.send(child.id, reconcileKickoff(child.engineSessionId !== undefined))
   }
 
   /**
-   * The run is over: stop its engine, count what it left in the decisions
-   * file and the tasks file and, when there are decisions without a proposal,
-   * hand them to the planner to propose on.
+   * The run is over: stop its engine and read what it left in the decisions
+   * file. Decisions without a proposal go to the planner to propose on. With
+   * nothing pending the board is derived from the spec and the build goes on.
    */
-  private async finishMapping(child: SessionRecord, errors: string[]): Promise<void> {
+  private async finishCheck(child: SessionRecord, errors: string[]): Promise<void> {
     const parentId = child.parentId!
     // Marked over before the first await, so a late event from the dying engine cannot finish it twice.
-    this.mappings.set(parentId, { live: false, text: this.mappings.get(parentId)?.text ?? '' })
+    this.checks.set(parentId, { live: false, text: this.checks.get(parentId)?.text ?? '' })
     await this.sessions.close(child.id)
+    let clean = false
     let text: string
+    const feature = child.feature!
     if (errors.length > 0) {
-      text = `Mapping failed: ${errors.join('; ')}`
+      text = `Check failed: ${errors.join('; ')}`
     } else {
-      const feature = child.feature!
-      const state = await readSpecState(specPath(this.workspaceRoot, feature))
-      const tasks = await readTasks(tasksPath(this.workspaceRoot, feature))
-      // The board is stamped with the spec it was built from; a later change to the plan makes it stale.
-      if (state.exists && tasks.exists) await stampSpecFingerprint(tasksPath(this.workspaceRoot, feature), specFingerprint(parseSpec(state.body)))
-      const open = openDecisions(await readDecisions(decisionsPath(this.workspaceRoot, feature)))
-      const count = tasks.exists ? liveTasks(tasks.tasks).length : 0
-      text = `Mapped: ${count} task${count === 1 ? '' : 's'}, ${open.length === 0 ? 'the code is clear' : `${open.length} decision${open.length === 1 ? '' : 's'}`}`
+      const decisions = await readDecisions(decisionsPath(this.workspaceRoot, feature))
+      const open = openDecisions(decisions)
+      clean = pendingDecisions(decisions).length === 0
+      text = `Checked: ${open.length === 0 ? 'the code is clear' : `${open.length} decision${open.length === 1 ? '' : 's'}`}`
       const unproposed = open.filter((d) => d.proposals.length === 0).map((d) => d.title)
       if (unproposed.length > 0 && this.sessions.get(parentId)) {
         await this.sessions.send(parentId, decisionsHandoffPrompt(feature, unproposed))
       }
     }
-    this.mappings.set(parentId, { live: false, text })
+    this.checks.set(parentId, { live: false, text })
     await this.sendState()
     this.changed.fire()
+    const plan = this.sessions.get(parentId)
+    if (clean && plan) await this.buildFromSpec(plan)
+  }
+
+  /**
+   * Nothing stands between the approved spec and the code: the board is
+   * derived from the spec, keeping the progress of one it replaces. A first
+   * board goes through the docs listing before the build starts, since the
+   * spec as ruled is final now; a board re-derived mid-build goes straight on.
+   */
+  private async buildFromSpec(plan: SessionRecord): Promise<void> {
+    const feature = plan.feature!
+    const spec = await readSpecState(specPath(this.workspaceRoot, feature))
+    if (!spec.exists || spec.status !== 'approved') return
+    const path = tasksPath(this.workspaceRoot, feature)
+    const existing = await readBoard(path)
+    await mkdir(dirname(path), { recursive: true })
+    await writeBoard(path, deriveBoard(parseSpec(spec.body), existing))
+    await this.sendState()
+    if (existing) return this.implementAfterApproval(plan)
+    this.reviewingDocs.add(feature)
+    await this.sendToPlanner(plan, docsReviewPrompt(feature))
   }
 
   /**
@@ -543,7 +554,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const run = await this.sessions.create(this.profileFor('implement'), 'implement', feature, { parentId: plan.id, task: task.name })
     this.allowWrites.setEnabled(run.id, true)
     await this.sendState()
-    await this.sessions.send(run.id, taskKickoff(started, task.name, parseSpec(spec.body)))
+    const decisions = await readDecisions(decisionsPath(this.workspaceRoot, feature))
+    await this.sessions.send(run.id, taskKickoff(started, task.name, parseSpec(spec.body), decisions))
   }
 
   /**
@@ -968,18 +980,19 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         const path = this.activeSpecPath()
         const feature = record?.feature
         if (!record || !path || !feature) return
-        // Agreement is reached, not assumed: every comment has to be closed first, and the tasks have to be known.
+        // Agreement is reached, not assumed: every comment has to be closed first.
         const review = await readReview(reviewPath(this.workspaceRoot, feature))
         assertApprovable(review)
+        const decisions = await readDecisions(decisionsPath(this.workspaceRoot, feature))
+        assertRulingsSent(decisions)
         const spec = await readSpecState(path)
-        assertRulingsSent(await readDecisions(decisionsPath(this.workspaceRoot, feature)))
         const tasks = await readTasks(tasksPath(this.workspaceRoot, feature))
-        const stage = planStage(spec, review, tasks)
-        if (tasksStale(spec, tasks)) throw new Error('The tasks predate the last change to the spec; they are re-mapped when the plan session’s turn ends with every decision applied.')
-        if (!isApprovable(stage, spec, tasks)) throw new Error('Map the spec against the code first: approval covers the tasks too.')
+        if (!isApprovable(planStage(spec, review, tasks, decisions), spec)) throw new Error('Only a draft with every comment closed can be approved.')
         await setSpecStatus(path, 'approved')
         await this.sendState()
-        // The spec is now the feature's definition; the docs it was planned from may say less, or otherwise. The planner lists it.
+        // Approval hands the spec to the build: the code is checked against it first, and speaks up only where it disagrees.
+        if (checkDue(await readSpecState(path), tasks, decisions)) return this.startCheck(record)
+        // A board an earlier mapping left, current with the spec: nothing to check, the docs listing and the build follow.
         this.reviewingDocs.add(feature)
         await this.sendToPlanner(record, docsReviewPrompt(feature))
         return
@@ -994,7 +1007,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         const path = this.activeSpecPath()
         const feature = this.activeRecord()?.feature
         if (!path || !feature) return
-        assertCommentable(await readSpecState(path))
+        // Decisions come after approval, so an approved spec takes a ruling; an implemented one is settled.
+        const spec = await readSpecState(path)
+        if (!spec.exists || spec.status === 'implemented') throw new Error('The feature is implemented: there is nothing left to rule on.')
         const decisions = decisionsPath(this.workspaceRoot, feature)
         await writeFile(decisions, withRuling(await readFile(decisions, 'utf8'), message.decision, message.ruling), 'utf8')
         await this.sendState()
@@ -1019,14 +1034,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         return
       case 'resolve_comment': {
         // Resolving a comment, including a disagreement, is the human's own act; it needs no draft.
-        let closed = false
-        await this.reviewing((review) => {
-          resolveComment(review, message.comment)
-          closed = openComments(review).length === 0
-        }, false)
-        // The last resolve closes the review; the spec is settled and its mapping against the code starts by itself.
-        const record = this.planRecord()
-        if (closed && record) await this.startMapping(record)
+        await this.reviewing((review) => resolveComment(review, message.comment), false)
         return
       }
       case 'submit_review': {
@@ -1041,22 +1049,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         await this.sendState()
         return
       }
-      case 'map_spec': {
+      case 'check_spec': {
+        // The way back in when a check failed or was stopped: approval started the first one.
         const record = this.planRecord()
-        if (record) await this.startMapping(record)
+        if (record) await this.startCheck(record)
         return
       }
-      case 'redo_map': {
+      case 'stop_check': {
         const record = this.planRecord()
-        if (record) await this.startMapping(record, message.note)
-        return
-      }
-      case 'stop_map': {
-        const record = this.planRecord()
-        // Task runs and cleanups live under the same tab; only the mapping is this button's to stop.
+        // Task runs and cleanups live under the same tab; only the check is this button's to stop.
         const child = record ? this.sessions.list().find((r) => r.parentId === record.id && r.mode === 'reconcile' && this.sessions.isLive(r.id)) : undefined
         if (!record || !child) return
-        this.mappings.set(record.id, { live: false, text: 'Mapping stopped' })
+        this.checks.set(record.id, { live: false, text: 'Check stopped' })
         await this.sessions.close(child.id)
         await this.sendState()
         this.changed.fire()
@@ -1209,7 +1213,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     if (!path || !record || !feature) return undefined
     const state = await readSpecState(path)
     const fromPlan = record.mode === 'plan' && state.exists
-    const mapping = this.mappings.get(record.id)
+    const check = this.checks.get(record.id)
     const verification = this.verifications.get(feature)
     const cleanup = this.cleanups.get(feature)
     const flagged = this.sweeps.get(feature)
@@ -1217,7 +1221,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const review = await readReview(reviewPath(this.workspaceRoot, feature)).catch(() => emptyReview())
     const tasks: TasksState = await readTasks(tasksPath(this.workspaceRoot, feature))
     const decisions = await readDecisions(decisionsPath(this.workspaceRoot, feature))
-    const stage = planStage(state, review, tasks)
+    const stage = planStage(state, review, tasks, decisions)
     const spec = state.exists ? parseSpec(state.body) : undefined
     const relativeTo = (file: string) => relative(this.workspaceRoot, file).split('\\').join('/')
     const runs = this.runsOf(record).map((r) => ({ mode: r.mode, status: this.statusOf(r.id) }))
@@ -1237,16 +1241,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       ...(spec ? { spec } : {}),
       stale: tasksStale(state, tasks),
       repairable: fromPlan && (spec?.problems.length ?? 0) > 0,
-      mappable: fromPlan && isMappable(stage, state) && mapping?.live !== true,
-      ...(mapping ? { mapping } : {}),
-      remappable: fromPlan && stage === 'mapped' && state.status === 'draft' && mapping?.live !== true,
-      // Offered only as the way back in: approval starts the build itself, so the button is for an implementer that never started or stopped early.
+      // Offered only as the way back in: approval starts the check itself, so the button is for one that failed or was stopped.
+      checkable: fromPlan && checkDue(state, tasks, decisions) && check?.live !== true && !this.applying.has(feature),
+      ...(check ? { check } : {}),
+      // Offered only as the way back in: the clean check starts the build itself, so the button is for an implementer that never started or stopped early.
       // An implementer whose engine is up but whose turn has ended is stopped too: its status says so, its engine does not.
-      implementable:
-        fromPlan &&
-        (stage === 'mapped' || stage === 'under_development') &&
-        !this.reviewingDocs.has(feature) &&
-        implementationStarts(state, tasks, implementerBusy),
+      implementable: fromPlan && stage === 'under_development' && !this.reviewingDocs.has(feature) && implementationStarts(state, tasks, implementerBusy),
       // Offered while the board is tested and the last record did not pass; a re-run after a pass is a manual choice too.
       verifiable: (stage === 'verification' || stage === 'verified') && verification?.live !== true,
       ...(verification ? { verification } : {}),
@@ -1257,12 +1257,12 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       tasks: tasks.exists ? tasks.tasks : [],
       review,
       commentable: isCommentable(state),
-      approvable: isApprovable(stage, state, tasks) && !this.applying.has(feature),
+      approvable: isApprovable(stage, state) && !this.applying.has(feature),
       decisions,
       pendingDecisions: pendingDecisions(decisions).length,
       applyingRulings: this.applying.has(feature),
       reviewingDocs: this.reviewingDocs.has(feature),
-      atWork: runs.some((r) => r.status === 'planning' || r.status === 'implementing') || mapping?.live === true || verification?.live === true || cleanup?.live === true,
+      atWork: runs.some((r) => r.status === 'planning' || r.status === 'implementing') || check?.live === true || verification?.live === true || cleanup?.live === true,
       ...(blocked ? { blocked } : {}),
       ...(failure ? { failure } : {}),
     }

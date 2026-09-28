@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isApprovable, isMappable, planStage, remapDue, tasksStale } from '../src/agent/phases/plan-stage'
+import { checkDue, isApprovable, planStage, tasksStale } from '../src/agent/phases/plan-stage'
 import { decisions } from '../src/agent/phases/decisions'
 import { parseReview } from '../src/agent/phases/plan-review'
 import type { SpecState } from '../src/agent/phases/spec-file'
@@ -48,16 +48,21 @@ describe('plan stage', () => {
     expect(planStage(draft, resolved, noTasks)).toBe('created')
   })
 
-  it('is_mapped_once_tasks_exist_until_work_starts', () => {
-    expect(planStage(draft, noReview, tasksState(task('A'), task('B')))).toBe('mapped')
-    expect(planStage(approved, noReview, tasksState(task('A'), task('B')))).toBe('mapped')
+  it('an_approved_spec_without_a_board_is_being_checked_or_ruled_on', () => {
+    expect(planStage(approved, noReview, noTasks)).toBe('checking')
+    const open = decisions('### X\n- on: Cancel command\n- finding: x')
+    expect(planStage(approved, noReview, noTasks, open)).toBe('ruling')
+    const applied = decisions('### X [applied]\n- on: Cancel command\n- finding: x\n- ruling: keep')
+    expect(planStage(approved, noReview, noTasks, applied)).toBe('checking')
   })
 
-  it('a_review_after_mapping_goes_back_to_under_review', () => {
+  it('a_draft_stays_a_draft_whatever_board_an_earlier_mapping_left', () => {
+    expect(planStage(draft, noReview, tasksState(task('A')))).toBe('created')
     expect(planStage(draft, review('## Round 1, pending\n- on Cancel command: no'), tasksState(task('A')))).toBe('under_review')
   })
 
-  it('is_under_development_from_the_first_state_change_until_every_task_is_tested', () => {
+  it('is_under_development_from_the_derived_board_until_every_task_is_tested', () => {
+    expect(planStage(approved, noReview, tasksState(task('A'), task('B')))).toBe('under_development')
     expect(planStage(approved, noReview, tasksState(task('A', { state: 'in_progress' }), task('B')))).toBe('under_development')
     expect(planStage(approved, noReview, tasksState(tested, task('B', { state: 'done' })))).toBe('under_development')
     expect(planStage(approved, noReview, tasksState(tested, task('B', { state: 'blocked', blockedReason: 'no API' })))).toBe('under_development')
@@ -85,41 +90,26 @@ describe('plan stage', () => {
     expect(tasksStale(draft, tasksState(task('A')))).toBe(false)
   })
 
-  it('a_stale_board_is_not_remapped_while_a_ruling_awaits_the_planner', () => {
-    const stale: TasksState = mappedFrom('ffff0000')
+  it('the_check_waits_while_a_decision_awaits_the_person_or_the_planner', () => {
     const open = decisions('### X\n- on: Cancel command\n- finding: x\n- proposed: change it\n\n### Y\n- on: Cancel command\n- finding: y')
-    expect(remapDue(draft, noReview, stale, open)).toBe(false)
+    expect(checkDue(approved, noTasks, open)).toBe(false)
     const ruled = decisions('### X\n- on: Cancel command\n- finding: x\n- proposed: change it\n- ruling: keep')
-    expect(remapDue(draft, noReview, stale, ruled)).toBe(false)
+    expect(checkDue(approved, noTasks, ruled)).toBe(false)
   })
 
-  it('applying_the_last_ruling_makes_the_remap_due', () => {
-    const stale: TasksState = mappedFrom('ffff0000')
-    const applied = decisions('### X [applied]\n- on: Cancel command\n- finding: x\n- proposed: change it\n- ruling: change it\n\n### Y [withdrawn]\n- finding: y')
-    expect(remapDue(draft, noReview, stale, applied)).toBe(true)
-    expect(remapDue(draft, noReview, stale, [])).toBe(true)
-    // A current board, an unmapped spec or a review in flight is not a re-map.
-    const fresh: TasksState = mappedFrom(specFingerprint(parseSpec(body)))
-    expect(remapDue(draft, noReview, fresh, [])).toBe(false)
-    expect(remapDue(draft, noReview, noTasks, [])).toBe(false)
-    expect(remapDue(draft, review('## Round 1, pending\n- on Cancel command: no'), stale, [])).toBe(false)
+  it('an_approved_spec_without_a_current_board_is_checked_once_every_decision_is_applied', () => {
+    const applied = decisions('### X [applied]\n- on: Cancel command\n- finding: x\n- ruling: change it\n\n### Y [withdrawn]\n- finding: y')
+    expect(checkDue(approved, noTasks, applied)).toBe(true)
+    expect(checkDue(approved, mappedFrom('ffff0000'), [])).toBe(true)
+    // A current board, or a spec not yet approved, is not checked.
+    expect(checkDue(approved, mappedFrom(specFingerprint(parseSpec(body))), [])).toBe(false)
+    expect(checkDue(draft, noTasks, [])).toBe(false)
   })
 
-  it('approval_is_offered_on_a_mapped_draft_whose_board_is_current', () => {
-    const fresh: TasksState = mappedFrom(specFingerprint(parseSpec(body)))
-    const stale: TasksState = mappedFrom('ffff0000')
-    expect(isApprovable('mapped', draft, fresh)).toBe(true)
-    expect(isApprovable('mapped', draft, stale)).toBe(false)
-    expect(isApprovable('mapped', approved, fresh)).toBe(false)
-    expect(isApprovable('created', draft, noTasks)).toBe(false)
-    expect(isApprovable('final_draft', draft, fresh)).toBe(false)
-  })
-
-  it('mapping_is_offered_on_a_created_draft_only_and_runs_by_itself_after_that', () => {
-    expect(isMappable('created', draft)).toBe(true)
-    expect(isMappable('final_draft', draft)).toBe(false)
-    expect(isMappable('mapped', draft)).toBe(false)
-    expect(isMappable('under_review', draft)).toBe(false)
-    expect(isMappable('created', approved)).toBe(false)
+  it('approval_is_offered_on_a_draft_with_no_comment_open', () => {
+    expect(isApprovable('created', draft)).toBe(true)
+    expect(isApprovable('final_draft', draft)).toBe(false)
+    expect(isApprovable('under_review', draft)).toBe(false)
+    expect(isApprovable('checking', approved)).toBe(false)
   })
 })

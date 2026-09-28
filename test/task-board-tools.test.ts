@@ -62,13 +62,13 @@ describe('ReadTasks', () => {
     expect(await call('ReadTasks', { task: 'Z' })).toEqual({ isError: true, text: 'No task named "Z". The board has: A, B.' })
   })
 
-  it('a_feature_not_yet_mapped_has_an_empty_board', async () => {
+  it('a_feature_not_yet_checked_has_an_empty_board', async () => {
     expect((await call('ReadTasks', {})).text).toContain('The board is empty')
   })
 })
 
 describe('UpdateTask', () => {
-  beforeEach(() => writeBoard(boardPath(), board(task('Cancel', { delivers: ['Cancel command', 'Shipped order'] }), task('Report'))))
+  beforeEach(() => writeBoard(boardPath(), board(task('Cancel', { delivers: ['Cancel command', 'Shipped order'], files: ['src/order.ts'] }), task('Report'))))
 
   it('a_state_change_is_written_to_the_board_and_answered_in_a_line', async () => {
     expect((await call('UpdateTask', { task: 'cancel', state: 'in_progress' })).text).toBe('Cancel: in progress.')
@@ -103,30 +103,10 @@ describe('UpdateTask', () => {
   })
 })
 
-describe('WriteTasks', () => {
-  beforeEach(() =>
-    writeFile(join(dir, 'plan', 'order-cancellation.spec.md'), '# Order cancellation\n\n## Goal\ng\n\n## Cancelling\n- **Cancel command**: a\n  - **Shipped order**: b\n- **Refund**: c\n'),
-  )
-
-  it('writes_the_tasks_marks_a_path_that_does_not_exist_as_new_and_names_the_rules_no_task_delivers', async () => {
-    const result = await call('WriteTasks', {
-      tasks: [{ name: 'Cancel', group: 'Cancelling', delivers: ['Cancel command', 'Shipped order', 'Invented'], text: 'add cancel', files: ['src/order.ts', 'src/cancel.ts'] }],
-    })
-    expect(result.text).toBe('Board saved: added Cancel.\nNo task delivers: Refund.\nDelivered but not a rule in the spec: Invented.')
-    expect((await readBoard(boardPath()))?.tasks[0]).toMatchObject({ files: ['src/order.ts', 'src/cancel.ts'], newFiles: ['src/cancel.ts'], state: 'open' })
-  })
-
-  it('a_rewrite_by_name_keeps_the_implementers_progress_on_disk', async () => {
-    await writeBoard(boardPath(), board(task('Cancel', { state: 'tested', note: 'departed', delivers: ['Cancel command'] })))
-    await call('WriteTasks', { tasks: [{ name: 'Cancel', delivers: ['Cancel command', 'Shipped order', 'Refund'], text: 'cancel it', files: [] }] })
-    expect((await readBoard(boardPath()))?.tasks[0]).toMatchObject({ state: 'tested', note: 'departed', text: 'cancel it' })
-  })
-})
-
 describe('the board tools run without a prompt and the file itself is off limits to the implementer', () => {
   it('no_board_tool_is_put_to_a_permission_prompt', async () => {
     const policy = new PermissionPolicy(dir, () => ({ allow: [], deny: [] }))
-    for (const name of ['ReadTasks', 'UpdateTask', 'WriteTasks']) {
+    for (const name of ['ReadTasks', 'UpdateTask']) {
       expect(await policy.preToolUse({ toolName: name, input: {}, toolUseId: 't' })).toEqual({ allow: true })
     }
   })

@@ -124,27 +124,19 @@ export class PlanFocusRequestedEvent extends Event {
   }
 }
 
-/** The plan bar's "Map against code": start a mapping run on the spec. */
-export class SpecMapRequestedEvent extends Event {
-  static readonly type = 'spec-map-requested'
+/** The plan bar's "Check again": check the approved spec against the code after a check failed or was stopped. */
+export class SpecCheckRequestedEvent extends Event {
+  static readonly type = 'spec-check-requested'
   constructor() {
-    super(SpecMapRequestedEvent.type, { bubbles: true })
+    super(SpecCheckRequestedEvent.type, { bubbles: true })
   }
 }
 
-/** The plan bar's stop on a running mapping. */
-export class SpecMapStoppedEvent extends Event {
-  static readonly type = 'spec-map-stopped'
+/** The plan bar's stop on a running check. */
+export class SpecCheckStoppedEvent extends Event {
+  static readonly type = 'spec-check-stopped'
   constructor() {
-    super(SpecMapStoppedEvent.type, { bubbles: true })
-  }
-}
-
-/** The plan bar's "Redo mapping": run it again, continuing its own conversation, with an optional note on what should differ. */
-export class SpecRemapRequestedEvent extends Event {
-  static readonly type = 'spec-remap-requested'
-  constructor(public readonly note?: string) {
-    super(SpecRemapRequestedEvent.type, { bubbles: true })
+    super(SpecCheckStoppedEvent.type, { bubbles: true })
   }
 }
 
@@ -294,9 +286,8 @@ declare global {
     [ReviewSubmittedEvent.type]: ReviewSubmittedEvent
     [PlanStepSelectedEvent.type]: PlanStepSelectedEvent
     [PlanFocusRequestedEvent.type]: PlanFocusRequestedEvent
-    [SpecMapRequestedEvent.type]: SpecMapRequestedEvent
-    [SpecMapStoppedEvent.type]: SpecMapStoppedEvent
-    [SpecRemapRequestedEvent.type]: SpecRemapRequestedEvent
+    [SpecCheckRequestedEvent.type]: SpecCheckRequestedEvent
+    [SpecCheckStoppedEvent.type]: SpecCheckStoppedEvent
     [CleanupStoppedEvent.type]: CleanupStoppedEvent
     [CleanupDecidedEvent.type]: CleanupDecidedEvent
     [SweepRequestedEvent.type]: SweepRequestedEvent

@@ -90,6 +90,23 @@ describe('OpenAiClient', () => {
     expect((request!.headers as Record<string, string>).authorization).toBe('Bearer k')
   })
 
+  it('a_past_tool_call_with_malformed_arguments_is_sent_as_an_empty_object_since_vllm_rejects_the_whole_request', async () => {
+    const client = clientWith(sseResponse(['[DONE]']))
+    const stream = client.stream({
+      model: 'm',
+      messages: [
+        { role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'Write', arguments: '{"content": "using Npgsql;\\n    [Fact' }] },
+        { role: 'tool', toolCallId: 'c1', content: 'Tool arguments are not valid JSON' },
+      ],
+      tools: [],
+      maxTokens: 4096,
+      signal: new AbortController().signal,
+    })
+    for await (const _ of stream) void _
+    const body = JSON.parse(lastRequest!.body as string)
+    expect(body.messages[0].tool_calls[0].function.arguments).toBe('{}')
+  })
+
   it('non_2xx_response_is_an_api_error_with_status_and_body', async () => {
     const client = clientWith(new Response('{"error":"bad key"}', { status: 401 }))
     await expect(collect(client)).rejects.toMatchObject({ status: 401, body: '{"error":"bad key"}' })
