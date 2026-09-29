@@ -32,14 +32,14 @@ const GROUP: Record<keyof SessionGroups, { label: string; icon: string }> = {
 
 export type SessionNode = { kind: 'group'; group: keyof SessionGroups } | { kind: 'session'; record: SessionRecord }
 
-/** The Sessions view: the chats and the plans in a folder each, with their status; click opens one in the chat. */
+/** The Sessions view: the chats and the plans in a folder each, with their status; click opens one in its own editor tab. */
 export class SessionsTree implements vscode.TreeDataProvider<SessionNode> {
   private readonly changed = new vscode.EventEmitter<void>()
   readonly onDidChangeTreeData = this.changed.event
 
   constructor(
     private readonly sessions: SessionManager,
-    private readonly activeId: () => string | undefined,
+    private readonly isOpen: (sessionId: string) => boolean,
     private readonly statusOf: (sessionId: string) => SessionStatus,
   ) {}
 
@@ -70,10 +70,9 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode> {
   private sessionItem(record: SessionRecord): vscode.TreeItem {
     const item = new vscode.TreeItem(record.title)
     const status = this.statusOf(record.id)
-    const active = record.id === this.activeId()
     const { icon, color } = STATUS_ICON[status]
     item.id = record.id
-    item.description = `${record.profile.name} · ${status.replace('_', ' ')}${active ? ' · open' : ''}`
+    item.description = `${record.profile.name} · ${status.replace('_', ' ')}${this.isOpen(record.id) ? ' · open' : ''}`
     item.iconPath = new vscode.ThemeIcon(icon, color ? new vscode.ThemeColor(color) : undefined)
     item.tooltip = `${MODE_LABEL[record.mode]} · ${record.profile.name} · ${status.replace('_', ' ')}`
     item.contextValue = 'session'

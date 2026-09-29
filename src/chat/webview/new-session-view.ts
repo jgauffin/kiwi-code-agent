@@ -2,10 +2,21 @@ import { compileTemplate } from '@relax.js/core/html'
 import { readData } from '@relax.js/core/forms'
 import type { SessionMode } from '../../agent/session/session-manager'
 import type { ProfileDefaults } from '../../settings/settings-store'
+import type { ResumableChat, ResumablePlan } from '../protocol'
 import { LinkedFilesRow } from './linked-files-row'
-import { DefaultProfileChangedEvent, NewSessionRequestedEvent } from './events'
+import { DefaultProfileChangedEvent, NewSessionRequestedEvent, PlanResumeRequestedEvent, SessionSelectedEvent } from './events'
 
 type NewSessionForm = { mode: SessionMode; feature?: string; prompt?: string }
+
+/** Work already on disk this screen offers to pick up rather than start over. */
+export type PickUp = { plans: ResumablePlan[]; chats: ResumableChat[]; unfiled: number }
+
+const STATUS_HINT: Record<ResumablePlan['status'], string> = {
+  draft: 'draft: review, check or approve',
+  approved: 'approved: ready to implement',
+}
+
+const when = (iso: string): string => new Date(iso).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
 
 /** The text fields, held by the view rather than by the form that happens to show them. */
 type Draft = { feature: string; prompt: string }
@@ -14,8 +25,8 @@ type TextField = HTMLInputElement | HTMLTextAreaElement
 
 /**
  * The "+" screen. One card per session type; the fields differ per card, so a
- * new type means a new card, not more conditionals. A plan on disk is picked
- * up from the tab bar instead, since it is not a new session.
+ * new type means a new card, not more conditionals. Work already on disk is
+ * picked up from the list below the cards, since it is not a new session.
  *
  * A card with a prompt links files beside its start button. On the plan card
  * that is a doc or a spec: a planner reads docs/**, the README and the specs
@@ -76,11 +87,35 @@ export class NewSessionView extends HTMLElement {
       <p class="hint">Reads docs/**, the README and the specs, and says in chat where their arrangement would cost a planner: what it has to read whole, what it cannot cite. It changes a doc only when you ask, one confirmed write at a time.</p>
       <button type="submit">Evaluate the docs</button>
     </form>
+    <section class="pick-up" if="any">
+      <h3>Pick up where you left off</h3>
+      <ul class="picks">
+        <li if="unfiled">
+          <button type="button" class="pick unfiled" r-click="file()">
+            <span class="icon">🗂</span>
+            <span class="what"><strong>{{unfiledLabel}}</strong><span class="hint">decided, not yet in the specs or docs</span></span>
+          </button>
+        </li>
+        <li loop="p in plans">
+          <button type="button" class="pick plan {{p.status}}" r-click="resume(p)">
+            <span class="icon">📐</span>
+            <span class="what"><strong>{{p.feature}}</strong><span class="hint">{{p.hint}}</span></span>
+          </button>
+        </li>
+        <li loop="c in chats">
+          <button type="button" class="pick chat" r-click="reopen(c)">
+            <span class="icon">🔧</span>
+            <span class="what"><strong>{{c.title}}</strong><span class="hint">{{c.hint}}</span></span>
+          </button>
+        </li>
+      </ul>
+    </section>
   `)
   private mode: SessionMode = 'chat'
   /** What has been typed, so swapping card keeps it: the same intent describes either session type. */
   private draft: Draft = { feature: '', prompt: '' }
   private profileDefaults: ProfileDefaults = { names: [], active: '' }
+  private pickUp: PickUp = { plans: [], chats: [], unfiled: 0 }
 
   connectedCallback(): void {
     if (this.childElementCount > 0) return
@@ -93,18 +128,25 @@ export class NewSessionView extends HTMLElement {
     this.render()
   }
 
-  update(profiles: ProfileDefaults): void {
+  update(profiles: ProfileDefaults, pickUp: PickUp): void {
     // State arrives often; a re-render while the user types is only worth it when something shown changed.
-    if (JSON.stringify(profiles) === JSON.stringify(this.profileDefaults)) return
+    if (JSON.stringify([profiles, pickUp]) === JSON.stringify([this.profileDefaults, this.pickUp])) return
     this.profileDefaults = profiles
+    this.pickUp = pickUp
     this.render()
   }
 
   private render(): void {
     const { names, active } = this.profileDefaults
+    const { plans, chats, unfiled } = this.pickUp
     this.template.render(
       {
         profiles: names.map((name) => ({ name, selected: name === active })),
+        any: plans.length > 0 || chats.length > 0 || unfiled > 0,
+        unfiled,
+        unfiledLabel: `${unfiled} unfiled decision${unfiled === 1 ? '' : 's'}`,
+        plans: plans.map((p) => ({ ...p, hint: STATUS_HINT[p.status] })),
+        chats: chats.map((c) => ({ ...c, hint: `last worked on ${when(c.startedAt)}` })),
         isChat: this.mode === 'chat',
         isPlan: this.mode === 'plan',
         isDocs: this.mode === 'docs',
@@ -114,6 +156,9 @@ export class NewSessionView extends HTMLElement {
       },
       {
         pick: (event: Event) => this.dispatchEvent(new DefaultProfileChangedEvent((event.target as HTMLSelectElement).value)),
+        file: () => this.dispatchEvent(new NewSessionRequestedEvent('file-decisions', undefined, undefined)),
+        resume: (plan: ResumablePlan) => this.dispatchEvent(new PlanResumeRequestedEvent(plan.feature)),
+        reopen: (chat: ResumableChat) => this.dispatchEvent(new SessionSelectedEvent(chat.sessionId)),
         edit: (field: keyof Draft, event: Event) => {
           this.draft[field] = (event.target as TextField).value
         },

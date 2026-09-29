@@ -8,6 +8,7 @@ scripts/**
 assets/**
 docs/**
 !docs/logos/logo-square-transparent-500px.png
+!docs/logos/logo-square-transparent.svg
 articles/**
 node_modules/**
 **/*.map

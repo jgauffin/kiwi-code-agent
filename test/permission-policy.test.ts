@@ -3,6 +3,7 @@ import { isReadOnlyCommand } from '../src/agent/permissions/read-only-commands'
 import { PermissionPolicy, type PermissionRules } from '../src/agent/permissions/permission-policy'
 import { commandLines, projectRuleFor, ruleLabel } from '../src/agent/permissions/permission-rules'
 import { readOnlyTools } from '../src/agent/permissions/tool-classes'
+import { reviewEdits } from '../src/agent/permissions/gate'
 import type { SessionHooks } from '../src/agent/session/hooks'
 import { ASK_USER_TOOL } from '../src/agent/openai-session/tools/ask-user'
 import { BLIND_PLAN_TOOLS, blindPlanPrompt } from '../src/agent/phases/blind-plan'
@@ -340,6 +341,40 @@ describe('the Allow writes switch', () => {
     // The switch is for the project's own files: a write anywhere else is still a question.
     expect(await use(p, 'Write', { file_path: '../other/a.ts' })).toBeUndefined()
     expect(await use(p, 'Bash', { command: 'echo hi > f' })).toBeUndefined()
+  })
+
+  it('the_changes_a_script_staged_pass_under_the_switch_like_any_other_write', async () => {
+    let on = false
+    const p = switched(() => on)
+    const staged = { files: ['src/a.ts', 'src/b.ts'] }
+    expect(await use(p, 'RunScript', staged)).toBeUndefined()
+    on = true
+    expect(await use(p, 'RunScript', staged)).toEqual({ allow: true })
+    // The switch is for the project's own files: one staged anywhere else is still a question for all of them.
+    expect(await use(p, 'RunScript', { files: ['src/a.ts', '../other/a.ts'] })).toBeUndefined()
+    expect(await use(p, 'RunScript', { files: [] })).toBeUndefined()
+  })
+
+  it('a_deny_rule_blocks_a_staged_change_and_an_allow_rule_covering_every_file_applies_them_unasked', async () => {
+    const p = new PermissionPolicy(cwd, () => ({ allow: ['RunScript(src/**)'], deny: ['RunScript(**/.env)'] }), { readOnly })
+    expect(await use(p, 'RunScript', { files: ['src/a.ts', 'src/b.ts'] })).toEqual({ allow: true })
+    expect(await use(p, 'RunScript', { files: ['src/a.ts', 'lib/a.ts'] })).toBeUndefined()
+    expect(await use(p, 'RunScript', { files: ['src/a.ts', 'config/.env'] })).toMatchObject({ deny: expect.stringContaining('RunScript(**/.env)') })
+  })
+
+  it('the_script_review_asks_only_for_what_the_rules_leave_open', async () => {
+    let on = false
+    let asked = 0
+    const ask = async () => (asked++, { kind: 'allow' } as const)
+    const review = (files: string[]) => reviewEdits(switched(() => on, { deny: ['RunScript(**/.env)'] }), ask, { toolName: 'RunScript', input: { files }, toolUseId: 't' }, {})
+
+    expect(await review(['src/a.ts'])).toEqual({ kind: 'allow' })
+    expect(asked).toBe(1)
+    on = true
+    expect(await review(['src/a.ts'])).toEqual({ kind: 'allow' })
+    expect(asked, 'the switch covers it, so the user is not asked again').toBe(1)
+    expect(await review(['config/.env'])).toMatchObject({ kind: 'deny' })
+    expect(asked, 'a deny rule answers without asking').toBe(1)
   })
 
   it('a_move_or_copy_passes_under_the_switch_only_when_both_ends_are_inside_the_project', async () => {

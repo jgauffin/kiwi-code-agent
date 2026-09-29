@@ -1,12 +1,17 @@
 import type { FromWebview, ToWebview } from '../protocol'
 
-declare function acquireVsCodeApi(): { postMessage(message: unknown): void }
+declare function acquireVsCodeApi(): { postMessage(message: unknown): void; setState(state: unknown): void }
 
 // One handle per page: VS Code refuses a second acquire, so every app in the bundle goes through here.
 const api = acquireVsCodeApi()
 
 export function postToHost(message: unknown): void {
   api.postMessage(message)
+}
+
+/** What VS Code hands back when it revives this panel after a reload: the session the tab showed. */
+export function rememberTab(tabId: string | undefined): void {
+  api.setState({ tabId })
 }
 
 export function onHostMessage<M>(handler: (message: M) => void): void {

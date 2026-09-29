@@ -63,19 +63,11 @@ export class NewSessionRequestedEvent extends Event {
   }
 }
 
-/** The tab bar's pick of a plan already on disk. */
+/** The new-session screen's pick of a plan already on disk. */
 export class PlanResumeRequestedEvent extends Event {
   static readonly type = 'plan-resume-requested'
   constructor(public readonly feature: string) {
     super(PlanResumeRequestedEvent.type, { bubbles: true })
-  }
-}
-
-/** The "+" tab: show the new-session screen. */
-export class NewSessionViewRequestedEvent extends Event {
-  static readonly type = 'new-session-view-requested'
-  constructor() {
-    super(NewSessionViewRequestedEvent.type, { bubbles: true })
   }
 }
 
@@ -217,13 +209,7 @@ export class PlanViewSelectedEvent extends Event {
   }
 }
 
-export class SessionClosedEvent extends Event {
-  static readonly type = 'session-closed'
-  constructor(public readonly sessionId: string) {
-    super(SessionClosedEvent.type, { bubbles: true })
-  }
-}
-
+/** Open a session that has no editor tab of its own yet; one is given to it. */
 export class SessionSelectedEvent extends Event {
   static readonly type = 'session-selected'
   constructor(public readonly sessionId: string) {
@@ -285,10 +271,8 @@ declare global {
     [PermissionDecidedEvent.type]: PermissionDecidedEvent
     [QuestionAnsweredEvent.type]: QuestionAnsweredEvent
     [NewSessionRequestedEvent.type]: NewSessionRequestedEvent
-    [NewSessionViewRequestedEvent.type]: NewSessionViewRequestedEvent
     [PlanResumeRequestedEvent.type]: PlanResumeRequestedEvent
     [SessionSelectedEvent.type]: SessionSelectedEvent
-    [SessionClosedEvent.type]: SessionClosedEvent
     [SpecApprovedEvent.type]: SpecApprovedEvent
     [RulingsSentEvent.type]: RulingsSentEvent
     [ReviewSubmittedEvent.type]: ReviewSubmittedEvent

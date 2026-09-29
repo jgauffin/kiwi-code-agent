@@ -487,19 +487,21 @@ export function activate(context: vscode.ExtensionContext): void {
     allowWritesControl,
     permissionStore,
     workspaceRoot,
-    context.workspaceState,
   )
   const tree = new SessionsTree(
     sessions,
-    () => chat.activeId,
+    (id) => chat.isOpen(id),
     (id) => chat.statusOf(id),
   )
 
   context.subscriptions.push(
     output,
-    vscode.window.registerWebviewViewProvider('kiwiAgent.chat', chat, { webviewOptions: { retainContextWhenHidden: true } }),
+    // The panel says which session it showed, so a reload brings each tab back on its own session.
     vscode.window.registerWebviewPanelSerializer(CHAT_PANEL_TYPE, {
-      deserializeWebviewPanel: async (panel) => chat.adoptPanel(panel),
+      deserializeWebviewPanel: (panel, state: { tabId?: string } | undefined) => {
+        chat.adoptPanel(panel, state?.tabId)
+        return Promise.resolve()
+      },
     }),
     vscode.window.registerTreeDataProvider('kiwiAgent.sessions', tree),
     chat.onDidChange(() => tree.refresh()),
@@ -512,7 +514,10 @@ export function activate(context: vscode.ExtensionContext): void {
       const ids = record.mode === 'plan' ? sessions.list().filter((r) => r.feature === record.feature).map((r) => r.id) : [record.id]
       for (const id of ids) await chat.remove(id)
     }),
-    vscode.commands.registerCommand('kiwiAgent.openChat', () => chat.openInEditor()),
+    vscode.commands.registerCommand('kiwiAgent.stopSession', (node: SessionNode) => {
+      if (node.kind === 'session') return chat.close(node.record.id)
+      return undefined
+    }),
     vscode.commands.registerCommand('kiwiAgent.openSettings', () => settingsPanel.open()),
     // The new-session pickers show the profiles as settings hold them, from the page or from settings.json.
     vscode.workspace.onDidChangeConfiguration((e) => {

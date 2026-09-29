@@ -141,7 +141,11 @@ export class PermissionPolicy implements SessionHooks {
 
   private relativePaths(tool: ToolUse): string[] {
     const input = (tool.input ?? {}) as Record<string, unknown>
-    const raw = TRANSFER_TOOLS.has(tool.toolName) ? [input['source'], input['destination']] : [input['file_path'] ?? input['notebook_path'] ?? input['path']]
+    const raw = TRANSFER_TOOLS.has(tool.toolName)
+      ? [input['source'], input['destination']]
+      : Array.isArray(input['files'])
+        ? input['files']
+        : [input['file_path'] ?? input['notebook_path'] ?? input['path']]
     return raw.filter((p): p is string => typeof p === 'string').map((p) => this.paths.relative(p))
   }
 }

@@ -40,3 +40,16 @@ export async function confirmReason(hooks: SessionHooks | undefined, ask: AskPer
   const gate = await gateCall(hooks, ask, { name: use.toolName, readOnly: false }, use)
   return gate.refused?.text
 }
+
+/**
+ * The changes a script staged, put to the user as one diff. It is the same
+ * decision as any other write, so the rules answer first: a deny rule blocks
+ * them, the session's switch or an allow rule covering every file applies them
+ * unasked, and only what the rules leave open reaches the user.
+ */
+export async function reviewEdits(hooks: SessionHooks | undefined, ask: AskPermission, use: ToolUse, shown: PermissionShown): Promise<PermissionDecision> {
+  const pre = await hooks?.preToolUse?.(use)
+  if (pre && 'deny' in pre) return { kind: 'deny', message: pre.deny }
+  if (pre?.allow) return { kind: 'allow' }
+  return ask(use.toolUseId, use.toolName, use.input, shown)
+}
