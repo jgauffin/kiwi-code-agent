@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
+import type { PickUp } from '../src/chat/webview/new-session-view'
 
 ;(globalThis as Record<string, unknown>).acquireVsCodeApi = () => ({ postMessage: () => {} })
 
@@ -8,10 +9,12 @@ const { NewSessionView } = await import('../src/chat/webview/new-session-view')
 const { LinkedFilesRow } = await import('../src/chat/webview/linked-files-row')
 const events = await import('../src/chat/webview/events')
 
-function view(profiles = { names: ['Claude', 'Kimi'], active: 'Claude' }) {
+const NOTHING: PickUp = { plans: [], chats: [], unfiled: 0 }
+
+function view(profiles = { names: ['Claude', 'Kimi'], active: 'Claude' }, pickUp: PickUp = NOTHING) {
   const node = new NewSessionView()
   document.body.appendChild(node)
-  node.update(profiles)
+  node.update(profiles, pickUp)
   return node
 }
 
@@ -48,7 +51,7 @@ describe('NewSessionView profile picker', () => {
 
   it('a_changed_default_moves_the_selection_on_the_next_state', () => {
     const node = view()
-    node.update({ names: ['Claude', 'Kimi'], active: 'Kimi' })
+    node.update({ names: ['Claude', 'Kimi'], active: 'Kimi' }, NOTHING)
     expect(node.querySelector<HTMLSelectElement>('select[name=profile]')!.value).toBe('Kimi')
     node.remove()
   })
@@ -72,7 +75,7 @@ describe('NewSessionView fields across cards', () => {
   it('a_render_from_arriving_state_keeps_what_is_half_typed', () => {
     const node = view()
     type(node, '.chat-fields textarea[name=prompt]', 'half a thou')
-    node.update({ names: ['Claude'], active: 'Claude' })
+    node.update({ names: ['Claude'], active: 'Claude' }, NOTHING)
     expect(node.querySelector<HTMLTextAreaElement>('.chat-fields textarea[name=prompt]')!.value).toBe('half a thou')
     node.remove()
   })
@@ -142,6 +145,59 @@ describe('NewSessionView fields across cards', () => {
     node.querySelector('.chat-fields')!.dispatchEvent(new Event('submit', { cancelable: true }))
     expect(files).toEqual(['src/orders/cancel.ts'])
     expect(row.paths).toEqual([])
+    node.remove()
+  })
+})
+
+const picks = (node: HTMLElement) => [...node.querySelectorAll<HTMLButtonElement>('.pick-up .pick')]
+
+describe('NewSessionView pick-up list', () => {
+  const waiting = {
+    plans: [{ feature: 'Orders', status: 'approved' as const }],
+    chats: [{ sessionId: 's9', title: 'Why does the cart double-count?', startedAt: '2026-01-02T10:00:00.000Z' }],
+    unfiled: 2,
+  }
+
+  it('nothing_to_pick_up_leaves_the_screen_to_the_cards_alone', () => {
+    const node = view()
+    expect(node.querySelector('.pick-up')).toBeNull()
+    node.remove()
+  })
+
+  it('every_piece_of_work_left_on_disk_is_offered', () => {
+    const node = view(undefined, waiting)
+    expect(picks(node).map((p) => p.querySelector('strong')!.textContent)).toEqual([
+      '2 unfiled decisions',
+      'Orders',
+      'Why does the cart double-count?',
+    ])
+    node.remove()
+  })
+
+  it('picking_a_plan_asks_for_it_by_feature', () => {
+    const node = view(undefined, waiting)
+    let seen: unknown
+    node.addEventListener(events.PlanResumeRequestedEvent.type, (e) => (seen = e.feature))
+    picks(node)[1]!.click()
+    expect(seen).toBe('Orders')
+    node.remove()
+  })
+
+  it('picking_a_closed_chat_reopens_that_session_rather_than_starting_one', () => {
+    const node = view(undefined, waiting)
+    let seen: unknown
+    node.addEventListener(events.SessionSelectedEvent.type, (e) => (seen = e.sessionId))
+    picks(node)[2]!.click()
+    expect(seen).toBe('s9')
+    node.remove()
+  })
+
+  it('picking_the_unfiled_decisions_starts_the_session_that_files_them', () => {
+    const node = view(undefined, waiting)
+    let seen: unknown
+    node.addEventListener(events.NewSessionRequestedEvent.type, (e) => (seen = e.mode))
+    picks(node)[0]!.click()
+    expect(seen).toBe('file-decisions')
     node.remove()
   })
 })

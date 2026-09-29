@@ -1,6 +1,7 @@
 {
     "kiwiAgent.permissions.allow": [
         "Bash(npx vitest:*)",
-        "Bash(npx tsc:*)"
+        "Bash(npx tsc:*)",
+        "Bash(npx esbuild:*)"
     ]
 }

@@ -4,7 +4,7 @@ import type { PlanState, RunRef, RunSection, ToWebview } from '../src/chat/proto
 import type { SessionEvent } from '../src/agent/session/code-session'
 
 const sent: unknown[] = []
-;(globalThis as Record<string, unknown>).acquireVsCodeApi = () => ({ postMessage: (m: unknown) => sent.push(m) })
+;(globalThis as Record<string, unknown>).acquireVsCodeApi = () => ({ postMessage: (m: unknown) => sent.push(m), setState: () => {} })
 
 const { ChatApp } = await import('../src/chat/webview/chat-app')
 
@@ -44,7 +44,7 @@ const implementRun = (current = true): RunRef => ({ sessionId: IMPLEMENT, mode: 
 
 const state = (): Extract<ToWebview, { type: 'state' }> => ({
   type: 'state',
-  tabs: [{ id: SESSION, title: 'Orders', mode: 'plan', profileName: 'Claude', status: 'idle', active: true }],
+  tab: { id: SESSION, title: 'Orders', mode: 'plan', profileName: 'Claude', status: 'idle' },
   plan: plan(),
   plans: [],
   chats: [],

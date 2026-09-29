@@ -38,8 +38,8 @@ chat-app {
   /*
    * One row: the flow as steps, the current one lit, and at the right the one
    * next thing. The lit step is the stage; nothing restates it. Its own
-   * background sets it apart from the session tabs above and the plan tabs
-   * below, so the three rows read as three different things.
+   * background sets it apart from the plan tabs below, so the two rows read
+   * as two different things.
    */
   & > .plan-bar {
     display: flex;
@@ -1055,185 +1055,6 @@ chat-app {
 
   }
 
-  & > .tabs {
-    border-bottom: 1px solid var(--vscode-panel-border);
-
-    & .bar {
-      display: flex;
-      align-items: stretch;
-    }
-
-    & .tabs {
-      list-style: none;
-      margin: 0;
-      padding: 0 0.3rem;
-      display: flex;
-      gap: 0.2rem;
-      overflow-x: auto;
-      flex: 1;
-      min-width: 0;
-    }
-
-    & .tab {
-      display: flex;
-      align-items: center;
-      gap: 0.3rem;
-      padding: 0.35rem 0.5rem;
-      cursor: pointer;
-      border-bottom: 2px solid transparent;
-      white-space: nowrap;
-      max-width: 14rem;
-      opacity: 0.75;
-
-      &:hover {
-        opacity: 1;
-        background: var(--vscode-list-hoverBackground);
-      }
-
-      &.active {
-        opacity: 1;
-        border-bottom-color: var(--vscode-focusBorder);
-      }
-
-      &:is(.needs_human, .needs_approval, .needs_answer) .status {
-        animation: pulse 1.2s ease-in-out infinite;
-      }
-
-      &.error .status {
-        color: var(--vscode-errorForeground);
-      }
-
-      & .title {
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-
-      & .close {
-        background: none;
-        border: none;
-        color: inherit;
-        cursor: pointer;
-        opacity: 0.5;
-        padding: 0 0.2rem;
-
-        &:hover {
-          opacity: 1;
-        }
-      }
-
-      &.new {
-        font-size: 1.2em;
-        padding-block: 0.15rem;
-      }
-    }
-
-    /* What can be picked up again: an icon at the far right, and the list it drops. */
-    & .menu {
-      position: relative;
-      flex: none;
-
-      & .old {
-        height: 100%;
-        background: none;
-        border: none;
-        border-bottom: 2px solid transparent;
-        color: inherit;
-        cursor: pointer;
-        opacity: 0.75;
-        padding: 0 0.6rem;
-
-        &:hover {
-          opacity: 1;
-          background: var(--vscode-list-hoverBackground);
-        }
-
-        &.active {
-          opacity: 1;
-          border-bottom-color: var(--vscode-focusBorder);
-        }
-
-        /* Decisions wait to be filed: the icon stands out with its count, in the bar's own colour. */
-        &.waiting {
-          opacity: 1;
-        }
-
-        & .count {
-          margin-left: 0.25rem;
-          font-size: 0.85em;
-          font-weight: 600;
-        }
-      }
-
-      & .picks {
-        position: absolute;
-        right: 0;
-        top: 100%;
-        z-index: 10;
-        list-style: none;
-        margin: 0;
-        padding: 0.3rem;
-        min-width: 18rem;
-        max-width: 26rem;
-        max-height: 60vh;
-        overflow-y: auto;
-        display: flex;
-        flex-direction: column;
-        gap: 0.1rem;
-        background: var(--vscode-dropdown-background, var(--vscode-editor-background));
-        border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border));
-        border-radius: 6px;
-        box-shadow: 0 2px 8px rgb(0 0 0 / 0.35);
-      }
-
-      & .empty {
-        padding: 0.4rem 0.6rem;
-        opacity: 0.7;
-        white-space: nowrap;
-      }
-
-      & .pick {
-        width: 100%;
-        display: flex;
-        align-items: baseline;
-        gap: 0.5rem;
-        text-align: left;
-        padding: 0.4rem 0.6rem;
-        background: none;
-        color: var(--vscode-foreground);
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-
-        &:hover {
-          background: var(--vscode-list-hoverBackground);
-        }
-
-        /* The name over what it says about itself, so a long chat title has the row to itself. */
-        & .what {
-          display: flex;
-          flex-direction: column;
-          gap: 0.1rem;
-          min-width: 0;
-        }
-
-        & strong {
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-
-        & .hint {
-          opacity: 0.7;
-        }
-
-        &.approved .hint {
-          color: var(--vscode-testing-iconPassed);
-          opacity: 1;
-        }
-      }
-    }
-  }
-
   & > .new-session {
     overflow-y: auto;
     padding: 0.8rem;
@@ -1323,6 +1144,68 @@ chat-app {
       }
     }
 
+    /* What can be picked up again: plans on disk, chats with no tab open, decisions waiting to be filed. */
+    & .pick-up {
+      margin-top: 1.2rem;
+      border-top: 1px solid var(--vscode-panel-border);
+      padding-top: 0.8rem;
+
+      & h3 {
+        margin: 0 0 0.4rem;
+        font-size: 1em;
+        opacity: 0.8;
+      }
+
+      & .picks {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.1rem;
+      }
+
+      & .pick {
+        width: 100%;
+        display: flex;
+        align-items: baseline;
+        gap: 0.5rem;
+        text-align: left;
+        padding: 0.4rem 0.6rem;
+        background: none;
+        color: var(--vscode-foreground);
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+
+        &:hover {
+          background: var(--vscode-list-hoverBackground);
+        }
+
+        /* The name over what it says about itself, so a long chat title has the row to itself. */
+        & .what {
+          display: flex;
+          flex-direction: column;
+          gap: 0.1rem;
+          min-width: 0;
+        }
+
+        & strong {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        & .hint {
+          opacity: 0.7;
+        }
+
+        &.approved .hint {
+          color: var(--vscode-testing-iconPassed);
+          opacity: 1;
+        }
+      }
+    }
   }
 
   /*

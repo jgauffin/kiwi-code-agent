@@ -55,6 +55,9 @@ export function toolWriteTargets(toolName: string, input: unknown): WriteTargets
       return paths([named['file_path']])
     case 'NotebookEdit':
       return paths([named['notebook_path']])
+    // A script's staged changes name every file they would write; the script itself names none, and writes nothing until they are judged.
+    case 'RunScript':
+      return Array.isArray(named['files']) ? paths(named['files']) : undefined
     default:
       return undefined
   }

@@ -1,7 +1,7 @@
 import type { PlanState, RunRef, RunSection, ToWebview } from '../protocol'
 import type { SessionEvent } from '../../agent/session/code-session'
 import type { SessionMode } from '../../agent/session/session-manager'
-import { onMessage, post } from './vscode-api'
+import { onMessage, post, rememberTab } from './vscode-api'
 import { ChatComposer } from './chat-composer'
 import { ChatTranscript } from './chat-transcript'
 import { NewSessionView } from './new-session-view'
@@ -10,7 +10,6 @@ import { PlanTabs } from './plan-tabs'
 import { PlanView } from './plan-view'
 import { STEP_RUNS, planStep, tabFor, type Step, type Tab } from './plan-step'
 import { LinkedFilesRow } from './linked-files-row'
-import { SessionTabs } from './session-tabs'
 import {
   AllowWritesToggledEvent,
   CleanupDecidedEvent,
@@ -22,7 +21,6 @@ import {
   LinkOpenFileRequestedEvent,
   McpReconnectRequestedEvent,
   NewSessionRequestedEvent,
-  NewSessionViewRequestedEvent,
   PermissionDecidedEvent,
   PlanFocusRequestedEvent,
   PlanResumeRequestedEvent,
@@ -33,7 +31,6 @@ import {
   ReviewActionEvent,
   ReviewSubmittedEvent,
   RulingsSentEvent,
-  SessionClosedEvent,
   SessionModelChangedEvent,
   SessionSelectedEvent,
   SpecApprovedEvent,
@@ -50,13 +47,13 @@ import {
 type RunSectionView = { mode: SessionMode; details: HTMLDetailsElement; transcript: ChatTranscript }
 
 /**
- * Root of the chat UI. Talks to the extension host; children talk to it
- * through events. Shows the new-session screen, or the active session: its
- * transcript, or in a feature session one tab of the plan or the transcript,
- * picked on the strip under the plan bar.
+ * Root of the chat UI, one editor tab's worth. Talks to the extension host;
+ * children talk to it through events. Shows the new-session screen until a
+ * session is started on the tab, then that session: its transcript, or in a
+ * feature session one tab of the plan or the transcript, picked on the strip
+ * under the plan bar.
  */
 export class ChatApp extends HTMLElement {
-  private readonly tabs = new SessionTabs()
   private readonly planBar = new PlanBar()
   private readonly planTabs = new PlanTabs()
   private readonly planView = new PlanView()
@@ -65,7 +62,8 @@ export class ChatApp extends HTMLElement {
   private readonly runs = document.createElement('div')
   private readonly sections = new Map<string, RunSectionView>()
   private readonly composer = new ChatComposer()
-  private activeSessionId: string | undefined
+  /** The session this editor tab shows, absent while it shows the new-session screen. */
+  private tabId: string | undefined
   private creating = false
   private plan: PlanState | undefined
   private view: ViewTab = 'chat'
@@ -82,7 +80,6 @@ export class ChatApp extends HTMLElement {
 
   connectedCallback(): void {
     if (this.childElementCount > 0) return
-    this.tabs.className = 'tabs'
     this.planBar.className = 'plan-bar'
     this.planBar.hidden = true
     this.planTabs.className = 'plan-tabs'
@@ -90,9 +87,11 @@ export class ChatApp extends HTMLElement {
     this.planView.className = 'plan-view'
     this.planView.hidden = true
     this.newSession.className = 'new-session'
+    // Hidden until the host says the tab has no session: `creating` is false here, and the DOM has to agree.
+    this.newSession.hidden = true
     this.runs.className = 'runs'
     this.composer.className = 'composer'
-    this.append(this.tabs, this.planBar, this.planTabs, this.newSession, this.planView, this.runs, this.composer)
+    this.append(this.planBar, this.planTabs, this.newSession, this.planView, this.runs, this.composer)
 
     this.addEventListener(SpecApprovedEvent.type, () => post({ type: 'approve_spec' }))
     this.addEventListener(RulingsSentEvent.type, () => post({ type: 'send_rulings' }))
@@ -132,12 +131,7 @@ export class ChatApp extends HTMLElement {
     this.addEventListener(SessionModelChangedEvent.type, (e) => post({ type: 'set_session_model', name: e.name }))
     this.addEventListener(ContinueInChatRequestedEvent.type, () => post({ type: 'continue_in_chat' }))
     this.addEventListener(McpReconnectRequestedEvent.type, (e) => post({ type: 'reconnect_mcp', server: e.server }))
-    this.addEventListener(SessionSelectedEvent.type, (e) => {
-      this.showCreating(false)
-      post({ type: 'switch_session', sessionId: e.sessionId })
-    })
-    this.addEventListener(SessionClosedEvent.type, (e) => post({ type: 'close_session', sessionId: e.sessionId }))
-    this.addEventListener(NewSessionViewRequestedEvent.type, () => this.showCreating(true))
+    this.addEventListener(SessionSelectedEvent.type, (e) => post({ type: 'switch_session', sessionId: e.sessionId }))
     this.addEventListener(PlanResumeRequestedEvent.type, (e) => post({ type: 'resume_plan', feature: e.feature }))
     this.addEventListener(DefaultProfileChangedEvent.type, (e) => post({ type: 'set_default_profile', name: e.name }))
     this.addEventListener(NewSessionRequestedEvent.type, (e) =>
@@ -157,16 +151,19 @@ export class ChatApp extends HTMLElement {
   private receive(message: ToWebview): void {
     switch (message.type) {
       case 'state': {
-        const active = message.tabs.find((t) => t.active)
-        this.activeSessionId = active?.id
-        if (!active && !this.creating) this.showCreating(true)
-        this.tabs.update(message.tabs, this.creating, { plans: message.plans, chats: message.chats, unfiled: message.unfiled })
-        this.newSession.update(message.profiles)
+        const tab = message.tab
+        if (tab?.id !== this.tabId) {
+          this.tabId = tab?.id
+          rememberTab(this.tabId)
+        }
+        // What the tab shows follows what it is: a session, or no session yet.
+        if ((tab === undefined) !== this.creating) this.showCreating(tab === undefined)
+        this.newSession.update(message.profiles, { plans: message.plans, chats: message.chats, unfiled: message.unfiled })
         this.composer.setSwitches({
           allowWrites: message.allowWrites,
           mcp: message.mcp,
-          model: active?.mode === 'chat' ? { current: active.profileName, options: message.models.map((m) => m.name) } : undefined,
-          continueInChat: active?.mode === 'docs',
+          model: tab?.mode === 'chat' ? { current: tab.profileName, options: message.models.map((m) => m.name) } : undefined,
+          continueInChat: tab?.mode === 'docs',
         })
         this.plan = message.plan
         const current = message.currentRun ? this.sections.get(message.currentRun) : undefined
@@ -176,7 +173,7 @@ export class ChatApp extends HTMLElement {
         break
       }
       case 'transcript':
-        if (message.sessionId !== this.activeSessionId) return
+        if (message.sessionId !== this.tabId) return
         this.showCreating(false)
         this.drawRuns(message.runs)
         this.composer.setHeldByQuestion(this.anyOpenQuestion)
@@ -186,7 +183,7 @@ export class ChatApp extends HTMLElement {
         this.composer.focusInput()
         break
       case 'event': {
-        if (message.sessionId !== this.activeSessionId) return
+        if (message.sessionId !== this.tabId) return
         const section = this.sectionFor(message.run)
         section.transcript.apply(message.event)
         this.composer.setHeldByQuestion(this.anyOpenQuestion)
@@ -200,9 +197,6 @@ export class ChatApp extends HTMLElement {
       case 'linked_file':
         // The answer belongs to the row that asked: the composer's, or the new-session card's.
         if (this.linkTarget?.isConnected) this.linkTarget.link(message.path)
-        break
-      case 'show_new_session':
-        this.showCreating(true)
         break
     }
   }

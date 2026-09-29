@@ -11,14 +11,13 @@ import type { SessionMode } from '../agent/session/session-manager'
 import type { RunBlock, SessionStatus } from '../agent/session/session-status'
 import type { ProfileDefaults } from '../settings/settings-store'
 
-/** One tab: a session that is live, or the one being looked at. */
+/** The session an editor tab shows; its `title` is what the tab is named. */
 export type SessionTab = {
   id: string
   title: string
   mode: SessionMode
   profileName: string
   status: SessionStatus
-  active: boolean
 }
 
 /** The active feature's plan: the plan bar and the plan view follow its stage. */
@@ -103,16 +102,17 @@ export type RunRef = { sessionId: string; mode: SessionMode; title: string; curr
 
 export type RunSection = RunRef & { events: SessionEvent[] }
 
-/** A plan on disk the tab bar offers to pick up; verified ones are finished and not offered. */
+/** A plan on disk the new-session screen offers to pick up; verified ones are finished and not offered. */
 export type ResumablePlan = { feature: string; status: 'draft' | 'approved' }
 
-/** A chat with no tab in play the tab bar offers to reopen; its transcript is the context it comes back with. */
+/** A chat with no editor tab open the new-session screen offers to reopen; its transcript is the context it comes back with. */
 export type ResumableChat = { sessionId: string; title: string; startedAt: string }
 
 export type ToWebview =
   | {
       type: 'state'
-      tabs: SessionTab[]
+      /** The session this editor tab shows; absent while it shows the new-session screen. */
+      tab?: SessionTab
       /** Allow-writes for the active session; absent when its phase decides writes itself or no session is active. */
       allowWrites?: boolean
       /** The active session's MCP servers as its engine last reported them; absent while it is not running or takes none. */
@@ -121,9 +121,9 @@ export type ToWebview =
       plan?: PlanState
       /** The run under the active tab that what the user types reaches; its section is the one open. */
       currentRun?: string
-      /** Plans under `plan/` still in progress, for the tab bar's resume list. */
+      /** Plans under `plan/` still in progress, for the new-session screen's pick-up list. */
       plans: ResumablePlan[]
-      /** Chats closed but not forgotten, newest first, for the same list. */
+      /** Chats with no editor tab open, newest first, for the same list. */
       chats: ResumableChat[]
       /** Decisions in `plan/unfiled-decisions.md` waiting to be filed into the specs and docs, for the same list. */
       unfiled: number
@@ -132,12 +132,10 @@ export type ToWebview =
       /** Every model a provider serves, for the composer's model switch on a chat session. */
       models: ModelProfile[]
     }
-  /** Full history of the active tab, one section per run under it, oldest first. */
+  /** Full history of the tab, one section per run under it, oldest first. */
   | { type: 'transcript'; sessionId: string; runs: RunSection[] }
   /** The file the editor had open when the composer asked to link it, as it will be named in the prompt. */
   | { type: 'linked_file'; path: string }
-  /** Show the new-session screen (from the Sessions view's + button). */
-  | { type: 'show_new_session' }
   | { type: 'event'; sessionId: string; run: RunRef; event: SessionEvent }
 
 /** The user's answer to a permission prompt, with the rules its lines were allowed by that later calls should pass on. */
@@ -180,9 +178,8 @@ export type FromWebview =
   | { type: 'continue_in_chat' }
   /** Tries one of the active session's MCP servers again. */
   | { type: 'reconnect_mcp'; server: string }
+  /** Opens the session in its own editor tab, revealing the tab it already has. */
   | { type: 'switch_session'; sessionId: string }
-  /** Stops the engine; the session stays in the list and resumes on the next prompt. */
-  | { type: 'close_session'; sessionId: string }
   /** `prompt`, when given, is sent as the first message; `files` are linked files it should read. */
   | { type: 'new_session'; mode: SessionMode; feature?: string; prompt?: string; files?: string[] }
   /** Sets the profile new sessions run on. */

@@ -6,6 +6,14 @@ import { dirname, join } from 'node:path'
 const watch = process.argv.includes('--watch')
 const require = createRequire(import.meta.url)
 
+// vsce builds one .vsix per target, so each build copies only the ripgrep that
+// target runs. Without a target (dev builds, watch) both are copied so the
+// extension runs on whichever machine loads it.
+const targetArg = process.argv.find((a) => a.startsWith('--target='))?.slice('--target='.length)
+const ripgrepPlatforms = { 'win32-x64': ['x64-win32'], 'win32-arm64': ['arm64-win32'] }
+if (targetArg && !ripgrepPlatforms[targetArg]) throw new Error(`unknown --target ${targetArg}`)
+const platforms = targetArg ? ripgrepPlatforms[targetArg] : ['x64-win32', 'arm64-win32']
+
 // The Agent SDK is bundled into the extension. Its cli.js (Claude Code as one
 // JavaScript file) and the ripgrep it expects next to itself are copied into
 // dist/ so the .vsix carries no node_modules. cli.js looks for ripgrep at
@@ -18,7 +26,7 @@ if (!watch) rmSync('dist', { recursive: true, force: true })
 mkdirSync('dist', { recursive: true })
 cpSync(join(sdkDir, 'cli.js'), 'dist/cli.mjs')
 cpSync(join(sdkDir, 'vendor', 'ripgrep', 'COPYING'), 'dist/vendor/ripgrep/COPYING')
-for (const platform of ['x64-win32', 'arm64-win32']) {
+for (const platform of platforms) {
   cpSync(join(sdkDir, 'vendor', 'ripgrep', platform), join('dist/vendor/ripgrep', platform), { recursive: true })
 }
 

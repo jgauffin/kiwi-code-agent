@@ -19,7 +19,7 @@ import { spawnWithRuntime, type NodeRuntime } from './node-runtime'
 import { bareToolName, toolServer } from './tool-server'
 import { ReadTracker } from '../openai-session/tools/read-tracker'
 import { fail, type Tool, type ToolContext } from '../openai-session/tools/tool'
-import { confirmReason, denyReason, gateCall, type AskPermission, type PermissionShown } from '../permissions/gate'
+import { confirmReason, denyReason, gateCall, reviewEdits, type AskPermission, type PermissionShown } from '../permissions/gate'
 import type { QuestionOutcome, UserQuestionRequest } from '../session/user-question'
 
 type QueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>; options?: Options }) => Query
@@ -338,7 +338,7 @@ export class SdkSession implements CodeSession {
       },
       authorize: (name, input) => denyReason(this.options.hooks, use(name, input)),
       confirm: (name, input) => confirmReason(this.options.hooks, ask, use(name, input)),
-      review: (title, edits) => ask(crypto.randomUUID(), 'RunScript', { files: edits.map((e) => e.label) }, { title, edits }),
+      review: (title, edits) => reviewEdits(this.options.hooks, ask, use('RunScript', { files: edits.map((e) => e.label) }), { title, edits }),
     }
   }
 

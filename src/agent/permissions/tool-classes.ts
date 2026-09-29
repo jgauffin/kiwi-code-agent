@@ -24,6 +24,8 @@ export const isShellTool = (toolName: string): boolean => SHELL_TOOLS.has(toolNa
 export const FILE_TOOLS: ReadonlySet<string> = new Set([
   'Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'NotebookRead', 'Glob', 'Grep',
   'JsonSchema', 'JsonQuery', 'MarkdownSearch', 'CodeOutline', 'CodeSearch', 'LS', 'ReadDir', 'Exists',
+  // Its staged changes name their files; the rules judge them as they judge any other write.
+  'RunScript',
   ...TRANSFER_TOOLS,
 ])
 

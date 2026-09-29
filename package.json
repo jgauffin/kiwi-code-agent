@@ -54,11 +54,6 @@
         {
           "id": "kiwiAgent.sessions",
           "name": "Sessions"
-        },
-        {
-          "type": "webview",
-          "id": "kiwiAgent.chat",
-          "name": "Chat"
         }
       ]
     },
@@ -66,7 +61,7 @@
       {
         "command": "kiwiAgent.newSession",
         "title": "New Session",
-        "icon": "$(add)"
+        "icon": "docs/logos/logo-square-transparent.svg"
       },
       {
         "command": "kiwiAgent.removeSession",
@@ -83,8 +78,9 @@
         "icon": "$(checklist)"
       },
       {
-        "command": "kiwiAgent.openChat",
-        "title": "KiwiAgent: Open Chat in Editor"
+        "command": "kiwiAgent.stopSession",
+        "title": "Stop Session",
+        "icon": "$(debug-stop)"
       },
       {
         "command": "kiwiAgent.openSettings",
@@ -105,6 +101,12 @@
       }
     ],
     "menus": {
+      "editor/title": [
+        {
+          "command": "kiwiAgent.newSession",
+          "group": "navigation@100"
+        }
+      ],
       "view/title": [
         {
           "command": "kiwiAgent.newSession",
@@ -118,20 +120,29 @@
         },
         {
           "command": "kiwiAgent.openSettings",
-          "when": "view == kiwiAgent.sessions || view == kiwiAgent.chat",
+          "when": "view == kiwiAgent.sessions",
           "group": "navigation@9"
         }
       ],
       "view/item/context": [
         {
+          "command": "kiwiAgent.stopSession",
+          "when": "view == kiwiAgent.sessions && viewItem == session",
+          "group": "inline@1"
+        },
+        {
           "command": "kiwiAgent.removeSession",
           "when": "view == kiwiAgent.sessions && viewItem == session",
-          "group": "inline"
+          "group": "inline@2"
         }
       ],
       "commandPalette": [
         {
           "command": "kiwiAgent.removeSession",
+          "when": "false"
+        },
+        {
+          "command": "kiwiAgent.stopSession",
           "when": "false"
         },
         {
@@ -450,10 +461,10 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "prompts": "esbuild scripts/prompts.ts --bundle --platform=node --format=cjs --target=node22 --external:vscode --log-level=warning --outfile=dist/prompts.cjs && node dist/prompts.cjs",
-    "package": "npm run typecheck && npm run build && vsce package --no-dependencies --target win32-x64 && vsce package --no-dependencies --target win32-arm64",
+    "package": "npm run typecheck && node esbuild.mjs --target=win32-x64 && vsce package --no-dependencies --target win32-x64 && node esbuild.mjs --target=win32-arm64 && vsce package --no-dependencies --target win32-arm64",
     "link-dev": "node scripts/link-dev.mjs",
     "unlink-dev": "node scripts/link-dev.mjs --unlink",
-    "publish": "npm run typecheck && npm run build && vsce publish --no-dependencies --target win32-x64 win32-arm64"
+    "publish": "npm run typecheck && node esbuild.mjs --target=win32-x64 && vsce publish --no-dependencies --target win32-x64 && node esbuild.mjs --target=win32-arm64 && vsce publish --no-dependencies --target win32-arm64"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.2.112",
