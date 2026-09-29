@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { SessionManager, type SessionMode, type SessionRecord, type SessionStore } from './agent/session/session-manager'
-import { SessionsTree } from './chat/sessions-tree'
+import { SessionsTree, type SessionNode } from './chat/sessions-tree'
 import { providerModel, resolveStep, type ModelProfile } from './agent/session/model-profile'
 import type { CodeSession } from './agent/session/code-session'
 import { SdkSession } from './agent/sdk-session/sdk-session'
@@ -505,7 +505,13 @@ export function activate(context: vscode.ExtensionContext): void {
     chat.onDidChange(() => tree.refresh()),
     vscode.commands.registerCommand('kiwiAgent.newSession', () => chat.showNewSession()),
     vscode.commands.registerCommand('kiwiAgent.openSession', (id: string) => chat.open(id)),
-    vscode.commands.registerCommand('kiwiAgent.removeSession', (record: SessionRecord) => chat.remove(record.id)),
+    vscode.commands.registerCommand('kiwiAgent.removeSession', async (node: SessionNode) => {
+      if (node.kind !== 'session') return
+      const { record } = node
+      // A plan entry stands for its feature: removing only its newest plan session would bring an older one up in its place.
+      const ids = record.mode === 'plan' ? sessions.list().filter((r) => r.feature === record.feature).map((r) => r.id) : [record.id]
+      for (const id of ids) await chat.remove(id)
+    }),
     vscode.commands.registerCommand('kiwiAgent.openChat', () => chat.openInEditor()),
     vscode.commands.registerCommand('kiwiAgent.openSettings', () => settingsPanel.open()),
     // The new-session pickers show the profiles as settings hold them, from the page or from settings.json.

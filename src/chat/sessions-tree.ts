@@ -1,6 +1,7 @@
 import * as vscode from 'vscode'
-import { isBuild, type SessionManager, type SessionMode, type SessionRecord } from '../agent/session/session-manager'
+import type { SessionManager, SessionMode, SessionRecord } from '../agent/session/session-manager'
 import type { SessionStatus } from '../agent/session/session-status'
+import { sessionGroups, type SessionGroups } from './session-groups'
 
 const MODE_LABEL: Record<SessionMode, string> = {
   chat: 'Chat',
@@ -24,8 +25,15 @@ const STATUS_ICON: Record<SessionStatus, { icon: string; color?: string }> = {
   error: { icon: 'error', color: 'charts.red' },
 }
 
-/** The Sessions view: every session, with its status; click opens it in the chat. */
-export class SessionsTree implements vscode.TreeDataProvider<SessionRecord> {
+const GROUP: Record<keyof SessionGroups, { label: string; icon: string }> = {
+  chats: { label: 'Chats', icon: 'comment-discussion' },
+  plans: { label: 'Plans', icon: 'checklist' },
+}
+
+export type SessionNode = { kind: 'group'; group: keyof SessionGroups } | { kind: 'session'; record: SessionRecord }
+
+/** The Sessions view: the chats and the plans in a folder each, with their status; click opens one in the chat. */
+export class SessionsTree implements vscode.TreeDataProvider<SessionNode> {
   private readonly changed = new vscode.EventEmitter<void>()
   readonly onDidChangeTreeData = this.changed.event
 
@@ -39,12 +47,27 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionRecord> {
     this.changed.fire()
   }
 
-  /** A run under another session (a check) shows on its parent, and a build shows nowhere: neither is an entry of its own. */
-  getChildren(): SessionRecord[] {
-    return this.sessions.list().filter((r) => !r.parentId && !isBuild(r.mode))
+  getChildren(node?: SessionNode): SessionNode[] {
+    const groups = sessionGroups(this.sessions.list())
+    if (!node) return (['chats', 'plans'] as const).filter((g) => groups[g].length > 0).map((group) => ({ kind: 'group', group }))
+    if (node.kind === 'group') return groups[node.group].map((record) => ({ kind: 'session', record }))
+    return []
   }
 
-  getTreeItem(record: SessionRecord): vscode.TreeItem {
+  getTreeItem(node: SessionNode): vscode.TreeItem {
+    return node.kind === 'group' ? this.groupItem(node.group) : this.sessionItem(node.record)
+  }
+
+  private groupItem(group: keyof SessionGroups): vscode.TreeItem {
+    const { label, icon } = GROUP[group]
+    const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Expanded)
+    item.id = `group:${group}`
+    item.iconPath = new vscode.ThemeIcon(icon)
+    item.contextValue = 'group'
+    return item
+  }
+
+  private sessionItem(record: SessionRecord): vscode.TreeItem {
     const item = new vscode.TreeItem(record.title)
     const status = this.statusOf(record.id)
     const active = record.id === this.activeId()
