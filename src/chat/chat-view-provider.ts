@@ -125,6 +125,8 @@ export const CHAT_PANEL_TYPE = 'kiwiAgent.chatPanel'
  */
 export class ChatViewProvider implements vscode.WebviewViewProvider {
   private readonly webviews = new Set<vscode.Webview>()
+  /** The chat panels open in editor groups, so a new one can join the group they are in. */
+  private readonly panels = new Set<vscode.WebviewPanel>()
   private readonly statuses = new Map<string, SessionStatus>()
   /** Per session, why its last turn failed; absent once a turn goes through or the next prompt is sent. */
   private readonly failures = new Map<string, string>()
@@ -192,15 +194,19 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   }
 
   openInEditor(): void {
-    this.adoptPanel(
-      vscode.window.createWebviewPanel(CHAT_PANEL_TYPE, 'KiwiAgent', vscode.ViewColumn.Beside, { retainContextWhenHidden: true }),
-    )
+    // A panel joins the group an open one already sits in, as another tab there, rather than splitting the editor again.
+    const column = [...this.panels].find((p) => p.viewColumn !== undefined)?.viewColumn ?? vscode.ViewColumn.Beside
+    this.adoptPanel(vscode.window.createWebviewPanel(CHAT_PANEL_TYPE, 'KiwiAgent', column, { retainContextWhenHidden: true }))
   }
 
   /** A new editor panel, or one VS Code revived after a window reload. */
   adoptPanel(panel: vscode.WebviewPanel): void {
+    this.panels.add(panel)
     this.attach(panel.webview)
-    panel.onDidDispose(() => this.webviews.delete(panel.webview))
+    panel.onDidDispose(() => {
+      this.panels.delete(panel)
+      this.webviews.delete(panel.webview)
+    })
   }
 
   async newSession(mode: SessionMode, feature?: string, prompt?: string): Promise<SessionRecord> {

@@ -84,7 +84,8 @@
       },
       {
         "command": "kiwiAgent.openChat",
-        "title": "KiwiAgent: Open Chat in Editor"
+        "title": "KiwiAgent: Open Chat in Editor",
+        "icon": "media/kiwi.svg"
       },
       {
         "command": "kiwiAgent.openSettings",
@@ -105,6 +106,12 @@
       }
     ],
     "menus": {
+      "editor/title": [
+        {
+          "command": "kiwiAgent.openChat",
+          "group": "navigation"
+        }
+      ],
       "view/title": [
         {
           "command": "kiwiAgent.newSession",
