@@ -86,7 +86,7 @@ describe('plan housekeeping', () => {
     expect(await exists('.agent/plan/audit.review.md')).toBe(true)
   })
 
-  it('postponed_cleanup_keeps_the_feature_open', async () => {
+  it('postponed_cleanup_keeps_the_working_files_however_old', async () => {
     await workspace(
       { 'plan/audit.spec.md': approvedSpec, '.agent/plan/audit.tasks.json': renderBoard(withCleanupDecision(finished, 'postponed')) },
       90,

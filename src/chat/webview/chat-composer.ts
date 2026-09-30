@@ -44,7 +44,9 @@ type Switches = {
 export class ChatComposer extends HTMLElement {
   private readonly template = compileTemplate(`
     <form r-submit="submit(event)">
-      <textarea name="prompt" rows="3" placeholder="{{placeholder}}" disabled="{{held}}" r-keydown="keydown(event)"></textarea>
+      <p class="recipient" if="hasRecipient">{{recipientText}}</p>
+      <p class="refusal" if="refused">{{refusal}}</p>
+      <textarea name="prompt" rows="3" placeholder="{{placeholder}}" disabled="{{blocked}}" r-keydown="keydown(event)"></textarea>
       <div class="actions">
         <span class="switches">
           <label class="allow-writes" if="allowWritesAvailable" title="Let this session write files without asking. Bash and other tools still ask; deny rules still block.">
@@ -61,7 +63,7 @@ export class ChatComposer extends HTMLElement {
         </span>
         <context-meter class="context"></context-meter>
         <button type="button" class="stop" r-click="stop()">Stop</button>
-        <button type="submit" class="send" disabled="{{held}}">Send</button>
+        <button type="submit" class="send" disabled="{{blocked}}">Send</button>
       </div>
       <div class="mcp-servers" if="mcpAvailable">
         <span loop="s in servers" class="server {{s.status}}" title="{{s.title}}">
@@ -74,6 +76,10 @@ export class ChatComposer extends HTMLElement {
   private switches: Switches = { allowWrites: undefined, mcp: undefined, model: undefined }
   private context: ContextUsage | undefined
   private held = false
+  /** Who what is typed reaches, named so a tab with several conversations never leaves it to a guess. */
+  private recipient: string | undefined
+  /** Why the conversation shown takes no input; nothing is sent while it stands. */
+  private refusal: string | undefined
 
   connectedCallback(): void {
     if (this.childElementCount > 0) return
@@ -99,16 +105,32 @@ export class ChatComposer extends HTMLElement {
     this.render()
   }
 
+  /** The run what is typed reaches, by name, and why it takes no input when it does not. */
+  setTarget(recipient: string | undefined, refusal: string | undefined): void {
+    if (this.recipient === recipient && this.refusal === refusal) return
+    this.recipient = recipient
+    this.refusal = refusal
+    this.render()
+  }
+
   focusInput(): void {
-    if (!this.held) this.textarea.focus()
+    if (!this.blocked) this.textarea.focus()
+  }
+
+  private get blocked(): boolean {
+    return this.held || this.refusal !== undefined
   }
 
   private render(): void {
     const { allowWrites, mcp, model, continueInChat } = this.switches
     this.template.render(
       {
-        held: this.held,
-        placeholder: this.held ? 'Answer or skip the question above first.' : 'Ask for a change...',
+        blocked: this.blocked,
+        hasRecipient: this.recipient !== undefined,
+        recipientText: `To: ${this.recipient ?? ''}`,
+        refused: this.refusal !== undefined,
+        refusal: this.refusal ?? '',
+        placeholder: this.refusal !== undefined ? '' : this.held ? 'Answer or skip the question above first.' : 'Ask for a change...',
         allowWritesAvailable: allowWrites !== undefined,
         allowWrites: allowWrites ?? false,
         mcpAvailable: mcp !== undefined && mcp.length > 0,
@@ -152,7 +174,7 @@ export class ChatComposer extends HTMLElement {
 
   private send(): void {
     const text = this.textarea.value.trim()
-    if (text === '' || this.held) return
+    if (text === '' || this.blocked) return
     const files = this.linkedFiles.paths
     this.textarea.value = ''
     this.linkedFiles.clear()

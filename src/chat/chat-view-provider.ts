@@ -1,5 +1,5 @@
 import * as vscode from 'vscode'
-import { isBuild, isFeatureless, isPlanning, pickConversationalRun, stepOf, type SessionManager, type SessionMode, type SessionRecord } from '../agent/session/session-manager'
+import { isBuild, isFeatureless, isPlanning, stepOf, type SessionManager, type SessionMode, type SessionRecord } from '../agent/session/session-manager'
 import { phaseRefusalMessage, type ModelProfile, type PhaseProfile, type Step } from '../agent/session/model-profile'
 import { PHASE_STEPS, chooseProfile, isPhaseStep, shouldApplyPhaseChoice, type PhaseChoiceStore, type PhaseStepName } from '../agent/session/phase-choices'
 import type { McpServerState, SessionEvent } from '../agent/session/code-session'
@@ -82,6 +82,8 @@ import { sharedBuild } from '../agent/session/generated-context'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative } from 'node:path'
 import { linkedFilePath, withLinkedFiles } from './linked-files'
+import { refusal } from './phase-runs'
+import { advance, editedUnitFile, finished, measured, resumed, settled, startProgress, type CleanupProgress } from './cleanup-progress'
 import type {
   CleanupSweep,
   CleanupUnit,
@@ -89,6 +91,7 @@ import type {
   PhaseProfileState,
   PlanState,
   ResumableChat,
+  RunControls,
   RunRef,
   RunSection,
   RunState,
@@ -160,6 +163,8 @@ export class ChatViewProvider {
   private readonly verifyFailures = new Map<string, number>()
   /** The cleanup run per feature: what it is doing, or how the last one ended. */
   private readonly cleanups = new Map<string, RunState>()
+  /** The cleanup run's split per feature, unit by unit, for the Cleanup tab; cleared with the cleanup line by a new test run. */
+  private readonly cleanupProgress = new Map<string, CleanupProgress>()
   /** What the last size sweep found per feature: the offer the user rules on. Absent until one has run in this window. */
   private readonly sweeps = new Map<string, Oversized[]>()
   /** Features whose planner was handed the contract problems; its next finished turn completes the migration. */
@@ -421,7 +426,7 @@ export class ChatViewProvider {
       void this.panelOf(tabId)?.panel.webview.postMessage({
         type: 'event',
         sessionId: tabId,
-        run: this.runRef(record, this.currentRun(record)),
+        run: this.runRef(record),
         event,
       } satisfies ToWebview)
     }
@@ -598,13 +603,16 @@ export class ChatViewProvider {
    * Runs the test commands over the tasks' files, records the outcome, and
    * hands a failure to the implementer, up to the budget of consecutive
    * failures; past it the failed record waits for the user. A manual run
-   * starts the count over.
+   * starts the count over. True when the tests passed.
    */
-  private async verify(feature: string, manual: boolean): Promise<void> {
-    if (this.verifications.get(feature)?.live) return
+  private async verify(feature: string, manual: boolean): Promise<boolean> {
+    if (this.verifications.get(feature)?.live) return false
     if (manual) this.verifyFailures.delete(feature)
     // A new run makes the last cleanup's outcome old news; one still running folds this run into its own.
-    if (!this.cleanups.get(feature)?.live) this.cleanups.delete(feature)
+    if (!this.cleanups.get(feature)?.live) {
+      this.cleanups.delete(feature)
+      this.cleanupProgress.delete(feature)
+    }
     this.verifications.set(feature, { live: true, text: 'Running the tests…' })
     await this.sendState()
     let text: string
@@ -647,6 +655,7 @@ export class ChatViewProvider {
     this.changed.fire()
     if (held.length > 0) await this.askAboutForeignFailures(feature, held)
     if (passed) await this.sweepForCleanup(feature)
+    return passed
   }
 
   /** The docs listing after approval has ended: the build starts on its own, so approving is the only act it takes. */
@@ -731,7 +740,8 @@ export class ChatViewProvider {
       // A fix run is over once the board goes back to the test run; left open, it holds the plan's tab against the cleanup.
       if (!verificationDue(await readTasks(tasksPath(this.workspaceRoot, feature)))) return
       await this.sessions.settle(record.id)
-      return this.verify(feature, false)
+      await this.verify(feature, false)
+      return
     }
     const board = await readBoard(tasksPath(this.workspaceRoot, feature))
     if (!board || !taskSettled(board, record.task)) return
@@ -848,14 +858,20 @@ export class ChatViewProvider {
     if (!profile) return
     const child = await this.sessions.create(profile, 'cleanup', feature, { parentId: parent.id, files: paths })
     this.cleanups.set(feature, { live: true, text: 'Splitting oversized units…' })
+    this.cleanupProgress.set(feature, startProgress(flagged.map((u) => this.cleanupUnit(u))))
     await this.sendState()
     await this.sessions.send(child.id, cleanupKickoff(sizeReport(this.workspaceRoot, flagged), false))
   }
 
-  /** A flagged unit as the plan view reads it: the path workspace-relative, so it links like every other path there. */
+  /** A path as the plan view reads it: workspace-relative with forward slashes, so it links like every other path there. */
+  private workspaceRelative(path: string): string {
+    return (isAbsolute(path) ? relative(this.workspaceRoot, path) : path).split('\\').join('/')
+  }
+
+  /** A flagged unit as the plan view reads it. */
   private cleanupUnit(unit: Oversized): CleanupUnit {
     return {
-      path: relative(this.workspaceRoot, unit.path).split('\\').join('/'),
+      path: this.workspaceRelative(unit.path),
       line: unit.line,
       name: unit.name,
       kind: unit.kind,
@@ -876,7 +892,7 @@ export class ChatViewProvider {
     this.changed.fire()
   }
 
-  /** A cleanup run's events also become the one line the plan bar shows. */
+  /** A cleanup run's events become the one line the plan bar shows and the split the Cleanup tab follows. */
   private followCleanup(child: SessionRecord, event: SessionEvent): void {
     const feature = child.feature!
     const cleanup = this.cleanups.get(feature)
@@ -889,10 +905,46 @@ export class ChatViewProvider {
       void this.finishCleanup(child, [event.message])
       return
     }
+    const progressMoved = this.followCleanupProgress(feature, event)
     const line = progressLine(event, 'Cleanup')
-    if (line === undefined || line === cleanup.text) return
-    this.cleanups.set(feature, { live: true, text: line })
-    void this.sendState()
+    const lineMoved = line !== undefined && line !== cleanup.text
+    if (lineMoved) this.cleanups.set(feature, { live: true, text: line })
+    if (lineMoved || progressMoved) void this.sendState()
+  }
+
+  /** True when the split moved; an edit on a flagged file has that file measured again. */
+  private followCleanupProgress(feature: string, event: SessionEvent): boolean {
+    const progress = this.cleanupProgress.get(feature)
+    if (!progress) return false
+    const toRelative = (path: string) => this.workspaceRelative(path)
+    const next = advance(progress, event, toRelative)
+    this.cleanupProgress.set(feature, next)
+    const file = editedUnitFile(next, event, toRelative)
+    if (file) {
+      this.remeasure(feature, file).catch((error: unknown) => {
+        void vscode.window.showWarningMessage(`KiwiAgent: cannot measure ${file} again: ${error instanceof Error ? error.message : String(error)}`)
+      })
+    }
+    return next !== progress
+  }
+
+  private async remeasure(feature: string, path: string): Promise<void> {
+    const over = await oversizedFiles(this.workspaceRoot, [join(this.workspaceRoot, path)], this.sizeLimits.limits(), [])
+    // Read after the measure: events that came in meanwhile moved the progress on.
+    const progress = this.cleanupProgress.get(feature)
+    if (!progress) return
+    this.cleanupProgress.set(feature, measured(progress, path, over.map((u) => this.cleanupUnit(u))))
+    await this.sendState()
+  }
+
+  /** Talking to a cleanup that has ended starts it splitting again, so its turn is followed and ends in the same measure and test run. */
+  private async reengageCleanup(run: SessionRecord): Promise<void> {
+    const feature = run.feature
+    if (!feature || this.cleanups.get(feature)?.live) return
+    this.cleanups.set(feature, { live: true, text: 'answering…' })
+    const progress = this.cleanupProgress.get(feature)
+    if (progress) this.cleanupProgress.set(feature, resumed(progress))
+    await this.sendState()
   }
 
   /**
@@ -905,8 +957,11 @@ export class ChatViewProvider {
     // Marked over before the first await, so a late event from the dying engine cannot finish it twice.
     this.cleanups.set(feature, { live: false, text: this.cleanups.get(feature)?.text ?? '' })
     await this.sessions.close(child.id)
+    const progress = this.cleanupProgress.get(feature)
     if (errors.length > 0) {
-      this.cleanups.set(feature, { live: false, text: `Cleanup failed: ${errors.join('; ')}` })
+      const text = `Cleanup failed: ${errors.join('; ')}`
+      this.cleanups.set(feature, { live: false, text })
+      if (progress) this.cleanupProgress.set(feature, settled(progress, false, text))
       await this.sendState()
       this.changed.fire()
       return
@@ -918,8 +973,13 @@ export class ChatViewProvider {
     await recordCleanupDecision(tasksPath(this.workspaceRoot, feature), 'done')
     this.sweeps.delete(feature)
     this.cleanups.set(feature, { live: true, text: `${split}; running the tests…` })
-    await this.verify(feature, false)
-    this.cleanups.set(feature, { live: false, text: `${split}; ${this.verifications.get(feature)?.text ?? 'tests not run'}` })
+    const measuredProgress = progress ? finished(progress, left.map((u) => this.cleanupUnit(u))) : undefined
+    if (measuredProgress) this.cleanupProgress.set(feature, measuredProgress)
+    await this.sendState()
+    const passed = await this.verify(feature, false)
+    const text = `${split}; ${this.verifications.get(feature)?.text ?? 'tests not run'}`
+    this.cleanups.set(feature, { live: false, text })
+    if (measuredProgress) this.cleanupProgress.set(feature, settled(measuredProgress, passed, this.verifications.get(feature)?.text ?? 'tests not run'))
     await this.sendState()
     this.changed.fire()
   }
@@ -1114,8 +1174,10 @@ export class ChatViewProvider {
           await this.newSession('chat', undefined, text, entry)
           return
         }
-        // The tab's current run is what the person is talking to; the runs before it are history, and hear nothing.
-        const run = this.currentRun(shown)
+        // The phase the person picked names the run they talk to; nothing here guesses another.
+        if (!message.sessionId) throw new Error('The message names no conversation to go to.')
+        const run = this.targetOf(shown, message.sessionId, true)
+        if (run.mode === 'cleanup') await this.reengageCleanup(run)
         // A choice made since this run last spoke takes effect now, on its next turn (B3).
         await this.applyPhaseChoice(run)
         // A model switch picked while a turn of this chat session was in flight takes effect now (B10).
@@ -1150,14 +1212,13 @@ export class ChatViewProvider {
         await this.sessions.respondToQuestion(message.sessionId, message.requestId, message.outcome)
         return
       case 'interrupt':
-        // A task run building holds the floor, so Stop reaches it.
-        if (shown) await this.sessions.interrupt(this.currentRun(shown).id)
+        if (shown) await this.sessions.interrupt(this.targetOf(shown, message.sessionId, false).id)
         return
       case 'compact':
-        if (shown) this.sessions.compact(this.currentRun(shown).id)
+        if (shown) this.sessions.compact(this.targetOf(shown, message.sessionId, false).id)
         return
       case 'set_allow_writes':
-        if (shown) this.allowWrites.setEnabled(this.currentRun(shown).id, message.enabled)
+        if (shown) this.allowWrites.setEnabled(this.targetOf(shown, message.sessionId, false).id, message.enabled)
         void this.sendState()
         return
       case 'set_session_model': {
@@ -1174,7 +1235,7 @@ export class ChatViewProvider {
         }
         return
       case 'reconnect_mcp':
-        if (shown) await this.sessions.reconnectMcp(this.currentRun(shown).id, message.server)
+        if (shown) await this.sessions.reconnectMcp(this.targetOf(shown, message.sessionId, false).id, message.server)
         return
       case 'set_default_profile':
         await this.profileDefaults.set(message.name)
@@ -1302,6 +1363,8 @@ export class ChatViewProvider {
           : undefined
         if (!feature || !child) return
         this.cleanups.set(feature, { live: false, text: 'Cleanup stopped' })
+        const progress = this.cleanupProgress.get(feature)
+        if (progress) this.cleanupProgress.set(feature, settled(progress, false, 'Cleanup stopped'))
         await this.sessions.close(child.id)
         await this.sendState()
         this.changed.fire()
@@ -1474,6 +1537,7 @@ export class ChatViewProvider {
       ...(verification ? { verification } : {}),
       ...(cleanup ? { cleanup } : {}),
       ...(sweep ? { cleanupSweep: sweep } : {}),
+      ...(this.cleanupProgress.has(feature) ? { cleanupProgress: this.cleanupProgress.get(feature)! } : {}),
       ...(tasks.exists && tasks.cleanup ? { cleanupDecision: tasks.cleanup } : {}),
       ...(tasks.exists && tasks.verification ? { lastVerification: tasks.verification } : {}),
       tasks: tasks.exists ? tasks.tasks : [],
@@ -1530,14 +1594,13 @@ export class ChatViewProvider {
     return this.runsOf(record)[0]?.id ?? record.id
   }
 
-  /**
-   * The run holding the floor: the task run building now, else the newest
-   * session with a tab of its own. A mapping or a cleanup never holds it:
-   * waking one with a follow-up meant for the planner would put the question
-   * to a run scoped to something else.
-   */
-  private currentRun(record: SessionRecord): SessionRecord {
-    return pickConversationalRun(this.runsOf(record), (id) => this.sessions.isLive(id)) ?? record
+  /** The run a message from the tab names, which has to be one of the tab's; `speaking` also asks that it takes input. */
+  private targetOf(shown: SessionRecord, sessionId: string, speaking: boolean): SessionRecord {
+    const run = this.runsOf(shown).find((r) => r.id === sessionId)
+    if (!run) throw new Error('That conversation is not under this tab.')
+    const refused = speaking ? refusal(this.runControls(run)) : undefined
+    if (refused) throw new Error(refused)
+    return run
   }
 
   /**
@@ -1572,18 +1635,12 @@ export class ChatViewProvider {
             return undefined
           })
         : undefined
-      // The switches belong to the run the person is talking to, not to the session the tab is keyed by.
-      const run = record ? this.currentRun(record) : undefined
-      // Planning phases auto-allow their in-scope writes and deny the rest, so the switch has nothing to decide there.
-      const writesAsked = run !== undefined && !isPlanning(run.mode)
       void entry.panel.webview.postMessage({
         type: 'state',
         ...(tab ? { tab } : {}),
-        ...(run && writesAsked ? { allowWrites: this.allowWrites.isEnabled(run.id) } : {}),
-        ...(run && this.mcpServers.has(run.id) ? { mcp: this.mcpServers.get(run.id)! } : {}),
-        compactable: run !== undefined && this.sessions.isLive(run.id),
+        // The switches belong to each run: the phase the person picked decides which of them the composer shows.
+        runs: record ? this.runsOf(record).map((r) => this.runControls(r)) : [],
         ...(plan ? { plan } : {}),
-        ...(run ? { currentRun: run.id } : {}),
         ...shared,
       } satisfies ToWebview)
     }
@@ -1610,15 +1667,32 @@ export class ChatViewProvider {
     const tabId = this.tabIdOf(record)
     const panel = this.panelOf(tabId)
     if (!panel) return
-    const current = this.currentRun(record)
     const runs: RunSection[] = []
     for (const run of this.runsOf(record)) {
-      runs.push({ ...this.runRef(run, current), events: await this.sessions.transcript(run.id) })
+      runs.push({ ...this.runRef(run), events: await this.sessions.transcript(run.id) })
     }
     void panel.panel.webview.postMessage({ type: 'transcript', sessionId: tabId, runs } satisfies ToWebview)
   }
 
-  private runRef(run: SessionRecord, current: SessionRecord): RunRef {
-    return { sessionId: run.id, mode: run.mode, title: run.title, current: run.id === current.id }
+  private runRef(run: SessionRecord): RunRef {
+    return {
+      sessionId: run.id,
+      mode: run.mode,
+      title: run.title,
+      ...(run.task !== undefined ? { task: run.task } : {}),
+      ...(run.fixAttempt !== undefined ? { fixAttempt: run.fixAttempt } : {}),
+    }
+  }
+
+  private runControls(run: SessionRecord): RunControls {
+    return {
+      ...this.runRef(run),
+      profileName: run.profile.name,
+      live: this.sessions.isLive(run.id),
+      settled: run.settled === true,
+      // Planning phases auto-allow their in-scope writes and deny the rest, so the switch has nothing to decide there.
+      ...(!isPlanning(run.mode) ? { allowWrites: this.allowWrites.isEnabled(run.id) } : {}),
+      ...(this.mcpServers.has(run.id) ? { mcp: this.mcpServers.get(run.id)! } : {}),
+    }
   }
 }

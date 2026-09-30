@@ -11,6 +11,7 @@ import type { PhaseStepName } from '../agent/session/phase-choices'
 import type { SessionMode } from '../agent/session/session-manager'
 import type { RunBlock, SessionStatus } from '../agent/session/session-status'
 import type { ProfileDefaults } from '../settings/settings-store'
+import type { CleanupProgress } from './cleanup-progress'
 
 /** The session an editor tab shows; its `title` is what the tab is named. */
 export type SessionTab = {
@@ -55,6 +56,8 @@ export type PlanState = {
   cleanup?: RunState
   /** What the size sweep found after the tests passed; absent until one has run in this window. */
   cleanupSweep?: CleanupSweep
+  /** The split unit by unit, from the cleanup run's start in this window; absent before one ran. */
+  cleanupProgress?: CleanupProgress
   /** What the user said about the cleanup, as the tasks file records it; absent while the offer stands open. */
   cleanupDecision?: CleanupDecision
   /** The newest record in the tasks file, the outcome that stands. */
@@ -101,10 +104,31 @@ export type CleanupSweep = { units: CleanupUnit[] }
 
 /**
  * One run under a tab: the planner, a mapping, an implementer, a cleanup.
- * Each keeps its own conversation; the tab shows them one under the other,
- * and only the current one takes what the user types.
+ * Each keeps its own conversation; the phase picked on the stepper decides
+ * which of them the chat shows and what the user types reaches.
  */
-export type RunRef = { sessionId: string; mode: SessionMode; title: string; current: boolean }
+export type RunRef = {
+  sessionId: string
+  mode: SessionMode
+  title: string
+  /** The task a task run builds. */
+  task?: string
+  /** Which failed test run in a row a fix run mends. */
+  fixAttempt?: number
+}
+
+/** A run as the composer needs it when it is the one typed to: whether it is running, done, and its switches. */
+export type RunControls = RunRef & {
+  /** The profile its next turn runs on. */
+  profileName: string
+  live: boolean
+  /** Its job is done: a settled task or fix run is history and takes no input. */
+  settled: boolean
+  /** Absent when its phase decides writes itself. */
+  allowWrites?: boolean
+  /** Its MCP servers as its engine last reported them; absent while it is not running or takes none. */
+  mcp?: McpServerState[]
+}
 
 export type RunSection = RunRef & { events: SessionEvent[] }
 
@@ -119,16 +143,10 @@ export type ToWebview =
       type: 'state'
       /** The session this editor tab shows; absent while it shows the new-session screen. */
       tab?: SessionTab
-      /** Allow-writes for the active session; absent when its phase decides writes itself or no session is active. */
-      allowWrites?: boolean
-      /** The active session's MCP servers as its engine last reported them; absent while it is not running or takes none. */
-      mcp?: McpServerState[]
-      /** The run what the user types reaches has a running engine, so its conversation can be compacted. */
-      compactable?: boolean
+      /** Every run under the tab, oldest first; empty on the new-session screen. */
+      runs: RunControls[]
       /** Present when the active session is a plan session. */
       plan?: PlanState
-      /** The run under the active tab that what the user types reaches; its section is the one open. */
-      currentRun?: string
       /** Plans under `plan/` still in progress, for the new-session screen's pick-up list. */
       plans: ResumablePlan[]
       /** Chats with no editor tab open, newest first, for the same list. */
@@ -169,25 +187,26 @@ export type ReviewAction =
 
 export type FromWebview =
   | { type: 'ready' }
-  /** `files` are the composer's linked files; the prompt tells the agent to read them. */
-  | { type: 'send'; text: string; files?: string[] }
+  /** `files` are the composer's linked files; the prompt tells the agent to read them. `sessionId` is the run typed to, absent on the new-session screen. */
+  | { type: 'send'; text: string; files?: string[]; sessionId?: string }
   /** Answers with `linked_file` for the file open in the editor, so the composer can link it. */
   | { type: 'link_open_file' }
   /** `sessionId` is the run whose section the card sits in: a tab holds several, and only that one asked. */
   | { type: 'permission'; sessionId: string; requestId: string; decision: UserPermissionDecision }
   /** The card's answers to a question the model asked, or that the user left it unanswered. */
   | { type: 'question'; sessionId: string; requestId: string; outcome: QuestionOutcome }
-  | { type: 'interrupt' }
-  /** Folds the current run's conversation into a summary to make room; a turn in flight carries on after it. */
-  | { type: 'compact' }
-  /** File writes in the active session go through without a prompt while on. */
-  | { type: 'set_allow_writes'; enabled: boolean }
+  /** The next five name the run the phase's chat talks to: a tab holds several. */
+  | { type: 'interrupt'; sessionId: string }
+  /** Folds the run's conversation into a summary to make room; a turn in flight carries on after it. */
+  | { type: 'compact'; sessionId: string }
+  /** File writes in the run go through without a prompt while on. */
+  | { type: 'set_allow_writes'; sessionId: string; enabled: boolean }
   /** Switches the active chat session to a model named as `models` on `state` lists it. */
   | { type: 'set_session_model'; name: string }
   /** Carries the active docs evaluation's conversation into a new chat with the full tool set. */
   | { type: 'continue_in_chat' }
-  /** Tries one of the active session's MCP servers again. */
-  | { type: 'reconnect_mcp'; server: string }
+  /** Tries one of the run's MCP servers again. */
+  | { type: 'reconnect_mcp'; sessionId: string; server: string }
   /** Opens the session in its own editor tab, revealing the tab it already has. */
   | { type: 'switch_session'; sessionId: string }
   /** `prompt`, when given, is sent as the first message; `files` are linked files it should read. */

@@ -124,8 +124,24 @@ describe('PlanBar steps', () => {
     const running = bar(plan({ stage: 'checking', status: 'approved', check: { live: true, text: 'reading src' } }))
     expect(running.querySelector('.step.current')).not.toBeNull()
     expect(running.querySelector('.step.yours')).toBeNull()
-    const offered = bar(plan({ stage: 'verified', status: 'approved', commentable: false, atWork: false, cleanupSweep: { units: [{ path: 'src/a.ts', line: 1, name: 'a', kind: 'function', lines: 60, threshold: 25 }] } }))
-    expect(offered.querySelector('.step.current.yours')!.textContent).toBe('Cleanup')
+    const building = bar(plan({ stage: 'verification', status: 'approved', commentable: false, atWork: false }))
+    expect(building.querySelector('.step.current.yours')!.textContent).toBe('Verify')
+  })
+
+  it('a_plan_whose_tests_passed_is_complete_whatever_the_cleanup_left', () => {
+    const steps = (node: HTMLElement) => [...node.querySelectorAll<HTMLElement>('.step')].map((s) => s.className.replace('step ', ''))
+    const unit = { path: 'src/a.ts', line: 1, name: 'a', kind: 'function' as const, lines: 60, threshold: 25 }
+    const offered = bar(plan({ stage: 'verified', status: 'approved', commentable: false, atWork: false, cleanupSweep: { units: [unit] } }))
+    expect(steps(offered).every((s) => s === 'done')).toBe(true)
+    // The split stays on offer: the dev decides what to do with what is over the limit.
+    expect(offered.querySelector('.next.goto')!.textContent).toContain('1 unit over the limit')
+    const leftOver = bar(plan({ stage: 'verified', status: 'approved', commentable: false, atWork: false, cleanupSweep: { units: [unit] }, cleanupDecision: 'postponed' }))
+    expect(steps(leftOver).every((s) => s === 'done')).toBe(true)
+  })
+
+  it('a_complete_plan_lights_the_cleanup_step_again_while_a_cleanup_runs', () => {
+    const running = bar(plan({ stage: 'verified', status: 'approved', commentable: false, cleanupDecision: 'done', cleanup: { live: true, text: 'Edit src/a.ts' } }))
+    expect(running.querySelector('.step.current')!.textContent).toBe('Cleanup')
   })
 
   it('a_question_in_a_run_is_a_blocked_link_that_opens_the_chat', () => {

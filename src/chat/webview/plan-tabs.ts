@@ -10,8 +10,11 @@ import { planStep, presentTabs, tabLabel, type ViewTab } from './plan-step'
  * marked apart from a chat that merely moved.
  */
 export class PlanTabs extends HTMLElement {
-  /** `chatMoved`: the conversation has gone on while another tab was open, so its tab is marked instead of taking over. */
-  update(plan: PlanState | undefined, active: ViewTab, chatMoved = false): void {
+  /**
+   * `chatMoved`: the conversation has gone on while another tab was open, so its tab is marked instead of taking over.
+   * `chatLabel` names whose conversation the chat tab holds.
+   */
+  update(plan: PlanState | undefined, active: ViewTab, chatMoved = false, chatLabel = 'Chat'): void {
     this.hidden = plan?.body === undefined
     this.replaceChildren()
     if (!plan?.body) return
@@ -22,7 +25,7 @@ export class PlanTabs extends HTMLElement {
       node.type = 'button'
       const mark = tab === attention ? ' attention' : tab === 'chat' && chatMoved ? ' moved' : ''
       node.className = `tab${tab === active ? ' active' : ''}${mark}`
-      node.textContent = tab === 'chat' ? 'Chat' : tabLabel(tab, plan)
+      node.textContent = tab === 'chat' ? chatLabel : tabLabel(tab, plan)
       node.addEventListener('click', () => this.dispatchEvent(new PlanViewSelectedEvent(tab)))
       this.append(node)
     }

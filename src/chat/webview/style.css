@@ -29,7 +29,7 @@ chat-app {
   flex-direction: column;
   height: 100vh;
 
-  & > .runs,
+  & > .chats,
   & > .new-session {
     flex: 1;
     min-height: 0;
@@ -81,6 +81,18 @@ chat-app {
       &.current {
         font-weight: 600;
         color: var(--vscode-focusBorder);
+      }
+
+      /* The step whose conversation the chat shows. */
+      &.selected {
+        text-decoration: underline;
+        text-underline-offset: 0.3em;
+      }
+
+      /* Its conversation moved while another step's was shown. */
+      &.moved:not(.current)::after {
+        content: ' •';
+        color: var(--vscode-foreground);
       }
 
       /* The flow stands still until the person acts: warm, with a dot, so it reads apart from a step at work. */
@@ -1090,6 +1102,64 @@ chat-app {
       & .running {
         opacity: 0.85;
       }
+
+      /* A split under way, unit by unit: the state reads as text, and colour only says done or not. */
+      & .progress {
+        & .headline {
+          font-weight: 600;
+          margin: 0.3rem 0;
+
+          &.done {
+            color: var(--vscode-testing-iconPassed);
+          }
+
+          &.failed {
+            color: var(--vscode-editorWarning-foreground);
+          }
+        }
+
+        & .activity {
+          margin: 0;
+          opacity: 0.7;
+          font-family: var(--vscode-editor-font-family);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        & .files .entry > .link.file {
+          font-family: var(--vscode-editor-font-family);
+        }
+
+        & .unit {
+          & .state {
+            margin-left: auto;
+            font-size: 0.9em;
+          }
+
+          &.waiting .state {
+            opacity: 0.6;
+          }
+
+          &.within .state {
+            color: var(--vscode-testing-iconPassed);
+          }
+
+          &.over .state {
+            color: var(--vscode-editorWarning-foreground);
+          }
+        }
+
+        & .split-into,
+        & .moves {
+          margin: 0.3rem 0;
+
+          & .link.file {
+            font-family: var(--vscode-editor-font-family);
+            margin-right: 0.5rem;
+          }
+        }
+      }
     }
 
   }
@@ -1248,12 +1318,54 @@ chat-app {
   }
 
   /*
-   * A tab holds every run of its feature: the planner, the mapping, the
-   * implementer, the cleanup. They scroll as one column, each folded under
-   * its own name, so the tab reads as one place without the conversations
-   * running into each other.
+   * One chat per phase, the picked one shown. A phase's runs scroll as one
+   * column, each folded under its own name, so the conversations do not run
+   * into each other; the build shows one task's at a time, named above it.
    */
-  & > .runs {
+  & > .chats {
+    display: flex;
+    flex-direction: column;
+
+    & > .phase-chat {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+
+      & > .empty {
+        padding: 0.6rem;
+        opacity: 0.7;
+      }
+
+      & > .run-switch {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.3rem;
+        padding: 0.3rem 0.6rem;
+        border-bottom: 1px solid var(--vscode-panel-border);
+
+        & .task {
+          &.selected {
+            font-weight: 600;
+            outline: 1px solid var(--vscode-focusBorder);
+          }
+
+          &.settled:not(.selected) {
+            opacity: 0.7;
+          }
+        }
+      }
+
+      /* The switcher names the task above its conversation already. */
+      &.task-chat .run-head {
+        display: none;
+      }
+    }
+  }
+
+  & .runs {
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
 
     & > .run {
@@ -1812,6 +1924,21 @@ chat-app {
       display: flex;
       flex-direction: column;
       gap: 0.3rem;
+    }
+
+    /* Who what is typed reaches, so a tab with several conversations never leaves it to a guess. */
+    & .recipient,
+    & .refusal {
+      margin: 0;
+      font-size: 0.9em;
+    }
+
+    & .recipient {
+      opacity: 0.8;
+    }
+
+    & .refusal {
+      color: var(--vscode-editorWarning-foreground);
     }
 
     & textarea {

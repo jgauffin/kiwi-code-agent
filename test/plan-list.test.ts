@@ -43,7 +43,7 @@ describe('plan list', () => {
     }
   })
 
-  it('a_postponed_cleanup_keeps_the_feature_on_the_list_until_it_is_settled', async () => {
+  it('a_feature_whose_tests_passed_is_verified_whatever_the_cleanup_decision', async () => {
     const dir = await workspace({
       'audit.spec.md': '---\nfeature: Audit\nstatus: approved\n---\n# Audit\n',
       'audit.tasks.json': renderBoard(withCleanupDecision(passed(allTested('Log')), 'postponed')),
@@ -52,7 +52,7 @@ describe('plan list', () => {
     })
     try {
       expect(await listPlans(dir)).toMatchObject([
-        { feature: 'Audit', status: 'approved' },
+        { feature: 'Audit', status: 'verified' },
         { feature: 'Billing', status: 'verified' },
       ])
     } finally {

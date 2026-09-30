@@ -214,13 +214,18 @@ describe('whose turn it is', () => {
     expect(planStep(plan({ ...idle, checkable: true })).next).toMatchObject({ kind: 'action', action: 'check', label: 'Check again' })
   })
 
-  it('a_step_at_work_is_the_agents_and_an_act_or_an_offer_is_yours', () => {
+  it('a_step_at_work_is_the_agents_and_an_act_is_yours', () => {
     expect(planStep(plan({ stage: 'checking', status: 'approved', check: { live: true, text: 'reading src' } })).yours).toBe(false)
     expect(planStep(plan(building)).yours).toBe(false)
     expect(planStep(plan({ approvable: true })).yours).toBe(true)
+  })
+
+  it('passed_tests_complete_the_plan_and_the_cleanup_offer_does_not_hold_it', () => {
     const verified = { stage: 'verified' as const, status: 'approved' as const, commentable: false, atWork: false }
-    expect(planStep(plan({ ...verified, cleanupSweep: { units: [unit()] } })).yours).toBe(true)
-    expect(planStep(plan({ ...verified, cleanupSweep: { units: [] } })).yours).toBe(false)
+    const offered = planStep(plan({ ...verified, cleanupSweep: { units: [unit()] } }))
+    expect(offered).toMatchObject({ complete: true, yours: false, next: { kind: 'goto', tab: 'cleanup' } })
+    expect(planStep(plan({ ...verified, cleanupSweep: { units: [unit()] }, cleanupDecision: 'postponed' })).complete).toBe(true)
+    expect(planStep(plan({ stage: 'verification', status: 'approved', commentable: false, atWork: false })).complete).toBe(false)
   })
 })
 

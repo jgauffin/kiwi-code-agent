@@ -275,6 +275,14 @@ export class PhaseProfileChangedEvent extends Event {
   }
 }
 
+/** A phase's chat now talks to another of its runs: the reader picked one, so the composer follows. */
+export class ChatTargetChangedEvent extends Event {
+  static readonly type = 'chat-target-changed'
+  constructor() {
+    super(ChatTargetChangedEvent.type, { bubbles: true })
+  }
+}
+
 export class SessionRemovedEvent extends Event {
   static readonly type = 'session-removed'
   constructor(public readonly sessionId: string) {
@@ -310,6 +318,7 @@ declare global {
     [ReviewActionEvent.type]: ReviewActionEvent
     [EditorClosedEvent.type]: EditorClosedEvent
     [SessionRemovedEvent.type]: SessionRemovedEvent
+    [ChatTargetChangedEvent.type]: ChatTargetChangedEvent
     [AllowWritesToggledEvent.type]: AllowWritesToggledEvent
     [SessionModelChangedEvent.type]: SessionModelChangedEvent
     [ContinueInChatRequestedEvent.type]: ContinueInChatRequestedEvent

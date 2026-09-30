@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pickConversationalRun, SessionManager, stepOf, type SessionRecord, type SessionStore } from '../src/agent/session/session-manager'
+import { SessionManager, stepOf, type SessionRecord, type SessionStore } from '../src/agent/session/session-manager'
 import type { QuestionOutcome, UserQuestionRequest } from '../src/agent/session/user-question'
 import type { CodeSession, PermissionDecision, SessionEvent } from '../src/agent/session/code-session'
 import { AsyncQueue } from '../src/agent/session/async-queue'
@@ -996,71 +996,5 @@ describe('SessionManager', () => {
         await rm(dir, { recursive: true, force: true })
       }
     })
-  })
-})
-
-describe('pickConversationalRun', () => {
-  const rec = (id: string, over: Partial<SessionRecord> = {}): SessionRecord => ({
-    id,
-    title: id,
-    profile,
-    mode: 'plan',
-    createdAt: '2024-01-01T00:00:00.000Z',
-    feature: 'Orders',
-    ...over,
-  })
-
-  it('a_live_mapping_child_never_wins_the_floor_over_the_idle_plan_session', () => {
-    const plan = rec('plan')
-    const mapping = rec('mapping', { mode: 'reconcile', parentId: plan.id })
-    const isLive = (id: string) => id === mapping.id
-    expect(pickConversationalRun([plan, mapping], isLive)?.id).toBe(plan.id)
-  })
-
-  it('a_live_plan_session_holds_the_floor_over_an_older_run', () => {
-    const plan = rec('plan')
-    const isLive = (id: string) => id === plan.id
-    expect(pickConversationalRun([plan], isLive)?.id).toBe(plan.id)
-  })
-
-  it('with_nothing_live_the_newest_run_with_a_tab_of_its_own_holds_the_floor', () => {
-    const plan = rec('plan')
-    const implementer = rec('implement', { mode: 'implement' })
-    const cleanup = rec('cleanup', { mode: 'cleanup', parentId: implementer.id })
-    const isLive = () => false
-    expect(pickConversationalRun([plan, implementer, cleanup], isLive)?.id).toBe(implementer.id)
-  })
-
-  it('a_live_task_run_takes_what_the_user_types_over_its_live_plan_session', () => {
-    const plan = rec('plan')
-    const done = rec('task-a', { mode: 'implement', parentId: plan.id, task: 'A' })
-    const building = rec('task-b', { mode: 'implement', parentId: plan.id, task: 'B' })
-    const isLive = (id: string) => id === plan.id || id === building.id
-    expect(pickConversationalRun([plan, done, building], isLive)?.id).toBe(building.id)
-  })
-
-  it('a_settled_task_run_gives_the_floor_back_to_the_plan_session', () => {
-    const plan = rec('plan')
-    const done = rec('task-a', { mode: 'implement', parentId: plan.id, task: 'A', settled: true })
-    expect(pickConversationalRun([plan, done], () => false)?.id).toBe(plan.id)
-  })
-
-  it('a_fix_run_whose_engine_stopped_unsettled_keeps_the_floor_so_the_person_can_answer_it', () => {
-    const plan = rec('plan')
-    const task = rec('task-a', { mode: 'implement', parentId: plan.id, task: 'A', settled: true })
-    const fix = rec('fix', { mode: 'implement', parentId: plan.id, fixAttempt: 1 })
-    expect(pickConversationalRun([plan, task, fix], () => false)?.id).toBe(fix.id)
-  })
-
-  it('a_live_plan_session_outranks_a_stopped_unsettled_task_run', () => {
-    const plan = rec('plan')
-    const task = rec('task-a', { mode: 'implement', parentId: plan.id, task: 'A' })
-    expect(pickConversationalRun([plan, task], (id) => id === plan.id)?.id).toBe(plan.id)
-  })
-
-  it('no_conversational_run_at_all_yields_undefined', () => {
-    const plan = rec('plan')
-    const mapping = rec('mapping', { mode: 'reconcile', parentId: plan.id })
-    expect(pickConversationalRun([mapping], () => true)).toBeUndefined()
   })
 })

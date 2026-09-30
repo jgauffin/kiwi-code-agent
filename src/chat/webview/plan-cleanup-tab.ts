@@ -1,18 +1,39 @@
 import { compileTemplate } from '@relax.js/core/html'
 import type { CleanupUnit, PlanState } from '../protocol'
-import { CleanupDecidedEvent } from './events'
+import type { CleanupProgress, UnitProgress, UnitState } from '../cleanup-progress'
+import { CleanupDecidedEvent, PlanFocusRequestedEvent } from './events'
 import { offeredUnits } from './plan-step'
 import { PlanTab } from './plan-tab'
 import { post } from './vscode-api'
 
 type UnitRow = { name: string; measure: string; at: string; line: string }
 type FileRow = { path: string; openTitle: string; picked: boolean; units: UnitRow[] }
+type ProgressUnitRow = { name: string; measure: string; state: UnitState; stateLabel: string }
+type ProgressFileRow = { path: string; openTitle: string; units: ProgressUnitRow[] }
+
+const STATE_LABEL: Record<UnitState, string> = { waiting: 'waiting', working: 'working', within: 'within limit', over: 'still over' }
+
+/** Where the split stands, in one line: how far it got, or how the test run after it ended. */
+function headline(progress: CleanupProgress): string {
+  switch (progress.stage) {
+    case 'splitting':
+    case 'asking': {
+      const within = progress.units.filter((u) => u.state === 'within').length
+      return `Splitting: ${within} of ${progress.units.length} units within limit`
+    }
+    case 'testing':
+      return 'Running the tests…'
+    default:
+      return progress.outcome ?? ''
+  }
+}
 
 /**
  * What the size sweep found once the tests passed, by file, and the ways out
  * of it. Nothing is split until the user says so: the code was just proven,
  * and a split is a change to it. Every file starts picked; the user narrows
- * the split to the files worth it.
+ * the split to the files worth it. Once a split runs, the tab follows it unit
+ * by unit; the cleanup's chat holds the detail.
  */
 export class PlanCleanupTab extends PlanTab {
   private readonly template = compileTemplate(`
@@ -44,6 +65,23 @@ export class PlanCleanupTab extends PlanTab {
         <button type="button" title="The feature is finished as it stands; this is not offered again." r-click="decide('skip')">Skip</button>
         <p class="note" if="postponed">Postponed. The feature stays on the plan list until this is settled.</p>
       </div>
+      <div class="progress" if="progressing">
+        <p class="headline {{headlineClass}}"><button type="button" class="link" if="asking" title="Open the cleanup's chat, where its question waits." r-click="toChat()">Waiting on your answer</button><span unless="asking">{{headline}}</span></p>
+        <p class="activity" if="hasActivity">{{activity}}</p>
+        <ul class="files">
+          <li loop="f in progressFiles" class="entry">
+            <button type="button" class="link file" title="{{f.openTitle}}" r-click="open(f.path)">{{f.path}}</button>
+            <ul class="units">
+              <li loop="u in f.units" class="unit {{u.state}}">
+                <span class="text"><strong class="name">{{u.name}}</strong>{{u.measure}}</span>
+                <span class="state">{{u.stateLabel}}</span>
+              </li>
+            </ul>
+          </li>
+        </ul>
+        <p class="split-into" if="hasNewFiles">Split into: <button loop="p in newFiles" type="button" class="link file" title="Open {{p}}" r-click="open(p)">{{p}}</button></p>
+        <p class="moves" if="hasMoves">Pieces to move later are noted in <button type="button" class="link file" title="Open {{movesFile}}" r-click="open(movesFile)">{{movesFile}}</button></p>
+      </div>
       <p class="{{settledClass}}" if="settled">{{settledText}}</p>
     </section>
   `)
@@ -56,10 +94,23 @@ export class PlanCleanupTab extends PlanTab {
     const files = this.fileRows(units)
     const picked = files.filter((f) => f.picked)
     const offered = files.length > 0
-    const settled = offered ? undefined : settledLine(plan)
+    // A new offer outranks the record of the last split: it is what the person acts on now.
+    const progress = offered ? undefined : plan.cleanupProgress
+    const settled = offered || progress ? undefined : settledLine(plan)
     this.template.render(
       {
         offered,
+        progressing: progress !== undefined,
+        asking: progress?.stage === 'asking',
+        headline: progress ? headline(progress) : '',
+        headlineClass: progress?.stage ?? '',
+        hasActivity: progress?.activity !== undefined && progress.stage !== 'done' && progress.stage !== 'failed',
+        activity: progress?.activity ?? '',
+        progressFiles: progress ? this.progressRows(progress.units) : [],
+        hasNewFiles: (progress?.newFiles.length ?? 0) > 0,
+        newFiles: progress?.newFiles ?? [],
+        hasMoves: progress?.movesFile !== undefined,
+        movesFile: progress?.movesFile ?? '',
         toggleLabel: picked.length > 0 ? 'Select none' : 'Select all',
         count: `${picked.length} of ${files.length} files`,
         files,
@@ -76,8 +127,20 @@ export class PlanCleanupTab extends PlanTab {
         pick: (f: FileRow, event: Event) => this.pick(f.path, (event.target as HTMLInputElement).checked),
         open: (path: string) => post({ type: 'open_file', path }),
         decide: (decision: 'run' | 'postpone' | 'skip', which?: 'picked' | 'all') => this.decide(decision, files, which),
+        toChat: () => this.dispatchEvent(new PlanFocusRequestedEvent('chat')),
       },
     )
+  }
+
+  /** The split by file, each unit with where it stands. */
+  private progressRows(units: UnitProgress[]): ProgressFileRow[] {
+    return [...new Set(units.map((u) => u.path))].map((path) => ({
+      path,
+      openTitle: `Open ${path}`,
+      units: units
+        .filter((u) => u.path === path)
+        .map((u) => ({ name: u.name, measure: `: ${u.kind}, ${u.lines} lines, limit ${u.threshold}`, state: u.state, stateLabel: STATE_LABEL[u.state] })),
+    }))
   }
 
   /** One row per file the sweep named, with the units in it and whether it is still in the split. */

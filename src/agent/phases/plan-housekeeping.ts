@@ -50,7 +50,9 @@ export async function sweepPlans(cwd: string, now: Date): Promise<SweepReport> {
     const spec = join(cwd, PLAN_DIR, `${slug}.spec.md`)
     const text = await readOptional(spec)
     if (text !== undefined && statusOf(text) !== 'implemented') {
-      if (!finished(statusOf(text), await readTasks(join(workDir, `${slug}${TASKS_SUFFIX}`)))) continue
+      const tasks = await readTasks(join(workDir, `${slug}${TASKS_SUFFIX}`))
+      // A postponed cleanup is the dev's word to come back to it, and the board holds what to come back to.
+      if (!finished(statusOf(text), tasks) || (tasks.exists && tasks.cleanup === 'postponed')) continue
       await writeFile(spec, withStatus(text, 'implemented'), 'utf8')
       report.implemented.push(`${PLAN_DIR}/${slug}.spec.md`)
     }

@@ -4,6 +4,7 @@ import type { PlanState } from '../src/chat/protocol'
 import type { Spec } from '../src/agent/phases/spec-model'
 import type { ReviewRound } from '../src/agent/phases/plan-review'
 import type { Task } from '../src/agent/phases/tasks-file'
+import type { CleanupProgress } from '../src/chat/cleanup-progress'
 import { planState } from './plan-state-fixture'
 
 // The webview talks to the host through this handle, acquired when its modules load.
@@ -151,6 +152,59 @@ describe('PlanView', () => {
     const running = view(plan({ ...verified(), cleanupSweep: { units }, cleanup: { live: true, text: 'Read src/orders/cancel.ts' } }), 'cleanup')
     expect(running.querySelector('.cleanup .running')?.textContent).toBe('Read src/orders/cancel.ts')
     expect(buttons(running, 'Clean up all')).toHaveLength(0)
+  })
+
+  const progress = (over: Partial<CleanupProgress> = {}): CleanupProgress => ({
+    units: [
+      { ...sweepUnits[0]!, state: 'within' },
+      { ...sweepUnits[1]!, state: 'working' },
+    ],
+    newFiles: ['src/orders/cancel-refund.ts'],
+    movesFile: 'plan/unfiled-moves.md',
+    activity: 'Edit src/orders/order.ts',
+    stage: 'splitting',
+    ...over,
+  })
+  const running = () => ({ ...verified(), cleanupDecision: 'done' as const, cleanup: { live: true, text: 'Edit src/orders/order.ts' } })
+
+  it('while_a_cleanup_runs_the_tab_follows_the_split_unit_by_unit', () => {
+    const node = view(plan({ ...running(), cleanupProgress: progress() }), 'cleanup')
+
+    expect(node.querySelector('.cleanup .headline')?.textContent).toBe('Splitting: 1 of 2 units within limit')
+    expect(node.querySelector('.cleanup .activity')?.textContent).toBe('Edit src/orders/order.ts')
+    const rows = [...node.querySelectorAll<HTMLElement>('.cleanup .progress .unit')]
+    expect(rows.map((r) => [r.querySelector('.name')?.textContent, r.querySelector('.state')?.textContent])).toEqual([
+      ['cancel', 'within limit'],
+      ['Order', 'working'],
+    ])
+    expect([...node.querySelectorAll('.cleanup .split-into .link.file')].map((l) => l.textContent)).toEqual(['src/orders/cancel-refund.ts'])
+    expect(node.querySelector('.cleanup .moves .link.file')?.textContent).toBe('plan/unfiled-moves.md')
+    expect(node.querySelector('.cleanup .running')).toBeNull()
+  })
+
+  it('a_question_from_the_cleanup_links_to_the_chat_it_waits_in', () => {
+    const node = view(plan({ ...running(), cleanupProgress: progress({ stage: 'asking' }) }), 'cleanup')
+    const focused: string[] = []
+    node.addEventListener(PlanFocusRequestedEvent.type, (e) => focused.push((e as InstanceType<typeof PlanFocusRequestedEvent>).tab))
+
+    buttons(node, 'Waiting on your answer')[0]!.click()
+
+    expect(focused).toEqual(['chat'])
+  })
+
+  it('after_the_run_the_tab_says_what_is_still_over_and_how_the_tests_went', () => {
+    const done = progress({
+      stage: 'done',
+      outcome: 'Tests passed: 12 passed',
+      units: [
+        { ...sweepUnits[0]!, state: 'within' },
+        { ...sweepUnits[1]!, state: 'over' },
+      ],
+    })
+    const node = view(plan({ ...verified(), cleanupDecision: 'done', cleanup: { live: false, text: 'Cleanup left 1 unit over the limit; Tests passed' }, cleanupProgress: done }), 'cleanup')
+
+    expect(node.querySelector('.cleanup .headline')?.textContent).toBe('Tests passed: 12 passed')
+    expect([...node.querySelectorAll('.cleanup .progress .unit .state')].map((s) => s.textContent)).toEqual(['within limit', 'still over'])
   })
 
   it('the_how_block_is_on_the_task_folded_away', () => {

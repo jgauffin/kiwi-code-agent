@@ -474,25 +474,6 @@ export class SessionManager {
   }
 }
 
-/**
- * Of a tab's runs (oldest first), the one free text typed there is for: the
- * newest still live among the ones a person talks to, else the newest
- * implementer whose job is not done, else the newest with a tab of its own.
- * An implementer under the plan session is talked to until it settles, since
- * a stopped one waits on the person and its step's chat shows only
- * implementers. A mapping or a cleanup never is: it is scoped to its own job.
- */
-export function pickConversationalRun(runs: SessionRecord[], isLive: (id: string) => boolean): SessionRecord | undefined {
-  const newestFirst = [...runs].reverse()
-  const building = (r: SessionRecord) => r.parentId !== undefined && r.mode === 'implement'
-  const own = newestFirst.filter((r) => !r.parentId)
-  return (
-    newestFirst.find((r) => (!r.parentId || building(r)) && isLive(r.id)) ??
-    newestFirst.find((r) => building(r) && !r.settled) ??
-    own.at(0)
-  )
-}
-
 type PermissionRequest = Extract<SessionEvent, { type: 'permission_request' }>
 type QuestionRequest = Extract<SessionEvent, { type: 'question_request' }>
 

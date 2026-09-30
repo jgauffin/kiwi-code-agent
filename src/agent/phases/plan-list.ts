@@ -33,10 +33,9 @@ export async function listPlans(cwd: string): Promise<PlanSummary[]> {
   return plans
 }
 
-/** Built, proven and settled: nothing is left to do on the feature. */
+/** Built and proven: the tests passed. What the cleanup left is the dev's to decide on, so it never holds the feature open. */
 export function finished(status: SpecStatus, tasks: TasksState): boolean {
-  // A postponed cleanup is work the user asked to come back to, so the feature is not finished until it is settled.
-  return status === 'approved' && tasks.exists && tasksDone(tasks.tasks) && tasks.verification?.ok === true && tasks.cleanup !== 'postponed'
+  return status === 'approved' && tasks.exists && tasksDone(tasks.tasks) && tasks.verification?.ok === true
 }
 
 /** The specs still waiting for approval. */

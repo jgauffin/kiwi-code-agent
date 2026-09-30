@@ -32,11 +32,15 @@ const PHASE_LABEL: { plan: string; reconcile: string; implement: string; cleanup
  * row there or into the chat when a run waits on the person, and a line of
  * text while someone else is at work. A run in
  * flight shows its progress and a Stop; Repair rides along while the spec is
- * off contract. A reached step is a button that opens the tab it works in.
+ * off contract. A reached step is a button that picks its phase's chat and
+ * opens the tab it works in.
  */
 export class PlanBar extends HTMLElement {
-  /** `profileNames` are every configured profile, for the phase pickers' options (B1). */
-  update(plan: PlanState | undefined, profileNames: string[] = []): void {
+  /**
+   * `profileNames` are every configured profile, for the phase pickers' options (B1).
+   * `marks` names the step whose chat is picked and the steps whose chat moved unseen.
+   */
+  update(plan: PlanState | undefined, profileNames: string[] = [], marks: StepMarks = { moved: [] }): void {
     this.hidden = plan === undefined
     this.replaceChildren()
     if (!plan) return
@@ -46,8 +50,12 @@ export class PlanBar extends HTMLElement {
     const currentIndex = shown.indexOf(step.current)
     for (const [index, name] of shown.entries()) {
       // The lit step says where the flow is; `yours` says it stands still until the person acts.
-      const state = name === step.current ? `current${step.yours ? ' yours' : ''}` : index < currentIndex ? 'done' : step.reached.includes(name) ? 'reached' : 'future'
-      steps.append(this.stepNode(name, state))
+      const state =
+        step.complete || index < currentIndex ? 'done' : name === step.current ? `current${step.yours ? ' yours' : ''}` : step.reached.includes(name) ? 'reached' : 'future'
+      const node = this.stepNode(name, state)
+      node.classList.toggle('selected', name === marks.selected)
+      node.classList.toggle('moved', marks.moved.includes(name))
+      steps.append(node)
     }
     this.append(steps, ...this.run(plan), ...this.repair(plan), ...this.next(plan), this.phaseProfiles(plan, profileNames))
   }
@@ -103,7 +111,7 @@ export class PlanBar extends HTMLElement {
     node.textContent = STEP_LABEL[step]
     if (node instanceof HTMLButtonElement) {
       node.type = 'button'
-      node.title = `Open what the ${STEP_LABEL[step]} step works in.`
+      node.title = `Show the ${STEP_LABEL[step]} step: its conversation in the chat, and the tab it works in.`
       node.addEventListener('click', () => this.dispatchEvent(new PlanStepSelectedEvent(step)))
     }
     return node
@@ -180,6 +188,9 @@ export class PlanBar extends HTMLElement {
     return nodes
   }
 }
+
+/** The step whose chat is shown, and the steps whose chat moved while another was. */
+export type StepMarks = { selected?: Step; moved: Step[] }
 
 const isRunning = (plan: PlanState): boolean => plan.check?.live === true || plan.cleanup?.live === true || plan.verification?.live === true
 

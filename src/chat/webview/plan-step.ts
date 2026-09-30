@@ -25,17 +25,6 @@ export const STEP_LABEL: Record<Step, string> = {
   cleanup: 'Cleanup',
 }
 
-/** The runs whose conversations a step's chat holds: the planner and the check up to the build, the tasks through verification, the refactorings after. */
-export const STEP_RUNS: Record<Step, SessionMode[]> = {
-  plan: ['plan'],
-  review: ['plan'],
-  approve: ['plan', 'reconcile'],
-  rule: ['plan', 'reconcile'],
-  implement: ['implement'],
-  verify: ['implement'],
-  cleanup: ['cleanup'],
-}
-
 /** A tab of the plan view; each step works in one of them. */
 export type Tab = 'spec' | 'review' | 'decisions' | 'tasks' | 'cleanup'
 
@@ -62,9 +51,11 @@ export type PlanStep = {
   goto?: { tab: ViewTab; label: string; hint: string }
   /** The next act is the person's: the flow stands still until they take it. */
   yours: boolean
+  /** The tests passed and nothing runs: the plan is complete, and what the cleanup left is the dev's to decide on. */
+  complete: boolean
 }
 
-type Derived = Omit<PlanStep, 'reached' | 'yours'>
+type Derived = Omit<PlanStep, 'reached' | 'yours' | 'complete'>
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`
 
@@ -98,7 +89,8 @@ export function planStep(plan: PlanState): PlanStep {
     : derived.next.kind === 'waiting' && !plan.atWork
       ? stopped(derived.current, plan)
       : derived
-  return { ...step, reached: reached(step.current, plan), yours: step.next.kind === 'action' || step.next.kind === 'goto' }
+  const complete = (plan.status === 'implemented' || plan.stage === 'verified') && !plan.blocked && !plan.cleanup?.live && !plan.verification?.live
+  return { ...step, reached: reached(step.current, plan), yours: !complete && (step.next.kind === 'action' || step.next.kind === 'goto'), complete }
 }
 
 /** A run stopped mid-turn on the person outranks every other act: nothing moves until it is answered. */
@@ -299,7 +291,7 @@ export function presentTabs(plan: PlanState): Tab[] {
       case 'tasks':
         return plan.tasks.length > 0
       case 'cleanup':
-        return (plan.cleanupSweep?.units.length ?? 0) > 0 || plan.cleanup !== undefined || plan.cleanupDecision !== undefined
+        return (plan.cleanupSweep?.units.length ?? 0) > 0 || plan.cleanup !== undefined || plan.cleanupDecision !== undefined || plan.cleanupProgress !== undefined
     }
   })
 }
