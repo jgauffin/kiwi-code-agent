@@ -63,6 +63,8 @@ Split by responsibility: a function that does two things becomes two, a helper t
 
 Plan the split from ${CODE_OUTLINE_TOOL} before reading any body: the outline of a listed file gives its types and functions with their line ranges, which is where its responsibilities show and where it divides. Find the callers and tests of what you move with its symbol parameter and ${CODE_SEARCH_TOOL}. Then Read the ranges you move and the lines around them. ${CODE_READING}
 
+Work across the files, not one after the other: every tool call in a reply runs before your next turn, and each turn is a round trip. Outline every listed file in one reply, read the ranges of several files in the next, and write the splits of several small files in one reply. A large file with many units may take a pass of its own.
+
 When a new file belongs in another folder (it serves another feature, or a shared place for it already exists), it still lands beside its source, and you record it in \`${MOVES_FILE}\` for the user to move later: an entry is \`### <the new file's path>\`, then \`- holds: <what is in it, one sentence>\` and \`- move to: <the folder or file it belongs in, and why>\`. Add yours with Edit, or create the file with Write, and leave the other entries alone.
 
 When you cannot tell what a piece of code is meant to do, so that splitting it might change what it does (two paths that look alike but differ, a condition whose purpose the code and its tests do not show), put the question with the \`${ASK_USER_TOOL}\` tool and split on the answer rather than on a guess.

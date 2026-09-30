@@ -2,7 +2,7 @@
   "name": "kiwipow-agent",
   "displayName": "Kiwipow Agent",
   "description": "Coding sessions in VS Code with a choice of model engine per session.",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "publisher": "CoderrAB",
   "icon": "docs/logos/kiwipow-agent-logo-128.png",
   "galleryBanner": {
@@ -61,12 +61,12 @@
       {
         "command": "kiwiAgent.newSession",
         "title": "New Session",
-        "icon": "docs/logos/kiwipow-agent-logo-128.png"
+        "icon": "docs/logos/head-128.png"
       },
       {
         "command": "kiwiAgent.openChat",
         "title": "Kiwipow Agent: New Session Tab",
-        "icon": "docs/logos/kiwipow-agent-logo-128.png"
+        "icon": "docs/logos/head-128.png"
       },
       {
         "command": "kiwiAgent.removeSession",
@@ -505,10 +505,10 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "prompts": "esbuild scripts/prompts.ts --bundle --platform=node --format=cjs --target=node22 --external:vscode --loader:.md=text --log-level=warning --outfile=dist/prompts.cjs && node dist/prompts.cjs",
-    "package": "npm run typecheck && node esbuild.mjs --target=win32-x64 && vsce package --no-dependencies --target win32-x64 && node esbuild.mjs --target=win32-arm64 && vsce package --no-dependencies --target win32-arm64",
+    "package": "npm run typecheck && node esbuild.mjs --target=win32-x64 && node scripts/marketplace-readme.mjs && vsce package --no-dependencies --readme-path dist/marketplace-readme.md --target win32-x64 && node esbuild.mjs --target=win32-arm64 && node scripts/marketplace-readme.mjs && vsce package --no-dependencies --readme-path dist/marketplace-readme.md --target win32-arm64",
     "link-dev": "node scripts/link-dev.mjs",
     "unlink-dev": "node scripts/link-dev.mjs --unlink",
-    "publish": "npm run typecheck && node esbuild.mjs --target=win32-x64 && vsce publish --no-dependencies --target win32-x64 && node esbuild.mjs --target=win32-arm64 && vsce publish --no-dependencies --target win32-arm64"
+    "publish": "npm run typecheck && node esbuild.mjs --target=win32-x64 && node scripts/marketplace-readme.mjs && vsce publish --no-dependencies --readme-path dist/marketplace-readme.md --target win32-x64 && node esbuild.mjs --target=win32-arm64 && node scripts/marketplace-readme.mjs && vsce publish --no-dependencies --readme-path dist/marketplace-readme.md --target win32-arm64"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.2.112",

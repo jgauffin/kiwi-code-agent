@@ -77,6 +77,13 @@ describe('cleanup prompt', () => {
     expect(prompt).not.toContain('Read a file whole')
   })
 
+  it('small_files_are_split_together_so_one_reply_covers_several', () => {
+    const off = { functionLines: 0, typeLines: 0, fileLines: 0 }
+    const prompt = cleanupPrompt('Order cancellation', cwd, { source: { functionLines: 25, typeLines: 0, fileLines: 400 }, tests: off, testGlobs: [] })
+    expect(prompt).toContain('Outline every listed file in one reply')
+    expect(prompt).toContain('the splits of several small files in one reply')
+  })
+
   it('the_kickoff_carries_the_report', () => {
     expect(cleanupKickoff('src/a.ts:1 a (function, 30 lines, limit 25)', false)).toContain('src/a.ts:1 a (function, 30 lines, limit 25)')
   })

@@ -1,6 +1,8 @@
 # Kiwipow Agent
 
-![Kiwipow Agent logo](https://raw.githubusercontent.com/jgauffin/kiwi-code-agent/main/docs/logos/logo-square-transparent-500px.png)
+<!-- github-only -->
+![Kiwipow Agent logo](https://raw.githubusercontent.com/jgauffin/kiwi-code-agent/main/docs/logos/kiwipow-agent-logo-128.png)
+<!-- /github-only -->
 
 [![VS Code Marketplace](https://img.shields.io/badge/VS%20Code%20Marketplace-install-007ACC)](https://marketplace.visualstudio.com/items?itemName=CoderrAB.kiwipow-agent)
 [![GitHub](https://img.shields.io/badge/GitHub-repo-181717?logo=github)](https://github.com/jgauffin/kiwi-code-agent)

@@ -97,22 +97,7 @@ class Splitter {
         this.doubleQuoted()
         continue
       }
-      if (c === '$' && next === '(' && src[this.i + 2] === '(') {
-        this.arithmeticExpansion()
-        continue
-      }
-      if (c === '$' && next === '(') {
-        this.substitution()
-        continue
-      }
-      if (c === '$' && next === '{') {
-        this.parameterExpansion()
-        continue
-      }
-      if (c === '`') {
-        this.backticks()
-        continue
-      }
+      if (this.expansion(c, next)) continue
       if ((c === '<' || c === '>') && next === '(' && !this.inConditional) {
         this.substitution()
         continue
@@ -130,64 +115,51 @@ class Splitter {
         this.newline()
         continue
       }
-      if (this.inConditional && (c === '<' || c === '>' || c === '(' || c === ')' || (c === '&' && next === '&') || (c === '|' && next === '|'))) {
-        // Comparisons and grouping inside `[[ … ]]`, not operators.
-        const two = (c === '&' || c === '|') && next === c
-        this.add(two ? c + c : c)
-        this.i += two ? 2 : 1
-        continue
-      }
-      if (c === ';') {
-        // `;;`, `;&` and `;;&` end a case clause: a pattern comes next.
-        const clause = next === ';' || next === '&'
-        this.endSegment(this.i, this.i + (clause ? (src[this.i + 2] === '&' ? 3 : 2) : 1))
-        if (clause && this.cases.length) this.cases[this.cases.length - 1] = 'pattern'
-        continue
-      }
-      if (c === '&' && next === '&') {
-        this.endSegment(this.i, this.i + 2)
-        continue
-      }
-      if (c === '|' && (next === '|' || next === '&')) {
-        this.endSegment(this.i, this.i + 2)
-        continue
-      }
-      if (c === '|') {
-        this.endSegment(this.i, this.i + 1)
-        continue
-      }
-      if (c === '&' && next === '>') {
-        // `&> file`, `&>> file`: both streams to a file.
-        this.endWord()
-        this.i += src[this.i + 2] === '>' ? 3 : 2
-        this.redirectPending = true
-        continue
-      }
-      if (c === '&') {
-        this.endSegment(this.i, this.i + 1)
-        continue
-      }
-      if (c === '>') {
-        this.outputRedirect()
-        continue
-      }
-      if (c === '<') {
-        this.inputRedirect()
-        continue
-      }
-      if (c === '(') {
-        this.openParen()
-        continue
-      }
-      if (c === ')') {
-        this.closeParen()
-        continue
-      }
+      if (this.operator(c, next)) continue
       this.add(c)
       this.i++
     }
     this.endSegment(src.length, src.length)
     return { segments: this.segments }
+  }
+
+  /** `$((…))`, `$(…)`, `${…}` and backticks, which keep their meaning inside double quotes too. True when one was read. */
+  private expansion(c: string, next: string | undefined): boolean {
+    if (c === '$' && next === '(' && this.src[this.i + 2] === '(') this.arithmeticExpansion()
+    else if (c === '$' && next === '(') this.substitution()
+    else if (c === '$' && next === '{') this.parameterExpansion()
+    else if (c === '`') this.backticks()
+    else return false
+    return true
+  }
+
+  /** Control and redirection operators, and what stands in for them inside `[[ … ]]`. True when one was read. */
+  private operator(c: string, next: string | undefined): boolean {
+    const src = this.src
+    if (this.inConditional && (c === '<' || c === '>' || c === '(' || c === ')' || (c === '&' && next === '&') || (c === '|' && next === '|'))) {
+      // Comparisons and grouping inside `[[ … ]]`, not operators.
+      const two = (c === '&' || c === '|') && next === c
+      this.add(two ? c + c : c)
+      this.i += two ? 2 : 1
+    } else if (c === ';') {
+      // `;;`, `;&` and `;;&` end a case clause: a pattern comes next.
+      const clause = next === ';' || next === '&'
+      this.endSegment(this.i, this.i + (clause ? (src[this.i + 2] === '&' ? 3 : 2) : 1))
+      if (clause && this.cases.length) this.cases[this.cases.length - 1] = 'pattern'
+    } else if ((c === '&' && next === '&') || (c === '|' && (next === '|' || next === '&'))) this.endSegment(this.i, this.i + 2)
+    else if (c === '|') this.endSegment(this.i, this.i + 1)
+    else if (c === '&' && next === '>') {
+      // `&> file`, `&>> file`: both streams to a file.
+      this.endWord()
+      this.i += src[this.i + 2] === '>' ? 3 : 2
+      this.redirectPending = true
+    } else if (c === '&') this.endSegment(this.i, this.i + 1)
+    else if (c === '>') this.outputRedirect()
+    else if (c === '<') this.inputRedirect()
+    else if (c === '(') this.openParen()
+    else if (c === ')') this.closeParen()
+    else return false
+    return true
   }
 
   private add(c: string, quoted = false): void {
@@ -251,22 +223,7 @@ class Splitter {
         this.i += 2
         continue
       }
-      if (c === '$' && next === '(' && src[this.i + 2] === '(') {
-        this.arithmeticExpansion()
-        continue
-      }
-      if (c === '$' && next === '(') {
-        this.substitution()
-        continue
-      }
-      if (c === '$' && next === '{') {
-        this.parameterExpansion()
-        continue
-      }
-      if (c === '`') {
-        this.backticks()
-        continue
-      }
+      if (this.expansion(c, next)) continue
       this.add(c, true)
       this.i++
     }

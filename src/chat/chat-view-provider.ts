@@ -18,40 +18,13 @@ import { assertAllRuled, assertRulingsSent, compactAppliedDecisions, decisionsFi
 import { contextPath, readScenarioContext } from '../agent/phases/scenario-context'
 import { listPlans } from '../agent/phases/plan-list'
 import { progressLine, reconcileKickoff } from '../agent/phases/reconcile'
-import { TASK_CARRY_ON, assertImplementable, fixKickoff, implementationStarts, taskKickoff, taskSettled } from '../agent/phases/implement'
-import { cleanupKickoff } from '../agent/phases/cleanup'
+import { assertImplementable, implementationStarts } from '../agent/phases/implement'
 import { codePlanBuildKickoff } from '../agent/phases/code-plan'
-import { anyLimit, oversizedFiles, sizeReport, type Limits, type Oversized } from '../agent/cleanup/oversized'
-import { editedFiles } from '../agent/edits/edited-files'
 import { checkDue, isApprovable, planStage, tasksStale } from '../agent/phases/plan-stage'
 import { parseSpec } from '../agent/phases/spec-model'
 import { followRenames, migratePlan, type MigrationReport } from '../agent/phases/migrate-plan'
-import {
-  changeBoard,
-  deriveBoard,
-  nextTask,
-  readBoard,
-  readTasks,
-  recordCleanupDecision,
-  recordVerification,
-  sameName,
-  tasksDone,
-  tasksPath,
-  updateTask,
-  writeBoard,
-  type TasksState,
-} from '../agent/phases/tasks-file'
-import {
-  attributeWith,
-  countsAgainstBudget,
-  describeCommand,
-  runVerification,
-  verificationDue,
-  type CommandRunner,
-  type HeldFailure,
-  type VerificationFailure,
-  type VerifyRule,
-} from '../agent/phases/verification'
+import { deriveBoard, readBoard, readTasks, tasksDone, tasksPath, writeBoard, type TasksState } from '../agent/phases/tasks-file'
+import { attributeWith } from '../agent/phases/verification'
 import { FileHands } from '../agent/session/file-hands'
 import {
   addComment,
@@ -82,10 +55,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative } from 'node:path'
 import { linkedFilePath, withLinkedFiles } from './linked-files'
 import { refusal } from './phase-runs'
-import { advance, editedUnitFile, finished, measured, resumed, settled, startProgress, type CleanupProgress } from './cleanup-progress'
 import type {
-  CleanupSweep,
-  CleanupUnit,
   FromWebview,
   PlanState,
   ResumableChat,
@@ -97,30 +67,10 @@ import type {
   ToWebview,
 } from './protocol'
 import { webviewHtml } from './webview-html'
+import { FeatureBuild } from './feature-build'
+import { FeatureCleanup } from './feature-cleanup'
+import type { ChatRefresh, Notify, SessionSwitch, SizeLimits, Verifier } from './feature-runs'
 import type { ProfileDefaults } from '../settings/settings-store'
-
-/** A per-session on/off switch the composer shows. */
-export interface SessionSwitch {
-  isEnabled(sessionId: string): boolean
-  setEnabled(sessionId: string, enabled: boolean): void
-}
-
-/** The test run: its rules from settings, read when it starts, and the shell that runs them. */
-export interface Verifier {
-  rules(): VerifyRule[]
-  run: CommandRunner
-  /** Consecutive failed runs handed to the implementer before the failed record is left for the user. */
-  failureBudget(): number
-  /** Seconds a run whose failures are all foreign waits before running the same suites again (`kiwiAgent.verifyRetrySeconds`). */
-  retrySeconds(): number
-}
-
-/** The cleanup after a feature's tests pass: its size limits and what never gets measured, from settings, read when the run starts. */
-export interface SizeLimits {
-  limits(): Limits
-  /** Globs, workspace-relative, of files the measure passes over: generated code. */
-  ignore(): string[]
-}
 
 /** Where a prompt's allowances go: the workspace's permission allow list, or the session's own, which lasts as long as the extension host. */
 export interface PermissionStore {
@@ -143,6 +93,9 @@ const NEW_SESSION_TITLE = 'New session'
 /** A chat tab in the editor area and the session tab it shows; absent while it shows the new-session screen. */
 type ChatPanel = { panel: vscode.WebviewPanel; tabId?: string }
 
+/** One kind of message from the tab. */
+type WebviewMessage<T extends FromWebview['type']> = Extract<FromWebview, { type: T }>
+
 /**
  * Hosts the chat UI: one editor tab per session, so a session keeps running
  * in view while another is started. The provider routes each session's events
@@ -155,16 +108,8 @@ export class ChatViewProvider {
   private readonly failures = new Map<string, string>()
   /** The check against the code under each plan session, by the plan session's id: the current step, or how the last run ended. */
   private readonly checks = new Map<string, RunState>()
-  /** The test run per feature: what it is doing, or how the last one ended. */
-  private readonly verifications = new Map<string, RunState>()
-  /** Consecutive failed test runs per feature; a pass or a manual run resets it. */
-  private readonly verifyFailures = new Map<string, number>()
-  /** The cleanup run per feature: what it is doing, or how the last one ended. */
-  private readonly cleanups = new Map<string, RunState>()
-  /** The cleanup run's split per feature, unit by unit, for the Cleanup tab; cleared with the cleanup line by a new test run. */
-  private readonly cleanupProgress = new Map<string, CleanupProgress>()
-  /** What the last size sweep found per feature: the offer the user rules on. Absent until one has run in this window. */
-  private readonly sweeps = new Map<string, Oversized[]>()
+  private readonly build: FeatureBuild
+  private readonly cleanup: FeatureCleanup
   /** Features whose planner was handed the contract problems; its next finished turn completes the migration. */
   private readonly repairing = new Set<string>()
   /** Features whose rulings were handed to the planner; Approve waits for that turn to end rather than sending them twice. */
@@ -193,12 +138,42 @@ export class ChatViewProvider {
     private readonly profileFor: (step: Step, attempt?: number) => ModelProfile,
     private readonly profileDefaults: ProfileDefaultsStore,
     private readonly registeredModels: () => ModelProfile[],
-    private readonly verifier: Verifier,
-    private readonly sizeLimits: SizeLimits,
+    verifier: Verifier,
+    sizeLimits: SizeLimits,
     private readonly allowWrites: SessionSwitch,
     private readonly permissions: PermissionStore,
     private readonly workspaceRoot: string,
-  ) {}
+  ) {
+    const refresh: ChatRefresh = { sendState: () => this.sendState(), changed: () => this.changed.fire() }
+    const notify: Notify = {
+      warn: (text) => void vscode.window.showWarningMessage(`Kiwipow Agent: ${text}`),
+      error: (text) => void vscode.window.showErrorMessage(`Kiwipow Agent: ${text}`),
+      ask: (text, ...choices) => Promise.resolve(vscode.window.showWarningMessage(`Kiwipow Agent: ${text}`, { modal: true }, ...choices)),
+    }
+    // Each waits on the other: the cleanup follows a passing test run, and ends in one.
+    this.cleanup = new FeatureCleanup({
+      workspaceRoot,
+      sessions,
+      profileFor,
+      sizeLimits,
+      refresh,
+      notify,
+      verify: async (feature) => ({ passed: await this.build.verify(feature, false), text: this.build.lineOf(feature)?.text ?? 'tests not run' }),
+    })
+    this.build = new FeatureBuild({
+      workspaceRoot,
+      sessions,
+      profileFor,
+      verifier,
+      attribute: (feature) => attributeWith(new FileHands(workspaceRoot, `verify-${feature}`, 'implement', feature), feature, workspaceRoot),
+      allowWrites,
+      statusOf: (id) => this.statusOf(id),
+      isOpen: (id) => this.isOpen(id),
+      refresh,
+      notify,
+      listener: this.cleanup,
+    })
+  }
 
   /** Models are chosen in the profiles alone: a feature run takes a profile changed in settings on its next turn. A chat keeps its own switch. */
   private async followProfile(run: SessionRecord): Promise<void> {
@@ -274,7 +249,7 @@ export class ChatViewProvider {
 
   private adopt(panel: vscode.WebviewPanel, tabId: string | undefined): ChatPanel {
     const entry: ChatPanel = { panel, ...(tabId ? { tabId } : {}) }
-    panel.iconPath = vscode.Uri.joinPath(this.extensionUri, 'docs', 'logos', 'kiwipow-agent-logo-128.png')
+    panel.iconPath = vscode.Uri.joinPath(this.extensionUri, 'docs', 'logos', 'head-128.png')
     this.panels.add(entry)
     this.attach(entry)
     panel.onDidDispose(() => {
@@ -406,8 +381,8 @@ export class ChatViewProvider {
     }
     // A run under a session keeps its one line on the plan bar, and now also fills its own section of the tab.
     if (record?.parentId) {
-      if (record.mode === 'cleanup') this.followCleanup(record, event)
-      else if (record.mode === 'implement') void this.followTask(record, event)
+      if (record.mode === 'cleanup') this.cleanup.follow(record, event)
+      else if (record.mode === 'implement') void this.build.followTask(record, event)
       else this.followCheck(record, event)
     }
     if (record) {
@@ -436,8 +411,8 @@ export class ChatViewProvider {
     if (event.type === 'turn_done' && !event.isError && record?.mode === 'implement' && record.feature) {
       const feature = record.feature
       // A task run under the plan follows its amendment in followTask, before the next task starts.
-      if (record.parentId) void this.followBoard(feature)
-      else void this.followAmendment(feature).then(() => this.followBoard(feature))
+      if (record.parentId) void this.build.followBoard(feature)
+      else void this.build.followAmendment(feature).then(() => this.build.followBoard(feature))
     }
     // The evaluation has been said: the session goes on with the full tool set, so what it found is worked on where it was read.
     if (event.type === 'turn_done' && !event.isError && record?.mode === 'docs' && !record.opened) {
@@ -449,7 +424,7 @@ export class ChatViewProvider {
       const reviewed = this.reviewingDocs.delete(record.feature)
       if (applied || reviewed) void this.sendState()
       // The clean check was the go-ahead for the build; the docs listing was the last thing between it and the implementer.
-      if (reviewed && !event.isError) void this.implementAfterApproval(record)
+      if (reviewed && !event.isError) void this.build.implementAfterApproval(record)
       if (!event.isError) void this.followPlan(record)
     }
   }
@@ -559,415 +534,14 @@ export class ChatViewProvider {
     await mkdir(dirname(path), { recursive: true })
     await writeBoard(path, deriveBoard(parseSpec(spec.body), existing, await readScenarioContext(contextPath(this.workspaceRoot, feature))))
     await this.sendState()
-    if (existing) return this.implementAfterApproval(plan)
+    if (existing) return this.build.implementAfterApproval(plan)
     this.reviewingDocs.add(feature)
     await this.sendToPlanner(plan, docsReviewPrompt(feature))
   }
 
-  /**
-   * An implementer's turn ended: a board left all tested without a passing
-   * run gets the test run, whether the turn marked the last task or fixed the
-   * code after a failed run. A board that already passed is left alone.
-   */
-  private async followBoard(feature: string): Promise<void> {
-    const tasks = await readTasks(tasksPath(this.workspaceRoot, feature))
-    if (verificationDue(tasks)) await this.verify(feature, false)
-  }
-
-  /**
-   * An implementer's turn ended with the spec changed under the board: the
-   * user's answer amended a rule. The board is derived again, keeping its
-   * progress, without a check against the code: the run that amended the rule
-   * has read that code already.
-   */
-  private async followAmendment(feature: string): Promise<void> {
-    const spec = await readSpecState(specPath(this.workspaceRoot, feature))
-    const path = tasksPath(this.workspaceRoot, feature)
-    if (!spec.exists || !tasksStale(spec, await readTasks(path))) return
-    const existing = await readBoard(path)
-    if (!existing) return
-    await writeBoard(path, deriveBoard(parseSpec(spec.body), existing, await readScenarioContext(contextPath(this.workspaceRoot, feature))))
-    await this.sendState()
-  }
-
-  /**
-   * Runs the test commands over the tasks' files, records the outcome, and
-   * hands a failure to the implementer, up to the budget of consecutive
-   * failures; past it the failed record waits for the user. A manual run
-   * starts the count over. True when the tests passed.
-   */
-  private async verify(feature: string, manual: boolean): Promise<boolean> {
-    if (this.verifications.get(feature)?.live) return false
-    if (manual) this.verifyFailures.delete(feature)
-    // A new run makes the last cleanup's outcome old news; one still running folds this run into its own.
-    if (!this.cleanups.get(feature)?.live) {
-      this.cleanups.delete(feature)
-      this.cleanupProgress.delete(feature)
-    }
-    this.verifications.set(feature, { live: true, text: 'Running the tests…' })
-    await this.sendState()
-    let text: string
-    let passed = false
-    let held: HeldFailure[] = []
-    try {
-      const hands = new FileHands(this.workspaceRoot, `verify-${feature}`, 'implement', feature)
-      const outcome = await runVerification({
-        cwd: this.workspaceRoot,
-        feature,
-        rules: this.verifier.rules(),
-        run: this.verifier.run,
-        attribute: attributeWith(hands, feature, this.workspaceRoot),
-        retry: { seconds: this.verifier.retrySeconds(), wait: (ms) => new Promise((r) => setTimeout(r, ms)) },
-        onStart: (command) => {
-          this.verifications.set(feature, { live: true, text: `Running ${describeCommand(command, this.workspaceRoot)}` })
-          void this.sendState()
-        },
-      })
-      held = outcome.held
-      if (outcome.record.ok) {
-        this.verifyFailures.delete(feature)
-        text = `Tests passed: ${outcome.record.text}`
-        passed = true
-      } else if (outcome.failures.length === 0 && held.length > 0) {
-        // All foreign on the retry too (`Held rather than verified`): stays in verification, spared from the budget, and asked about below.
-        text = `Tests failed on files another hand changed: ${outcome.record.text}`
-      } else {
-        const failures = (this.verifyFailures.get(feature) ?? 0) + 1
-        this.verifyFailures.set(feature, failures)
-        text = `Tests failed: ${outcome.record.text}`
-        if (failures <= this.verifier.failureBudget()) await this.handToImplementer(feature, outcome.failures, failures)
-        else text += ` (${failures} in a row; fix it and verify again)`
-      }
-    } catch (error) {
-      text = `Test run failed: ${error instanceof Error ? error.message : String(error)}`
-    }
-    this.verifications.set(feature, { live: false, text })
-    await this.sendState()
-    this.changed.fire()
-    if (held.length > 0) await this.askAboutForeignFailures(feature, held)
-    if (passed) await this.sweepForCleanup(feature)
-    return passed
-  }
-
-  /** The docs listing after approval has ended: the build starts on its own, so approving is the only act it takes. */
-  private async implementAfterApproval(record: SessionRecord): Promise<void> {
-    const feature = record.feature!
-    try {
-      const spec = await readSpecState(specPath(this.workspaceRoot, feature))
-      const tasks = await readTasks(tasksPath(this.workspaceRoot, feature))
-      if (!implementationStarts(spec, tasks, this.implementerLive(feature))) return
-      await this.startImplementing(record)
-    } catch (error) {
-      void vscode.window.showErrorMessage(`Kiwipow Agent: cannot start the implementation: ${error instanceof Error ? error.message : String(error)}`)
-    }
-  }
-
-  /**
-   * A build the last window cut off mid-turn goes on where it stood, once per
-   * feature: a task run carries its task on, a run fixing a failed sweep hands
-   * the board back to the sweep. A run stopped on the user keeps waiting.
-   */
-  async resumeCutOffBuilds(): Promise<void> {
-    const resumed = new Set<string>()
-    for (const run of await this.sessions.takeCutOff()) {
-      if (run.mode !== 'implement' || !run.feature || resumed.has(run.feature)) continue
-      resumed.add(run.feature)
-      const plan = (run.parentId ? this.sessions.get(run.parentId) : undefined) ?? this.sessions.latest('plan', run.feature)
-      if (run.task !== undefined && plan) await this.implementAfterApproval(plan)
-      else if (run.task === undefined) {
-        await this.followBoard(run.feature).catch((error: unknown) => {
-          void vscode.window.showErrorMessage(`Kiwipow Agent: cannot resume the test run: ${error instanceof Error ? error.message : String(error)}`)
-        })
-      }
-    }
-  }
-
-  /**
-   * The next unfinished task gets a run of its own under the plan's tab,
-   * started on the board's hand-off rather than on a conversation grown
-   * through every task before it; the run that stopped on that task picks it
-   * up again instead. With no task left the board goes to the test sweep.
-   */
-  private async startImplementing(plan: SessionRecord): Promise<void> {
-    const feature = plan.feature!
-    const path = tasksPath(this.workspaceRoot, feature)
-    const board = await readBoard(path)
-    const task = board ? nextTask(board) : undefined
-    if (!board || !task) return this.followBoard(feature)
-    const previous = this.sessions.list().find((r) => r.mode === 'implement' && r.feature === feature && r.task !== undefined && sameName(r.task, task.name))
-    if (previous) {
-      if (this.statuses.get(previous.id) === 'implementing') return
-      // The switch does not outlive the window, and the approval that turned it on still stands.
-      this.allowWrites.setEnabled(previous.id, true)
-      await this.sessions.send(previous.id, TASK_CARRY_ON)
-      return
-    }
-    const spec = await readSpecState(specPath(this.workspaceRoot, feature))
-    if (!spec.exists) return
-    // Started by the host, so the run's only board call is the one that records how the task ended.
-    const profile = this.profileFor('implement')
-    const started = await changeBoard(path, (b) => updateTask(b, task.name, { state: 'in_progress' }))
-    const run = await this.sessions.create(profile, 'implement', feature, { parentId: plan.id, task: task.name })
-    this.allowWrites.setEnabled(run.id, true)
-    await this.sendState()
-    const decisions = await readDecisions(decisionsPath(this.workspaceRoot, feature))
-    await this.sessions.send(run.id, taskKickoff(started, task.name, parseSpec(spec.body), decisions))
-  }
-
-  /**
-   * A task run's turn ended. Its task settled: the run is closed and the next
-   * task's run starts. Not settled: the run waits for the user, who can carry
-   * it on. A run that fixed a failed sweep is closed and hands the board back
-   * to the sweep.
-   */
-  private async followTask(record: SessionRecord, event: SessionEvent): Promise<void> {
-    // The run moves its task on the board; the plan view shows the board, so it follows.
-    if (event.type === 'tool_result' && this.isOpen(record.id)) void this.sendState()
-    if (event.type !== 'turn_done' || event.isError) return
-    const feature = record.feature!
-    await this.followAmendment(feature)
-    if (record.task === undefined) {
-      // A fix run is over once the board goes back to the test run; left open, it holds the plan's tab against the cleanup.
-      if (!verificationDue(await readTasks(tasksPath(this.workspaceRoot, feature)))) return
-      await this.sessions.settle(record.id)
-      await this.verify(feature, false)
-      return
-    }
-    const board = await readBoard(tasksPath(this.workspaceRoot, feature))
-    if (!board || !taskSettled(board, record.task)) return
-    await this.sessions.settle(record.id)
-    const plan = this.sessions.get(record.parentId!)
-    if (plan) await this.startImplementing(plan)
-  }
-
-  /** An implementer at work on the feature: nothing starts a second one. */
-  private implementerLive(feature: string): boolean {
-    return this.sessions.list().some((r) => r.mode === 'implement' && r.feature === feature && this.sessions.isLive(r.id))
-  }
-
-  /**
-   * A failed sweep goes to a run of its own under the plan's tab, started on
-   * the failure and the tasks it names rather than on whichever task ran last.
-   * `attempt` is how many sweeps in a row have failed: each one tries harder.
-   */
-  private async handToImplementer(feature: string, failures: VerificationFailure[], attempt: number): Promise<void> {
-    const board = await readBoard(tasksPath(this.workspaceRoot, feature))
-    if (!board) return
-    const plan = this.sessions.latest('plan', feature)
-    const run = await this.sessions.create(this.profileFor('fix', attempt), 'implement', feature, { ...(plan ? { parentId: plan.id } : {}), fixAttempt: attempt })
-    this.allowWrites.setEnabled(run.id, true)
-    await this.sendState()
-    await this.sessions.send(run.id, fixKickoff(feature, board, failures, this.workspaceRoot))
-  }
-
-  /**
-   * `Held rather than verified`: the run's failures were foreign both times
-   * and are already recorded on the board, naming the files and the hand.
-   * The user, not the budget, decides what happens to them: run the suites
-   * again, hand them to the implementer as if they were the feature's own,
-   * or accept the feature with them standing.
-   */
-  private async askAboutForeignFailures(feature: string, held: HeldFailure[]): Promise<void> {
-    const lines = held.map((h) => `${describeCommand(h, this.workspaceRoot)} — ${h.files.join(', ')}: ${h.hand}`)
-    const pick = await vscode.window.showWarningMessage(
-      `Kiwipow Agent: verification for "${feature}" failed only on files another hand changed:\n${lines.join('\n')}`,
-      { modal: true },
-      'Run again',
-      'Hand to implementer anyway',
-      'Accept',
-    )
-    if (pick === 'Run again') await this.verify(feature, true)
-    else if (pick === 'Hand to implementer anyway') await this.handToImplementer(feature, held, this.verifyFailures.get(feature) ?? 1)
-    else if (pick === 'Accept') {
-      await recordVerification(tasksPath(this.workspaceRoot, feature), {
-        at: new Date().toISOString(),
-        ok: true,
-        text: `Accepted despite another hand: ${held.map((h) => describeCommand(h, this.workspaceRoot)).join('; ')}`,
-      })
-      this.verifications.set(feature, { live: false, text: 'Accepted with tests failing on files another hand changed.' })
-      await this.sendState()
-      this.changed.fire()
-      await this.sweepForCleanup(feature)
-    }
-  }
-
-  /**
-   * The tests passed: the files the feature's implementers edited are
-   * measured. Nothing is split on this alone. What is over a limit is an
-   * offer the user rules on at the Cleanup step, since a split is a change to
-   * code they have just seen proven.
-   */
-  private async sweepForCleanup(feature: string): Promise<void> {
-    if (this.cleanups.get(feature)?.live) return
-    const limits = this.sizeLimits.limits()
-    // A sweep that cannot measure still settles the step: an offer never made would hold the Cleanup step open with nothing to act on.
-    if (!anyLimit(limits)) return this.sizesUnchecked(feature, 'no size limits are set')
-    const tasks = await readTasks(tasksPath(this.workspaceRoot, feature))
-    // Skipped is the user's word that this feature is finished; done is the split already carried out.
-    if (tasks.exists && (tasks.cleanup === 'skipped' || tasks.cleanup === 'done')) return
-    const implementers = this.sessions.list().filter((r) => r.mode === 'implement' && r.feature === feature)
-    if (implementers.length === 0) return this.sizesUnchecked(feature, 'no implementer session is left to say which files it edited')
-    const files: string[] = []
-    for (const record of implementers) {
-      for (const file of editedFiles(await this.sessions.transcript(record.id))) if (!files.includes(file)) files.push(file)
-    }
-    const flagged = await oversizedFiles(this.workspaceRoot, files, limits, this.sizeLimits.ignore())
-    this.sweeps.set(feature, flagged)
-    if (flagged.length === 0) this.cleanups.set(feature, { live: false, text: 'Sizes checked: nothing to split' })
-    await this.sendState()
-    this.changed.fire()
-  }
-
-  private async sizesUnchecked(feature: string, why: string): Promise<void> {
-    this.sweeps.set(feature, [])
-    this.cleanups.set(feature, { live: false, text: `Sizes not checked: ${why}` })
-    await this.sendState()
-    this.changed.fire()
-  }
-
-  /**
-   * The user asked for the split: the units the last sweep found, in the files
-   * picked (all when none are named), go to a cleanup run under the plan's tab.
-   * It starts on the size report and reads the files itself: the implementers
-   * were one run per task, so none of them holds all of the feature's files.
-   */
-  private async runCleanup(feature: string, picked?: string[]): Promise<void> {
-    const refuse = (why: string) => void vscode.window.showWarningMessage(`Kiwipow Agent: cannot start the cleanup: ${why}`)
-    if (this.cleanups.get(feature)?.live) return refuse('one is already running')
-    const relativeTo = (file: string) => relative(this.workspaceRoot, file).split('\\').join('/')
-    const flagged = (this.sweeps.get(feature) ?? []).filter((u) => picked === undefined || picked.includes(relativeTo(u.path)))
-    if (flagged.length === 0) return refuse('none of the picked files are in the last size sweep')
-    const parent = this.sessions.latest('plan', feature) ?? this.sessions.list().find((r) => r.mode === 'implement' && r.feature === feature && !r.parentId)
-    if (!parent) return refuse(`no plan session is left for "${feature}"`)
-    const busy = this.sessions.liveChildOf(parent.id)
-    if (busy) return refuse(`"${busy.title}" is still running under the plan; close it first`)
-    const paths = [...new Set(flagged.map((u) => relativeTo(u.path)))]
-    const child = await this.sessions.create(this.profileFor('cleanup'), 'cleanup', feature, { parentId: parent.id, files: paths })
-    this.cleanups.set(feature, { live: true, text: 'Splitting oversized units…' })
-    this.cleanupProgress.set(feature, startProgress(flagged.map((u) => this.cleanupUnit(u))))
-    await this.sendState()
-    await this.sessions.send(child.id, cleanupKickoff(sizeReport(this.workspaceRoot, flagged), false))
-  }
-
-  /** A path as the plan view reads it: workspace-relative with forward slashes, so it links like every other path there. */
-  private workspaceRelative(path: string): string {
-    return (isAbsolute(path) ? relative(this.workspaceRoot, path) : path).split('\\').join('/')
-  }
-
-  /** A flagged unit as the plan view reads it. */
-  private cleanupUnit(unit: Oversized): CleanupUnit {
-    return {
-      path: this.workspaceRelative(unit.path),
-      line: unit.line,
-      name: unit.name,
-      kind: unit.kind,
-      lines: unit.lines,
-      threshold: unit.threshold,
-    }
-  }
-
-  /** The user's word on the offer: split now, come back to it, or settle the feature as it stands. */
-  private async decideCleanup(feature: string, decision: 'run' | 'postpone' | 'skip', paths?: string[]): Promise<void> {
-    if (decision === 'run') {
-      await this.runCleanup(feature, paths)
-      return
-    }
-    await recordCleanupDecision(tasksPath(this.workspaceRoot, feature), decision === 'skip' ? 'skipped' : 'postponed')
-    if (decision === 'skip') this.sweeps.delete(feature)
-    await this.sendState()
-    this.changed.fire()
-  }
-
-  /** A cleanup run's events become the one line the plan bar shows and the split the Cleanup tab follows. */
-  private followCleanup(child: SessionRecord, event: SessionEvent): void {
-    const feature = child.feature!
-    const cleanup = this.cleanups.get(feature)
-    if (!cleanup?.live) return
-    if (event.type === 'turn_done') {
-      void this.finishCleanup(child, event.isError ? (event.errors.length > 0 ? event.errors : ['the run ended with an error']) : [])
-      return
-    }
-    if (event.type === 'error' && event.fatal) {
-      void this.finishCleanup(child, [event.message])
-      return
-    }
-    const progressMoved = this.followCleanupProgress(feature, event)
-    const line = progressLine(event, 'Cleanup')
-    const lineMoved = line !== undefined && line !== cleanup.text
-    if (lineMoved) this.cleanups.set(feature, { live: true, text: line })
-    if (lineMoved || progressMoved) void this.sendState()
-  }
-
-  /** True when the split moved; an edit on a flagged file has that file measured again. */
-  private followCleanupProgress(feature: string, event: SessionEvent): boolean {
-    const progress = this.cleanupProgress.get(feature)
-    if (!progress) return false
-    const toRelative = (path: string) => this.workspaceRelative(path)
-    const next = advance(progress, event, toRelative)
-    this.cleanupProgress.set(feature, next)
-    const file = editedUnitFile(next, event, toRelative)
-    if (file) {
-      this.remeasure(feature, file).catch((error: unknown) => {
-        void vscode.window.showWarningMessage(`Kiwipow Agent: cannot measure ${file} again: ${error instanceof Error ? error.message : String(error)}`)
-      })
-    }
-    return next !== progress
-  }
-
-  private async remeasure(feature: string, path: string): Promise<void> {
-    const over = await oversizedFiles(this.workspaceRoot, [join(this.workspaceRoot, path)], this.sizeLimits.limits(), [])
-    // Read after the measure: events that came in meanwhile moved the progress on.
-    const progress = this.cleanupProgress.get(feature)
-    if (!progress) return
-    this.cleanupProgress.set(feature, measured(progress, path, over.map((u) => this.cleanupUnit(u))))
-    await this.sendState()
-  }
-
-  /** Talking to a cleanup that has ended starts it splitting again, so its turn is followed and ends in the same measure and test run. */
-  private async reengageCleanup(run: SessionRecord): Promise<void> {
-    const feature = run.feature
-    if (!feature || this.cleanups.get(feature)?.live) return
-    this.cleanups.set(feature, { live: true, text: 'answering…' })
-    const progress = this.cleanupProgress.get(feature)
-    if (progress) this.cleanupProgress.set(feature, resumed(progress))
-    await this.sendState()
-  }
-
-  /**
-   * The run is over: stop its engine, measure its files again, and run the
-   * tests once more, since the run had no shell to prove its split with. The
-   * line holds both outcomes.
-   */
-  private async finishCleanup(child: SessionRecord, errors: string[]): Promise<void> {
-    const feature = child.feature!
-    // Marked over before the first await, so a late event from the dying engine cannot finish it twice.
-    this.cleanups.set(feature, { live: false, text: this.cleanups.get(feature)?.text ?? '' })
-    await this.sessions.close(child.id)
-    const progress = this.cleanupProgress.get(feature)
-    if (errors.length > 0) {
-      const text = `Cleanup failed: ${errors.join('; ')}`
-      this.cleanups.set(feature, { live: false, text })
-      if (progress) this.cleanupProgress.set(feature, settled(progress, false, text))
-      await this.sendState()
-      this.changed.fire()
-      return
-    }
-    const files = (child.files ?? []).map((f) => join(this.workspaceRoot, f))
-    const left = await oversizedFiles(this.workspaceRoot, files, this.sizeLimits.limits(), [])
-    const split = left.length === 0 ? 'Cleaned: every unit is within its limit' : `Cleanup left ${left.length} unit${left.length === 1 ? '' : 's'} over the limit`
-    // Written before the test run, whose pass sweeps again: the offer was answered, and what the split left is not a new one.
-    await recordCleanupDecision(tasksPath(this.workspaceRoot, feature), 'done')
-    this.sweeps.delete(feature)
-    this.cleanups.set(feature, { live: true, text: `${split}; running the tests…` })
-    const measuredProgress = progress ? finished(progress, left.map((u) => this.cleanupUnit(u))) : undefined
-    if (measuredProgress) this.cleanupProgress.set(feature, measuredProgress)
-    await this.sendState()
-    const passed = await this.verify(feature, false)
-    const text = `${split}; ${this.verifications.get(feature)?.text ?? 'tests not run'}`
-    this.cleanups.set(feature, { live: false, text })
-    if (measuredProgress) this.cleanupProgress.set(feature, settled(measuredProgress, passed, this.verifications.get(feature)?.text ?? 'tests not run'))
-    await this.sendState()
-    this.changed.fire()
+  /** A build the last window cut off mid-turn goes on where it stood. */
+  resumeCutOffBuilds(): Promise<void> {
+    return this.build.resumeCutOffBuilds()
   }
 
   /**
@@ -1151,44 +725,12 @@ export class ChatViewProvider {
         await this.sendState()
         if (entry.tabId) await this.sendTranscript(entry.tabId)
         return
-      case 'send': {
-        const text = withLinkedFiles(message.text, message.files ?? [])
-        if (!shown) {
-          await this.newSession('chat', undefined, text, entry)
-          return
-        }
-        // The phase the person picked names the run they talk to; nothing here guesses another.
-        if (!message.sessionId) throw new Error('The message names no conversation to go to.')
-        const run = this.targetOf(shown, message.sessionId, true)
-        if (run.mode === 'cleanup') await this.reengageCleanup(run)
-        await this.followProfile(run)
-        // A model switch picked while a turn of this chat session was in flight takes effect now (B10).
-        await this.applyPendingModelSwitch(run)
-        await this.sessions.send(run.id, text)
-        return
-      }
-      case 'link_open_file': {
-        // With focus in the view there may be no active text editor, so the file on screen is the one meant.
-        const editor = vscode.window.activeTextEditor ?? vscode.window.visibleTextEditors[0]
-        if (!editor) {
-          void vscode.window.showWarningMessage('Kiwipow Agent: no file is open in the editor to link.')
-          return
-        }
-        void entry.panel.webview.postMessage({
-          type: 'linked_file',
-          path: linkedFilePath(this.workspaceRoot, editor.document.uri.fsPath),
-        } satisfies ToWebview)
-        return
-      }
-      case 'permission': {
-        if (!this.sessions.get(message.sessionId)) return
-        // The rules are in place before the call runs, so a second call they cover in the same turn already passes.
-        const { remember, ...decision } = message.decision
-        if (remember?.project.length) await this.permissions.allowForProject(remember.project)
-        if (remember?.session.length) this.permissions.allowForSession(message.sessionId, remember.session)
-        await this.sessions.respondToPermission(message.sessionId, message.requestId, decision)
-        return
-      }
+      case 'send':
+        return this.sendFromTab(message, shown, entry)
+      case 'link_open_file':
+        return this.linkOpenFile(entry)
+      case 'permission':
+        return this.answerPermission(message)
       case 'question':
         if (!this.sessions.get(message.sessionId)) return
         await this.sessions.respondToQuestion(message.sessionId, message.requestId, message.outcome)
@@ -1224,173 +766,188 @@ export class ChatViewProvider {
       case 'switch_session':
         await this.open(message.sessionId, entry)
         return
-      case 'new_session': {
-        // One filing at a time: a second would propose the same entries again.
-        const filing = message.mode === 'file-decisions' ? this.sessions.list().find((r) => r.mode === 'file-decisions' && this.sessions.isLive(r.id)) : undefined
-        if (filing) return this.open(filing.id, entry)
-        const prompt = withLinkedFiles(message.prompt ?? '', message.files ?? [])
-        // The docs card and the filing have nothing to fill in, so their sessions start on the job rather than waiting for a prompt.
-        const kickoff = message.mode === 'docs' ? docsEvaluationKickoff() : message.mode === 'file-decisions' ? fileDecisionsKickoff() : undefined
-        await this.newSession(message.mode, message.feature, prompt !== '' ? prompt : kickoff, entry)
-        return
-      }
+      case 'new_session':
+        return this.startFromCard(message, entry)
       case 'resume_plan':
-        await this.resumePlan(message.feature, entry)
-        return
-      case 'approve_spec': {
-        const record = this.planRecordOf(shown)
-        const path = this.specPathOf(shown)
-        const feature = record?.feature
-        if (!record || !path || !feature) return
-        // Agreement is reached, not assumed: every comment has to be closed first.
-        const review = await readReview(reviewPath(this.workspaceRoot, feature))
-        assertApprovable(review)
-        const decisions = await readDecisions(decisionsPath(this.workspaceRoot, feature))
-        assertRulingsSent(decisions)
-        const spec = await readSpecState(path)
-        const tasks = await readTasks(tasksPath(this.workspaceRoot, feature))
-        if (!isApprovable(planStage(spec, review, tasks, decisions), spec)) throw new Error('Only a draft with every comment closed can be approved.')
-        await setSpecStatus(path, 'approved')
-        await this.sendState()
-        // Approval hands the spec to the build: the code is checked against it first, and speaks up only where it disagrees.
-        if (checkDue(await readSpecState(path), tasks, decisions)) return this.startCheck(record)
-        // A board an earlier mapping left, current with the spec: nothing to check, the docs listing and the build follow.
-        this.reviewingDocs.add(feature)
-        await this.sendToPlanner(record, docsReviewPrompt(feature))
-        return
-      }
-      case 'send_rulings': {
-        const record = this.planRecordOf(shown)
-        if (!record?.feature) return
-        if (!(await this.handOverRulings(record))) throw new Error('No decision is pending; there is nothing to send.')
-        return
-      }
-      case 'rule_decision': {
-        const path = this.specPathOf(shown)
-        const feature = shown?.feature
-        if (!path || !feature) return
-        // Decisions come after approval, so an approved spec takes a ruling; an implemented one is settled.
-        const spec = await readSpecState(path)
-        if (!spec.exists || spec.status === 'implemented') throw new Error('The feature is implemented: there is nothing left to rule on.')
-        const decisions = decisionsPath(this.workspaceRoot, feature)
-        await writeFile(decisions, withRuling(await readFile(decisions, 'utf8'), message.decision, message.ruling), 'utf8')
-        await this.sendState()
-        return
-      }
+        return this.resumePlan(message.feature, entry)
+      case 'approve_spec':
+        return this.approveSpec(shown)
+      case 'send_rulings':
+        return this.sendRulings(shown)
+      case 'rule_decision':
+        return this.ruleDecision(shown, message)
       case 'add_comment':
-        await this.reviewing(shown, (review) => {
-          addComment(review, message.target, message.text)
-        })
-        return
+        return this.reviewing(shown, (review) => void addComment(review, message.target, message.text))
       case 'edit_comment':
-        await this.reviewing(shown, (review) => editComment(review, message.comment, message.text))
-        return
+        return this.reviewing(shown, (review) => editComment(review, message.comment, message.text))
       case 'remove_comment':
-        await this.reviewing(shown, (review) => removeComment(review, message.comment))
-        return
+        return this.reviewing(shown, (review) => removeComment(review, message.comment))
       case 'strike_item':
-        await this.reviewing(shown, (review) => strikeItem(review, message.item))
-        return
+        return this.reviewing(shown, (review) => strikeItem(review, message.item))
       case 'unstrike_item':
-        await this.reviewing(shown, (review) => unstrikeItem(review, message.item))
-        return
-      case 'resolve_comment': {
+        return this.reviewing(shown, (review) => unstrikeItem(review, message.item))
+      case 'resolve_comment':
         // Resolving a comment, including a disagreement, is the human's own act; it needs no draft.
-        await this.reviewing(shown, (review) => resolveComment(review, message.comment), false)
-        return
-      }
-      case 'submit_review': {
-        const record = this.planRecordOf(shown)
-        if (!record?.feature) return
-        await submitReview({
-          courier: this.courier(),
-          cwd: this.workspaceRoot,
-          feature: record.feature,
-          owner: { sessionId: record.id },
-        })
-        await this.sendState()
-        return
-      }
+        return this.reviewing(shown, (review) => resolveComment(review, message.comment), false)
+      case 'submit_review':
+        return this.submitReview(shown)
       case 'check_spec': {
         // The way back in when a check failed or was stopped: approval started the first one.
         const record = this.planRecordOf(shown)
-        if (record) await this.startCheck(record)
-        return
+        return record ? this.startCheck(record) : undefined
       }
-      case 'stop_check': {
-        const record = this.planRecordOf(shown)
-        // Task runs and cleanups live under the same tab; only the check is this button's to stop.
-        const child = record ? this.sessions.list().find((r) => r.parentId === record.id && r.mode === 'reconcile' && this.sessions.isLive(r.id)) : undefined
-        if (!record || !child) return
-        this.checks.set(record.id, { live: false, text: 'Check stopped' })
-        await this.sessions.close(child.id)
-        await this.sendState()
-        this.changed.fire()
-        return
-      }
-      case 'stop_cleanup': {
-        // The run shows on every tab of the feature, so it is found by the feature, not the active tab.
-        const feature = shown?.feature
-        const child = feature
-          ? this.sessions.list().find((r) => r.mode === 'cleanup' && r.feature === feature && this.sessions.isLive(r.id))
-          : undefined
-        if (!feature || !child) return
-        this.cleanups.set(feature, { live: false, text: 'Cleanup stopped' })
-        const progress = this.cleanupProgress.get(feature)
-        if (progress) this.cleanupProgress.set(feature, settled(progress, false, 'Cleanup stopped'))
-        await this.sessions.close(child.id)
-        await this.sendState()
-        this.changed.fire()
-        return
-      }
-      case 'cleanup_decision': {
-        const feature = shown?.feature
-        if (feature) await this.decideCleanup(feature, message.decision, message.paths)
-        return
-      }
-      case 'sweep_sizes': {
-        const feature = shown?.feature
-        if (feature) await this.sweepForCleanup(feature)
-        return
-      }
-      case 'repair_spec': {
-        const feature = shown?.feature
-        if (feature) this.reportMigration(await this.repairPlan(feature), true)
-        return
-      }
-      case 'implement_spec': {
-        const record = this.planRecordOf(shown)
-        const path = this.specPathOf(shown)
-        if (record?.mode !== 'plan' || !record.feature || !path) return
-        assertImplementable(await readSpecState(path), await readTasks(tasksPath(this.workspaceRoot, record.feature)))
-        await this.startImplementing(record)
-        return
-      }
-      case 'verify_spec': {
-        const feature = shown?.feature
-        if (feature) await this.verify(feature, true)
-        return
-      }
-      case 'open_file': {
-        // An edit names its file absolutely; a task names it relative to the workspace.
-        const path = isAbsolute(message.path) ? message.path : join(this.workspaceRoot, message.path)
-        const file = await vscode.workspace.openTextDocument(vscode.Uri.file(path))
-        const at = new vscode.Position(editLine(message.line, file.lineCount), 0)
-        await vscode.window.showTextDocument(file, { selection: new vscode.Range(at, at) })
-        return
-      }
-      case 'open_edit_diff': {
-        // The path comes back from the webview, so only a snapshot this extension wrote is opened.
-        if (!isRunSnapshot(runsRoot(this.workspaceRoot), message.snapshot)) return
-        await vscode.commands.executeCommand(
-          'vscode.diff',
-          vscode.Uri.file(message.snapshot),
-          vscode.Uri.file(message.path),
-          editDiffTitle(message.label),
-        )
-        return
-      }
+      case 'stop_check':
+        return this.stopCheck(shown)
+      case 'stop_cleanup':
+        return shown?.feature ? this.cleanup.stop(shown.feature) : undefined
+      case 'cleanup_decision':
+        return shown?.feature ? this.cleanup.decide(shown.feature, message.decision, message.paths) : undefined
+      case 'sweep_sizes':
+        return shown?.feature ? this.cleanup.sweep(shown.feature) : undefined
+      case 'repair_spec':
+        return shown?.feature ? this.reportMigration(await this.repairPlan(shown.feature), true) : undefined
+      case 'implement_spec':
+        return this.implementSpec(shown)
+      case 'verify_spec':
+        return shown?.feature ? void (await this.build.verify(shown.feature, true)) : undefined
+      case 'open_file':
+        return this.openFile(message)
+      case 'open_edit_diff':
+        return this.openEditDiff(message)
     }
+  }
+
+  private async sendFromTab(message: WebviewMessage<'send'>, shown: SessionRecord | undefined, entry: ChatPanel): Promise<void> {
+    const text = withLinkedFiles(message.text, message.files ?? [])
+    if (!shown) {
+      await this.newSession('chat', undefined, text, entry)
+      return
+    }
+    // The phase the person picked names the run they talk to; nothing here guesses another.
+    if (!message.sessionId) throw new Error('The message names no conversation to go to.')
+    const run = this.targetOf(shown, message.sessionId, true)
+    if (run.mode === 'cleanup') await this.cleanup.reengage(run)
+    await this.followProfile(run)
+    // A model switch picked while a turn of this chat session was in flight takes effect now (B10).
+    await this.applyPendingModelSwitch(run)
+    await this.sessions.send(run.id, text)
+  }
+
+  private linkOpenFile(entry: ChatPanel): void {
+    // With focus in the view there may be no active text editor, so the file on screen is the one meant.
+    const editor = vscode.window.activeTextEditor ?? vscode.window.visibleTextEditors[0]
+    if (!editor) {
+      void vscode.window.showWarningMessage('Kiwipow Agent: no file is open in the editor to link.')
+      return
+    }
+    void entry.panel.webview.postMessage({
+      type: 'linked_file',
+      path: linkedFilePath(this.workspaceRoot, editor.document.uri.fsPath),
+    } satisfies ToWebview)
+  }
+
+  private async answerPermission(message: WebviewMessage<'permission'>): Promise<void> {
+    if (!this.sessions.get(message.sessionId)) return
+    // The rules are in place before the call runs, so a second call they cover in the same turn already passes.
+    const { remember, ...decision } = message.decision
+    if (remember?.project.length) await this.permissions.allowForProject(remember.project)
+    if (remember?.session.length) this.permissions.allowForSession(message.sessionId, remember.session)
+    await this.sessions.respondToPermission(message.sessionId, message.requestId, decision)
+  }
+
+  private async startFromCard(message: WebviewMessage<'new_session'>, entry: ChatPanel): Promise<void> {
+    // One filing at a time: a second would propose the same entries again.
+    const filing = message.mode === 'file-decisions' ? this.sessions.list().find((r) => r.mode === 'file-decisions' && this.sessions.isLive(r.id)) : undefined
+    if (filing) return this.open(filing.id, entry)
+    const prompt = withLinkedFiles(message.prompt ?? '', message.files ?? [])
+    // The docs card and the filing have nothing to fill in, so their sessions start on the job rather than waiting for a prompt.
+    const kickoff = message.mode === 'docs' ? docsEvaluationKickoff() : message.mode === 'file-decisions' ? fileDecisionsKickoff() : undefined
+    await this.newSession(message.mode, message.feature, prompt !== '' ? prompt : kickoff, entry)
+  }
+
+  private async approveSpec(shown: SessionRecord | undefined): Promise<void> {
+    const record = this.planRecordOf(shown)
+    const path = this.specPathOf(shown)
+    const feature = record?.feature
+    if (!record || !path || !feature) return
+    // Agreement is reached, not assumed: every comment has to be closed first.
+    const review = await readReview(reviewPath(this.workspaceRoot, feature))
+    assertApprovable(review)
+    const decisions = await readDecisions(decisionsPath(this.workspaceRoot, feature))
+    assertRulingsSent(decisions)
+    const spec = await readSpecState(path)
+    const tasks = await readTasks(tasksPath(this.workspaceRoot, feature))
+    if (!isApprovable(planStage(spec, review, tasks, decisions), spec)) throw new Error('Only a draft with every comment closed can be approved.')
+    await setSpecStatus(path, 'approved')
+    await this.sendState()
+    // Approval hands the spec to the build: the code is checked against it first, and speaks up only where it disagrees.
+    if (checkDue(await readSpecState(path), tasks, decisions)) return this.startCheck(record)
+    // A board an earlier mapping left, current with the spec: nothing to check, the docs listing and the build follow.
+    this.reviewingDocs.add(feature)
+    await this.sendToPlanner(record, docsReviewPrompt(feature))
+  }
+
+  private async sendRulings(shown: SessionRecord | undefined): Promise<void> {
+    const record = this.planRecordOf(shown)
+    if (!record?.feature) return
+    if (!(await this.handOverRulings(record))) throw new Error('No decision is pending; there is nothing to send.')
+  }
+
+  private async ruleDecision(shown: SessionRecord | undefined, message: WebviewMessage<'rule_decision'>): Promise<void> {
+    const path = this.specPathOf(shown)
+    const feature = shown?.feature
+    if (!path || !feature) return
+    // Decisions come after approval, so an approved spec takes a ruling; an implemented one is settled.
+    const spec = await readSpecState(path)
+    if (!spec.exists || spec.status === 'implemented') throw new Error('The feature is implemented: there is nothing left to rule on.')
+    const decisions = decisionsPath(this.workspaceRoot, feature)
+    await writeFile(decisions, withRuling(await readFile(decisions, 'utf8'), message.decision, message.ruling), 'utf8')
+    await this.sendState()
+  }
+
+  private async submitReview(shown: SessionRecord | undefined): Promise<void> {
+    const record = this.planRecordOf(shown)
+    if (!record?.feature) return
+    await submitReview({
+      courier: this.courier(),
+      cwd: this.workspaceRoot,
+      feature: record.feature,
+      owner: { sessionId: record.id },
+    })
+    await this.sendState()
+  }
+
+  private async stopCheck(shown: SessionRecord | undefined): Promise<void> {
+    const record = this.planRecordOf(shown)
+    // Task runs and cleanups live under the same tab; only the check is this button's to stop.
+    const child = record ? this.sessions.list().find((r) => r.parentId === record.id && r.mode === 'reconcile' && this.sessions.isLive(r.id)) : undefined
+    if (!record || !child) return
+    this.checks.set(record.id, { live: false, text: 'Check stopped' })
+    await this.sessions.close(child.id)
+    await this.sendState()
+    this.changed.fire()
+  }
+
+  private async implementSpec(shown: SessionRecord | undefined): Promise<void> {
+    const record = this.planRecordOf(shown)
+    const path = this.specPathOf(shown)
+    if (record?.mode !== 'plan' || !record.feature || !path) return
+    assertImplementable(await readSpecState(path), await readTasks(tasksPath(this.workspaceRoot, record.feature)))
+    await this.build.startImplementing(record)
+  }
+
+  private async openFile(message: WebviewMessage<'open_file'>): Promise<void> {
+    // An edit names its file absolutely; a task names it relative to the workspace.
+    const path = isAbsolute(message.path) ? message.path : join(this.workspaceRoot, message.path)
+    const file = await vscode.workspace.openTextDocument(vscode.Uri.file(path))
+    const at = new vscode.Position(editLine(message.line, file.lineCount), 0)
+    await vscode.window.showTextDocument(file, { selection: new vscode.Range(at, at) })
+  }
+
+  private async openEditDiff(message: WebviewMessage<'open_edit_diff'>): Promise<void> {
+    // The path comes back from the webview, so only a snapshot this extension wrote is opened.
+    if (!isRunSnapshot(runsRoot(this.workspaceRoot), message.snapshot)) return
+    await vscode.commands.executeCommand('vscode.diff', vscode.Uri.file(message.snapshot), vscode.Uri.file(message.path), editDiffTitle(message.label))
   }
 
   /**
@@ -1472,10 +1029,8 @@ export class ChatViewProvider {
     const state = await readSpecState(path)
     const fromPlan = record.mode === 'plan' && state.exists
     const check = this.checks.get(record.id)
-    const verification = this.verifications.get(feature)
-    const cleanup = this.cleanups.get(feature)
-    const flagged = this.sweeps.get(feature)
-    const sweep: CleanupSweep | undefined = flagged ? { units: flagged.map((u) => this.cleanupUnit(u)) } : undefined
+    const verification = this.build.lineOf(feature)
+    const cleanupState = this.cleanup.stateOf(feature)
     const review = await readReview(reviewPath(this.workspaceRoot, feature)).catch(() => emptyReview())
     const tasks: TasksState = await readTasks(tasksPath(this.workspaceRoot, feature))
     const decisions = await readDecisions(decisionsPath(this.workspaceRoot, feature))
@@ -1508,9 +1063,7 @@ export class ChatViewProvider {
       // Offered while the board is tested and the last record did not pass; a re-run after a pass is a manual choice too.
       verifiable: (stage === 'verification' || stage === 'verified') && verification?.live !== true,
       ...(verification ? { verification } : {}),
-      ...(cleanup ? { cleanup } : {}),
-      ...(sweep ? { cleanupSweep: sweep } : {}),
-      ...(this.cleanupProgress.has(feature) ? { cleanupProgress: this.cleanupProgress.get(feature)! } : {}),
+      ...cleanupState,
       ...(tasks.exists && tasks.cleanup ? { cleanupDecision: tasks.cleanup } : {}),
       ...(tasks.exists && tasks.verification ? { lastVerification: tasks.verification } : {}),
       tasks: tasks.exists ? tasks.tasks : [],
@@ -1521,7 +1074,7 @@ export class ChatViewProvider {
       pendingDecisions: pendingDecisions(decisions).length,
       applyingRulings: this.applying.has(feature),
       reviewingDocs: this.reviewingDocs.has(feature),
-      atWork: runs.some((r) => r.status === 'planning' || r.status === 'implementing') || check?.live === true || verification?.live === true || cleanup?.live === true,
+      atWork: runs.some((r) => r.status === 'planning' || r.status === 'implementing') || check?.live === true || verification?.live === true || cleanupState.cleanup?.live === true,
       ...(blocked ? { blocked } : {}),
       ...(failure ? { failure } : {}),
     }
