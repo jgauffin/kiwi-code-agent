@@ -18,13 +18,13 @@ import {
 const REPO_MAP = 'repo map'
 
 /**
- * The modes that start with the map. Chat has no feature to place, and a plan
- * session is blind by design, so neither is given any of it.
+ * The modes that start with the map. Chat has no feature to place, and a
+ * feature plan session is blind by design, so neither is given any of it.
  *
  * The mode is taken as a plain string: this module is host-side and mechanical,
  * and reaches for nothing in the session layer.
  */
-export const wantsRepoMap = (mode: string): boolean => mode === 'reconcile' || mode === 'implement'
+export const wantsRepoMap = (mode: string): boolean => mode === 'reconcile' || mode === 'implement' || mode === 'code-plan'
 
 export type RepoMapSource = GeneratedSource
 export type RepoMapContext = GeneratedContext

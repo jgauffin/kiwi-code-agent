@@ -37,6 +37,13 @@ describe('sessionGroups', () => {
     expect(groups.plans.map((p) => p.record?.id)).toEqual(['plan'])
   })
 
+  it('lists_a_code_plan_with_the_chats_since_it_is_a_conversation_not_a_feature', () => {
+    const groups = sessionGroups([record('code-plan', 'code-plan'), record('chat', 'chat')], [])
+
+    expect(groups.chats.map((r) => r.id)).toEqual(['code-plan', 'chat'])
+    expect(groups.plans).toEqual([])
+  })
+
   it('shows_a_feature_planned_more_than_once_as_one_plan_its_newest_session', () => {
     const groups = sessionGroups(
       [record('newer', 'plan', { feature: 'login' }), record('other', 'plan', { feature: 'search' }), record('older', 'plan', { feature: 'login' })],

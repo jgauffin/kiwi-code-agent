@@ -21,6 +21,7 @@ import { listPlans } from '../agent/phases/plan-list'
 import { progressLine, reconcileKickoff } from '../agent/phases/reconcile'
 import { TASK_CARRY_ON, assertImplementable, fixKickoff, implementationStarts, taskKickoff, taskSettled } from '../agent/phases/implement'
 import { cleanupKickoff } from '../agent/phases/cleanup'
+import { codePlanBuildKickoff } from '../agent/phases/code-plan'
 import { anyLimit, oversizedFiles, sizeReport, type Limits, type Oversized } from '../agent/cleanup/oversized'
 import { editedFiles } from '../agent/edits/edited-files'
 import { checkDue, isApprovable, planStage, tasksStale } from '../agent/phases/plan-stage'
@@ -729,12 +730,12 @@ export class ChatViewProvider {
     if (record.task === undefined) {
       // A fix run is over once the board goes back to the test run; left open, it holds the plan's tab against the cleanup.
       if (!verificationDue(await readTasks(tasksPath(this.workspaceRoot, feature)))) return
-      await this.sessions.close(record.id)
+      await this.sessions.settle(record.id)
       return this.verify(feature, false)
     }
     const board = await readBoard(tasksPath(this.workspaceRoot, feature))
     if (!board || !taskSettled(board, record.task)) return
-    await this.sessions.close(record.id)
+    await this.sessions.settle(record.id)
     const plan = this.sessions.get(record.parentId!)
     if (plan) await this.startImplementing(plan)
   }
@@ -875,7 +876,7 @@ export class ChatViewProvider {
     this.changed.fire()
   }
 
-  /** A cleanup run has no transcript in the UI either: its events become the one line the plan bar shows. */
+  /** A cleanup run's events also become the one line the plan bar shows. */
   private followCleanup(child: SessionRecord, event: SessionEvent): void {
     const feature = child.feature!
     const cleanup = this.cleanups.get(feature)
@@ -1166,8 +1167,11 @@ export class ChatViewProvider {
         return
       }
       case 'continue_in_chat':
-        // The chat carries the evaluation's conversation on, so it takes over the tab the evaluation had.
-        if (shown?.mode === 'docs') await this.activate(await this.sessions.continueInChat(shown.id), undefined, entry)
+        // The chat carries the conversation on, so it takes over the tab the session had. A code plan continues to be built.
+        if (shown?.mode === 'docs' || shown?.mode === 'code-plan') {
+          const kickoff = shown.mode === 'code-plan' ? codePlanBuildKickoff() : undefined
+          await this.activate(await this.sessions.continueInChat(shown.id), kickoff, entry)
+        }
         return
       case 'reconnect_mcp':
         if (shown) await this.sessions.reconnectMcp(this.currentRun(shown).id, message.server)

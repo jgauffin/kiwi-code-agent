@@ -19,9 +19,9 @@ function fixedSource(summary: string | undefined): RepoMapSource {
 
 
 describe('repo map at session start', () => {
-  it('a_reconcile_run_and_an_implement_session_get_the_summary_while_a_chat_or_plan_session_does_not', async () => {
+  it('a_reconcile_run_an_implement_session_and_a_code_plan_get_the_summary_while_a_chat_or_feature_plan_session_does_not', async () => {
     const source = fixedSource('- Core (dotnet) `src/Core/Core.csproj` — 7 public types, index `.agent/repo-map/types/Core.md`')
-    for (const mode of ['reconcile', 'implement']) {
+    for (const mode of ['reconcile', 'implement', 'code-plan']) {
       const prompt = await withRepoMap(mode, BASE, source)
       expect(prompt.startsWith(BASE), mode).toBe(true)
       expect(prompt, mode).toContain('index `.agent/repo-map/types/Core.md`')

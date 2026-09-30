@@ -2,7 +2,7 @@
 
 ## Why
 
-Blind planning exists because a planner that can read the code inherits the code's mistakes as constraints. Every workaround becomes an implicit requirement, and the feature gets shaped to fit the defect. Deriving the spec from intent alone makes disagreement between intent and implementation visible rather than silently absorbed. Phase 2 is not "soften the spec until it fits"; it is "name each disagreement and rule on it", with the code as the presumed-wrong party.
+Feature planning is blind to the code because a planner that can read the code inherits the code's mistakes as constraints. Every workaround becomes an implicit requirement, and the feature gets shaped to fit the defect. Deriving the spec from intent alone makes disagreement between intent and implementation visible rather than silently absorbed. Phase 2 is not "soften the spec until it fits"; it is "name each disagreement and rule on it", with the code as the presumed-wrong party.
 
 ## Engines
 
@@ -13,11 +13,13 @@ A session runs on one engine, chosen per session or per phase:
 
 The extension only sees `CodeSession`: send a prompt, stream events, answer permission requests, interrupt. Engines differ below that line.
 
+A session's engine can change while it is in play: it carries on with the conversation it has and loses only what the previous engine alone held.
+
 Both take the workspace's `.mcp.json`: Claude through its own MCP client, the own loop through a client per server. The tools carry the same names and fall under the same permission rules on either engine, so a project's servers work the same whichever model runs.
 
 ## Shape
 
-Three phases, each a session with its own system prompt and tool set. The state is files on disk: a phase can always start from them. Blindness is the boundary: nothing that has seen the code reaches the plan session as conversation. Below it a re-check continues the last check's conversation where the engine resumes, so what was read is not read again. Implementation does not continue a conversation: each task is built by a run of its own, started on the board's hand-off, and the cleanup run starts on its size report. Planning produces the spec; approving it hands it to the build. The check against the code runs between the two and speaks up only when the code disagrees: its decisions go into a file of their own, never into the spec.
+Three phases, each a session with its own system prompt and tool set. The state is files on disk: a phase can always start from them. Blindness is the boundary: nothing that has seen the code reaches the plan session as conversation. Below it a re-check continues the last check's conversation, so what was read is not read again. Implementation does not continue a conversation: each task is built by a run of its own, started on the board's hand-off, and the cleanup run starts on its size report. Planning produces the spec; approving it hands it to the build. The check against the code runs between the two and speaks up only when the code disagrees: its decisions go into a file of their own, never into the spec.
 
 ```
 docs/**  +  specs  +  work item  →  spec.md  →  approved spec  →  decisions.md  →  revised spec  →  tasks.json  →  code  →  tests pass
@@ -47,7 +49,7 @@ Approve is offered on a draft with no open comment. Approving starts the check a
 
 A session that is picked up after its engine stopped is set up afresh: it carries the conversation it had, and the instructions and generated context a session starting now would get.
 
-## Phase 1: Blind plan
+## Phase 1: Feature planning
 
 Sees: feature description, domain brief (ubiquitous language, stack, constraints), `docs/**`, the workspace README, every feature's spec under `plan/*.spec.md`, the unfiled decisions, the docs map, one work item closure when ADO is connected.
 Never sees: source, PRs, build output, generated context drawn from the code such as the repo map, another feature's review, tasks or decisions. The docs map is the exception that proves the rule: generated, but from the docs alone, so it carries nothing the planner could not read itself.
@@ -200,9 +202,11 @@ Run id, per-phase transcript, tool calls, token spend, checkpoint reasons under 
 
 Phase 1 wants the strongest reasoner, phase 3 wants throughput. Profiles carry engine, model and effort.
 
-The model a phase runs on is chosen per feature, one profile per phase, and held as the user's own preference beside the feature rather than in its plan files: it is a way of working, not part of what the feature is, and it never changes the stage a feature is at.
+The model is chosen per feature for each phase that runs one — blind plan, map against code, implement, cleanup — while verification runs no model and takes no choice. A choice is the user's own way of working rather than part of what the feature is, so it lives beside the feature and not in its plan files.
 
-A chat session's model is chosen on the session and can be changed while the conversation is in play; it is independent of any feature's phase choices. Where nothing is chosen, the settings default stands.
+A choice naming a profile the settings no longer configure refuses the phase and names what is missing, offering the settings default for the user to take: a session running on a model nobody picked is worse than one that will not start.
+
+What a chat session runs on and what a feature's phases run on say nothing about each other. Where nothing is chosen, the settings default stands.
 
 ## Waiting for the person
 

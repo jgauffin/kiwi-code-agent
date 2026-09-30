@@ -25,7 +25,7 @@ describe('migrating the one-model-per-profile settings', () => {
   it('the_plan_model_becomes_an_override_on_every_planning_step_of_the_profile_in_use', () => {
     const { providers, profiles } = migrateModelSettings([sonnet, opus], 'Claude Sonnet', 'Claude')
     const active = profiles.find((p) => p.name === 'Claude Sonnet')!
-    expect(Object.keys(active.steps ?? {}).sort()).toEqual(['docs', 'file-decisions', 'plan', 'reconcile'])
+    expect(Object.keys(active.steps ?? {}).sort()).toEqual(['code-plan', 'docs', 'file-decisions', 'plan', 'reconcile'])
     expect(resolveStep(active, providers, 'plan').model).toBe('claude-opus-5')
     expect(resolveStep(active, providers, 'implement').model).toBe('claude-sonnet-5')
   })

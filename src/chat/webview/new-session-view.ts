@@ -50,9 +50,14 @@ export class NewSessionView extends HTMLElement {
         <strong>Chat</strong>
         <span class="hint">Work in the code with the full tool set.</span>
       </button>
+      <button type="button" class="type {{codePlanState}}" r-click="choose('code-plan')">
+        <span class="icon">🗺</span>
+        <strong>Plan</strong>
+        <span class="hint">Agree on intent, then plan against the code.</span>
+      </button>
       <button type="button" class="type {{planState}}" r-click="choose('plan')">
         <span class="icon">📐</span>
-        <strong>Plan</strong>
+        <strong>Feature planning</strong>
         <span class="hint">Write a spec from the intent docs, blind to the code.</span>
       </button>
       <button type="button" class="type {{docsState}}" r-click="choose('docs')">
@@ -70,6 +75,16 @@ export class NewSessionView extends HTMLElement {
         <linked-files-row class="linked-files"></linked-files-row>
       </div>
     </form>
+    <form class="code-plan-fields" if="isCodePlan" r-submit="create(event)">
+      <label>What should be done?
+        <textarea name="prompt" rows="6" required placeholder="The change, and why" r-input="edit('prompt', event)"></textarea>
+      </label>
+      <p class="hint">The planner settles what you want before it reads the code, then plans in chat. Continue in chat builds it.</p>
+      <div class="submit">
+        <button type="submit">Start planning</button>
+        <linked-files-row class="linked-files"></linked-files-row>
+      </div>
+    </form>
     <form class="plan-fields" if="isPlan" r-submit="create(event)">
       <label>Feature name
         <input name="feature" required placeholder="Order cancellation" r-input="edit('feature', event)">
@@ -79,7 +94,7 @@ export class NewSessionView extends HTMLElement {
       </label>
       <p class="hint">The planner reads docs/**, the README and the other specs, never the code, and writes plan/&lt;feature&gt;.spec.md.</p>
       <div class="submit">
-        <button type="submit">Start planning</button>
+        <button type="submit">Start feature planning</button>
         <linked-files-row class="linked-files"></linked-files-row>
       </div>
     </form>
@@ -148,9 +163,11 @@ export class NewSessionView extends HTMLElement {
         plans: plans.map((p) => ({ ...p, hint: STATUS_HINT[p.status] })),
         chats: chats.map((c) => ({ ...c, hint: `last worked on ${when(c.startedAt)}` })),
         isChat: this.mode === 'chat',
+        isCodePlan: this.mode === 'code-plan',
         isPlan: this.mode === 'plan',
         isDocs: this.mode === 'docs',
         chatState: this.mode === 'chat' ? 'selected' : '',
+        codePlanState: this.mode === 'code-plan' ? 'selected' : '',
         planState: this.mode === 'plan' ? 'selected' : '',
         docsState: this.mode === 'docs' ? 'selected' : '',
       },

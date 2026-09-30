@@ -55,6 +55,7 @@ import { DOC_READING, OutlineGate } from './agent/openai-session/tools/markdown/
 import { RECONCILE_TOOLS, reconcilePrompt, reconcileScope } from './agent/phases/reconcile'
 import { IMPLEMENT_TOOLS, implementPrompt } from './agent/phases/implement'
 import { CLEANUP_TOOLS, cleanupPrompt, cleanupScope } from './agent/phases/cleanup'
+import { CODE_PLAN_TOOLS, codePlanPrompt } from './agent/phases/code-plan'
 import { sweepPlans } from './agent/phases/plan-housekeeping'
 import { ensureAgentDirIgnored } from './agent/agent-dir-ignore'
 import { scratchDir, scratchInstruction } from './agent/scratch/scratch-folder'
@@ -291,6 +292,12 @@ export function activate(context: vscode.ExtensionContext): void {
           readable: readableIn(scope),
         }
       }
+      case 'code-plan':
+        // Read-only by its tool set: nothing to scope, and the build happens in the chat it continues into.
+        return {
+          systemPrompt: await withMap(record, await withDocs(record, codePlanPrompt(workspaceRoot), onProgress), onProgress),
+          toolNames: CODE_PLAN_TOOLS,
+        }
       case 'docs': {
         const scope = docsEvaluationScope(planIgnore())
         return {

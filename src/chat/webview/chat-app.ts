@@ -181,7 +181,7 @@ export class ChatApp extends HTMLElement {
               : tab && message.plan
                 ? { current: tab.profileName }
                 : undefined,
-          continueInChat: tab?.mode === 'docs',
+          continueInChat: tab?.mode === 'docs' || tab?.mode === 'code-plan',
           compactable: message.compactable ?? false,
         })
         this.currentRun = message.currentRun

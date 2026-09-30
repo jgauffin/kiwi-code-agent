@@ -98,6 +98,25 @@ describe('SessionManager', () => {
     }
   })
 
+  it('a_settled_run_is_marked_done_until_it_is_sent_work_again', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+    try {
+      const store = memoryStore()
+      const manager = new SessionManager(store, async (r) => new FakeSession(r.id, r.profile, r.engineSessionId), (id) => RunLog.forSession(dir, id), () => {})
+      const plan = await manager.create(profile, 'plan', 'Orders')
+      const run = await manager.create(profile, 'implement', 'Orders', { parentId: plan.id, task: 'A' })
+      await manager.send(run.id, 'build A')
+      await manager.settle(run.id)
+      expect(manager.isLive(run.id)).toBe(false)
+      expect(store.saved.at(-1)?.find((r) => r.id === run.id)?.settled).toBe(true)
+      await manager.send(run.id, 'A reopened')
+      expect(store.saved.at(-1)?.find((r) => r.id === run.id)?.settled).toBeUndefined()
+      await manager.disposeAll()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('engine_starts_on_first_prompt_not_on_creation', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'sm-'))
     try {
@@ -1020,10 +1039,23 @@ describe('pickConversationalRun', () => {
     expect(pickConversationalRun([plan, done, building], isLive)?.id).toBe(building.id)
   })
 
-  it('a_closed_task_run_gives_the_floor_back_to_the_plan_session', () => {
+  it('a_settled_task_run_gives_the_floor_back_to_the_plan_session', () => {
     const plan = rec('plan')
-    const done = rec('task-a', { mode: 'implement', parentId: plan.id, task: 'A' })
+    const done = rec('task-a', { mode: 'implement', parentId: plan.id, task: 'A', settled: true })
     expect(pickConversationalRun([plan, done], () => false)?.id).toBe(plan.id)
+  })
+
+  it('a_fix_run_whose_engine_stopped_unsettled_keeps_the_floor_so_the_person_can_answer_it', () => {
+    const plan = rec('plan')
+    const task = rec('task-a', { mode: 'implement', parentId: plan.id, task: 'A', settled: true })
+    const fix = rec('fix', { mode: 'implement', parentId: plan.id, fixAttempt: 1 })
+    expect(pickConversationalRun([plan, task, fix], () => false)?.id).toBe(fix.id)
+  })
+
+  it('a_live_plan_session_outranks_a_stopped_unsettled_task_run', () => {
+    const plan = rec('plan')
+    const task = rec('task-a', { mode: 'implement', parentId: plan.id, task: 'A' })
+    expect(pickConversationalRun([plan, task], (id) => id === plan.id)?.id).toBe(plan.id)
   })
 
   it('no_conversational_run_at_all_yields_undefined', () => {

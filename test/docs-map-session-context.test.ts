@@ -16,8 +16,8 @@ const fixedSource = (summary: string | undefined): DocsMapSource => ({
 })
 
 describe('the docs map at session start', () => {
-  it('a_plan_and_a_docs_session_get_the_map_while_a_chat_or_implement_session_does_not', async () => {
-    for (const mode of ['plan', 'docs']) {
+  it('a_feature_plan_a_code_plan_and_a_docs_session_get_the_map_while_a_chat_or_implement_session_does_not', async () => {
+    for (const mode of ['plan', 'code-plan', 'docs']) {
       const prompt = await withDocsMap(mode, BASE, fixedSource(SUMMARY))
       expect(prompt.startsWith(BASE), mode).toBe(true)
       expect(prompt, mode).toContain('- `#Cancellation`: when an order may be cancelled')

@@ -6,16 +6,19 @@ import { nextStatus, underWay, type SessionStatus } from './session-status'
 
 /**
  * `plan` writes a feature's spec blind, `reconcile` checks it against the code
- * (together: planning), `implement` builds the approved spec, `cleanup` splits
- * what the implementation left oversized. `docs` judges how the docs a blind
- * planner reads are arranged, `docs-map` describes them so it can find its
- * way, and `file-decisions` files the user's unfiled decisions into the specs
- * and docs; none of those belongs to a feature.
+ * (together: feature planning), `implement` builds the approved spec, `cleanup`
+ * splits what the implementation left oversized. `code-plan` agrees on intent
+ * and then plans against the code, with no spec, and is built in the chat it
+ * continues into. `docs` judges how the docs a blind planner reads are
+ * arranged, `docs-map` describes them so it can find its way, and
+ * `file-decisions` files the user's unfiled decisions into the specs and docs;
+ * none of those belongs to a feature.
  */
-export type SessionMode = 'chat' | 'plan' | 'reconcile' | 'implement' | 'cleanup' | 'docs' | 'docs-map' | 'file-decisions'
+export type SessionMode = 'chat' | 'plan' | 'reconcile' | 'implement' | 'cleanup' | 'code-plan' | 'docs' | 'docs-map' | 'file-decisions'
 
-/** Work in the intent rather than the code: no blanket allow for writes. */
-export const isPlanning = (mode: Step): boolean => mode === 'plan' || mode === 'reconcile' || mode === 'docs' || mode === 'file-decisions'
+/** Planning rather than building: no blanket allow for writes. */
+export const isPlanning = (mode: Step): boolean =>
+  mode === 'plan' || mode === 'reconcile' || mode === 'code-plan' || mode === 'docs' || mode === 'file-decisions'
 
 /**
  * The steps a profile names a model for, in the order the settings page lists
@@ -24,7 +27,8 @@ export const isPlanning = (mode: Step): boolean => mode === 'plan' || mode === '
  */
 export const STEPS: { step: Step; label: string; hint: string }[] = [
   { step: 'chat', label: 'Chat', hint: 'Work in the code with the full tool set.' },
-  { step: 'plan', label: 'Plan', hint: 'Write the spec from the intent docs, blind to the code.' },
+  { step: 'plan', label: 'Feature planning', hint: 'Write the spec from the intent docs, blind to the code.' },
+  { step: 'code-plan', label: 'Plan', hint: 'Agree on intent, then plan against the code.' },
   { step: 'reconcile', label: 'Check against code', hint: 'Name each disagreement between the approved spec and the code before it is built.' },
   { step: 'implement', label: 'Implement', hint: 'Build the approved spec, task by task, with a test per rule.' },
   { step: 'fix', label: 'Fix', hint: 'Mend what a failed test run names; one effort level harder each time it fails again.' },
@@ -35,7 +39,8 @@ export const STEPS: { step: Step; label: string; hint: string }[] = [
 ]
 
 /** The modes that stand on their own rather than on a feature's plan files. */
-export const isFeatureless = (mode: Step): boolean => mode === 'chat' || mode === 'docs' || mode === 'docs-map' || mode === 'file-decisions'
+export const isFeatureless = (mode: Step): boolean =>
+  mode === 'chat' || mode === 'code-plan' || mode === 'docs' || mode === 'docs-map' || mode === 'file-decisions'
 
 /** A build, not a conversation: it has no tab and no entry of its own, and nobody prompts it. */
 export const isBuild = (mode: SessionMode): boolean => mode === 'docs-map'
@@ -55,6 +60,8 @@ export type SessionRecord = {
   task?: string
   /** On a run that fixes a failed test sweep: how many sweeps in a row have failed, which sets how hard it tries. */
   fixAttempt?: number
+  /** The run's job is done (its task settled, its fix handed back to the test run): history, never again what the person talks to. */
+  settled?: true
   /**
    * Engine-side conversation id, what lets a closed session continue. For the
    * Claude SDK it is the engine's own, inherited from the session this one
@@ -83,7 +90,7 @@ function titleFor(mode: SessionMode, feature: string | undefined): string {
   if (!feature) return 'New session'
   switch (mode) {
     case 'plan':
-      return `Plan: ${feature}`
+      return `Feature: ${feature}`
     case 'reconcile':
       return `Map: ${feature}`
     case 'implement':
@@ -91,6 +98,7 @@ function titleFor(mode: SessionMode, feature: string | undefined): string {
     case 'cleanup':
       return `Cleanup: ${feature}`
     case 'chat':
+    case 'code-plan':
       return 'New session'
   }
 }
@@ -229,8 +237,10 @@ export class SessionManager {
       record.title = text.length > 60 ? text.slice(0, 57) + '...' : text
       await this.store.save(this.records)
     }
-    if (record.cutOff) {
+    if (record.cutOff || record.settled) {
+      // A settled run sent work again (its task reopened) has a job once more.
       delete record.cutOff
+      delete record.settled
       await this.store.save(this.records)
     }
     // Echoed here rather than by the engine, and the start-up said out loud: bringing an
@@ -316,6 +326,14 @@ export class SessionManager {
     if (!session) return
     this.live.delete(id)
     await session.dispose()
+  }
+
+  /** Closed because its job is done, unlike a run merely stopped, which still waits on the person. */
+  async settle(id: string): Promise<void> {
+    const record = this.require(id)
+    record.settled = true
+    await this.store.save(this.records)
+    await this.close(id)
   }
 
   async remove(id: string): Promise<void> {
@@ -458,16 +476,21 @@ export class SessionManager {
 
 /**
  * Of a tab's runs (oldest first), the one free text typed there is for: the
- * newest still live among the ones a person talks to, else the newest with a
- * tab of its own. An implementer under the plan session is talked to while it
- * builds its task, since its section is the one at work; a closed one is
- * history. A mapping or a cleanup never is: it is scoped to its own job.
+ * newest still live among the ones a person talks to, else the newest
+ * implementer whose job is not done, else the newest with a tab of its own.
+ * An implementer under the plan session is talked to until it settles, since
+ * a stopped one waits on the person and its step's chat shows only
+ * implementers. A mapping or a cleanup never is: it is scoped to its own job.
  */
 export function pickConversationalRun(runs: SessionRecord[], isLive: (id: string) => boolean): SessionRecord | undefined {
   const newestFirst = [...runs].reverse()
   const building = (r: SessionRecord) => r.parentId !== undefined && r.mode === 'implement'
   const own = newestFirst.filter((r) => !r.parentId)
-  return newestFirst.find((r) => (!r.parentId || building(r)) && isLive(r.id)) ?? own.at(0)
+  return (
+    newestFirst.find((r) => (!r.parentId || building(r)) && isLive(r.id)) ??
+    newestFirst.find((r) => building(r) && !r.settled) ??
+    own.at(0)
+  )
 }
 
 type PermissionRequest = Extract<SessionEvent, { type: 'permission_request' }>

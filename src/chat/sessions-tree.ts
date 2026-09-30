@@ -6,10 +6,11 @@ import { sessionGroups, type PlanEntry, type SessionGroups } from './session-gro
 
 const MODE_LABEL: Record<SessionMode, string> = {
   chat: 'Chat',
-  plan: 'Plan',
+  plan: 'Feature planning',
   reconcile: 'Check against code',
   implement: 'Implement',
   cleanup: 'Cleanup',
+  'code-plan': 'Plan',
   docs: 'Evaluate docs',
   'docs-map': 'Docs map',
   'file-decisions': 'File decisions',

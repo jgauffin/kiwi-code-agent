@@ -74,6 +74,7 @@ const RUN_NOUN: Record<SessionMode, string> = {
   reconcile: 'the check',
   implement: 'the implementer',
   cleanup: 'the cleanup',
+  'code-plan': 'the planner',
   docs: 'the docs session',
   'docs-map': 'the docs map',
   'file-decisions': 'the filing session',

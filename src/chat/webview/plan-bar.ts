@@ -19,7 +19,7 @@ import { STEP_LABEL, failureText, planStep, shownSteps, type NextAction, type St
 
 /** Labels the four phases a feature runs a model on carry in the picker row (B1); distinct from `plan-step`'s own step labels, which name the flow the person follows rather than what runs a model. */
 const PHASE_LABEL: { plan: string; reconcile: string; implement: string; cleanup: string } = {
-  plan: 'Blind plan',
+  plan: 'Feature planning',
   reconcile: 'Map against code',
   implement: 'Implement',
   cleanup: 'Cleanup',

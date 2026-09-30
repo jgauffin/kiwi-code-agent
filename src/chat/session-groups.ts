@@ -17,7 +17,8 @@ export type SessionGroups = { chats: SessionRecord[]; plans: PlanEntry[] }
  * first, newest first, then the specs nobody has opened here.
  */
 export function sessionGroups(records: SessionRecord[], specs: PlanSummary[]): SessionGroups {
-  const chats = records.filter((r) => r.mode === 'chat' && !r.parentId)
+  // A code plan is a conversation that ends in a chat, not a feature with a spec.
+  const chats = records.filter((r) => (r.mode === 'chat' || r.mode === 'code-plan') && !r.parentId)
   const bySlug = new Map(specs.map((s) => [basename(s.path, '.spec.md'), s]))
   const plans = new Map<string, PlanEntry>()
   for (const r of records) {

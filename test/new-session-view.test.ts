@@ -20,8 +20,8 @@ function view(profiles = { names: ['Claude', 'Kimi'], active: 'Claude' }, pickUp
 
 const options = (select: HTMLSelectElement) => [...select.options].map((o) => o.textContent)
 
-const card = (node: HTMLElement, name: 'chat' | 'plan' | 'docs') =>
-  [...node.querySelectorAll<HTMLButtonElement>('.types button')][{ chat: 0, plan: 1, docs: 2 }[name]]!
+const card = (node: HTMLElement, name: 'chat' | 'code-plan' | 'plan' | 'docs') =>
+  [...node.querySelectorAll<HTMLButtonElement>('.types button')][{ chat: 0, 'code-plan': 1, plan: 2, docs: 3 }[name]]!
 
 function type(node: HTMLElement, selector: string, text: string): void {
   const field = node.querySelector<HTMLTextAreaElement>(selector)!
@@ -93,6 +93,18 @@ describe('NewSessionView fields across cards', () => {
     expect(node.querySelector<HTMLTextAreaElement>('.plan-fields textarea[name=prompt]')!.value).toBe('')
     card(node, 'chat').click()
     expect(node.querySelector<HTMLTextAreaElement>('.chat-fields textarea[name=prompt]')!.value).toBe('')
+    node.remove()
+  })
+
+  it('the_code_plan_card_starts_a_session_on_a_prompt_that_belongs_to_no_feature', () => {
+    const node = view()
+    card(node, 'code-plan').click()
+    expect(node.querySelector('.code-plan-fields input[name=feature]')).toBeNull()
+    type(node, '.code-plan-fields textarea[name=prompt]', 'A filter on the orders list')
+    let seen: unknown
+    node.addEventListener(events.NewSessionRequestedEvent.type, (e) => (seen = [e.mode, e.feature, e.prompt]))
+    node.querySelector('.code-plan-fields')!.dispatchEvent(new Event('submit', { cancelable: true }))
+    expect(seen).toEqual(['code-plan', undefined, 'A filter on the orders list'])
     node.remove()
   })
 

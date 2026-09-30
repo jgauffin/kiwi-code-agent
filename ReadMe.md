@@ -14,7 +14,7 @@ A VS Code coding agent that plans a feature before it reads your code, and calls
 
 | | What it does | Why you want it |
 |---|---|---|
-| **Blind planning** | The planner reads your docs and approved specs, never the code (enforced at the tool call), and writes a spec of named rules. | A planner that reads the code inherits its bugs as requirements; this one plans from intent. |
+| **Feature planning, blind to the code** | The planner reads your docs and approved specs, never the code (enforced at the tool call), and writes a spec of named rules. | A planner that reads the code inherits its bugs as requirements; this one plans from intent. |
 | **You rule on disagreements** | The spec is mapped against the code; each conflict becomes a decision card with both sides and proposed rewordings. | Nothing is silently absorbed. You decide whether the spec or the code is wrong. |
 | **Done means proven** | Every task names the test that proves each rule it delivers; the plan view shows each rule's task and test, or the gap. | No "done" without evidence you can click through. |
 | **Targeted verification** | When all tasks are tested, your test commands run over just the projects the feature touched; a failure goes back to the implementer. | Only the suites that matter run, and red never reaches you as finished. |
@@ -33,6 +33,7 @@ A VS Code coding agent that plans a feature before it reads your code, and calls
 ## Also
 
 - **Chat sessions** for everyday work, with the full tool set.
+- **Plan sessions** for work the code shapes, such as a UI on its framework: intent is agreed before the code is read, then the plan is made against the code and built in a chat.
 - **Prompts that don't nag.** Read-only tools and commands, your `package.json` scripts and your test commands run without asking; other shell calls are prompted command by command.
 - **Large JSON without reading it whole**: query a file by expression and get back only the rows you asked for.
 
@@ -45,11 +46,11 @@ Claude sessions need one of:
 - an **Anthropic API key**, added to the Claude provider on the settings page (gear icon), or
 - a **Claude Code login** already on this machine, used when no key is set.
 
-Open KiwiAgent in the activity bar, press `+`, pick **Plan** and describe the feature. For a non-Claude model, add a provider on the settings page.
+Open KiwiAgent in the activity bar, press `+`, pick **Feature planning** and describe the feature. For a non-Claude model, add a provider on the settings page.
 
 ## More
 
-- [docs/plan-sessions.md](docs/plan-sessions.md): the plan workflow step by step.
+- [docs/plan-sessions.md](docs/plan-sessions.md): the feature planning workflow step by step, and Plan sessions.
 - [docs/settings.md](docs/settings.md): every setting, MCP servers, logs.
 - [docs/developing.md](docs/developing.md): build from source.
 - [docs/intent/agent.md](docs/intent/agent.md): why it works this way.

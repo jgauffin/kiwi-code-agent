@@ -70,7 +70,7 @@ describe('ProfilesTab profile cards', () => {
   it('a_card_shows_the_default_and_every_step_that_overrides_it', () => {
     const node = tab()
     expect(cards(node)[0]!.querySelector('.chips')!.textContent).toContain('default Claude · claude-sonnet-5')
-    expect(cards(node)[1]!.querySelector('.chips')!.textContent).toContain('Plan: Claude · claude-opus-5 (high)')
+    expect(cards(node)[1]!.querySelector('.chips')!.textContent).toContain('Feature planning: Claude · claude-opus-5 (high)')
     expect(cards(node)[1]!.querySelector('.chips')!.textContent).not.toContain('Implement')
     node.remove()
   })

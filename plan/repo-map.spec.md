@@ -27,7 +27,7 @@ Run on demand from the command, and by the session start that needs a fresh map.
 A reconcile run or an implement session begins, and the map has to be there and current before the first prompt.
 
 - **B8**: a reconcile run and an implement session receive the map's summary as context at their start; a chat session and a plan session do not. (docs/features/repo-map.md#Repo map)
-  - **E4**: the map's root is in no plan session's read scope, so its Read and Glob deny it and blindness holds even when a map exists. (docs/intent/agent.md#Phase 1: Blind plan)
+  - **E4**: the map's root is in no plan session's read scope, so its Read and Glob deny it and blindness holds even when a map exists. (docs/intent/agent.md#Phase 1: Feature planning)
 - **B9**: when the map is missing or older than the newest source file, the start builds it first and the session's first prompt is held until the build ends; progress is visible while it runs. (docs/features/repo-map.md#Repo map)
   - **E5**: a build that fails, or exceeds its time bound, does not block the start — the session begins with the previous map if there is one and with none if there is not, and says which.
   - **E6**: a session works from the map as it stood when it started and keeps that snapshot for its life — another session's build, or the command, rewriting the map underneath changes nothing it holds; a session set up afresh after its engine stopped counts as a start and takes a new snapshot.
