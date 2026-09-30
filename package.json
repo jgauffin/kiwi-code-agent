@@ -4,7 +4,7 @@
   "description": "Coding sessions in VS Code with a choice of model engine per session.",
   "version": "0.2.1",
   "publisher": "CoderrAB",
-  "icon": "docs/logos/logo-square-transparent-500px.png",
+  "icon": "docs/logos/kiwipow-agent-logo-128.png",
   "galleryBanner": {
     "color": "#1e1e1e",
     "theme": "dark"
@@ -61,12 +61,12 @@
       {
         "command": "kiwiAgent.newSession",
         "title": "New Session",
-        "icon": "docs/logos/logo-square-transparent.svg"
+        "icon": "docs/logos/kiwipow-agent-logo-128.png"
       },
       {
         "command": "kiwiAgent.openChat",
         "title": "KiwiAgent: New Session Tab",
-        "icon": "media/kiwi.svg"
+        "icon": "docs/logos/kiwipow-agent-logo-128.png"
       },
       {
         "command": "kiwiAgent.removeSession",

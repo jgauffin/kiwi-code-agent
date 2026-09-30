@@ -7,8 +7,7 @@ plan/**
 scripts/**
 assets/**
 docs/**
-!docs/logos/logo-square-transparent-500px.png
-!docs/logos/logo-square-transparent.svg
+!docs/logos/kiwipow-agent-logo-128.png
 articles/**
 node_modules/**
 **/*.map

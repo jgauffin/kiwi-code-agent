@@ -274,7 +274,7 @@ export class ChatViewProvider {
 
   private adopt(panel: vscode.WebviewPanel, tabId: string | undefined): ChatPanel {
     const entry: ChatPanel = { panel, ...(tabId ? { tabId } : {}) }
-    panel.iconPath = vscode.Uri.joinPath(this.extensionUri, 'media', 'kiwi.svg')
+    panel.iconPath = vscode.Uri.joinPath(this.extensionUri, 'docs', 'logos', 'kiwipow-agent-logo-128.png')
     this.panels.add(entry)
     this.attach(entry)
     panel.onDidDispose(() => {
