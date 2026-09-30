@@ -7,7 +7,7 @@ series: A coding agent that plans blind
 
 Ask a model whether the code it just wrote is good and it will tell you. That is the problem. The answer is fluent, agreeable and worth nothing, because the thing being graded wrote the grade.
 
-So in KiwiAgent the last two steps of a feature have no model in them.
+So in Kiwipow Agent the last two steps of a feature have no model in them.
 
 ## Verification: only the suites the feature touched
 

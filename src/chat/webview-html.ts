@@ -1,7 +1,7 @@
 import * as vscode from 'vscode'
 import { fontSizeStyle } from './webview-font-size'
 
-/** The page every KiwiAgent webview loads: one bundle, the root element naming the app that runs. */
+/** The page every Kiwipow Agent webview loads: one bundle, the root element naming the app that runs. */
 export function webviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, rootElement: string): string {
   const script = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'dist', 'webview.js'))
   const style = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'dist', 'webview.css'))

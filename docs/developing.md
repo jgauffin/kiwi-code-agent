@@ -6,7 +6,7 @@ npm test          # no network or engine needed
 npm run build     # dist/: extension, webview, cli.mjs, ripgrep
 ```
 
-F5 launches the Extension Development Host. Open the "KiwiAgent" view in the activity bar.
+F5 launches the Extension Development Host. Open the "Kiwipow Agent" view in the activity bar.
 
 ## Use the working copy as the installed extension
 
@@ -21,5 +21,5 @@ Reload the window once. From then on, after `npm run build` (or the `npm: watch`
 ## Package
 
 ```
-npm run package   # kiwi-agent-<version>.vsix
+npm run package   # kiwipow-agent-<version>.vsix
 ```

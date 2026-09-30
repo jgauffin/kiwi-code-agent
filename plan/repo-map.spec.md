@@ -11,7 +11,7 @@ A reconcile or implement session starts knowing what the workspace is made of, s
 ## Building the map
 Run on demand from the command, and by the session start that needs a fresh map.
 
-- **B1**: the command `KiwiAgent: Build Repo Map` writes the map: the workspace's projects — solutions, `.csproj`, `package.json` workspaces — each with its path and kind, and for each project a type index of its public types with their public members, one line each. (docs/features/repo-map.md#Repo map)
+- **B1**: the command `Kiwipow Agent: Build Repo Map` writes the map: the workspace's projects — solutions, `.csproj`, `package.json` workspaces — each with its path and kind, and for each project a type index of its public types with their public members, one line each. (docs/features/repo-map.md#Repo map)
   - **E1**: a workspace where no project is recognised still produces a map that states it found none, so the next session start does not rebuild over and over.
 - **B2**: the build considers the workspace's source and project files only, skipping the locations the agent's own search tools skip, the agent's generated folder, and — when the workspace has a `.gitignore` — what it ignores; the same set is what "the newest source file" is measured over.
   - **E7**: a workspace with no `.gitignore`, or one that cannot be read, builds normally on the built-in list of skipped locations alone.

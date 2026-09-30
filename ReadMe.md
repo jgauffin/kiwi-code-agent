@@ -1,14 +1,14 @@
-# KiwiCodeAgent
+# Kiwipow Agent
 
-![KiwiAgent logo](https://raw.githubusercontent.com/jgauffin/kiwi-code-agent/main/docs/logos/logo-square-transparent-500px.png)
+![Kiwipow Agent logo](https://raw.githubusercontent.com/jgauffin/kiwi-code-agent/main/docs/logos/logo-square-transparent-500px.png)
 
-[![VS Code Marketplace](https://img.shields.io/badge/VS%20Code%20Marketplace-install-007ACC)](https://marketplace.visualstudio.com/items?itemName=CoderrAB.kiwi-agent)
+[![VS Code Marketplace](https://img.shields.io/badge/VS%20Code%20Marketplace-install-007ACC)](https://marketplace.visualstudio.com/items?itemName=CoderrAB.kiwipow-agent)
 [![GitHub](https://img.shields.io/badge/GitHub-repo-181717?logo=github)](https://github.com/jgauffin/kiwi-code-agent)
 [![Homepage](https://img.shields.io/badge/homepage-coderr.io-blue)](https://coderr.io)
 
 A VS Code coding agent that plans a feature before it reads your code, and calls nothing done until a test proves each rule.
 
-> **Early days.** KiwiAgent is young and you will hit bugs. Things are changing frequently, use at own risk! [Report them](https://github.com/jgauffin/kiwi-code-agent/issues); they usually get fixed fast.
+> **Early days.** Kiwipow Agent is young and you will hit bugs. Things are changing frequently, use at own risk! [Report them](https://github.com/jgauffin/kiwi-code-agent/issues); they usually get fixed fast.
 
 ## Why it's different
 
@@ -26,7 +26,7 @@ A VS Code coding agent that plans a feature before it reads your code, and calls
 ## Any model, per step
 
 - **Claude** through the Claude Agent SDK.
-- **Any OpenAI-compatible endpoint** on KiwiAgent's own tool loop.
+- **Any OpenAI-compatible endpoint** on Kiwipow Agent's own tool loop.
 - A profile picks the model per step: the strongest reasoner for planning and mapping, a fast cheap one for implementation.
 - Your `.mcp.json` servers (the workspace's and `~/.mcp.json`, with Claude Code's user-wide list moved there on first run), `CLAUDE.md`/`AGENTS.md`, skills and permission rules work the same on both.
 
@@ -39,14 +39,14 @@ A VS Code coding agent that plans a feature before it reads your code, and calls
 
 ## Get started
 
-Install **KiwiAgent** from the [Marketplace](https://marketplace.visualstudio.com/items?itemName=CoderrAB.kiwi-agent). Windows only (x64, arm64).
+Install **Kiwipow Agent** from the [Marketplace](https://marketplace.visualstudio.com/items?itemName=CoderrAB.kiwipow-agent). Windows only (x64, arm64).
 
 Claude sessions need one of:
 
 - an **Anthropic API key**, added to the Claude provider on the settings page (gear icon), or
 - a **Claude Code login** already on this machine, used when no key is set.
 
-Open KiwiAgent in the activity bar, press `+`, pick **Feature planning** and describe the feature. For a non-Claude model, add a provider on the settings page.
+Open Kiwipow Agent in the activity bar, press `+`, pick **Feature planning** and describe the feature. For a non-Claude model, add a provider on the settings page.
 
 ## More
 

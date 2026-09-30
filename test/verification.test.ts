@@ -123,7 +123,7 @@ describe('runVerification', () => {
     await expect(runVerification({ cwd: dir, feature: 'Order cancellation', rules, run })).rejects.toThrow(/no tasks file/i)
   })
 
-  const foreign: Attribute = async () => ({ foreign: true, files: ['src/app/orders.ts'], hand: 'It was changed by a KiwiAgent plan session on "Other feature".' })
+  const foreign: Attribute = async () => ({ foreign: true, files: ['src/app/orders.ts'], hand: 'It was changed by a Kiwipow Agent plan session on "Other feature".' })
   const ours: Attribute = async () => ({ foreign: false, files: ['src/app/orders.ts'] })
 
   it('held_rather_than_verified_an_all_foreign_run_without_a_retry_is_held_and_recorded_on_the_board_naming_the_files_and_the_hand', async () => {

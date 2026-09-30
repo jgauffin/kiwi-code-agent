@@ -70,7 +70,7 @@ describe('classifyFailure', () => {
 
     const classification = await classifyFailure(failureAt(path, 2), hands, 'Order cancellation', dir)
     expect(classification.foreign).toBe(true)
-    expect(classification.hand).toContain('outside KiwiAgent')
+    expect(classification.hand).toContain('outside Kiwipow Agent')
   })
 
   it('narrowed_to_the_function_a_failing_test_whose_own_function_another_hand_changed_is_foreign_even_though_this_feature_wrote_the_rest', async () => {

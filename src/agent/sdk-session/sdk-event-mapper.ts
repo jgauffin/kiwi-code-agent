@@ -137,7 +137,7 @@ export class SdkEventMapper {
 /** The refusals a new user meets first, told as what to do about them rather than as a code. */
 const ASSISTANT_ERRORS: Partial<Record<SDKAssistantMessageError, string>> = {
   authentication_failed:
-    'Claude is not logged in. Add an Anthropic API key to the Claude provider in KiwiAgent settings (the gear icon), then start a new session.',
+    'Claude is not logged in. Add an Anthropic API key to the Claude provider in Kiwipow Agent settings (the gear icon), then start a new session.',
   billing_error: 'Anthropic refused the request for billing reasons: check the credit or plan of the account the Claude provider uses.',
 }
 

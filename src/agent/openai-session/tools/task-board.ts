@@ -140,7 +140,7 @@ function workspacePath(cwd: string, path: string): string {
 
 /**
  * Of `files`, those whose current content is not this feature's own work: no
- * KiwiAgent session left it there, or the one that did was working a
+ * Kiwipow Agent session left it there, or the one that did was working a
  * different feature. The task names the file as touched either way; this is
  * what keeps that from being taken as proof the task's own runs wrote it.
  */

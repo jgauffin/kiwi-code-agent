@@ -106,7 +106,7 @@ function configPort(): ConfigPort {
 const OWN_TOOLS: Tool[] = [jsonSchemaTool, jsonQueryTool, codeOutlineTool, askUserTool, moveTool, copyTool, runScriptTool()]
 
 export function activate(context: vscode.ExtensionContext): void {
-  const output = vscode.window.createOutputChannel('KiwiAgent')
+  const output = vscode.window.createOutputChannel('Kiwipow Agent')
   // Without a folder open the engine still needs a working directory that exists.
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? context.globalStorageUri.fsPath
   mkdirSync(workspaceRoot, { recursive: true })
@@ -200,7 +200,7 @@ export function activate(context: vscode.ExtensionContext): void {
    * for the life of that engine.
    */
   const withMap = async (record: SessionRecord, systemPrompt: string, onProgress: StartProgress): Promise<string> =>
-    await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'KiwiAgent: repo map' }, (progress) =>
+    await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'Kiwipow Agent: repo map' }, (progress) =>
       withRepoMap(record.mode, systemPrompt, workspaceRepoMap(workspaceRoot), {
         onProgress: (line) => {
           progress.report({ message: line })
@@ -224,7 +224,7 @@ export function activate(context: vscode.ExtensionContext): void {
       style === 'outline'
         ? outlineDocsMap(() => renderOutlineMap(workspaceRoot, ignored))
         : workspaceDocsMap(workspaceRoot, ignored, (onProgress) => chat.buildDocsMap(ignored, onProgress))
-    return await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'KiwiAgent: docs map' }, (progress) =>
+    return await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: 'Kiwipow Agent: docs map' }, (progress) =>
       withDocsMap(record.mode, systemPrompt, source, {
         style,
         onProgress: (line) => {
@@ -359,7 +359,7 @@ export function activate(context: vscode.ExtensionContext): void {
       return readMcpConfig(workspaceRoot)
     },
     () => sessions.liveSessions(),
-    (message) => void vscode.window.showWarningMessage(`KiwiAgent: ${message}`),
+    (message) => void vscode.window.showWarningMessage(`Kiwipow Agent: ${message}`),
   )
 
   /** An engine start-up step in the output channel, timed, so a start that stalls shows the step it stalled on. */
@@ -443,7 +443,7 @@ export function activate(context: vscode.ExtensionContext): void {
           // Telemetry posts go through axios, which cannot authenticate against a
           // corporate proxy asking for NTLM, leaving 407s in the session diagnostics.
           env: {
-            CLAUDE_AGENT_SDK_CLIENT_APP: 'kiwi-agent-vscode/0.0.1',
+            CLAUDE_AGENT_SDK_CLIENT_APP: 'kiwipow-agent-vscode/0.0.1',
             CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
             ...(anthropicKey ? { ANTHROPIC_API_KEY: anthropicKey } : {}),
           },
@@ -464,7 +464,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!profile.apiKeySecret) throw new Error(`Profile "${profile.name}" has no apiKeySecret`)
         traceStart(record, `reading the API key "${profile.apiKeySecret}"`)
         const apiKey = await context.secrets.get(secretKey(profile.apiKeySecret))
-        if (!apiKey) throw new Error(`No API key stored for "${profile.apiKeySecret}". Set it on the provider in KiwiAgent settings.`)
+        if (!apiKey) throw new Error(`No API key stored for "${profile.apiKeySecret}". Set it on the provider in Kiwipow Agent settings.`)
         onProgress(`Connecting to ${profile.name}`)
         // Indexed per session so a skill added to the workspace or the user profile shows up on the next one.
         const skills = await indexSkills(workspaceRoot, undefined, join(pluginPath, 'skills'))
@@ -572,7 +572,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('kiwiAgent.openSession', (id: string) => chat.open(id)),
     vscode.commands.registerCommand('kiwiAgent.resumePlan', (feature: string) =>
       chat.resumePlan(feature).catch((error: unknown) => {
-        void vscode.window.showErrorMessage(`KiwiAgent: ${error instanceof Error ? error.message : String(error)}`)
+        void vscode.window.showErrorMessage(`Kiwipow Agent: ${error instanceof Error ? error.message : String(error)}`)
       }),
     ),
     vscode.commands.registerCommand('kiwiAgent.removeSession', async (node: SessionNode) => {
@@ -633,7 +633,7 @@ function profileFor(step: Step, attempt?: number): ModelProfile {
   const profile = profiles.find((p) => p.name === activeProfile) ?? profiles[0]
   if (!profile) throw new Error('No model profiles configured (kiwiAgent.profiles)')
   if (activeProfile && profile.name !== activeProfile) {
-    void vscode.window.showWarningMessage(`KiwiAgent: profile "${activeProfile}" not found, using "${profile.name}".`)
+    void vscode.window.showWarningMessage(`Kiwipow Agent: profile "${activeProfile}" not found, using "${profile.name}".`)
   }
   return resolveStep(profile, providers, step, attempt)
 }

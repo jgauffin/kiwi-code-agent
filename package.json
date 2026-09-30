@@ -1,6 +1,6 @@
 {
-  "name": "kiwi-agent",
-  "displayName": "KiwiAgent",
+  "name": "kiwipow-agent",
+  "displayName": "Kiwipow Agent",
   "description": "Coding sessions in VS Code with a choice of model engine per session.",
   "version": "0.2.1",
   "publisher": "CoderrAB",
@@ -44,7 +44,7 @@
       "activitybar": [
         {
           "id": "kiwiAgent",
-          "title": "KiwiAgent",
+          "title": "Kiwipow Agent",
           "icon": "$(hubot)"
         }
       ]
@@ -65,7 +65,7 @@
       },
       {
         "command": "kiwiAgent.openChat",
-        "title": "KiwiAgent: New Session Tab",
+        "title": "Kiwipow Agent: New Session Tab",
         "icon": "docs/logos/kiwipow-agent-logo-128.png"
       },
       {
@@ -93,20 +93,20 @@
       },
       {
         "command": "kiwiAgent.openSettings",
-        "title": "KiwiAgent: Settings",
+        "title": "Kiwipow Agent: Settings",
         "icon": "$(gear)"
       },
       {
         "command": "kiwiAgent.migratePlans",
-        "title": "KiwiAgent: Migrate plans to the spec contract"
+        "title": "Kiwipow Agent: Migrate plans to the spec contract"
       },
       {
         "command": "kiwiAgent.buildRepoMap",
-        "title": "KiwiAgent: Build Repo Map"
+        "title": "Kiwipow Agent: Build Repo Map"
       },
       {
         "command": "kiwiAgent.buildDocsMap",
-        "title": "KiwiAgent: Build Docs Map"
+        "title": "Kiwipow Agent: Build Docs Map"
       }
     ],
     "menus": {
@@ -169,7 +169,7 @@
       ]
     },
     "configuration": {
-      "title": "KiwiAgent",
+      "title": "Kiwipow Agent",
       "properties": {
         "kiwiAgent.activeProfile": {
           "type": "string",
@@ -243,7 +243,7 @@
         "kiwiAgent.traceEngine": {
           "type": "boolean",
           "default": false,
-          "description": "Log every message from the Claude engine (one line each) to the KiwiAgent output channel. Applies to sessions started after the change."
+          "description": "Log every message from the Claude engine (one line each) to the Kiwipow Agent output channel. Applies to sessions started after the change."
         },
         "kiwiAgent.nodePath": {
           "type": "string",

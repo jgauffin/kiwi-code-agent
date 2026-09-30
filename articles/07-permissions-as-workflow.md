@@ -7,7 +7,7 @@ series: A coding agent that plans blind
 
 Every coding agent asks permission. After a day of it you stop reading, and after a week you turn it off. A gate you always say yes to is not a gate; it is a habit with a button.
 
-So the question is not whether to ask. It is how few times you can be asked while every answer still means something. In KiwiAgent that question got about eleven hundred lines of code, which makes the permission gate the largest single mechanism in the extension.
+So the question is not whether to ask. It is how few times you can be asked while every answer still means something. In Kiwipow Agent that question got about eleven hundred lines of code, which makes the permission gate the largest single mechanism in the extension.
 
 ## Read-only is decided, not declared
 

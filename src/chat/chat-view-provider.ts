@@ -658,7 +658,7 @@ export class ChatViewProvider {
       if (!implementationStarts(spec, tasks, this.implementerLive(feature))) return
       await this.startImplementing(record)
     } catch (error) {
-      void vscode.window.showErrorMessage(`KiwiAgent: cannot start the implementation: ${error instanceof Error ? error.message : String(error)}`)
+      void vscode.window.showErrorMessage(`Kiwipow Agent: cannot start the implementation: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 
@@ -676,7 +676,7 @@ export class ChatViewProvider {
       if (run.task !== undefined && plan) await this.implementAfterApproval(plan)
       else if (run.task === undefined) {
         await this.followBoard(run.feature).catch((error: unknown) => {
-          void vscode.window.showErrorMessage(`KiwiAgent: cannot resume the test run: ${error instanceof Error ? error.message : String(error)}`)
+          void vscode.window.showErrorMessage(`Kiwipow Agent: cannot resume the test run: ${error instanceof Error ? error.message : String(error)}`)
         })
       }
     }
@@ -770,7 +770,7 @@ export class ChatViewProvider {
   private async askAboutForeignFailures(feature: string, held: HeldFailure[]): Promise<void> {
     const lines = held.map((h) => `${describeCommand(h, this.workspaceRoot)} — ${h.files.join(', ')}: ${h.hand}`)
     const pick = await vscode.window.showWarningMessage(
-      `KiwiAgent: verification for "${feature}" failed only on files another hand changed:\n${lines.join('\n')}`,
+      `Kiwipow Agent: verification for "${feature}" failed only on files another hand changed:\n${lines.join('\n')}`,
       { modal: true },
       'Run again',
       'Hand to implementer anyway',
@@ -832,7 +832,7 @@ export class ChatViewProvider {
    * were one run per task, so none of them holds all of the feature's files.
    */
   private async runCleanup(feature: string, picked?: string[]): Promise<void> {
-    const refuse = (why: string) => void vscode.window.showWarningMessage(`KiwiAgent: cannot start the cleanup: ${why}`)
+    const refuse = (why: string) => void vscode.window.showWarningMessage(`Kiwipow Agent: cannot start the cleanup: ${why}`)
     if (this.cleanups.get(feature)?.live) return refuse('one is already running')
     const relativeTo = (file: string) => relative(this.workspaceRoot, file).split('\\').join('/')
     const flagged = (this.sweeps.get(feature) ?? []).filter((u) => picked === undefined || picked.includes(relativeTo(u.path)))
@@ -908,7 +908,7 @@ export class ChatViewProvider {
     const file = editedUnitFile(next, event, toRelative)
     if (file) {
       this.remeasure(feature, file).catch((error: unknown) => {
-        void vscode.window.showWarningMessage(`KiwiAgent: cannot measure ${file} again: ${error instanceof Error ? error.message : String(error)}`)
+        void vscode.window.showWarningMessage(`Kiwipow Agent: cannot measure ${file} again: ${error instanceof Error ? error.message : String(error)}`)
       })
     }
     return next !== progress
@@ -989,45 +989,45 @@ export class ChatViewProvider {
   }
 
   /**
-   * The `KiwiAgent: Build Repo Map` command. The build is mechanical and runs
+   * The `Kiwipow Agent: Build Repo Map` command. The build is mechanical and runs
    * in the extension host: no engine is started, so nothing is spent and
    * nothing is asked of the user while it runs.
    */
   async buildRepoMap(): Promise<void> {
     try {
       const result = await vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Notification, title: 'KiwiAgent: building the repo map' },
+        { location: vscode.ProgressLocation.Notification, title: 'Kiwipow Agent: building the repo map' },
         (progress) => buildRepoMap(this.workspaceRoot, (line) => progress.report({ message: line })),
       )
       const count = result.projects.length
-      void vscode.window.showInformationMessage(`KiwiAgent: repo map built — ${count} project${count === 1 ? '' : 's'}.`)
+      void vscode.window.showInformationMessage(`Kiwipow Agent: repo map built — ${count} project${count === 1 ? '' : 's'}.`)
     } catch (error) {
-      void vscode.window.showWarningMessage(`KiwiAgent: the repo map could not be built: ${error instanceof Error ? error.message : String(error)}`)
+      void vscode.window.showWarningMessage(`Kiwipow Agent: the repo map could not be built: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 
   /**
-   * The `KiwiAgent: Build Docs Map` command. Unlike the repo map this one
+   * The `Kiwipow Agent: Build Docs Map` command. Unlike the repo map this one
    * spends a turn, so it says up front how many docs it has to read and
    * nothing at all when the map is already current.
    */
   async buildDocsMapCommand(ignored: string[]): Promise<void> {
     const plan = await planDocsMap(this.workspaceRoot, ignored)
     if (plan.current && (await this.docsMapIsComposed())) {
-      void vscode.window.showInformationMessage('KiwiAgent: the docs map is current.')
+      void vscode.window.showInformationMessage('Kiwipow Agent: the docs map is current.')
       return
     }
     try {
       const result = await vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Notification, title: 'KiwiAgent: building the docs map' },
+        { location: vscode.ProgressLocation.Notification, title: 'Kiwipow Agent: building the docs map' },
         (progress) => this.buildDocsMap(ignored, (line) => progress.report({ message: line })),
       )
       const described = result.described.length
       const left = result.undescribed.length
       const tail = left === 0 ? '' : `, ${left} still to describe`
-      void vscode.window.showInformationMessage(`KiwiAgent: docs map built: ${described} doc${described === 1 ? '' : 's'}${tail}.`)
+      void vscode.window.showInformationMessage(`Kiwipow Agent: docs map built: ${described} doc${described === 1 ? '' : 's'}${tail}.`)
     } catch (error) {
-      void vscode.window.showWarningMessage(`KiwiAgent: the docs map could not be built: ${error instanceof Error ? error.message : String(error)}`)
+      void vscode.window.showWarningMessage(`Kiwipow Agent: the docs map could not be built: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 
@@ -1099,7 +1099,7 @@ export class ChatViewProvider {
   async migratePlans(): Promise<void> {
     const plans = await listPlans(this.workspaceRoot)
     if (plans.length === 0) {
-      void vscode.window.showInformationMessage('KiwiAgent: no plans to migrate.')
+      void vscode.window.showInformationMessage('Kiwipow Agent: no plans to migrate.')
       return
     }
     const reports: MigrationReport[] = []
@@ -1110,7 +1110,7 @@ export class ChatViewProvider {
       clean.length > 0 ? `on contract: ${clean.join(', ')}` : '',
       handed.length > 0 ? `handed to the planner: ${handed.join(', ')}` : '',
     ].filter((p) => p.length > 0)
-    void vscode.window.showInformationMessage(`KiwiAgent: migrated ${plans.length} plan${plans.length === 1 ? '' : 's'}; ${parts.join('; ')}.`)
+    void vscode.window.showInformationMessage(`Kiwipow Agent: migrated ${plans.length} plan${plans.length === 1 ? '' : 's'}; ${parts.join('; ')}.`)
   }
 
   /** `handed` says the planner has the remaining problems now; otherwise its turn is over and they are the user's to look at. */
@@ -1118,12 +1118,12 @@ export class ChatViewProvider {
     const left = report.problems.length
     if (left === 0) {
       const done = report.steps.length > 0 ? `: ${report.steps.join(' ')}` : '.'
-      void vscode.window.showInformationMessage(`KiwiAgent: "${report.feature}" is on contract${done}`)
+      void vscode.window.showInformationMessage(`Kiwipow Agent: "${report.feature}" is on contract${done}`)
       return
     }
     const problems = `${left} contract problem${left === 1 ? '' : 's'}`
     void vscode.window.showWarningMessage(
-      `KiwiAgent: "${report.feature}" has ${problems}; ${handed ? 'the planner is rearranging the spec' : 'see the plan bar'}.`,
+      `Kiwipow Agent: "${report.feature}" has ${problems}; ${handed ? 'the planner is rearranging the spec' : 'see the plan bar'}.`,
     )
   }
 
@@ -1134,7 +1134,7 @@ export class ChatViewProvider {
     webview.onDidReceiveMessage((message: FromWebview) => {
       this.handle(message, entry).catch((error: unknown) => {
         const text = error instanceof Error ? error.message : String(error)
-        void vscode.window.showErrorMessage(`KiwiAgent: ${text}`)
+        void vscode.window.showErrorMessage(`Kiwipow Agent: ${text}`)
       })
     })
   }
@@ -1171,7 +1171,7 @@ export class ChatViewProvider {
         // With focus in the view there may be no active text editor, so the file on screen is the one meant.
         const editor = vscode.window.activeTextEditor ?? vscode.window.visibleTextEditors[0]
         if (!editor) {
-          void vscode.window.showWarningMessage('KiwiAgent: no file is open in the editor to link.')
+          void vscode.window.showWarningMessage('Kiwipow Agent: no file is open in the editor to link.')
           return
         }
         void entry.panel.webview.postMessage({
@@ -1575,11 +1575,11 @@ export class ChatViewProvider {
    */
   private async sendState(): Promise<void> {
     const plans = await listPlans(this.workspaceRoot).catch((error: unknown) => {
-      void vscode.window.showErrorMessage(`KiwiAgent: cannot list plans: ${error instanceof Error ? error.message : String(error)}`)
+      void vscode.window.showErrorMessage(`Kiwipow Agent: cannot list plans: ${error instanceof Error ? error.message : String(error)}`)
       return []
     })
     const unfiled = await readUnfiled(this.workspaceRoot).catch((error: unknown) => {
-      void vscode.window.showErrorMessage(`KiwiAgent: cannot read the unfiled decisions: ${error instanceof Error ? error.message : String(error)}`)
+      void vscode.window.showErrorMessage(`Kiwipow Agent: cannot read the unfiled decisions: ${error instanceof Error ? error.message : String(error)}`)
       return []
     })
     const shared = {
@@ -1597,7 +1597,7 @@ export class ChatViewProvider {
       entry.panel.title = tab?.title ?? NEW_SESSION_TITLE
       const plan = record
         ? await this.planState(record).catch((error: unknown) => {
-            void vscode.window.showErrorMessage(`KiwiAgent: cannot read spec: ${error instanceof Error ? error.message : String(error)}`)
+            void vscode.window.showErrorMessage(`Kiwipow Agent: cannot read spec: ${error instanceof Error ? error.message : String(error)}`)
             return undefined
           })
         : undefined

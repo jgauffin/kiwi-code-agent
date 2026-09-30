@@ -136,9 +136,9 @@ describe('the question card', () => {
     type(card, 0, '   ')
     expect(submitButton(card)?.disabled).toBe(true)
 
-    type(card, 0, 'KiwiAgent')
+    type(card, 0, 'Kiwipow Agent')
     expect(submitButton(card)?.disabled).toBe(false)
-    expect(submitted(card)).toEqual({ kind: 'answered', answers: [{ chosen: [], other: 'KiwiAgent' }] })
+    expect(submitted(card)).toEqual({ kind: 'answered', answers: [{ chosen: [], other: 'Kiwipow Agent' }] })
   })
 
   it('a_resolved_card_is_replaced_by_each_question_and_its_answer_as_text', () => {

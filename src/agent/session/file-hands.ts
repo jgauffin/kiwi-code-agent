@@ -13,7 +13,7 @@ type Registry = { id: string; mode: SessionMode; feature?: string; files: Record
 const dirFor = (workspaceRoot: string): string => join(workspaceRoot, '.agent', 'sessions')
 
 /**
- * Attributes a file's content to the KiwiAgent session that last wrote it, so
+ * Attributes a file's content to the Kiwipow Agent session that last wrote it, so
  * a stale-write refusal can name who: this session's own writes go in here,
  * another session's are read back off disk. A thin attribution log, not the
  * fuller claim registry (deadlines, heartbeats, denying a live session's
@@ -52,12 +52,12 @@ export class FileHands {
     await writeFile(file, JSON.stringify(registry), 'utf8').catch(() => undefined)
   }
 
-  /** The other KiwiAgent session whose own write left `path` at exactly `mtimeMs`, if one did. */
+  /** The other Kiwipow Agent session whose own write left `path` at exactly `mtimeMs`, if one did. */
   async whoWrote(path: string, mtimeMs: number): Promise<Hand | undefined> {
     return this.find(path, mtimeMs, `${this.sessionId}.json`)
   }
 
-  /** The KiwiAgent session whose own write left `path` at exactly `mtimeMs`, this session's own included, if one did. */
+  /** The Kiwipow Agent session whose own write left `path` at exactly `mtimeMs`, this session's own included, if one did. */
   async handFor(path: string, mtimeMs: number): Promise<Hand | undefined> {
     return this.find(path, mtimeMs)
   }
@@ -116,11 +116,11 @@ async function readRegistry(file: string): Promise<Registry | undefined> {
 
 /**
  * What a refusal or notice says about where a change came from: the other
- * KiwiAgent session and the feature it works on when the registry names one,
- * outside KiwiAgent otherwise — never which tool made the change.
+ * Kiwipow Agent session and the feature it works on when the registry names one,
+ * outside Kiwipow Agent otherwise — never which tool made the change.
  */
 export function describeHand(hand: Hand | undefined): string {
-  if (!hand) return 'It was changed from outside KiwiAgent.'
-  const who = hand.feature ? `a KiwiAgent ${hand.mode} session on "${hand.feature}"` : `a KiwiAgent ${hand.mode} session`
+  if (!hand) return 'It was changed from outside Kiwipow Agent.'
+  const who = hand.feature ? `a Kiwipow Agent ${hand.mode} session on "${hand.feature}"` : `a Kiwipow Agent ${hand.mode} session`
   return `It was changed by ${who}.`
 }

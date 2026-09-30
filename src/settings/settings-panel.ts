@@ -27,7 +27,7 @@ export class SettingsPanel {
       this.panel.reveal()
       return
     }
-    this.adopt(vscode.window.createWebviewPanel(SETTINGS_PANEL_TYPE, 'KiwiAgent Settings', vscode.ViewColumn.Active, { retainContextWhenHidden: true }))
+    this.adopt(vscode.window.createWebviewPanel(SETTINGS_PANEL_TYPE, 'Kiwipow Agent Settings', vscode.ViewColumn.Active, { retainContextWhenHidden: true }))
   }
 
   /** A new panel, or one VS Code revived after a window reload. */
@@ -39,7 +39,7 @@ export class SettingsPanel {
     panel.webview.onDidReceiveMessage((message: FromSettingsWebview) => {
       this.handle(message).catch((error: unknown) => {
         const text = error instanceof Error ? error.message : String(error)
-        void vscode.window.showErrorMessage(`KiwiAgent: ${text}`)
+        void vscode.window.showErrorMessage(`Kiwipow Agent: ${text}`)
       })
     })
     // An edit in settings.json shows up on the page as well.

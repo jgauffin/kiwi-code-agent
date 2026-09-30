@@ -71,7 +71,7 @@ describe('StaleWriteGuard', () => {
     await other.postToolUse(written('Write', { file_path: 'a.txt', content: 'changed by the other session' }))
 
     const result = await mine.preToolUse(use('Edit', { file_path: 'a.txt', old_string: 'changed', new_string: 'x' }))
-    expect(result).toMatchObject({ deny: expect.stringContaining('a KiwiAgent plan session on "Order cancellation"') })
+    expect(result).toMatchObject({ deny: expect.stringContaining('a Kiwipow Agent plan session on "Order cancellation"') })
   })
 
   it('who_changed_it_says_outside_kiwiagent_when_no_session_wrote_it', async () => {
@@ -83,6 +83,6 @@ describe('StaleWriteGuard', () => {
     const later = new Date(Date.now() + 5000)
     await utimes(path, later, later)
     const result = await guard.preToolUse(use('Edit', { file_path: 'a.txt', old_string: 'x', new_string: 'y' }))
-    expect(result).toMatchObject({ deny: expect.stringContaining('changed from outside KiwiAgent') })
+    expect(result).toMatchObject({ deny: expect.stringContaining('changed from outside Kiwipow Agent') })
   })
 })

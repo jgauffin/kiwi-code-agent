@@ -55,5 +55,5 @@ async function pick(drafts: PlanSummary[]): Promise<PlanSummary | undefined> {
 
 function report(error: unknown): void {
   const text = error instanceof Error ? error.message : String(error)
-  void vscode.window.showErrorMessage(`KiwiAgent: ${text}`)
+  void vscode.window.showErrorMessage(`Kiwipow Agent: ${text}`)
 }

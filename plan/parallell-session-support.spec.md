@@ -6,7 +6,7 @@ status: approved
 # Parallell session support
 
 ## Goal
-A person working with KiwiAgent rarely works with KiwiAgent alone: a second plan or implement session runs beside the first, and an agent outside KiwiAgent, a branch switch or the person's own editor changes the same files. Today the agent cannot tell its own work from anyone else's, so it writes over a change it never saw and, worse, verification blames the feature for tests the other hand broke. This feature gives the agent that distinction: every change in the workspace is either this session's own or another hand's, a write onto a file another hand moved is refused instead of instructed against, a running session is told when the ground shifts under it, and a failing test in code the feature never touched is reported as someone else's rather than handed back to the implementer.
+A person working with Kiwipow Agent rarely works with Kiwipow Agent alone: a second plan or implement session runs beside the first, and an agent outside Kiwipow Agent, a branch switch or the person's own editor changes the same files. Today the agent cannot tell its own work from anyone else's, so it writes over a change it never saw and, worse, verification blames the feature for tests the other hand broke. This feature gives the agent that distinction: every change in the workspace is either this session's own or another hand's, a write onto a file another hand moved is refused instead of instructed against, a running session is told when the ground shifts under it, and a failing test in code the feature never touched is reported as someone else's rather than handed back to the implementer.
 
 ## Writing a file another hand changed
 Every session that writes — plan, implement, cleanup, chat — is held to the same check, which the extension performs rather than the prompt asking for it.
@@ -16,7 +16,7 @@ Every session that writes — plan, implement, cleanup, chat — is held to the 
 - **Unread file refused**: a write to a file that exists and this session never read is refused for the same reason.
   - **A new file needs no read**: writing a file that does not exist is not refused.
 - **No read-before-edit instruction**: the phase instructions carry no rule telling the model to read before editing, because the refusal enforces it (docs/intent/agent.md#Instructions).
-- **Who changed it**: a refusal or notice names the other KiwiAgent session and the feature it works on where the change came from one, and otherwise says the change came from outside KiwiAgent, without naming which tool (docs/features/coordination.md#Claims).
+- **Who changed it**: a refusal or notice names the other Kiwipow Agent session and the feature it works on where the change came from one, and otherwise says the change came from outside Kiwipow Agent, without naming which tool (docs/features/coordination.md#Claims).
 
 ## Being told while the work is in play
 - **Notice of another hand**: a session whose turn is in play is told, as a one-line tail on its next tool result, that another hand changed a file this session has written or read (docs/features/coordination.md#Channels).
@@ -34,4 +34,4 @@ Verification is mechanical and runs over the files the tasks name; with a second
 - **Budget spared**: an all-foreign failure does not count against `kiwiAgent.verifyFailureBudget` (docs/intent/agent.md#Verification).
 
 ## Open questions
-- **Verifying beside a live sibling**: should verification be postponed while another KiwiAgent session in the same workspace is mid-turn, rather than run and then be retried?
+- **Verifying beside a live sibling**: should verification be postponed while another Kiwipow Agent session in the same workspace is mid-turn, rather than run and then be retried?

@@ -155,7 +155,7 @@ export async function runVerification(options: {
       classified = failures.length > 0 ? await classifyAll(failures) : []
     }
     if (failures.length > 0 && allForeign(classified)) {
-      held = classified.map(({ failure, classification }) => ({ ...failure, files: classification.files, hand: classification.hand ?? 'It was changed from outside KiwiAgent.' }))
+      held = classified.map(({ failure, classification }) => ({ ...failure, files: classification.files, hand: classification.hand ?? 'It was changed from outside Kiwipow Agent.' }))
       failures = []
     } else if (failures.length > 0) {
       failures = classified.filter((c) => !c.classification.foreign).map((c) => c.failure)

@@ -9,7 +9,7 @@ Every codebase carries workarounds. A cap that is there because of an overflow n
 
 Now ask an agent to plan a feature in that code. It reads the code first, because that is what agents do. It finds the cap, and the cap becomes a requirement. The feature is shaped to fit the defect, and nobody is told. The spec looks reasonable. It has absorbed a bug as a rule.
 
-That is the problem KiwiAgent is built around. It is a VS Code extension that runs coding sessions, and its planning session cannot read the code.
+That is the problem Kiwipow Agent is built around. It is a VS Code extension that runs coding sessions, and its planning session cannot read the code.
 
 ## What the planner sees
 

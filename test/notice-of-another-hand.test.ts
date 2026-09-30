@@ -84,6 +84,6 @@ describe('NoticeOfAnotherHand', () => {
     await other.recordWrite(path, (await stat(path)).mtimeMs)
 
     const result = await mine.postToolUse(written('Bash', { command: 'echo hi' }))
-    expect(result?.additionalContext).toContain('a KiwiAgent plan session on "Order cancellation"')
+    expect(result?.additionalContext).toContain('a Kiwipow Agent plan session on "Order cancellation"')
   })
 })

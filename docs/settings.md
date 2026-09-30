@@ -1,6 +1,6 @@
 # Settings
 
-*KiwiAgent: Settings* (or the gear in the Sessions and Chat views) opens a page in the editor with four tabs: Models and Advanced write to user settings, Permissions and Project to the workspace. Models has its own Providers and Profiles sub-tabs. API keys go to the editor's secret storage from the Providers sub-tab, under the provider's own name; a rename carries the stored key with it, so nothing else names it. A `claude-sdk` provider's key is optional: with one, Claude sessions use that Anthropic API key; without one, they use the Claude Code login on this machine.
+*Kiwipow Agent: Settings* (or the gear in the Sessions and Chat views) opens a page in the editor with four tabs: Models and Advanced write to user settings, Permissions and Project to the workspace. Models has its own Providers and Profiles sub-tabs. API keys go to the editor's secret storage from the Providers sub-tab, under the provider's own name; a rename carries the stored key with it, so nothing else names it. A `claude-sdk` provider's key is optional: with one, Claude sessions use that Anthropic API key; without one, they use the Claude Code login on this machine.
 
 The keys, for settings.json:
 
@@ -23,10 +23,10 @@ The keys, for settings.json:
 - `kiwiAgent.permissions.denyGitWrites`: blocks every git command that is not read-only, whatever the allow rules say. Permissions tab, Git.
 - `kiwiAgent.nodePath`: Node executable for the Claude engine; empty uses VS Code's executable.
 - `kiwiAgent.compactAtTokens`: compact a conversation once it is this large, even when the window holds more, since every request re-sends it; 0 compacts only when the window runs short. Settings page, Advanced tab. A provider can set its own per model (`compactAtTokens` on the provider, model id → tokens), edited beside each model under Models › Providers; that wins for sessions on that provider and model.
-- `kiwiAgent.traceEngine`: one line per Claude engine message in the KiwiAgent output channel, to see what the engine sends (thinking deltas, status) when the UI shows nothing.
+- `kiwiAgent.traceEngine`: one line per Claude engine message in the Kiwipow Agent output channel, to see what the engine sends (thinking deltas, status) when the UI shows nothing.
 - `kiwiAgent.verify`: test commands run once every task of a feature is marked tested, over the files the tasks name, in the directory of the nearest `project` file; a repo with a backend and a frontend runs each suite once, and only the suites the feature touched. A failure is handed to the implement session, up to `kiwiAgent.verifyFailureBudget` consecutive failures. Default: `dotnet test` of the `.csproj` owning a `.cs` file, `npm test` in the `package.json` folder owning a `.ts` file.
 - `kiwiAgent.planIgnore`: globs under `docs/` feature planning must not see. The docs map does not describe them and the docs evaluation does not judge them.
-- Command *KiwiAgent: Build Docs Map* describes the docs that changed since the last build. A planning session and a docs evaluation do it themselves when the map is behind.
+- Command *Kiwipow Agent: Build Docs Map* describes the docs that changed since the last build. A planning session and a docs evaluation do it themselves when the map is behind.
 - `kiwiAgent.docsMap.style`: `described` (default) has a model write one line per section; `outline` gives headings with line ranges and each doc's opening paragraph, read at session start at no model cost. Set it to compare the two.
 
 ## Instruction files and skills
@@ -39,7 +39,7 @@ Claude Code's layout, at the user level and in the workspace. On the own-loop en
 
 `~/.mcp.json` holds the servers every workspace gets and the workspace's own `.mcp.json` goes over it, so a workspace can replace a user server by name. Only the workspace file is watched; a change to the user's takes effect on the next window.
 
-Claude Code itself keeps the user's servers in `~/.claude.json` instead, under `mcpServers`. The first time it runs, KiwiAgent copies them into `~/.mcp.json` so both read the same list — verbatim, `${VAR}` placeholders and all, leaving out any name the format refuses. It copies only when there is no `~/.mcp.json` yet, so a server removed afterwards stays removed; to run the copy again, delete the file. Servers Claude Code holds per project (`projects` in `~/.claude.json`) are left where they are.
+Claude Code itself keeps the user's servers in `~/.claude.json` instead, under `mcpServers`. The first time it runs, Kiwipow Agent copies them into `~/.mcp.json` so both read the same list — verbatim, `${VAR}` placeholders and all, leaving out any name the format refuses. It copies only when there is no `~/.mcp.json` yet, so a server removed afterwards stays removed; to run the copy again, delete the file. Servers Claude Code holds per project (`projects` in `~/.claude.json`) are left where they are.
 
 ## Logs
 

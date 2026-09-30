@@ -37,7 +37,7 @@ export function failureFiles(output: string, baseDir: string): { path: string; l
 
 /**
  * A failure is foreign when every file its output names is: no session of
- * `feature` currently owns it, and either another KiwiAgent session does or
+ * `feature` currently owns it, and either another Kiwipow Agent session does or
  * this feature's own last known content there no longer matches what is on
  * disk. A file the output names but nothing tracked is never called foreign
  * (`No other hand no excuse`): the run is silent on whether it changed since

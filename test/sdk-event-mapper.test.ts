@@ -63,7 +63,7 @@ describe('SdkEventMapper', () => {
     const [error] = new SdkEventMapper().map(msg)
     expect(error).toMatchObject({ type: 'error', fatal: false })
     expect((error as { message: string }).message).toContain('API key')
-    expect((error as { message: string }).message).toContain('KiwiAgent settings')
+    expect((error as { message: string }).message).toContain('Kiwipow Agent settings')
   })
 
   it('a_billing_refusal_says_it_is_the_account_not_the_login', () => {

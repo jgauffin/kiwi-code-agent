@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { ScopeGuard } from '../src/agent/phases/scope-guard'
 import { CLEANUP_TOOLS, MOVES_FILE, cleanupKickoff, cleanupPrompt, cleanupScope } from '../src/agent/phases/cleanup'
 import { ASK_USER_TOOL } from '../src/agent/openai-session/tools/ask-user'
+import { CODE_READING } from '../src/agent/code-outline/code-outline-gate'
+import { CODE_OUTLINE_TOOL } from '../src/agent/code-outline/code-outline-tool'
 import { progressLine } from '../src/agent/phases/reconcile'
 
 const cwd = process.platform === 'win32' ? 'D:\\work\\repo' : '/work/repo'
@@ -65,6 +67,14 @@ describe('cleanup prompt', () => {
     })
     expect(prompt).toContain('(a function 25 code lines, a file 400; in tests a function 60 code lines, a file 1200)')
     expect(prompt).toContain('A test file stays one file per tested file')
+  })
+
+  it('the_split_is_planned_from_the_outline_not_from_reading_files_whole', () => {
+    const off = { functionLines: 0, typeLines: 0, fileLines: 0 }
+    const prompt = cleanupPrompt('Order cancellation', cwd, { source: { functionLines: 25, typeLines: 0, fileLines: 400 }, tests: off, testGlobs: [] })
+    expect(prompt).toContain(CODE_READING)
+    expect(prompt).toContain(`Plan the split from ${CODE_OUTLINE_TOOL}`)
+    expect(prompt).not.toContain('Read a file whole')
   })
 
   it('the_kickoff_carries_the_report', () => {

@@ -16,14 +16,14 @@ export function watchOwnBundle(context: vscode.ExtensionContext): vscode.Disposa
       if (file !== 'extension.js' && file !== 'webview.js') return
       clearTimeout(timer)
       timer = setTimeout(() => {
-        void vscode.window.showInformationMessage('KiwiAgent was rebuilt.', 'Reload Window').then((choice) => {
+        void vscode.window.showInformationMessage('Kiwipow Agent was rebuilt.', 'Reload Window').then((choice) => {
           if (choice) void vscode.commands.executeCommand('workbench.action.reloadWindow')
         })
       }, 500)
     })
   } catch (error) {
     // Only reachable when dist/ is missing, which is a broken install, not a dev loop.
-    void vscode.window.showWarningMessage(`KiwiAgent: cannot watch ${bundle}: ${(error as Error).message}`)
+    void vscode.window.showWarningMessage(`Kiwipow Agent: cannot watch ${bundle}: ${(error as Error).message}`)
   }
   return { dispose: () => watcher?.close() }
 }

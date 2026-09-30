@@ -33,7 +33,7 @@ export class AdvancedTab extends HTMLElement {
         hint: 'For models without a limit of their own (Models › Providers): a conversation this large is folded into a summary, even when the model’s window holds more, since every request re-sends the whole conversation. 0 compacts only when the window runs short. Applies to sessions started after the change.',
       }),
       field('Node executable', nodePath, { hint: 'Runs the Claude CLI. A path here wins over the editor’s Node.' }),
-      checkField('Trace engine', trace, 'Logs every Claude SDK message to the KiwiAgent output channel. Applies to sessions started after the change.'),
+      checkField('Trace engine', trace, 'Logs every Claude SDK message to the Kiwipow Agent output channel. Applies to sessions started after the change.'),
       settingsFileLink('user'),
     )
   }

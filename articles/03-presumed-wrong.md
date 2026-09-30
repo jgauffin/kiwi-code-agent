@@ -7,7 +7,7 @@ series: A coding agent that plans blind
 
 The spec was written without looking at the code. Sooner or later the two have to meet.
 
-In KiwiAgent that meeting is its own step. A run takes the draft spec and the repository and looks for one thing: where they disagree. Not whether the spec is good, not whether the code is nice. Only the disagreements, and only the ones that stand in this feature's way.
+In Kiwipow Agent that meeting is its own step. A run takes the draft spec and the repository and looks for one thing: where they disagree. Not whether the spec is good, not whether the code is nice. Only the disagreements, and only the ones that stand in this feature's way.
 
 ## Three things it looks for
 

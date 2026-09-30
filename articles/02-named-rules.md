@@ -7,7 +7,7 @@ series: A coding agent that plans blind
 
 Acceptance criteria are a promise. Somebody writes them, somebody else writes the code, and the connection between the two lives in a review comment and then nowhere.
 
-KiwiAgent replaces the promise with a chain of names. A rule has a name. A task names the rules it delivers. A test is named after the rule it proves. Nothing in the chain is a synthetic id, and nothing is allowed to say "done" while a link is missing.
+Kiwipow Agent replaces the promise with a chain of names. A rule has a name. A task names the rules it delivers. A test is named after the rule it proves. Nothing in the chain is a synthetic id, and nothing is allowed to say "done" while a link is missing.
 
 ## The spec has a shape, and the shape is checked
 

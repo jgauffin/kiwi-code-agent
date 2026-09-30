@@ -19,7 +19,7 @@ export function connectMcp(cwd: string, onStderr: (server: string, chunk: string
     if (transport instanceof StdioClientTransport) {
       transport.stderr?.on('data', (chunk: Buffer | string) => onStderr(name, chunk.toString()))
     }
-    const client = new Client({ name: 'kiwi-agent', version: '0.0.1' }, { capabilities: {} })
+    const client = new Client({ name: 'kiwipow-agent', version: '0.0.1' }, { capabilities: {} })
     // The SDK's HTTP transport declares `sessionId?: string` but holds undefined; its own interface is stricter than it is.
     await client.connect(transport as Transport)
     return connection(client)
