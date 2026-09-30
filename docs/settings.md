@@ -35,7 +35,11 @@ Claude Code's layout, at the user level and in the workspace. On the own-loop en
 
 ## MCP servers
 
-`.mcp.json` in the workspace root (Claude Code's format) gives chat sessions its servers' tools on both engines, as `mcp__<server>__<tool>`. They ask before running unless an allow rule names the tool or `mcp__<server>__*`. A save of the file reaches running sessions, and the composer shows each server's status with a reconnect button.
+`.mcp.json` (Claude Code's format) gives chat sessions its servers' tools on both engines, as `mcp__<server>__<tool>`. They ask before running unless an allow rule names the tool or `mcp__<server>__*`. A save of the file reaches running sessions, and the composer shows each server's status with a reconnect button.
+
+`~/.mcp.json` holds the servers every workspace gets and the workspace's own `.mcp.json` goes over it, so a workspace can replace a user server by name. Only the workspace file is watched; a change to the user's takes effect on the next window.
+
+Claude Code itself keeps the user's servers in `~/.claude.json` instead, under `mcpServers`. The first time it runs, KiwiAgent copies them into `~/.mcp.json` so both read the same list — verbatim, `${VAR}` placeholders and all, leaving out any name the format refuses. It copies only when there is no `~/.mcp.json` yet, so a server removed afterwards stays removed; to run the copy again, delete the file. Servers Claude Code holds per project (`projects` in `~/.claude.json`) are left where they are.
 
 ## Logs
 

@@ -47,10 +47,27 @@ describe('mcp config', () => {
 
   it('a_missing_file_is_no_servers_and_a_present_one_is_read', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'mcp-'))
-    expect(await readMcpConfig(dir, env)).toEqual({})
+    const home = await mkdtemp(join(tmpdir(), 'home-'))
+    expect(await readMcpConfig(dir, env, home)).toEqual({})
     await writeFile(join(dir, '.mcp.json'), '{"mcpServers":{"docs":{"command":"node"}}}')
-    expect(await readMcpConfig(dir, env)).toEqual({ docs: { type: 'stdio', command: 'node' } })
+    expect(await readMcpConfig(dir, env, home)).toEqual({ docs: { type: 'stdio', command: 'node' } })
     await writeFile(join(dir, '.mcp.json'), '{')
-    await expect(readMcpConfig(dir, env)).rejects.toThrow(/\.mcp\.json/)
+    await expect(readMcpConfig(dir, env, home)).rejects.toThrow(/\.mcp\.json/)
+  })
+
+  it('the_users_servers_serve_every_workspace_and_the_workspace_replaces_one_by_name', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mcp-'))
+    const home = await mkdtemp(join(tmpdir(), 'home-'))
+    await writeFile(join(home, '.mcp.json'), '{"mcpServers":{"docs":{"command":"user"},"shared":{"command":"user"}}}')
+    expect(await readMcpConfig(dir, env, home)).toEqual({ docs: { type: 'stdio', command: 'user' }, shared: { type: 'stdio', command: 'user' } })
+    await writeFile(join(dir, '.mcp.json'), '{"mcpServers":{"shared":{"command":"workspace"}}}')
+    expect(await readMcpConfig(dir, env, home)).toEqual({ docs: { type: 'stdio', command: 'user' }, shared: { type: 'stdio', command: 'workspace' } })
+  })
+
+  it('a_broken_user_file_names_its_path', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mcp-'))
+    const home = await mkdtemp(join(tmpdir(), 'home-'))
+    await writeFile(join(home, '.mcp.json'), '{')
+    await expect(readMcpConfig(dir, env, home)).rejects.toThrow(home)
   })
 })

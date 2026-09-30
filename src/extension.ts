@@ -36,6 +36,7 @@ import type { Tool } from './agent/openai-session/tools/tool'
 import { indexSkills } from './agent/skills/skill-index'
 import { MCP_CONFIG_FILE, readMcpConfig } from './agent/mcp/mcp-config'
 import { connectMcp } from './agent/mcp/mcp-connect'
+import { migrateClaudeMcpServers } from './agent/mcp/migrate-claude-mcp'
 import { McpServerSet } from './agent/mcp/mcp-servers'
 import { McpToolHost } from './agent/mcp/mcp-tool-host'
 import { runShell } from './agent/shell/run-shell'
@@ -347,9 +348,20 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   }
 
-  /** The workspace's `.mcp.json`, read once and again on every change; `sessions` is resolved when a session runs, after it exists. */
+  // Claude Code's user-wide servers into `~/.mcp.json`, once. Every read waits for it, so the first one already sees them.
+  const mcpMigration = migrateClaudeMcpServers().then(
+    (names) => {
+      if (names.length > 0) output.appendLine(`moved ${names.join(', ')} from Claude Code's settings to ~/${MCP_CONFIG_FILE}`)
+    },
+    (error: unknown) => output.appendLine(`could not read Claude Code's MCP servers: ${error instanceof Error ? error.message : String(error)}`),
+  )
+
+  /** The user's and the workspace's `.mcp.json`, read once and again on every change; `sessions` is resolved when a session runs, after it exists. */
   const mcp = new McpServerSet(
-    () => readMcpConfig(workspaceRoot),
+    async () => {
+      await mcpMigration
+      return readMcpConfig(workspaceRoot)
+    },
     () => sessions.liveSessions(),
     (message) => void vscode.window.showWarningMessage(`KiwiAgent: ${message}`),
   )
