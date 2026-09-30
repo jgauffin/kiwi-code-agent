@@ -14,6 +14,13 @@ const working = (mode: SessionMode): SessionStatus => (isPlanning(mode) ? 'plann
 /** The engine is at work on a turn, not stopped on the user. */
 export const underWay = (status: SessionStatus): boolean => status === 'planning' || status === 'implementing'
 
+/**
+ * Whether a chat session's freshly picked model switch takes hold at once
+ * rather than waiting for its next prompt (B10): never while its turn is
+ * still in flight, since that turn finishes on the model it started on.
+ */
+export const appliesModelSwitchNow = (status: SessionStatus): boolean => !underWay(status)
+
 /** Statuses that are the user's turn: engine noise does not take them away. */
 const waiting = (status: SessionStatus): boolean => status === 'needs_human' || status === 'needs_approval' || status === 'needs_answer'
 
@@ -70,7 +77,8 @@ export function nextStatus(current: SessionStatus, mode: SessionMode, event: Ses
     case 'user_message':
       return working(mode)
     case 'status':
-      if (event.status === 'idle') return current
+      // A compaction between turns ends without a turn_done to say the session is free again.
+      if (event.status === 'idle' || event.status === 'compacting') return current
       return waiting(current) ? current : working(mode)
     case 'permission_request':
       return 'needs_approval'

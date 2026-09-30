@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ReadTracker } from '../src/agent/openai-session/tools/read-tracker'
@@ -8,6 +8,7 @@ import type { Tool, ToolContext } from '../src/agent/openai-session/tools/tool'
 import { PermissionPolicy } from '../src/agent/permissions/permission-policy'
 import { readOnlyTools } from '../src/agent/permissions/tool-classes'
 import { readBoard, writeBoard } from '../src/agent/phases/tasks-file'
+import { FileHands } from '../src/agent/session/file-hands'
 import { board, task } from './task-board-fixture'
 
 const FEATURE = 'Order cancellation'
@@ -101,6 +102,36 @@ describe('UpdateTask', () => {
   it('paths_are_kept_workspace_relative_whatever_form_they_were_given_in', async () => {
     await call('UpdateTask', { task: 'Cancel', files: [join(dir, 'src', 'order.ts'), 'src\\cancel.ts'] })
     expect((await readBoard(boardPath()))?.tasks[0]!.files).toEqual(['src/order.ts', 'src/cancel.ts'])
+  })
+})
+
+describe("the task's work is its own", () => {
+  const toolWith = (name: string, hands: FileHands): Tool => taskBoardTools(FEATURE, hands).find((t) => t.name === name)!
+  const callWith = (name: string, hands: FileHands, input: unknown) => toolWith(name, hands).execute(input as never, ctx)
+
+  beforeEach(() => writeBoard(boardPath(), board(task('Cancel', { delivers: ['Cancel command'], files: ['src/order.ts'] }))))
+
+  it('a_file_written_by_the_task_s_own_session_is_not_recorded_as_foreign', async () => {
+    const hands = new FileHands(dir, 's1', 'implement', FEATURE)
+    const path = join(dir, 'src', 'order.ts')
+    await hands.recordWrite(path, (await stat(path)).mtimeMs)
+    await callWith('UpdateTask', hands, { task: 'Cancel', files: ['src/order.ts'] })
+    expect((await readBoard(boardPath()))?.tasks[0]!.foreignFiles).toEqual([])
+  })
+
+  it('a_foreign_change_to_a_named_file_is_recorded_on_the_task_instead_of_counted_as_the_task_s_work', async () => {
+    const path = join(dir, 'src', 'order.ts')
+    // Another feature's own session left the file as it stands now.
+    const other = new FileHands(dir, 's2', 'implement', 'Refunds')
+    const later = new Date(Date.now() + 5000)
+    await utimes(path, later, later)
+    await other.recordWrite(path, (await stat(path)).mtimeMs)
+
+    const mine = new FileHands(dir, 's1', 'implement', FEATURE)
+    await callWith('UpdateTask', mine, { task: 'Cancel', files: ['src/order.ts'] })
+    const saved = (await readBoard(boardPath()))?.tasks[0]!
+    expect(saved!.foreignFiles).toEqual(['src/order.ts'])
+    expect(saved!.files).toEqual(['src/order.ts'])
   })
 })
 

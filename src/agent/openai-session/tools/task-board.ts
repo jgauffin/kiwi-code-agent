@@ -1,6 +1,9 @@
+import { existsSync } from 'node:fs'
+import { stat } from 'node:fs/promises'
 import { isAbsolute, relative, resolve } from 'node:path'
 import { z } from 'zod'
 import { changeBoard, nextTask, readBoard, sameName, tasksFile, tasksPath, updateTask, type Task, type TaskBoard, type TaskProgress } from '../../phases/tasks-file'
+import type { FileHands } from '../../session/file-hands'
 import type { PreToolUseOutcome, SessionHooks, ToolUse } from '../../session/hooks'
 import { fail, ok, type Tool, type ToolOutput } from './tool'
 
@@ -28,6 +31,7 @@ const headline = (task: Task): string => `${task.name} [${marker(task)}]${task.d
 export function detail(task: Task): string {
   const lines = [headline(task)]
   if (task.files.length > 0) lines.push(`files: ${task.files.map((f) => (task.newFiles.includes(f) ? `${f} (new)` : f)).join(', ')}`)
+  if (task.foreignFiles.length > 0) lines.push(`foreign changes: ${task.foreignFiles.join(', ')}`)
   if (task.context.length > 0) lines.push(`context: ${task.context.join(', ')}`)
   if (task.how.trim()) lines.push('how:', ...task.how.split('\n').map((l) => `  ${l}`))
   if (task.proves.length > 0) lines.push(`proves: ${task.proves.map((p) => `${p.item} → ${p.file} ${p.test}`).join(', ')}`)
@@ -92,7 +96,7 @@ const updateSchema = z.object({
     .describe('What this task left that a later task builds on: the types, functions, tables and test helpers it added or changed, by name and file. A few lines; the next task starts from them without your conversation.'),
 })
 
-function updateTaskTool(feature: string): Tool<typeof updateSchema> {
+function updateTaskTool(feature: string, hands?: FileHands): Tool<typeof updateSchema> {
   return {
     name: UPDATE_TASK_TOOL,
     description: `Move a task of "${feature}" along: its state, the files it touched, the tests that prove its rules, your note. Only the fields you give change.`,
@@ -100,10 +104,12 @@ function updateTaskTool(feature: string): Tool<typeof updateSchema> {
     // It writes the session's own board, never the code; a state change is not put to a prompt.
     readOnly: true,
     async execute(input, ctx): Promise<ToolOutput> {
+      const files = input.files?.map((f) => workspacePath(ctx.cwd, f))
       const change: TaskProgress = {
         ...(input.state !== undefined ? { state: input.state } : {}),
         ...(input.blockedReason !== undefined ? { blockedReason: input.blockedReason } : {}),
-        ...(input.files !== undefined ? { files: input.files.map((f) => workspacePath(ctx.cwd, f)) } : {}),
+        ...(files !== undefined ? { files } : {}),
+        ...(files !== undefined ? { foreignFiles: await foreignFiles(files, feature, hands, ctx.cwd) } : {}),
         ...(input.proves !== undefined ? { proves: input.proves.map((p) => ({ item: p.rule, file: workspacePath(ctx.cwd, p.file), test: p.test })) } : {}),
         ...(input.note !== undefined ? { note: input.note } : {}),
         ...(input.built !== undefined ? { built: input.built } : {}),
@@ -132,9 +138,27 @@ function workspacePath(cwd: string, path: string): string {
   return (isAbsolute(trimmed) ? relative(cwd, trimmed) : trimmed).split('\\').join('/')
 }
 
+/**
+ * Of `files`, those whose current content is not this feature's own work: no
+ * KiwiAgent session left it there, or the one that did was working a
+ * different feature. The task names the file as touched either way; this is
+ * what keeps that from being taken as proof the task's own runs wrote it.
+ */
+async function foreignFiles(files: string[], feature: string, hands: FileHands | undefined, cwd: string): Promise<string[]> {
+  if (!hands) return []
+  const foreign: string[] = []
+  for (const file of files) {
+    const path = isAbsolute(file) ? file : resolve(cwd, file)
+    if (!existsSync(path)) continue
+    const hand = await hands.handFor(path, (await stat(path)).mtimeMs)
+    if (!hand || hand.feature !== feature) foreign.push(file)
+  }
+  return foreign
+}
+
 /** The board tools of one feature; a session is offered those its mode names. */
-export function taskBoardTools(feature: string): Tool[] {
-  return [readTasksTool(feature), updateTaskTool(feature)]
+export function taskBoardTools(feature: string, hands?: FileHands): Tool[] {
+  return [readTasksTool(feature), updateTaskTool(feature, hands)]
 }
 
 /**

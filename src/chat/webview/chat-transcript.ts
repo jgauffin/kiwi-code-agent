@@ -49,6 +49,8 @@ export class ChatTranscript extends HTMLElement {
   private working: { element: HTMLElement; label: string; startedAt: number; stop: () => void } | undefined
   /** The offer to carry on a turn that stopped short; it stands only until the conversation moves on. */
   private resume: HTMLButtonElement | undefined
+  /** The model the session is running on now, to tell a restart on the same model from a switch to another (B13). */
+  private currentModel: string | undefined
 
   connectedCallback(): void {
     this.ensureStatusLine()
@@ -74,6 +76,7 @@ export class ChatTranscript extends HTMLElement {
     this.pendingTools.clear()
     this.openEdit = undefined
     this.resume = undefined
+    this.currentModel = undefined
     this.working?.stop()
     this.working = undefined
     this.activity = undefined
@@ -101,6 +104,11 @@ export class ChatTranscript extends HTMLElement {
     this.ensureStatusLine()
     switch (event.type) {
       case 'session_started':
+        // A restart on the same model (a reconnect, a resumed turn) says nothing new; a switch
+        // to another model is marked in the scrolling transcript, not only in the status line,
+        // so a reader can tell after the fact which part of the conversation it produced (B13).
+        if (this.currentModel !== undefined && this.currentModel !== event.model) this.insert(switchMarker(event))
+        this.currentModel = event.model
         this.setStatus(`${event.model} · Claude Code ${event.engineVersion ?? ''}`.trim())
         // The engine is up, so what the turn waits on takes over from the start-up.
         if (this.activity) this.activity = this.currentActivity()
@@ -401,6 +409,11 @@ function compactionMarker(event: Extract<SessionEvent, { type: 'compacted' }>): 
   summary.textContent = `Context compacted${sizes}`
   details.append(summary, block('compaction-summary', event.summary))
   return details
+}
+
+/** Where the session switched to another model, so a reader can place which model produced what follows (B13). */
+function switchMarker(event: Extract<SessionEvent, { type: 'session_started' }>): HTMLElement {
+  return block('turn model-switch', `Switched to ${event.model}`)
 }
 
 function block(className: string, text: string, render: (text: string, into: HTMLElement) => void = plainText): HTMLElement {

@@ -1,17 +1,18 @@
 # Own-loop compaction
 
-The own agent loop over an OpenAI-compatible model keeps working when a conversation outgrows the model's context window. The Claude engine compacts for itself and none of this applies to it.
+The own agent loop over an OpenAI-compatible model keeps working when a conversation outgrows the model's context window. The Claude engine's compaction is described under [Claude engine](#claude-engine); the rest of this page is the own loop's.
 
 ## When it happens
 
 - Context window per model comes from the `kiwiAgent.contextWindows` setting (model id → tokens); a model not listed is treated as 128k.
-- Usage is tracked from each completion's prompt token count. At 90% of the window the engine compacts before the next request.
+- Usage is tracked from each completion's prompt token count. At 90% of the window, or at the model's compaction limit when that comes first, the engine compacts before the next request.
+- The compaction limit is the provider's own for the model (edited beside it under Models › Providers), else `kiwiAgent.compactAtTokens`. It is read from the settings when a session starts, so an older session follows a limit set since.
 - A provider error saying the context is too long triggers a compaction and one retry per turn; a second failure ends the turn with an error.
 - A conversation with nothing older to fold is not compacted: one turn that overflows the window on its own fails loudly rather than being summarised into silence.
 
 ## What survives
 
-The turns kept verbatim are whole turns from the end, taken until they would fill 30% of the window — not a fixed count, so a turn of one small tool call does not cost as much as a turn that read half the repo. The last turn is kept whatever it costs.
+The turns kept verbatim are whole turns from the end, taken until they would fill a third of the size compaction happens at — not a fixed count, so a turn of one small tool call does not cost as much as a turn that read half the repo. The last turn is kept whatever it costs.
 
 Everything between the system prompt and the kept tail is folded into a summary written by the same model from a fixed prompt (what was asked, what was done, what is still open, files touched). The summariser is given the folded turns as a transcript with tool results left out, since they are the bulk; what the calls were for is what the summary carries. It is given no tools.
 
@@ -33,10 +34,25 @@ The ledger says where to look; the tracker makes the model actually look.
 
 ## What the session reports
 
-A `status: compacting` event while it runs, then a `compacted` event carrying the summary and what the prompt cost beforehand. The chat shows it as a marker the reader can expand to see the summary. The Claude engine maps its own `compact_boundary` to the same event, reporting sizes but no summary.
+A `status: compacting` event while it runs, then a `compacted` event carrying the summary and what the prompt cost beforehand. The chat shows it as a marker the reader can expand to see the summary.
+
+Every completion reports a `context_usage` event (prompt tokens against the window, and the size compaction happens at); after a compaction, an estimate stands in until the next request measures it.
 
 Compaction never touches the run log; the full history stays on disk.
 
+## Manual compaction
+
+The meter under the chat box shows how much of the current run's window is left, and its button compacts that run. Between turns it compacts at once, without a turn of its own; during a turn it compacts before the turn's next request. Disabled while no engine holds the conversation.
+
+## Claude engine
+
+Claude Code's own auto-compaction is switched off (`DISABLE_AUTO_COMPACT=1`): it could fail without saying so and leave a turn to overflow. The session runs it instead:
+
+- The window is what the engine budgets against (`getContextUsage().maxTokens`), not the model's; usage comes from each main-conversation reply.
+- At 75% of that window, or at the model's compaction limit when that comes first, a turn in flight is interrupted, `/compact` is sent, and the turn is carried on with a prompt to continue. The host sees one turn; the interrupted one and the compaction's never reach it.
+- A failed compaction ends the turn as failed with the engine's reason, rather than carrying on into a full window.
+- The engine's `compact_boundary` maps to `compacted`, with sizes but no summary.
+
 ## Not included
 
-Cross-session memory, manual compaction, anthropic-style context editing. The ledger is not yet rebuilt when a session resumes from its run log, so a resumed session starts with an empty one.
+Cross-session memory, anthropic-style context editing. The ledger is not yet rebuilt when a session resumes from its run log, so a resumed session starts with an empty one.

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { commandsFor, findUpward, runVerification, verificationDue, verificationHandoffPrompt, type VerifyRule } from '../src/agent/phases/verification'
+import { commandsFor, countsAgainstBudget, findUpward, runVerification, verificationDue, verificationHandoffPrompt, type Attribute, type VerifyRule } from '../src/agent/phases/verification'
 import { readTasks, stateOfBoard, writeBoard, type Task } from '../src/agent/phases/tasks-file'
 import { board as boardOf, task } from './task-board-fixture'
 
@@ -121,6 +121,76 @@ describe('runVerification', () => {
 
   it('refuses_without_a_tasks_file', async () => {
     await expect(runVerification({ cwd: dir, feature: 'Order cancellation', rules, run })).rejects.toThrow(/no tasks file/i)
+  })
+
+  const foreign: Attribute = async () => ({ foreign: true, files: ['src/app/orders.ts'], hand: 'It was changed by a KiwiAgent plan session on "Other feature".' })
+  const ours: Attribute = async () => ({ foreign: false, files: ['src/app/orders.ts'] })
+
+  it('held_rather_than_verified_an_all_foreign_run_without_a_retry_is_held_and_recorded_on_the_board_naming_the_files_and_the_hand', async () => {
+    await board(tested('T1', 'src/app/orders.ts'))
+    outcome = { ok: false, output: 'boom' }
+    const result = await runVerification({ cwd: dir, feature: 'Order cancellation', rules, run, attribute: foreign })
+    expect(result.failures).toEqual([])
+    expect(result.held).toMatchObject([{ files: ['src/app/orders.ts'], hand: expect.stringContaining('Other feature') }])
+    expect(result.record.ok).toBe(false)
+    const tasks = await readTasks(boardPath())
+    expect(tasks.exists && tasks.verification).toMatchObject({ ok: false, foreign: [{ files: ['src/app/orders.ts'], hand: expect.stringContaining('Other feature') }] })
+    expect(verificationDue(tasks)).toBe(true)
+  })
+
+  it('no_other_hand_no_excuse_a_run_whose_failures_are_all_the_features_own_is_handed_to_the_implementer_as_before', async () => {
+    await board(tested('T1', 'src/app/orders.ts'))
+    outcome = { ok: false, output: 'boom' }
+    const result = await runVerification({ cwd: dir, feature: 'Order cancellation', rules, run, attribute: ours })
+    expect(result.failures).toHaveLength(1)
+    expect(result.held).toEqual([])
+  })
+
+  it('retry_before_asking_an_all_foreign_run_waits_and_runs_the_same_suites_again_before_being_reported', async () => {
+    await board(tested('T1', 'src/app/orders.ts'))
+    outcome = { ok: false, output: 'boom' }
+    const waited: number[] = []
+    const result = await runVerification({
+      cwd: dir,
+      feature: 'Order cancellation',
+      rules,
+      run,
+      attribute: foreign,
+      retry: { seconds: 5, wait: async (ms) => void waited.push(ms) },
+    })
+    expect(runs).toHaveLength(2)
+    expect(waited).toEqual([5000])
+    expect(result.held).toHaveLength(1)
+  })
+
+  it('ours_on_the_second_run_a_failure_thats_foreign_first_but_the_features_own_on_the_retry_is_handed_to_the_implementer', async () => {
+    await board(tested('T1', 'src/app/orders.ts'))
+    outcome = { ok: false, output: 'boom' }
+    let call = 0
+    const attribute: Attribute = async (failure) => (++call === 1 ? foreign(failure) : ours(failure))
+    const result = await runVerification({
+      cwd: dir,
+      feature: 'Order cancellation',
+      rules,
+      run,
+      attribute,
+      retry: { seconds: 1, wait: async () => {} },
+    })
+    expect(runs).toHaveLength(2)
+    expect(result.failures).toHaveLength(1)
+    expect(result.held).toEqual([])
+  })
+})
+
+describe('countsAgainstBudget', () => {
+  const record = { at: '2026-09-14T10:00:00Z', ok: false, text: 'x' }
+
+  it('budget_spared_an_all_foreign_held_outcome_does_not_count_against_the_budget', () => {
+    expect(countsAgainstBudget({ record, failures: [], held: [{ command: 'npm test', cwd: dir, output: '', files: [], hand: 'x' }] })).toBe(false)
+  })
+
+  it('a_failure_thats_the_features_own_counts_against_the_budget', () => {
+    expect(countsAgainstBudget({ record, failures: [{ command: 'npm test', cwd: dir, output: '' }], held: [] })).toBe(true)
   })
 })
 

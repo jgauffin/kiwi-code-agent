@@ -84,6 +84,18 @@ describe('SettingsStore profiles', () => {
     expect((values.get('profiles') as Profile[])[0]!.steps).toBeUndefined()
   })
 
+  it('a_step_may_set_only_its_effort_and_keeps_it_when_its_model_matches_the_default', async () => {
+    const { store: s, values } = store(withModels([claudeProvider], [], ''))
+    const steps = { implement: { effort: 'low' as const }, plan: { provider: 'Claude', model: 'claude-opus-5', effort: 'max' as const } }
+    await s.saveProfile(0, { name: 'Balanced', default: { provider: 'Claude', model: 'claude-opus-5' }, steps })
+    expect((values.get('profiles') as Profile[])[0]!.steps).toEqual({ implement: { effort: 'low' }, plan: { effort: 'max' } })
+  })
+
+  it('a_step_naming_a_provider_without_a_model_is_refused', async () => {
+    const { store: s } = store(withModels([claudeProvider], [], ''))
+    await expect(s.saveProfile(0, { name: 'Half', default: { provider: 'Claude', model: 'claude-opus-5' }, steps: { plan: { provider: 'Claude' } } })).rejects.toThrow(/model/)
+  })
+
   it('the_first_profile_saved_becomes_what_new_sessions_run_on', async () => {
     const { store: s, values } = store(withModels([claudeProvider], [], ''))
     await s.saveProfile(0, opus)
@@ -151,6 +163,25 @@ describe('SettingsStore providers', () => {
     const { store: s, values } = store(withModels([], [], ''))
     await s.saveProvider(0, { ...claudeProvider, models: ['claude-opus-5', ' ', ''] })
     expect((values.get('providers') as Provider[])[0]!.models).toEqual(['claude-opus-5'])
+  })
+
+  it('a_compaction_limit_is_kept_only_for_a_model_the_provider_still_serves', async () => {
+    const { store: s, values } = store(withModels([], [], ''))
+    await s.saveProvider(0, { ...claudeProvider, compactAtTokens: { 'claude-opus-5': 300_000, 'claude-haiku-4-5': 100_000, 'claude-sonnet-5': -1 } })
+    expect((values.get('providers') as Provider[])[0]!.compactAtTokens).toEqual({ 'claude-opus-5': 300_000 })
+  })
+
+  it('a_provider_with_no_compaction_limits_saves_none', async () => {
+    const { store: s, values } = store(withModels([], [], ''))
+    await s.saveProvider(0, { ...claudeProvider, compactAtTokens: {} })
+    expect(values.get('providers')).toEqual([claudeProvider])
+  })
+
+  it('an_openai_provider_keeps_its_declared_reasoning_control_and_a_claude_one_none', async () => {
+    const { store: s, values } = store(withModels([], [], ''))
+    await s.saveProvider(0, { ...bergetProvider, reasoningControl: 'reasoning_effort' })
+    await s.saveProvider(1, { ...claudeProvider, reasoningControl: 'reasoning_effort' })
+    expect(values.get('providers')).toEqual([{ ...bergetProvider, reasoningControl: 'reasoning_effort' }, claudeProvider])
   })
 })
 

@@ -220,6 +220,24 @@ describe('the board derived from the spec', () => {
     })
   })
 
+  it('each_task_starts_from_the_files_the_check_found_its_scenario_builds_on', () => {
+    const found = new Map([['cancelling an order', ['src/orders/order.ts', 'src/orders/cancel.ts']]])
+    const derived = deriveBoard(two, undefined, found)
+    expect(derived.tasks.map((t) => [t.name, t.context])).toEqual([
+      ['Cancelling an order', ['src/orders/order.ts', 'src/orders/cancel.ts']],
+      ['Refunding', []],
+    ])
+  })
+
+  it('a_later_check_replaces_a_scenarios_files_and_one_it_leaves_out_keeps_them', () => {
+    const first = deriveBoard(two, undefined, new Map([['Cancelling an order', ['src/orders/order.ts']], ['Refunding', ['src/refund.ts']]]))
+    const again = deriveBoard(two, first, new Map([['Cancelling an order', ['src/orders/cancel.ts']]]))
+    expect(again.tasks.map((t) => [t.name, t.context])).toEqual([
+      ['Cancelling an order', ['src/orders/cancel.ts']],
+      ['Refunding', ['src/refund.ts']],
+    ])
+  })
+
   it('a_scenario_gone_from_the_spec_leaves_its_task_on_the_board_marked_removed', () => {
     const again = deriveBoard(spec('## Refunding\n- **Refund on cancel**: refunded'), deriveBoard(two))
     expect(again.tasks.find((t) => t.name === 'Cancelling an order')?.removed).toBe(true)

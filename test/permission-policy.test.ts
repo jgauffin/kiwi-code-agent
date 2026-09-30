@@ -326,6 +326,32 @@ describe('which sessions may ask', () => {
   })
 })
 
+describe('denying git writes', () => {
+  const run = (command: string, rules: Partial<PermissionRules> = {}, toolName = 'Bash') =>
+    new PermissionPolicy(cwd, () => ({ allow: [], deny: [], denyGitWrites: true, ...rules })).preToolUse({ toolName, input: { command }, toolUseId: 't' })
+
+  it('every_git_command_that_changes_the_repository_is_blocked_however_it_is_run', async () => {
+    for (const c of ['git commit -m x', 'git push', 'git stash', 'ls && git checkout main', 'timeout 30 git reset --hard', 'ls | xargs git branch -D', 'git config user.name x', 'git -c core.pager=sh log'])
+      expect(await run(c), c).toMatchObject({ deny: expect.stringContaining('denyGitWrites') })
+    expect(await run('git commit -m x', {}, 'PowerShell')).toMatchObject({ deny: expect.stringContaining('denyGitWrites') })
+  })
+
+  it('an_allow_rule_does_not_let_a_git_write_through', async () => {
+    expect(await run('git push', { allow: ['Bash'] })).toMatchObject({ deny: expect.stringContaining('denyGitWrites') })
+  })
+
+  it('git_that_only_reads_is_not_blocked_even_with_global_options_or_its_output_redirected', async () => {
+    for (const c of ['git status', 'git --no-pager diff', 'git -P log', 'git -C sub log --oneline', 'git config --get user.name'])
+      expect(await run(c), c).toEqual({ allow: true })
+    // Writing the log to a file is a file write, asked about like any other, not a git write.
+    expect(await run('git log > log.txt')).toBeUndefined()
+  })
+
+  it('git_writes_are_only_asked_about_while_the_setting_is_off', async () => {
+    expect(await run('git commit -m x', { denyGitWrites: false })).toBeUndefined()
+  })
+})
+
 describe('the Allow writes switch', () => {
   const use = (h: SessionHooks, toolName: string, input: unknown) => h.preToolUse!({ toolName, input, toolUseId: 't' })
   const switched = (on: () => boolean, rules: Partial<PermissionRules> = {}) =>
@@ -445,5 +471,57 @@ describe('the Allow writes switch', () => {
     const p = switched(() => true, { deny: ['Write(**/.env)'] })
     expect(await use(p, 'Write', { file_path: 'config/.env' })).toMatchObject({ deny: expect.stringContaining('Write(**/.env)') })
     expect(await use(p, 'Write', { file_path: 'src/a.ts' })).toEqual({ allow: true })
+  })
+})
+
+describe('the scratch folder', () => {
+  const scratch = '.agent/scratch/s1'
+  const use = (h: SessionHooks, toolName: string, input: unknown) => h.preToolUse!({ toolName, input, toolUseId: 't' })
+  const policy = (rules: Partial<PermissionRules> = {}) => new PermissionPolicy(cwd, () => ({ allow: [], deny: [], ...rules }), { readOnly, scratch })
+
+  it('writes_in_the_scratch_folder_pass_with_the_switch_off_and_writes_elsewhere_still_ask', async () => {
+    const p = policy()
+    for (const tool of ['Write', 'Edit', 'MultiEdit']) expect(await use(p, tool, { file_path: `${scratch}/probe.mjs` }), tool).toEqual({ allow: true })
+    expect(await use(p, 'Write', { file_path: `${cwd}/${scratch}/deep/probe.mjs` })).toEqual({ allow: true })
+    expect(await use(p, 'RunScript', { files: [`${scratch}/a.mjs`, `${scratch}/b.mjs`] })).toEqual({ allow: true })
+    expect(await use(p, 'Move', { source: `${scratch}/a.mjs`, destination: `${scratch}/b.mjs` })).toEqual({ allow: true })
+    expect(await use(p, 'Write', { file_path: 'src/a.ts' })).toBeUndefined()
+    expect(await use(p, 'RunScript', { files: [`${scratch}/a.mjs`, 'src/a.ts'] })).toBeUndefined()
+    expect(await use(p, 'Move', { source: `${scratch}/a.mjs`, destination: 'src/a.mjs' })).toBeUndefined()
+    // Another session's folder is not this one's.
+    expect(await use(p, 'Write', { file_path: '.agent/scratch/s2/a.mjs' })).toBeUndefined()
+    expect(await use(p, 'Write', { file_path: `${scratch}/../../runs/s1/events.jsonl` })).toBeUndefined()
+  })
+
+  it('a_deny_rule_still_blocks_a_write_in_the_scratch_folder', async () => {
+    const p = policy({ deny: ['Write(.agent/**)'] })
+    expect(await use(p, 'Write', { file_path: `${scratch}/probe.mjs` })).toMatchObject({ deny: expect.stringContaining('Write(.agent/**)') })
+  })
+
+  it('file_changing_commands_in_the_scratch_folder_pass_and_a_cd_out_of_it_makes_them_ask', async () => {
+    const p = policy()
+    expect(await use(p, 'Bash', { command: `mkdir -p ${scratch}/probe && touch ${scratch}/probe/a.ts` })).toEqual({ allow: true })
+    expect(await use(p, 'Bash', { command: `rm -rf ${scratch}/probe` })).toEqual({ allow: true })
+    expect(await use(p, 'Bash', { command: `cd ${scratch} && rm -rf ${scratch}/probe` })).toEqual({ allow: true })
+    expect(await use(p, 'Bash', { command: 'rm -rf src/a.ts' })).toBeUndefined()
+    // From `src` the path lands in `src/.agent/...`, which is not the scratch folder.
+    expect(await use(p, 'Bash', { command: `cd src && rm -rf ${scratch}/probe` })).toBeUndefined()
+  })
+
+  it('running_a_script_from_the_scratch_folder_is_still_asked', async () => {
+    expect(await use(policy(), 'Bash', { command: `node ${scratch}/probe.mjs` })).toBeUndefined()
+  })
+
+  it('a_prompt_line_the_scratch_folder_covers_says_so', () => {
+    const request = { type: 'permission_request' as const, requestId: 'r', toolName: 'Bash', input: { command: `rm -rf ${scratch}/probe && dotnet restore` } }
+    expect(policy().decorate(request)).toMatchObject({
+      commands: [{ text: `rm -rf ${scratch}/probe`, passes: 'the scratch folder' }, { text: 'dotnet restore', rule: 'Bash(dotnet restore:*)' }],
+    })
+  })
+
+  it('with_the_switch_on_the_whole_project_is_writable_as_before', async () => {
+    const p = new PermissionPolicy(cwd, () => ({ allow: [], deny: [] }), { readOnly, scratch, writesAllowed: () => true })
+    expect(await use(p, 'Write', { file_path: 'src/a.ts' })).toEqual({ allow: true })
+    expect(await use(p, 'Write', { file_path: `${scratch}/a.mjs` })).toEqual({ allow: true })
   })
 })

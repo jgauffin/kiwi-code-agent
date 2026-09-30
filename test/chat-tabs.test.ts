@@ -31,6 +31,7 @@ function plan(): PlanState {
     applyingRulings: false,
     reviewingDocs: false,
     atWork: true,
+    phaseProfiles: [],
   }
 }
 
@@ -285,3 +286,41 @@ describe('the chat holds the conversations of the step the flow is at', () => {
 function posted(sent: unknown[], type: string): Record<string, unknown> | undefined {
   return sent.find((m): m is Record<string, unknown> => typeof m === 'object' && m !== null && (m as { type?: string }).type === type)
 }
+
+describe("the composer's model switch follows the session it belongs to", () => {
+  const composerOf = (node: HTMLElement) => node.querySelector('chat-composer')!
+
+  it('B9_a_chat_sessions_composer_offers_every_registered_model_switchable_at_any_point_independent_of_any_features_phase_choices', () => {
+    const node = new ChatApp()
+    document.body.appendChild(node)
+    const { plan: _plan, ...rest } = state()
+    send({
+      ...rest,
+      tab: { id: SESSION, title: 'Untitled', mode: 'chat', profileName: 'Careful', status: 'idle' },
+      models: [
+        { name: 'Careful', engine: 'claude-sdk', model: 'opus' },
+        { name: 'Fast', engine: 'claude-sdk', model: 'sonnet' },
+      ],
+    })
+    send({ type: 'transcript', sessionId: SESSION, runs: [] })
+
+    const select = composerOf(node).querySelector<HTMLSelectElement>('select[name=model]')
+    expect(select).not.toBeNull()
+    expect([...select!.options].map((o) => o.value)).toEqual(['Careful', 'Fast'])
+    expect(select!.value).toBe('Careful')
+
+    select!.value = 'Fast'
+    select!.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(posted(sent, 'set_session_model')).toEqual({ type: 'set_session_model', name: 'Fast' })
+    node.remove()
+  })
+
+  it("E2_a_plan_sessions_composer_names_its_current_phases_profile_and_offers_no_switch_there", () => {
+    const node = app()
+
+    const composer = composerOf(node)
+    expect(composer.querySelector('select[name=model]')).toBeNull()
+    expect(composer.querySelector('.model-current')?.textContent).toBe('Claude')
+    node.remove()
+  })
+})

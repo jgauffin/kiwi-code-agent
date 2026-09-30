@@ -181,10 +181,28 @@ export function isReadOnlySegment(segment: ShellSegment, context: ReadOnlyContex
   if (READ_ONLY_BY_ARGUMENTS.has(command)) return !argumentsMutate(command, args)
   const subs = READ_ONLY_SUBCOMMANDS[command]
   if (subs) {
-    const [sub, ...rest] = args
+    const [sub, ...rest] = command === 'git' ? gitSubcommand(args) : args
     return sub !== undefined && subs.has(sub) && !subcommandMutates(command, sub, rest)
   }
   return false
+}
+
+/** Git's arguments from its subcommand on, past the global options that only say where to look or how to page. `-c` is not one: it can name a pager or a hook to run. */
+function gitSubcommand(args: string[]): string[] {
+  let i = 0
+  while (i < args.length) {
+    const arg = args[i]!
+    if (arg === '-P' || arg === '--no-pager' || /^--(git-dir|work-tree)=/.test(arg)) i++
+    else if (arg === '-C' || arg === '--git-dir' || arg === '--work-tree') i += 2
+    else break
+  }
+  return args.slice(i)
+}
+
+/** Does this segment run git to change the repository or its config? A redirect of its output writes a file, not the repository, so it is left out. */
+export function isGitWrite(segment: ShellSegment): boolean {
+  const [raw] = runCommand(segment.tokens).tokens
+  return raw !== undefined && commandName(raw) === 'git' && !isReadOnlySegment({ ...segment, writesFile: false })
 }
 
 /** True when every simple command in the line only inspects, the ones a substitution holds among them. */

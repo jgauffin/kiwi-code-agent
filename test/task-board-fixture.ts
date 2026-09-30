@@ -7,6 +7,7 @@ export const task = (name: string, over: Partial<Task> = {}): Task => ({
   delivers: [],
   files: [],
   newFiles: [],
+  foreignFiles: [],
   context: [],
   how: '',
   proves: [],

@@ -1,6 +1,6 @@
 ---
 feature: commenting a plan
-status: approved
+status: implemented
 ---
 
 # commenting a plan

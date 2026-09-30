@@ -1,5 +1,5 @@
 import { permissionResolved, type CodeSession, type PermissionDecision, type SessionEvent } from './code-session'
-import type { ModelProfile } from './model-profile'
+import type { ModelProfile, Step } from './model-profile'
 import type { RunLog } from '../runs/run-log'
 import { answerText, UNANSWERED_RESULT, type QuestionOutcome, type UserQuestionRequest } from './user-question'
 import { nextStatus, underWay, type SessionStatus } from './session-status'
@@ -15,18 +15,19 @@ import { nextStatus, underWay, type SessionStatus } from './session-status'
 export type SessionMode = 'chat' | 'plan' | 'reconcile' | 'implement' | 'cleanup' | 'docs' | 'docs-map' | 'file-decisions'
 
 /** Work in the intent rather than the code: no blanket allow for writes. */
-export const isPlanning = (mode: SessionMode): boolean => mode === 'plan' || mode === 'reconcile' || mode === 'docs' || mode === 'file-decisions'
+export const isPlanning = (mode: Step): boolean => mode === 'plan' || mode === 'reconcile' || mode === 'docs' || mode === 'file-decisions'
 
 /**
  * The steps a profile names a model for, in the order the settings page lists
  * them. A step is a mode: what a session is for is what decides how strong a
  * model it earns, so there is no second vocabulary to keep in step.
  */
-export const STEPS: { step: SessionMode; label: string; hint: string }[] = [
+export const STEPS: { step: Step; label: string; hint: string }[] = [
   { step: 'chat', label: 'Chat', hint: 'Work in the code with the full tool set.' },
   { step: 'plan', label: 'Plan', hint: 'Write the spec from the intent docs, blind to the code.' },
   { step: 'reconcile', label: 'Check against code', hint: 'Name each disagreement between the approved spec and the code before it is built.' },
   { step: 'implement', label: 'Implement', hint: 'Build the approved spec, task by task, with a test per rule.' },
+  { step: 'fix', label: 'Fix', hint: 'Mend what a failed test run names; one effort level harder each time it fails again.' },
   { step: 'cleanup', label: 'Cleanup', hint: 'Split what the implementation left oversized.' },
   { step: 'docs', label: 'Evaluate docs', hint: 'Judge how the docs a blind planner reads are arranged.' },
   { step: 'docs-map', label: 'Docs map', hint: 'Describe the docs so a blind planner can find its way.' },
@@ -34,7 +35,7 @@ export const STEPS: { step: SessionMode; label: string; hint: string }[] = [
 ]
 
 /** The modes that stand on their own rather than on a feature's plan files. */
-export const isFeatureless = (mode: SessionMode): boolean => mode === 'chat' || mode === 'docs' || mode === 'docs-map' || mode === 'file-decisions'
+export const isFeatureless = (mode: Step): boolean => mode === 'chat' || mode === 'docs' || mode === 'docs-map' || mode === 'file-decisions'
 
 /** A build, not a conversation: it has no tab and no entry of its own, and nobody prompts it. */
 export const isBuild = (mode: SessionMode): boolean => mode === 'docs-map'
@@ -52,6 +53,8 @@ export type SessionRecord = {
   files?: string[]
   /** The board task an implement run builds; absent on a run that fixes a failed test sweep. */
   task?: string
+  /** On a run that fixes a failed test sweep: how many sweeps in a row have failed, which sets how hard it tries. */
+  fixAttempt?: number
   /**
    * Engine-side conversation id, what lets a closed session continue. For the
    * Claude SDK it is the engine's own, inherited from the session this one
@@ -63,6 +66,9 @@ export type SessionRecord = {
   cutOff?: true
   createdAt: string
 }
+
+/** The step a session's profile resolves as: a fix of a failed test sweep is an implement session but a step of its own. */
+export const stepOf = (record: SessionRecord): Step => (record.fixAttempt !== undefined ? 'fix' : record.mode)
 
 export interface SessionStore {
   list(): SessionRecord[]
@@ -93,6 +99,7 @@ export type CreateOptions = {
   parentId?: string
   files?: string[]
   task?: string
+  fixAttempt?: number
   /**
    * The session whose conversation the new one carries on, so what it read is
    * not read again. Honoured on the same engine; across engines the session
@@ -185,7 +192,7 @@ export class SessionManager {
   }
 
   async create(profile: ModelProfile, mode: SessionMode = 'chat', feature?: string, options: CreateOptions = {}): Promise<SessionRecord> {
-    const { parentId, files, task, continues } = options
+    const { parentId, files, task, fixAttempt, continues } = options
     const continued = continues ? continuationOf(continues, profile) : undefined
     const record: SessionRecord = {
       id: crypto.randomUUID(),
@@ -196,6 +203,7 @@ export class SessionManager {
       ...(parentId ? { parentId } : {}),
       ...(files ? { files } : {}),
       ...(task ? { task } : {}),
+      ...(fixAttempt ? { fixAttempt } : {}),
       ...(continued ? { engineSessionId: continued } : {}),
       createdAt: new Date().toISOString(),
     }
@@ -294,6 +302,11 @@ export class SessionManager {
 
   async interrupt(id: string): Promise<void> {
     await this.live.get(id)?.interrupt()
+  }
+
+  /** Only a running engine holds a conversation to fold; a stopped one is compacted, if need be, once it runs again. */
+  compact(id: string): void {
+    this.live.get(id)?.compact()
   }
 
   /** Stop the engine but keep the record; a later prompt resumes it. A run under the session stops with it. */

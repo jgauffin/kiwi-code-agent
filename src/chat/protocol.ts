@@ -7,6 +7,7 @@ import type { Spec } from '../agent/phases/spec-model'
 import type { CleanupDecision, Task, VerificationRecord } from '../agent/phases/tasks-file'
 import type { UnitKind } from '../agent/cleanup/unit-size'
 import type { ModelProfile } from '../agent/session/model-profile'
+import type { PhaseStepName } from '../agent/session/phase-choices'
 import type { SessionMode } from '../agent/session/session-manager'
 import type { RunBlock, SessionStatus } from '../agent/session/session-status'
 import type { ProfileDefaults } from '../settings/settings-store'
@@ -80,7 +81,12 @@ export type PlanState = {
   blocked?: RunBlock
   /** A run of the feature whose last turn failed, and why: nothing retries it, so the dev has to be told. */
   failure?: RunFailure
+  /** The profile each phase will run on next, by step; `isDefault` marks one running on the settings default rather than a choice made for this feature (B8). */
+  phaseProfiles: PhaseProfileState[]
 }
+
+/** One phase's resolved profile as the plan view shows it (B8), or the configuration it refused to start on (B6). */
+export type PhaseProfileState = { step: PhaseStepName; name: string; isDefault: boolean } | { step: PhaseStepName; missing: string }
 
 export type RunFailure = { mode: SessionMode; message: string }
 
@@ -117,6 +123,8 @@ export type ToWebview =
       allowWrites?: boolean
       /** The active session's MCP servers as its engine last reported them; absent while it is not running or takes none. */
       mcp?: McpServerState[]
+      /** The run what the user types reaches has a running engine, so its conversation can be compacted. */
+      compactable?: boolean
       /** Present when the active session is a plan session. */
       plan?: PlanState
       /** The run under the active tab that what the user types reaches; its section is the one open. */
@@ -170,6 +178,8 @@ export type FromWebview =
   /** The card's answers to a question the model asked, or that the user left it unanswered. */
   | { type: 'question'; sessionId: string; requestId: string; outcome: QuestionOutcome }
   | { type: 'interrupt' }
+  /** Folds the current run's conversation into a summary to make room; a turn in flight carries on after it. */
+  | { type: 'compact' }
   /** File writes in the active session go through without a prompt while on. */
   | { type: 'set_allow_writes'; enabled: boolean }
   /** Switches the active chat session to a model named as `models` on `state` lists it. */
@@ -184,6 +194,8 @@ export type FromWebview =
   | { type: 'new_session'; mode: SessionMode; feature?: string; prompt?: string; files?: string[] }
   /** Sets the profile new sessions run on. */
   | { type: 'set_default_profile'; name: string }
+  /** Sets, or clears when `name` is absent, the profile the active plan's named phase runs on (B1, B7); clearing returns the phase to the settings default (B2). */
+  | { type: 'set_phase_profile'; step: PhaseStepName; name?: string }
   /** Opens the plan session behind a spec on disk, or starts one on it when none remains; what it offers follows the spec's status. */
   | { type: 'resume_plan'; feature: string }
   /** Approves the draft and starts its check against the code; refused while a comment is open. */

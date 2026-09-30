@@ -1,7 +1,8 @@
 import type { Limits } from '../agent/cleanup/oversized'
-import { type ModelChoice, type Profile, type Provider } from '../agent/session/model-profile'
+import { type ModelChoice, type Profile, type Provider, type StepChoice } from '../agent/session/model-profile'
 import { STEPS } from '../agent/session/session-manager'
 import type { VerifyRule } from '../agent/phases/verification'
+import { DEFAULT_COMPACT_AT_TOKENS } from '../agent/session/compaction-point'
 import { migrateModelSettings, needsMigration, type LegacyProfile, type ModelSettings } from './model-settings'
 import type { EditableSettings, SettingKey, SettingsSnapshot, SettingsTarget } from './protocol'
 
@@ -40,8 +41,10 @@ const TARGETS: Record<SettingKey | 'profiles' | 'providers', SettingsTarget> = {
   providers: 'user',
   nodePath: 'user',
   traceEngine: 'user',
+  compactAtTokens: 'user',
   'permissions.allow': 'workspace',
   'permissions.deny': 'workspace',
+  'permissions.denyGitWrites': 'workspace',
   verify: 'workspace',
   verifyFailureBudget: 'workspace',
   'cleanup.functionLines': 'workspace',
@@ -99,13 +102,18 @@ export class SettingsStore {
       profiles,
       activeProfile,
       keys: await Promise.all(names.map(async (name) => ({ name, stored: await this.secrets.has(name) }))),
-      permissions: { allow: this.config.get<string[]>('permissions.allow', []), deny: this.config.get<string[]>('permissions.deny', []) },
+      permissions: {
+        allow: this.config.get<string[]>('permissions.allow', []),
+        deny: this.config.get<string[]>('permissions.deny', []),
+        denyGitWrites: this.config.get('permissions.denyGitWrites', false),
+      },
       verify: this.config.get<VerifyRule[]>('verify', []),
       verifyFailureBudget: this.config.get('verifyFailureBudget', 3),
       cleanup: this.cleanup(),
       planIgnore: this.config.get<string[]>('planIgnore', []),
       nodePath: this.config.get('nodePath', ''),
       traceEngine: this.config.get('traceEngine', false),
+      compactAtTokens: this.config.get('compactAtTokens', DEFAULT_COMPACT_AT_TOKENS),
       hasWorkspace: this.config.hasWorkspace(),
     }
   }
@@ -217,7 +225,7 @@ export class SettingsStore {
 }
 
 /** Every model choice a profile makes: its default and any step that overrides it. */
-const choices = (profile: Profile): ModelChoice[] => [profile.default, ...Object.values(profile.steps ?? {})]
+const choices = (profile: Profile): StepChoice[] => [profile.default, ...Object.values(profile.steps ?? {})]
 
 /** A list row left empty is a row, not a rule. */
 function cleaned<V>(value: V): V {
@@ -232,11 +240,13 @@ function validProvider(provider: Provider): Provider {
   const name = provider.name.trim()
   if (!name) throw new Error('A provider needs a name.')
   const models = [...new Set(provider.models.map((m) => m.trim()).filter((m) => m !== ''))]
-  const base: Provider = { name, engine: provider.engine, models }
+  // A limit for a model the provider no longer lists, or one that is no size, would only linger unseen.
+  const limits = Object.entries(provider.compactAtTokens ?? {}).filter(([model, tokens]) => models.includes(model) && Number.isInteger(tokens) && tokens >= 0)
+  const base: Provider = { name, engine: provider.engine, models, ...(limits.length > 0 ? { compactAtTokens: Object.fromEntries(limits) } : {}) }
   if (provider.engine === 'claude-sdk') return base
   const baseUrl = provider.baseUrl?.trim()
   if (!baseUrl) throw new Error(`Provider "${name}" needs a base URL.`)
-  return { ...base, baseUrl }
+  return { ...base, baseUrl, ...(provider.reasoningControl ? { reasoningControl: provider.reasoningControl } : {}) }
 }
 
 function validProfile(profile: Profile, providers: Provider[]): Profile {
@@ -245,10 +255,22 @@ function validProfile(profile: Profile, providers: Provider[]): Profile {
   const fallback = validChoice(profile.name, 'every step', profile.default, providers)
   const overrides = STEPS.map(({ step }) => [step, profile.steps?.[step]] as const)
     .filter(([, choice]) => choice !== undefined)
-    .map(([step, choice]) => [step, validChoice(profile.name, stepLabel(step), choice!, providers)] as const)
-    // A step choosing what the default already says is not an override; keeping it would drift the moment the default moves.
-    .filter(([, choice]) => JSON.stringify(choice) !== JSON.stringify(fallback))
+    .map(([step, choice]) => [step, validStepChoice(profile.name, stepLabel(step), choice!, fallback, providers)] as const)
+    .filter(([, choice]) => Object.keys(choice).length > 0)
   return { name, default: fallback, ...(overrides.length > 0 ? { steps: Object.fromEntries(overrides) } : {}) }
+}
+
+/**
+ * A step's own model is kept only where it differs from the default's, since
+ * one that matches would drift the moment the default moves. Its effort is
+ * kept either way: without it the step runs the effort suggested for it.
+ */
+function validStepChoice(profile: string, where: string, choice: StepChoice, fallback: ModelChoice, providers: Provider[]): StepChoice {
+  const effort = choice.effort ? { effort: choice.effort } : {}
+  if (!choice.provider?.trim() && !choice.model?.trim()) return effort
+  const own = validChoice(profile, where, { provider: choice.provider ?? '', model: choice.model ?? '', ...(choice.systemPromptFile ? { systemPromptFile: choice.systemPromptFile } : {}) }, providers)
+  const sameModel = own.provider === fallback.provider && own.model === fallback.model && own.systemPromptFile === fallback.systemPromptFile
+  return sameModel ? effort : { ...own, ...effort }
 }
 
 const stepLabel = (step: string): string => STEPS.find((s) => s.step === step)?.label ?? step

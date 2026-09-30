@@ -44,6 +44,18 @@ const UNRESOLVABLE = /[$~`]/
  */
 export type WriteTargets = string[] | undefined
 
+/**
+ * Where a session may write without a prompt: the project while "Allow writes"
+ * is on, its scratch folder otherwise. A shell's paths are read from the project
+ * root, so a `cd` counts only while it stays where the writes are allowed.
+ */
+export type WritableArea = {
+  /** What the prompt says let a line through. */
+  passes: string
+  canEnter(path: string): boolean
+  canWrite(path: string): boolean
+}
+
 /** What a file tool's input says it will write. A move or copy writes both its ends. */
 export function toolWriteTargets(toolName: string, input: unknown): WriteTargets {
   const named = (input ?? {}) as Record<string, unknown>
@@ -78,13 +90,12 @@ export function commandWriteTargets(segment: ShellSegment): WriteTargets {
 }
 
 /**
- * The rule the session's "Allow writes" switch stands on, for a file tool and
- * for a shell command alike: every path the call changes lies strictly below
- * the project root, so the root itself is not something it may take. A call
- * whose paths could not be read is covered by nothing and is asked about.
+ * The rule a writable area stands on, for a file tool and for a shell command
+ * alike: every path the call changes lies in the area. A call whose paths could
+ * not be read is covered by nothing and is asked about.
  */
-export function writesInProject(targets: WriteTargets, below: (path: string) => boolean): boolean {
-  return targets !== undefined && targets.length > 0 && targets.every(below)
+export function writesWithin(targets: WriteTargets, area: WritableArea): boolean {
+  return targets !== undefined && targets.length > 0 && targets.every((path) => area.canWrite(path))
 }
 
 function paths(raw: unknown[]): string[] {

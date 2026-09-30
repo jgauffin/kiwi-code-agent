@@ -11,7 +11,7 @@ function decision(over: Partial<Decision>): Decision {
 }
 
 function task(state: Task['state'], group?: string): Task {
-  return { name: 'Cancel', text: '', delivers: [], ...(group ? { group } : {}), files: [], newFiles: [], context: [], how: '', proves: [], note: '', built: '', state, removed: false }
+  return { name: 'Cancel', text: '', delivers: [], ...(group ? { group } : {}), files: [], newFiles: [], foreignFiles: [], context: [], how: '', proves: [], note: '', built: '', state, removed: false }
 }
 
 const round = (over: Partial<ReviewRound>): ReviewRound => ({ number: 1, comments: [], strikes: [], ...over })

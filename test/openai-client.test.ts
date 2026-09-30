@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ApiError, OpenAiClient } from '../src/agent/openai-session/openai-client'
-import type { CompletionDelta } from '../src/agent/openai-session/chat-messages'
+import type { CompletionDelta, CompletionRequest } from '../src/agent/openai-session/chat-messages'
 
 function sseResponse(events: unknown[], status = 200): Response {
   const encoder = new TextEncoder()
@@ -17,9 +17,10 @@ function sseResponse(events: unknown[], status = 200): Response {
   return new Response(body, { status, headers: { 'content-type': 'text/event-stream' } })
 }
 
-async function collect(client: OpenAiClient): Promise<{ deltas: CompletionDelta[]; request: RequestInit | undefined }> {
+async function collect(client: OpenAiClient, extra: Partial<CompletionRequest> = {}): Promise<{ deltas: CompletionDelta[]; request: RequestInit | undefined }> {
   const deltas: CompletionDelta[] = []
   for await (const d of client.stream({
+    ...extra,
     model: 'm',
     messages: [
       { role: 'system', content: 'sys' },
@@ -88,6 +89,13 @@ describe('OpenAiClient', () => {
     expect(body.messages[3]).toEqual({ role: 'tool', tool_call_id: 'c1', content: 'file content' })
     expect(body.tools[0]).toEqual({ type: 'function', function: { name: 'Read', description: 'reads', parameters: { type: 'object' } } })
     expect((request!.headers as Record<string, string>).authorization).toBe('Bearer k')
+  })
+
+  it('effort_goes_out_as_reasoning_effort_only_when_the_session_has_one', async () => {
+    const withEffort = await collect(clientWith(sseResponse(['[DONE]'])), { reasoningEffort: 'high' })
+    expect(JSON.parse(withEffort.request!.body as string).reasoning_effort).toBe('high')
+    const without = await collect(clientWith(sseResponse(['[DONE]'])))
+    expect(JSON.parse(without.request!.body as string)).not.toHaveProperty('reasoning_effort')
   })
 
   it('a_past_tool_call_with_malformed_arguments_is_sent_as_an_empty_object_since_vllm_rejects_the_whole_request', async () => {

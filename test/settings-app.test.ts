@@ -18,13 +18,14 @@ export function snapshot(over: Partial<SettingsSnapshot> = {}): SettingsSnapshot
     profiles: [{ name: 'Claude', default: { provider: 'Claude', model: 'claude-opus-5' } }],
     activeProfile: 'Claude',
     keys: [],
-    permissions: { allow: ['Edit'], deny: [] },
+    permissions: { allow: ['Edit'], deny: [], denyGitWrites: false },
     verify: [{ match: 'src/**/*.ts', project: 'package.json', command: 'npm test' }],
     verifyFailureBudget: 3,
     cleanup: { functionLines: 25, typeLines: 200, fileLines: 400, tests: ['**/*.test.*'], testFunctionLines: 60, testTypeLines: 600, testFileLines: 1200, ignore: [] },
     planIgnore: [],
     nodePath: '',
     traceEngine: false,
+    compactAtTokens: 400_000,
     hasWorkspace: true,
     ...over,
   }
@@ -77,6 +78,22 @@ describe('AdvancedTab', () => {
     const input = tab.querySelector<HTMLInputElement>('input[name=nodePath]')!
     expect(saved(tab, () => change(input, ' C:/node/node.exe '))).toEqual({ key: 'nodePath', value: 'C:/node/node.exe' })
   })
+
+  it('the_compaction_ceiling_saves_as_a_token_count', () => {
+    const tab = new AdvancedTab()
+    tab.update(snapshot())
+    const input = tab.querySelector<HTMLInputElement>('input[name=compactAtTokens]')!
+    expect(input.value).toBe('400000')
+    expect(saved(tab, () => change(input, '150000'))).toEqual({ key: 'compactAtTokens', value: 150_000 })
+  })
+
+  it('a_blank_or_negative_ceiling_is_not_saved_and_the_field_goes_back', () => {
+    const tab = new AdvancedTab()
+    tab.update(snapshot())
+    const input = tab.querySelector<HTMLInputElement>('input[name=compactAtTokens]')!
+    expect(saved(tab, () => change(input, '-5'))).toBeUndefined()
+    expect(input.value).toBe('400000')
+  })
 })
 
 describe('PermissionsTab', () => {
@@ -89,19 +106,28 @@ describe('PermissionsTab', () => {
 
   it('removing_a_rule_saves_the_list_without_it', () => {
     const tab = new PermissionsTab()
-    tab.update(snapshot({ permissions: { allow: ['Edit', 'Bash(npm test)'], deny: [] } }))
+    tab.update(snapshot({ permissions: { allow: ['Edit', 'Bash(npm test)'], deny: [], denyGitWrites: false } }))
     const remove = tab.querySelector<HTMLButtonElement>('rule-list .remove')!
     expect(saved(tab, () => remove.click())).toEqual({ key: 'permissions.allow', value: ['Bash(npm test)'] })
   })
 
   it('an_added_row_is_not_a_rule_until_it_has_text', () => {
     const tab = new PermissionsTab()
-    tab.update(snapshot({ permissions: { allow: [], deny: [] } }))
+    tab.update(snapshot({ permissions: { allow: [], deny: [], denyGitWrites: false } }))
     const list = tab.querySelector<HTMLElement>('rule-list')!
     list.querySelector<HTMLButtonElement>('.add')!.click()
     const input = list.querySelector<HTMLInputElement>('input')!
     expect(saved(tab, () => change(input, ''))).toEqual({ key: 'permissions.allow', value: [] })
     expect(saved(tab, () => change(input, 'Bash'))).toEqual({ key: 'permissions.allow', value: ['Bash'] })
+  })
+
+  it('the_git_writes_switch_saves_on_its_own_key', () => {
+    const tab = new PermissionsTab()
+    tab.update(snapshot())
+    const box = tab.querySelector<HTMLInputElement>('input[name="permissions.denyGitWrites"]')!
+    expect(box.checked).toBe(false)
+    box.checked = true
+    expect(saved(tab, () => box.dispatchEvent(new Event('change', { bubbles: true })))).toEqual({ key: 'permissions.denyGitWrites', value: true })
   })
 
   it('fields_are_disabled_without_a_folder_open', () => {

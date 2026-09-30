@@ -33,7 +33,7 @@ const spec: Spec = {
 const plan = (over: Partial<PlanState> = {}): PlanState => planState({ spec, ...over })
 
 const round = (over: Partial<ReviewRound>): ReviewRound => ({ number: 1, comments: [], strikes: [], ...over })
-const task = (over: Partial<Task> = {}): Task => ({ name: 'Cancel', text: 'add it', delivers: ['Cancel command'], files: [], newFiles: [], context: [], how: '', proves: [], note: '', built: '', state: 'open', removed: false, ...over })
+const task = (over: Partial<Task> = {}): Task => ({ name: 'Cancel', text: 'add it', delivers: ['Cancel command'], files: [], newFiles: [], foreignFiles: [], context: [], how: '', proves: [], note: '', built: '', state: 'open', removed: false, ...over })
 
 function view(state: PlanState, tab: Tab = 'spec'): InstanceType<typeof PlanView> {
   const node = new PlanView()

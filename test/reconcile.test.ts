@@ -15,9 +15,10 @@ describe('ScopeGuard for reconciling', () => {
     expect(await use('Glob', { pattern: '**/*.cs' })).toBeUndefined()
   })
 
-  it('only_the_decisions_are_writable_so_the_spec_stays_the_planners_the_board_goes_through_its_tool_and_nothing_leaks_into_code_or_docs', async () => {
+  it('only_the_decisions_and_the_scenario_context_are_writable_so_the_spec_stays_the_planners_the_board_goes_through_its_tool_and_nothing_leaks_into_code_or_docs', async () => {
     expect(await use('Write', { file_path: '.agent/plan/order-cancellation.decisions.md' })).toEqual({ allow: true })
     expect(await use('Edit', { file_path: '.agent/plan/order-cancellation.decisions.md' })).toEqual({ allow: true })
+    expect(await use('Write', { file_path: '.agent/plan/order-cancellation.context.md' })).toEqual({ allow: true })
     expect(await use('Write', { file_path: '.agent/plan/order-cancellation.tasks.json' })).toMatchObject({ deny: expect.any(String) })
     expect(await use('Edit', { file_path: 'src/Orders/OrderService.cs' })).toMatchObject({ deny: expect.any(String) })
     expect(await use('Edit', { file_path: 'plan/order-cancellation.spec.md' })).toMatchObject({ deny: expect.any(String) })
@@ -85,8 +86,15 @@ describe('reconcile prompt', () => {
   it('the_proposals_and_the_ruling_belong_to_others_and_the_run_ends_silently', () => {
     expect(prompt).toContain('The `proposed`, `recommended` and `because` lines are the planner\'s and the `ruling` line is the user\'s')
     expect(prompt).toContain('The spec is not yours to write')
-    expect(prompt).toContain('When the decisions are written, or there are none, stop.')
+    expect(prompt).toContain('When the context and the decisions are written, or there are no decisions, stop.')
     expect(prompt).not.toContain('summarise')
+  })
+
+  it('every_run_writes_where_each_scenario_is_built_so_the_implementer_starts_there', () => {
+    expect(prompt).toContain('.agent/plan/order-cancellation.context.md')
+    expect(prompt).toContain('## Cancelling an order')
+    expect(prompt).toContain('every run')
+    expect(reconcileKickoff(true)).toContain('context')
   })
 
   it('writes_decisions_only_since_the_board_is_derived_from_the_spec', () => {

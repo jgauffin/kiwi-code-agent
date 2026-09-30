@@ -1,18 +1,17 @@
-import type { Effort, ModelChoice, Profile, Provider } from '../../agent/session/model-profile'
+import { EFFORTS, effortLevels, STEP_EFFORT } from '../../agent/session/effort'
+import type { Effort, ModelChoice, Profile, Provider, Step, StepChoice } from '../../agent/session/model-profile'
 import { STEPS } from '../../agent/session/session-manager'
 import type { SettingsSnapshot } from '../protocol'
 import { DefaultProfileChangedEvent } from '../../chat/webview/events'
 import { ProfileRemovedEvent, ProfileSavedEvent } from './events'
 import { button, el, field, heading, select, settingsFileLink, textInput } from './fields'
 
-const EFFORTS: { value: Effort | ''; label: string }[] = [
-  { value: '', label: 'Provider default' },
-  { value: 'low', label: 'low' },
-  { value: 'medium', label: 'medium' },
-  { value: 'high', label: 'high' },
-  { value: 'xhigh', label: 'xhigh' },
-  { value: 'max', label: 'max' },
-]
+/** What a blank effort means on a row: the provider's own for the default, the step's suggestion or the default's for a step. */
+const blankEffort = (step: Step | undefined): string => {
+  if (!step) return 'Provider default'
+  const suggested = STEP_EFFORT[step]
+  return suggested ? `Suggested (${suggested})` : 'Same as default'
+}
 
 /**
  * What a session runs on: a profile names a model for every step, one default
@@ -88,12 +87,16 @@ export class ProfilesTab extends HTMLElement {
     const name = textInput('name', profile.name, { placeholder: 'Balanced' })
     name.required = true
     const defaultRow = new ChoiceRow()
-    defaultRow.configure('default', 'Default', profile.default, snapshot.providers, true)
+    defaultRow.configure('default', 'Default', profile.default, snapshot.providers)
     const stepRows = STEPS.map((s) => {
       const row = new ChoiceRow()
-      row.configure(`step-${s.step}`, s.label, profile.steps?.[s.step], snapshot.providers, false, s.hint)
+      row.configure(`step-${s.step}`, s.label, profile.steps?.[s.step], snapshot.providers, s)
       return row
     })
+    // A step without a model of its own runs the default's, so what effort it can take follows the default row.
+    const inherit = () => stepRows.forEach((row) => row.inherit(defaultRow.whole()))
+    defaultRow.addEventListener('change', inherit)
+    inherit()
     const cancel = button('Cancel', () => {
       this.editing = undefined
       this.draw(snapshot)
@@ -108,10 +111,10 @@ export class ProfilesTab extends HTMLElement {
     form.addEventListener('submit', (event) => {
       event.preventDefault()
       this.editing = undefined
-      const overrides = stepRows.filter((r) => r.hasOverride())
-      const steps = overrides.length > 0 ? (Object.fromEntries(overrides.map((r) => [r.stepKey(), r.choice()])) as Profile['steps']) : undefined
+      const overrides = stepRows.map((r) => [r.stepKey(), r.choice()] as const).filter(([, choice]) => choice !== undefined)
+      const steps = overrides.length > 0 ? (Object.fromEntries(overrides) as Profile['steps']) : undefined
       this.dispatchEvent(
-        new ProfileSavedEvent(index, { name: name.value.trim(), default: defaultRow.choice()!, ...(steps ? { steps } : {}) }),
+        new ProfileSavedEvent(index, { name: name.value.trim(), default: defaultRow.whole(), ...(steps ? { steps } : {}) }),
       )
     })
     return form
@@ -124,64 +127,90 @@ export class ProfilesTab extends HTMLElement {
   }
 }
 
-const describe = (choice: ModelChoice): string => `${choice.provider} · ${choice.model}${choice.effort ? ` (${choice.effort})` : ''}`
+const describe = (choice: StepChoice): string => {
+  if (!choice.provider || !choice.model) return `${choice.effort} effort`
+  return `${choice.provider} · ${choice.model}${choice.effort ? ` (${choice.effort})` : ''}`
+}
 
 const modelsOf = (providers: Provider[], name: string): string[] => providers.find((p) => p.name === name)?.models ?? []
 
-/** One row of a profile form: the default, always on, or a step, toggled by an "Override" box. */
+/**
+ * One row of a profile form: the default, always on, or a step. A step's
+ * "Override" box governs only its model; its effort is its own either way.
+ */
 class ChoiceRow extends HTMLElement {
   private key = ''
+  private providers: Provider[] = []
   private override: HTMLInputElement | undefined
   private provider!: HTMLSelectElement
   private model!: HTMLSelectElement
   private effort!: HTMLSelectElement
+  /** The default row's model, which a step without its own runs on. */
+  private inherited: ModelChoice | undefined
 
-  /** Built once per row per form draw, since the row's providers and choice are fixed for that draw. */
-  configure(key: string, label: string, choice: ModelChoice | undefined, providers: Provider[], alwaysOn: boolean, hint?: string): void {
+  /** Built once per row per form draw, since the row's providers and choice are fixed for that draw. A step row is given its step. */
+  configure(key: string, label: string, choice: StepChoice | undefined, providers: Provider[], step?: { step: Step; hint: string }): void {
     this.key = key
+    this.providers = providers
     this.className = 'choice-row'
-    const active = choice ?? { provider: providers[0]?.name ?? '', model: providers[0]?.models[0] ?? '' }
+    const ownModel = choice?.provider && choice.model ? { provider: choice.provider, model: choice.model } : undefined
+    const active = ownModel ?? { provider: providers[0]?.name ?? '', model: providers[0]?.models[0] ?? '' }
     this.provider = select(`${key}-provider`, providers.map((p) => ({ value: p.name, label: p.name })), active.provider)
     this.model = select(`${key}-model`, modelsOf(providers, active.provider).map((m) => ({ value: m, label: m })), active.model)
-    this.effort = select(`${key}-effort`, EFFORTS, active.effort ?? '')
+    const levels = [{ value: '', label: blankEffort(step?.step) }, ...EFFORTS.map((e) => ({ value: e, label: e }))]
+    this.effort = select(`${key}-effort`, levels, choice?.effort ?? '')
     this.provider.addEventListener('change', () => {
       const models = modelsOf(providers, this.provider.value)
       this.model.replaceChildren(...models.map((m) => new Option(m, m)))
     })
+    this.addEventListener('change', () => this.refresh())
     const row = el('div', 'row')
     row.append(el('span', 'label', label), this.provider, this.model, this.effort)
-    if (!alwaysOn) {
+    if (step) {
       const box = document.createElement('input')
       box.type = 'checkbox'
-      box.checked = choice !== undefined
-      box.addEventListener('change', () => this.setDisabled())
+      box.checked = ownModel !== undefined
       this.override = box
       row.prepend(box)
     }
     this.replaceChildren(row)
-    if (hint) this.append(el('span', 'hint', hint))
-    this.setDisabled()
+    if (step) this.append(el('span', 'hint', step.hint))
+    this.refresh()
   }
 
   stepKey(): string {
     return this.key.replace(/^step-/, '')
   }
 
-  hasOverride(): boolean {
-    return this.override?.checked ?? true
+  inherit(model: ModelChoice): void {
+    this.inherited = model
+    this.refresh()
   }
 
-  choice(): ModelChoice | undefined {
-    if (!this.hasOverride()) return undefined
+  /** The row's model and effort as they stand, what the default row saves. */
+  whole(): ModelChoice {
     const effort = this.effort.value as Effort | ''
     return { provider: this.provider.value, model: this.model.value, ...(effort ? { effort } : {}) }
   }
 
-  private setDisabled(): void {
-    const on = this.hasOverride()
-    this.provider.disabled = !on
-    this.model.disabled = !on
-    this.effort.disabled = !on
+  /** A step row's own model and effort, or undefined where it says nothing of its own. */
+  choice(): StepChoice | undefined {
+    const effort = this.effort.value as Effort | ''
+    const own = this.override?.checked ?? true
+    const choice: StepChoice = { ...(own ? { provider: this.provider.value, model: this.model.value } : {}), ...(effort ? { effort } : {}) }
+    return Object.keys(choice).length > 0 ? choice : undefined
+  }
+
+  /** The model the row runs on decides which efforts it can take; one taking none turns the picker off. */
+  private refresh(): void {
+    const own = this.override?.checked ?? true
+    this.provider.disabled = !own
+    this.model.disabled = !own
+    const runsOn = own ? { provider: this.provider.value, model: this.model.value } : this.inherited
+    const provider = runsOn && this.providers.find((p) => p.name === runsOn.provider)
+    const takes = provider ? effortLevels(provider, runsOn.model) : EFFORTS
+    this.effort.disabled = takes.length === 0
+    for (const option of this.effort.options) option.disabled = option.value !== '' && !takes.includes(option.value as Effort)
   }
 }
 

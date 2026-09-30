@@ -178,6 +178,11 @@ settings-app {
     }
   }
 
+  /* The model id is what the row is about; its compaction limit is a number beside it. */
+  & model-list-field .row input[name=compactAtTokens] {
+    flex: 0 0 9rem;
+  }
+
   & model-list-field .offers {
     display: flex;
     flex-wrap: wrap;

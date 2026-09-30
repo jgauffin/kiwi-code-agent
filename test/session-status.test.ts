@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { blockOf, lastFailure, mostUrgent, nextStatus, type SessionStatus } from '../src/agent/session/session-status'
+import { appliesModelSwitchNow, blockOf, lastFailure, mostUrgent, nextStatus, type SessionStatus } from '../src/agent/session/session-status'
 import type { SessionEvent } from '../src/agent/session/code-session'
 import type { SessionMode } from '../src/agent/session/session-manager'
 
@@ -31,6 +31,13 @@ describe('session status', () => {
 
   it('a_cleanup_run_is_implementing_and_its_stop_does_not_ask_for_the_human', () => {
     expect(run('cleanup', [{ type: 'user_message', text: 'x' }, turnDone(), { type: 'ended' }])).toEqual(['implementing', 'idle', 'idle'])
+  })
+
+  it('compacting_between_turns_leaves_the_session_as_it_was_since_no_turn_end_follows', () => {
+    const compacting: SessionEvent = { type: 'status', status: 'compacting' }
+    expect(nextStatus('needs_human', 'implement', compacting)).toBe('needs_human')
+    expect(nextStatus('idle', 'chat', compacting)).toBe('idle')
+    expect(nextStatus('implementing', 'implement', compacting)).toBe('implementing')
   })
 
   it('a_pending_permission_is_its_own_status_until_it_is_answered', () => {
@@ -103,6 +110,18 @@ describe('session status', () => {
       'needs_human',
       'needs_human',
     ])
+  })
+})
+
+describe('a chat sessions model switch', () => {
+  it('B10_a_switch_applies_at_once_when_the_session_is_idle_or_stopped_on_the_user_but_waits_out_a_turn_in_flight', () => {
+    expect(appliesModelSwitchNow('idle')).toBe(true)
+    expect(appliesModelSwitchNow('needs_human')).toBe(true)
+    expect(appliesModelSwitchNow('needs_approval')).toBe(true)
+    expect(appliesModelSwitchNow('needs_answer')).toBe(true)
+    expect(appliesModelSwitchNow('error')).toBe(true)
+    expect(appliesModelSwitchNow('planning')).toBe(false)
+    expect(appliesModelSwitchNow('implementing')).toBe(false)
   })
 })
 

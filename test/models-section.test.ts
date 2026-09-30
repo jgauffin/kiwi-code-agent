@@ -12,13 +12,14 @@ function snapshot(): SettingsSnapshot {
     profiles: [{ name: 'Claude', default: { provider: 'Claude', model: 'claude-opus-5' } }],
     activeProfile: 'Claude',
     keys: [],
-    permissions: { allow: [], deny: [] },
+    permissions: { allow: [], deny: [], denyGitWrites: false },
     verify: [],
     verifyFailureBudget: 3,
     cleanup: { functionLines: 25, typeLines: 200, fileLines: 400, tests: [], testFunctionLines: 60, testTypeLines: 600, testFileLines: 1200, ignore: [] },
     planIgnore: [],
     nodePath: '',
     traceEngine: false,
+    compactAtTokens: 400_000,
     hasWorkspace: true,
   }
 }

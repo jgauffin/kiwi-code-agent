@@ -145,6 +145,7 @@ export function boardFromMarkdown(text: string): TaskBoard {
       ...(group !== undefined ? { group } : {}),
       files: [],
       newFiles: [],
+      foreignFiles: [],
       context: [],
       how: '',
       proves: [],

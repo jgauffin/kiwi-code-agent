@@ -1,3 +1,4 @@
+import type { PhaseStepName } from '../../agent/session/phase-choices'
 import type { SessionMode } from '../../agent/session/session-manager'
 import type { QuestionOutcome } from '../../agent/session/user-question'
 import type { ReviewAction, UserPermissionDecision } from '../protocol'
@@ -26,6 +27,13 @@ export class InterruptRequestedEvent extends Event {
   static readonly type = 'interrupt-requested'
   constructor() {
     super(InterruptRequestedEvent.type, { bubbles: true })
+  }
+}
+
+export class CompactRequestedEvent extends Event {
+  static readonly type = 'compact-requested'
+  constructor() {
+    super(CompactRequestedEvent.type, { bubbles: true })
   }
 }
 
@@ -256,6 +264,17 @@ export class DefaultProfileChangedEvent extends Event {
   }
 }
 
+/** The plan bar's picker on one phase: the profile it runs on from its next turn, or `undefined` to return it to the settings default (B1, B2). */
+export class PhaseProfileChangedEvent extends Event {
+  static readonly type = 'phase-profile-changed'
+  constructor(
+    public readonly step: PhaseStepName,
+    public readonly name: string | undefined,
+  ) {
+    super(PhaseProfileChangedEvent.type, { bubbles: true })
+  }
+}
+
 export class SessionRemovedEvent extends Event {
   static readonly type = 'session-removed'
   constructor(public readonly sessionId: string) {
@@ -268,6 +287,7 @@ declare global {
     [PromptSubmittedEvent.type]: PromptSubmittedEvent
     [LinkOpenFileRequestedEvent.type]: LinkOpenFileRequestedEvent
     [InterruptRequestedEvent.type]: InterruptRequestedEvent
+    [CompactRequestedEvent.type]: CompactRequestedEvent
     [PermissionDecidedEvent.type]: PermissionDecidedEvent
     [QuestionAnsweredEvent.type]: QuestionAnsweredEvent
     [NewSessionRequestedEvent.type]: NewSessionRequestedEvent
@@ -295,5 +315,6 @@ declare global {
     [ContinueInChatRequestedEvent.type]: ContinueInChatRequestedEvent
     [McpReconnectRequestedEvent.type]: McpReconnectRequestedEvent
     [DefaultProfileChangedEvent.type]: DefaultProfileChangedEvent
+    [PhaseProfileChangedEvent.type]: PhaseProfileChangedEvent
   }
 }

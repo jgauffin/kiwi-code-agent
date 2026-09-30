@@ -1,6 +1,6 @@
 import type { SettingsSnapshot } from '../protocol'
 import { RuleListChangedEvent, SettingSavedEvent } from './events'
-import { el, heading, note, settingsFileLink } from './fields'
+import { checkField, checkbox, el, heading, note, onChange, settingsFileLink } from './fields'
 import { RuleList } from './rule-list'
 
 export const NO_WORKSPACE_NOTE = 'Open a folder to change workspace settings.'
@@ -22,6 +22,7 @@ export class PermissionsTab extends HTMLElement {
       this.list('Allowed without asking', 'permissions.allow', snapshot.permissions.allow, disabled),
       this.list('Denied', 'permissions.deny', snapshot.permissions.deny, disabled),
       note('A rule is a tool name, or a tool with a pattern: Edit, Edit(src/**), Bash(npm test), PowerShell(npm run:*). Deny wins over allow.'),
+      this.gitWrites(snapshot.permissions.denyGitWrites, disabled),
       settingsFileLink('workspace'),
     )
   }
@@ -33,6 +34,17 @@ export class PermissionsTab extends HTMLElement {
     list.update(values, { placeholder: 'Edit(src/**)', disabled })
     list.addEventListener(RuleListChangedEvent.type, (e) => this.dispatchEvent(new SettingSavedEvent(key, e.values)))
     section.append(list)
+    return section
+  }
+
+  private gitWrites(checked: boolean, disabled: boolean): HTMLElement {
+    const section = el('section', 'git')
+    section.append(el('h3', '', 'Git'))
+    const box = checkbox('permissions.denyGitWrites', checked, { disabled })
+    onChange(box, () => this.dispatchEvent(new SettingSavedEvent('permissions.denyGitWrites', box.checked)))
+    section.append(
+      checkField('Deny git writes', box, 'Blocks every git command that changes the repository (commit, push, checkout, stash, reset, ...), whatever the allow rules say. Status, log, diff and other reads still run.'),
+    )
     return section
   }
 }

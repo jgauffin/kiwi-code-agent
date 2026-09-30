@@ -10,7 +10,7 @@ export type SettingsSnapshot = {
   profiles: Profile[]
   activeProfile: string
   keys: ApiKeyState[]
-  permissions: { allow: string[]; deny: string[] }
+  permissions: { allow: string[]; deny: string[]; denyGitWrites: boolean }
   verify: VerifyRule[]
   verifyFailureBudget: number
   cleanup: {
@@ -26,6 +26,8 @@ export type SettingsSnapshot = {
   planIgnore: string[]
   nodePath: string
   traceEngine: boolean
+  /** The conversation size at which a session compacts, when that comes before the window runs short; 0 for none. */
+  compactAtTokens: number
   /** Workspace-scoped settings need a folder open to be written. */
   hasWorkspace: boolean
 }
@@ -35,8 +37,10 @@ export type EditableSettings = {
   activeProfile: string
   nodePath: string
   traceEngine: boolean
+  compactAtTokens: number
   'permissions.allow': string[]
   'permissions.deny': string[]
+  'permissions.denyGitWrites': boolean
   verify: VerifyRule[]
   verifyFailureBudget: number
   'cleanup.functionLines': number

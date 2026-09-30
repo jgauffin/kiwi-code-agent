@@ -138,7 +138,7 @@ export function implementPrompt(feature: string, cwd: string, rules: VerifyRule[
 
 The spec is the contract: goal, rules and edge cases. Every rule has a name, the bold lead-in of its line. A human approved it; do not reinterpret it. Where the code and the spec disagree, the spec wins. Where the spec is silent, do the simplest thing that satisfies it and record the choice in the task's note.
 
-The board is read with ${READ_TASKS_TOOL} and moved along with ${UPDATE_TASK_TOOL}; it is not a file you read or edit. Your task is one scenario of the spec and names the rules it delivers; where and how to build it is yours to find in the code. Read in batches, several Reads in one message: every request carries the whole conversation, so a batch costs one request where reading one file at a time costs one each. Build on what earlier tasks left rather than finding it again; open another task's files only where your task needs them. A task that already names files, context or a how was mapped before the build: start from those and search only for what they do not answer, and depart from the how only where the code says it cannot be done that way, saying so in the task's note.
+The board is read with ${READ_TASKS_TOOL} and moved along with ${UPDATE_TASK_TOOL}; it is not a file you read or edit. Your task is one scenario of the spec and names the rules it delivers; its context, when it has one, is where the check of the spec found that scenario is built, and the rest of where and how is yours to find in the code. Read in batches, several Reads in one message: every request carries the whole conversation, so a batch costs one request where reading one file at a time costs one each. Build on what earlier tasks left rather than finding it again; open another task's files only where your task needs them. A task that already names files, context or a how: start from those and search only for what they do not answer, and depart from the how only where the code says it cannot be done that way, saying so in the task's note.
 
 Your task is already in_progress. Record where it ends with ${UPDATE_TASK_TOOL}:
 - tested when every rule the task delivers is proven by a test named in its proves, passing in a run you narrowed to it. In the same call give the proves and built: what this task left that a later task builds on (the types, functions, tables and test helpers it added or changed, by name and file). The next task starts from those lines, not from your conversation;
@@ -160,7 +160,7 @@ The next feature is planned blind from the docs and specs, so an answer that set
 Rules:
 - The decisions file is not yours to change, and the spec only as above.
 - Never edit \`${DOCS_DIR}/\`: intent is the user's.
-- Read a file before editing it; read it again when a tool result says it changed underneath you. Do not re-explore what the hand-off already names.
+- Do not re-explore what the hand-off already names.
 - ${DOC_READING}
 - ${CODE_READING} Before writing a test, outline the test file or folder it belongs in: the rule may already be proven, and the neighbouring tests show the pattern to follow.
 - ${SCRIPT_WRITING}

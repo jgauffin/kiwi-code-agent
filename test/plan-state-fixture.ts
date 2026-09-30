@@ -24,6 +24,12 @@ export function planState(over: Partial<PlanState> = {}): PlanState {
     applyingRulings: false,
     reviewingDocs: false,
     atWork: true,
+    phaseProfiles: [
+      { step: 'plan', name: 'Balanced', isDefault: true },
+      { step: 'reconcile', name: 'Balanced', isDefault: true },
+      { step: 'implement', name: 'Balanced', isDefault: true },
+      { step: 'cleanup', name: 'Balanced', isDefault: true },
+    ],
     ...over,
   }
 }

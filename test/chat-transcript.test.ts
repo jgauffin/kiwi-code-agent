@@ -455,3 +455,44 @@ describe('a turn stopped at its round limit', () => {
     expect(resume(view)).toBeNull()
   })
 })
+
+describe('a model switch in the transcript', () => {
+  const switches = (view: Transcript) => [...view.querySelectorAll('.model-switch')].map((el) => el.textContent)
+  const status = (view: Transcript) => view.querySelector<HTMLElement>('.status')?.textContent ?? ''
+
+  it('a_switch_to_another_model_is_marked_in_the_scrolling_transcript_not_only_in_the_status_line', () => {
+    const view = transcript()
+
+    view.apply({ type: 'session_started', engineSessionId: 'e1', model: 'opus' })
+    view.apply({ type: 'user_message', text: 'go' })
+    view.apply({ type: 'session_started', engineSessionId: 'e2', model: 'glm' })
+
+    expect(switches(view)).toEqual(['Switched to glm'])
+    expect(status(view)).toContain('glm')
+  })
+
+  it('a_restart_on_the_same_model_leaves_no_mark_since_nothing_a_reader_would_place_by_it_changed', () => {
+    const view = transcript()
+
+    view.apply({ type: 'session_started', engineSessionId: 'e1', model: 'opus' })
+    view.apply({ type: 'ended' })
+    view.apply({ type: 'session_started', engineSessionId: 'e2', model: 'opus' })
+
+    expect(switches(view)).toEqual([])
+  })
+
+  it('a_switch_recorded_in_the_log_replays_at_the_point_it_happened_so_a_reader_can_place_it_later', () => {
+    const view = transcript()
+
+    view.reset([
+      { type: 'session_started', engineSessionId: 'e1', model: 'opus' },
+      { type: 'user_message', text: 'go' },
+      { type: 'session_started', engineSessionId: 'e2', model: 'glm' },
+      { type: 'user_message', text: 'and now' },
+    ])
+
+    const order = [...view.children].map((el) => el.className)
+    expect(order.indexOf('turn model-switch')).toBeGreaterThan(order.indexOf('user'))
+    expect(order.lastIndexOf('user')).toBeGreaterThan(order.indexOf('turn model-switch'))
+  })
+})

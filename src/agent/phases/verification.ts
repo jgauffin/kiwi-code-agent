@@ -3,6 +3,8 @@ import { dirname, isAbsolute, join, matchesGlob, relative, resolve } from 'node:
 import { CODE_OUTLINE_TOOL } from '../code-outline/code-outline-tool'
 import { readTasks, recordVerification, taskFiles, tasksDone, tasksPath, type TasksState, type VerificationRecord } from './tasks-file'
 import { UPDATE_TASK_TOOL } from '../openai-session/tools/task-board'
+import { classifyFailure, type Classification } from './verification-attribution'
+import type { FileHands } from '../session/file-hands'
 
 /**
  * A rule says which files, when touched, make which command run, and where.
@@ -24,7 +26,30 @@ export type VerifyCommand = { command: string; cwd: string }
 
 export type VerificationFailure = VerifyCommand & { output: string }
 
-export type VerificationOutcome = { record: VerificationRecord; failures: VerificationFailure[] }
+/** A failure whose files were, on a retry, foreign both times: held rather than handed to the implementer. */
+export type HeldFailure = VerificationFailure & { files: string[]; hand: string }
+
+export type VerificationOutcome = {
+  record: VerificationRecord
+  /** Handed to the implementer: this feature's own, whatever the run, or foreign ones that were still failing on the retry. */
+  failures: VerificationFailure[]
+  /** All-foreign on the retry (or, without one configured, on the only run): held for the user rather than handed on. */
+  held: HeldFailure[]
+}
+
+/** Whether a failure is this feature's own or foreign, and (when it is not this feature's own) what to say about it. */
+export type Attribute = (failure: VerificationFailure) => Promise<Classification>
+
+/** `feature`'s attribution over `hands`: a failure is foreign when every file its output names was another hand's, `No other hand no excuse` otherwise. */
+export function attributeWith(hands: FileHands, feature: string, cwd: string): Attribute {
+  return (failure) => classifyFailure(failure, hands, feature, cwd)
+}
+
+/** A run whose failures are all foreign gets one retry before it is reported (`Retry before asking`). */
+export type RetryOptions = { seconds: number; wait: (ms: number) => Promise<void> }
+
+/** Whether the outcome should count against `kiwiAgent.verifyFailureBudget`: an all-foreign run held for the user is spared (`Budget spared`). */
+export const countsAgainstBudget = (outcome: VerificationOutcome): boolean => outcome.failures.length > 0 || outcome.held.length === 0
 
 /** Commands for the touched files, deduplicated, in rule order per file. */
 export function commandsFor(files: string[], rules: VerifyRule[], cwd: string): VerifyCommand[] {
@@ -95,26 +120,56 @@ export async function runVerification(options: {
   maxOutputChars?: number
   /** Fires before each command, so the UI can say what is running. */
   onStart?: (command: VerifyCommand) => void
+  /** Tells a failure's own from another hand's; without one every failure is treated as the feature's own, as before this rule existed. */
+  attribute?: Attribute
+  /** A run whose failures are all foreign is retried once, per `kiwiAgent.verifyRetrySeconds`, before it is held; without one it is held straight away. */
+  retry?: RetryOptions
 }): Promise<VerificationOutcome> {
-  const { cwd, feature, rules, run } = options
+  const { cwd, feature, rules, run, attribute } = options
   const path = tasksPath(cwd, feature)
   const tasks = await readTasks(path)
   if (!tasks.exists) throw new Error(`No tasks file for "${feature}": nothing to verify.`)
   const commands = commandsFor(taskFiles(tasks.tasks), rules, cwd)
-  const failures: VerificationFailure[] = []
-  for (const command of commands) {
-    options.onStart?.(command)
-    const result = await run(command.command, command.cwd)
-    if (!result.ok) failures.push({ ...command, output: trimFront(result.output, options.maxOutputChars ?? 8000) })
+  const maxOutputChars = options.maxOutputChars ?? 8000
+
+  const runOnce = async (): Promise<VerificationFailure[]> => {
+    const failures: VerificationFailure[] = []
+    for (const command of commands) {
+      options.onStart?.(command)
+      const result = await run(command.command, command.cwd)
+      if (!result.ok) failures.push({ ...command, output: trimFront(result.output, maxOutputChars) })
+    }
+    return failures
+  }
+  const classifyAll = async (failures: VerificationFailure[]): Promise<{ failure: VerificationFailure; classification: Classification }[]> =>
+    attribute ? Promise.all(failures.map(async (failure) => ({ failure, classification: await attribute(failure) }))) : failures.map((failure) => ({ failure, classification: { foreign: false, files: [] } }))
+  const allForeign = (classified: { classification: Classification }[]): boolean => classified.length > 0 && classified.every((c) => c.classification.foreign)
+
+  let failures = await runOnce()
+  let held: HeldFailure[] = []
+  if (failures.length > 0) {
+    let classified = await classifyAll(failures)
+    if (allForeign(classified) && options.retry) {
+      await options.retry.wait(options.retry.seconds * 1000)
+      failures = await runOnce()
+      classified = failures.length > 0 ? await classifyAll(failures) : []
+    }
+    if (failures.length > 0 && allForeign(classified)) {
+      held = classified.map(({ failure, classification }) => ({ ...failure, files: classification.files, hand: classification.hand ?? 'It was changed from outside KiwiAgent.' }))
+      failures = []
+    } else if (failures.length > 0) {
+      failures = classified.filter((c) => !c.classification.foreign).map((c) => c.failure)
+    }
   }
   const ran = commands.map((c) => describeCommand(c, cwd)).join('; ')
   const record: VerificationRecord = {
     at: options.now ?? new Date().toISOString(),
-    ok: failures.length === 0,
-    text: failures.length > 0 ? failures.map((f) => describeCommand(f, cwd)).join('; ') : ran || 'nothing to run',
+    ok: failures.length === 0 && held.length === 0,
+    text: failures.length > 0 || held.length > 0 ? [...failures, ...held].map((f) => describeCommand(f, cwd)).join('; ') : ran || 'nothing to run',
+    ...(held.length > 0 ? { foreign: held.map((h) => ({ command: describeCommand(h, cwd), files: h.files, hand: h.hand })) } : {}),
   }
   await recordVerification(path, record)
-  return { record, failures }
+  return { record, failures, held }
 }
 
 /** The message the implementer gets when the test run failed: the commands, their output, and what to do about it. */

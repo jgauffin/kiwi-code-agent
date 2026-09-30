@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { pickConversationalRun, SessionManager, type SessionRecord, type SessionStore } from '../src/agent/session/session-manager'
+import { pickConversationalRun, SessionManager, stepOf, type SessionRecord, type SessionStore } from '../src/agent/session/session-manager'
 import type { QuestionOutcome, UserQuestionRequest } from '../src/agent/session/user-question'
 import type { CodeSession, PermissionDecision, SessionEvent } from '../src/agent/session/code-session'
 import { AsyncQueue } from '../src/agent/session/async-queue'
@@ -45,6 +45,10 @@ class FakeSession implements CodeSession {
     this.out.push({ type: 'question_request', requestId, request })
   }
   async interrupt() {}
+  compactions = 0
+  compact() {
+    this.compactions++
+  }
   async dispose() {
     this.disposed = true
     this.out.end()
@@ -319,6 +323,17 @@ describe('SessionManager', () => {
         await manager.disposeAll()
         const next = reopened(store)
         expect([ended, asking, approving].map((r) => next.get(r.id)?.cutOff)).toEqual([undefined, undefined, undefined])
+      })
+    })
+
+    it('a_fix_run_keeps_its_attempt_across_a_reload_so_it_resolves_as_a_fix_at_that_attempt', async () => {
+      await withManager(async (manager, _engines, store) => {
+        const fix = await manager.create(profile, 'implement', 'Locks', { fixAttempt: 2 })
+        const task = await manager.create(profile, 'implement', 'Locks', { task: 'Period lock' })
+        const reloaded = reopened(store)
+        expect(reloaded.get(fix.id)?.fixAttempt).toBe(2)
+        expect(stepOf(reloaded.get(fix.id)!)).toBe('fix')
+        expect(stepOf(reloaded.get(task.id)!)).toBe('implement')
       })
     })
 
@@ -848,6 +863,26 @@ describe('SessionManager', () => {
         await manager.setProfile(chat.id, berget)
         expect(manager.get(chat.id)!.profile).toEqual(berget)
         expect(manager.get(chat.id)!.engineSessionId).toBeUndefined()
+        await manager.disposeAll()
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
+
+    it('B12_switching_one_chat_sessions_profile_leaves_another_live_chat_session_running_on_what_it_had', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+      try {
+        const { manager } = setup(dir)
+        const first = await manager.create(profile, 'chat')
+        const second = await manager.create(profile, 'chat')
+        await manager.send(first.id, 'hi')
+        await manager.send(second.id, 'hi')
+
+        const sonnet: ModelProfile = { ...profile, name: 'Claude Sonnet', model: 'sonnet' }
+        await manager.setProfile(first.id, sonnet)
+
+        expect(manager.get(first.id)!.profile).toEqual(sonnet)
+        expect(manager.get(second.id)!.profile).toEqual(profile)
         await manager.disposeAll()
       } finally {
         await rm(dir, { recursive: true, force: true })

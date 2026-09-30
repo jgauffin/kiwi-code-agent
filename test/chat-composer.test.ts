@@ -132,6 +132,13 @@ describe('ChatComposer model switch', () => {
     select.dispatchEvent(new Event('change', { bubbles: true }))
     expect(seen).toBe('Kimi')
   })
+
+  it('a_plan_sessions_phase_profile_is_named_with_no_switch_offered_there', () => {
+    const node = composer()
+    node.setSwitches({ allowWrites: undefined, mcp: undefined, model: { current: 'Careful' } })
+    expect(node.querySelector('select[name=model]')).toBeNull()
+    expect(node.querySelector('.model-current')?.textContent).toBe('Careful')
+  })
 })
 
 describe('ChatComposer continue in chat', () => {

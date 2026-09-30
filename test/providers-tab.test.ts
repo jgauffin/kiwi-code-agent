@@ -17,13 +17,14 @@ function snapshot(over: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     profiles: [],
     activeProfile: '',
     keys: [{ name: 'berget', stored: false }],
-    permissions: { allow: [], deny: [] },
+    permissions: { allow: [], deny: [], denyGitWrites: false },
     verify: [],
     verifyFailureBudget: 3,
     cleanup: { functionLines: 25, typeLines: 200, fileLines: 400, tests: [], testFunctionLines: 60, testTypeLines: 600, testFileLines: 1200, ignore: [] },
     planIgnore: [],
     nodePath: '',
     traceEngine: false,
+    compactAtTokens: 400_000,
     hasWorkspace: true,
     ...over,
   }
@@ -105,6 +106,47 @@ describe('ProvidersTab cards', () => {
     set(form, 'name', 'GLM')
     form.dispatchEvent(new Event('submit', { cancelable: true }))
     expect(seen).toEqual([1, { ...berget, name: 'GLM' }])
+    node.remove()
+  })
+
+  it('an_openai_provider_declares_how_it_takes_effort_and_blank_leaves_it_to_the_known_models', () => {
+    const saved = (value: string): Provider | undefined => {
+      const node = tab(snapshot({ providers: [claude, { ...berget, reasoningControl: 'none' }] }))
+      const form = edit(node, 1)
+      expect(form.querySelector<HTMLSelectElement>('select[name=reasoningControl]')!.value).toBe('none')
+      let seen: Provider | undefined
+      node.addEventListener(events.ProviderSavedEvent.type, (e) => (seen = e.provider))
+      set(form, 'reasoningControl', value)
+      form.dispatchEvent(new Event('submit', { cancelable: true }))
+      node.remove()
+      return seen
+    }
+    expect(saved('reasoning_effort')).toEqual({ ...berget, reasoningControl: 'reasoning_effort' })
+    expect(saved('')).toEqual(berget)
+  })
+
+  it('each_model_takes_its_own_compaction_limit_saved_with_the_provider', () => {
+    const node = tab()
+    const form = edit(node, 0)
+    let seen: Provider | undefined
+    node.addEventListener(events.ProviderSavedEvent.type, (e) => (seen = e.provider))
+    set(form, 'compactAtTokens', '300000')
+    form.dispatchEvent(new Event('submit', { cancelable: true }))
+    expect(seen).toEqual({ ...claude, compactAtTokens: { 'claude-opus-5': 300_000 } })
+    node.remove()
+  })
+
+  it('a_blank_limit_is_not_saved_so_the_model_follows_the_global_setting_shown_in_its_place', () => {
+    const node = tab(snapshot({ providers: [{ ...claude, compactAtTokens: { 'claude-opus-5': 250_000 } }, berget] }))
+    const form = edit(node, 0)
+    const limit = form.querySelector<HTMLInputElement>('input[name=compactAtTokens]')!
+    expect(limit.value).toBe('250000')
+    expect(limit.placeholder).toContain('400000')
+    let seen: Provider | undefined
+    node.addEventListener(events.ProviderSavedEvent.type, (e) => (seen = e.provider))
+    set(form, 'compactAtTokens', '')
+    form.dispatchEvent(new Event('submit', { cancelable: true }))
+    expect(seen).toEqual(claude)
     node.remove()
   })
 

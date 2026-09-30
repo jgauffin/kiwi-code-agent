@@ -30,6 +30,8 @@ export type CompletionRequest = {
   tools: ToolDefinition[]
   /** Output tokens per reply, reasoning included. */
   maxTokens: number
+  /** Sent only to an endpoint known to take it; the resolved profile already fitted it to these levels. */
+  reasoningEffort?: 'low' | 'medium' | 'high'
   signal: AbortSignal
 }
 

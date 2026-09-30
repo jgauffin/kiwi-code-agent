@@ -1,6 +1,6 @@
 ---
 feature: File edit diff
-status: approved
+status: implemented
 ---
 
 # File edit diff

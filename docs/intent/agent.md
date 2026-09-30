@@ -62,7 +62,7 @@ First a direction in chat (the decisions that shape the feature, the questions t
 
 ```markdown
 ## Goal
-Prose.
+One paragraph: who, what, why.
 
 ## Cancelling an order            ← a scenario: a situation from the user's side
 - **Cancel command**: a rule, written so a test can prove it (docs/intent/orders.md#Cancellation)
@@ -73,7 +73,7 @@ Prose.
 - **Partial refunds**: what only the user can settle
 ```
 
-`Goal` and `Open questions` are reserved; every other `##` is a scenario, and a small feature has one. Rules sit directly under a scenario; an edge case is nested under the rule it qualifies, one level, no deeper. Every rule, edge case and question is named by the bold lead-in of its line, unique in the spec; the name never changes once written, a rename carries `(was Old name)` after the new one. There are no invariants, acceptance criteria or task sections: an invariant is a rule, an acceptance criterion restates one, and the evidence that a rule holds is the test the implementer names for it. The extension parses the spec into this model on every write and hands what does not fit back to the model on the same tool result; the plan view shows the problems and offers Repair, which runs the migration (below) for that plan.
+`Goal` and `Open questions` are reserved; every other `##` is a scenario, and a small feature has one. The goal is one paragraph in domain language: who the feature is for, what it does and why. It frames the rules and holds none. Rules sit directly under a scenario; an edge case is nested under the rule it qualifies, one level, no deeper. Every rule, edge case and question is named by the bold lead-in of its line, unique in the spec; the name never changes once written, a rename carries `(was Old name)` after the new one. There are no invariants, acceptance criteria or task sections: an invariant is a rule, an acceptance criterion restates one, and the evidence that a rule holds is the test the implementer names for it. The extension parses the spec into this model on every write and hands what does not fit back to the model on the same tool result; the plan view shows the problems and offers Repair, which runs the migration (below) for that plan.
 
 ### get_work_item
 
@@ -108,7 +108,7 @@ A run, not a session: started by Approve, it runs under the plan session's tab w
 
 The job is to find what stands in the feature's way before any code is written, not to grade the spec. It runs before the build rather than inside it because a conflict found halfway can undo the tasks before it, and because a run whose job is to finish is pulled toward absorbing the defect it should report. Only disagreements are reported, each as a decision for the user; a rule the code accommodates without incident is not mentioned. An empty list is a valid result, and the build starts on it without the person being asked anything. What the run looks for: a business rule in the code that says otherwise (the human decides which side is right), existing behaviour the feature would change or break that the spec does not mention, and something the spec assumes that the code shows to be wrong. Only in code the feature will change or build on: behaviour in code the feature leaves alone is not a finding. Where the feature is built, when that is open, is one decision ruled before the findings it would make moot. A constraint on how a rule is built rather than what it does is not a decision: the implementer reads the same code.
 
-Output: `.agent/plan/<feature>.decisions.md`, one `###` per decision titled by the disagreement, with an `on` line naming the rules it concerns and a `finding` line of one or two sentences: what the code does, at the one path and symbol that shows it, and what the spec says; not how it was found and not what the spec should say instead. The run writes titles, `on` and `finding` only. When the run ends with decisions that have no proposal, the plan session is handed their titles and adds one to three `proposed` lines under each: distinct ways to settle it, each the rule's new text as it would stand in the spec: observable behaviour, not how it is built. Keeping the rule is not proposed; it is always offered.
+Output: `.agent/plan/<feature>.decisions.md`, one `###` per decision titled by the disagreement, with an `on` line naming the rules it concerns and a `finding` line of one or two sentences: what the code does, at the one path and symbol that shows it, and what the spec says; not how it was found and not what the spec should say instead. The run writes titles, `on` and `finding` only. When the run ends with decisions that have no proposal, the plan session is handed their titles and adds one to three `proposed` lines under each: distinct ways to settle it, each the rule's new text as it would stand in the spec: observable behaviour, not how it is built. Keeping the rule is not proposed; it is always offered. With them goes the planner's own pick, a `recommended` line naming a proposal by number or `keep`, and a one-sentence `because`; the user reads it under the options and is free to rule otherwise.
 
 ```markdown
 ### Shipped orders cannot be cancelled
@@ -116,6 +116,8 @@ Output: `.agent/plan/<feature>.decisions.md`, one `###` per decision titled by t
 - finding: what the code does, at one path and symbol, and what the spec says
 - proposed: the rule's new text, one way
 - proposed: the rule's new text, another way
+- recommended: 1
+- because: one sentence on why that way
 - ruling: keep
 ```
 

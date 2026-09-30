@@ -2,7 +2,7 @@
   "name": "kiwi-agent",
   "displayName": "KiwiAgent",
   "description": "Coding sessions in VS Code with a choice of model engine per session.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "CoderrAB",
   "icon": "docs/logos/logo-square-transparent-500px.png",
   "galleryBanner": {
@@ -64,6 +64,11 @@
         "icon": "docs/logos/logo-square-transparent.svg"
       },
       {
+        "command": "kiwiAgent.openChat",
+        "title": "KiwiAgent: Open Chat in Editor",
+        "icon": "media/kiwi.svg"
+      },
+      {
         "command": "kiwiAgent.removeSession",
         "title": "Remove Session",
         "icon": "$(trash)"
@@ -71,6 +76,10 @@
       {
         "command": "kiwiAgent.openSession",
         "title": "Open Session"
+      },
+      {
+        "command": "kiwiAgent.resumePlan",
+        "title": "Open Plan"
       },
       {
         "command": "kiwiAgent.openDraftPlan",
@@ -150,6 +159,10 @@
           "when": "false"
         },
         {
+          "command": "kiwiAgent.resumePlan",
+          "when": "false"
+        },
+        {
           "command": "kiwiAgent.openDraftPlan",
           "when": "false"
         }
@@ -207,13 +220,25 @@
           "scope": "resource",
           "description": "Tool calls blocked outright, same rule shape as permissions.allow. Wins over allow rules and over read-only calls: Read(**/.env), Bash(curl:*)."
         },
+        "kiwiAgent.permissions.denyGitWrites": {
+          "type": "boolean",
+          "default": false,
+          "scope": "resource",
+          "description": "Blocks every git command that changes the repository or its config (commit, push, checkout, stash, reset, ...), in Bash and PowerShell alike, whatever the allow rules say. Read-only git (status, log, diff, show, blame) still runs."
+        },
         "kiwiAgent.contextWindows": {
           "type": "object",
           "default": {},
           "additionalProperties": {
             "type": "number"
           },
-          "description": "Context window in tokens per model id, for OpenAI-compatible providers. The agent loop folds the older turns into a summary once the prompt reaches 90% of this. A model not listed here is treated as 128000. The Claude engine compacts on its own and ignores this."
+          "description": "Context window in tokens per model id, for OpenAI-compatible providers. The agent loop folds the older turns into a summary once the prompt reaches 90% of this. A model not listed here is treated as 128000. The Claude engine reports its own window and ignores this."
+        },
+        "kiwiAgent.compactAtTokens": {
+          "type": "number",
+          "default": 700000,
+          "minimum": 0,
+          "description": "For models without a limit of their own (a provider's compactAtTokens): compact a conversation once it is this many tokens, even when the model's window holds more, since every request re-sends the whole conversation. 0 compacts only when the window runs short (75% of it on Claude, 90% on OpenAI-compatible models). Applies to sessions started after the change."
         },
         "kiwiAgent.traceEngine": {
           "type": "boolean",
@@ -265,6 +290,11 @@
           "type": "integer",
           "default": 3,
           "description": "Consecutive failed test runs handed to the implement session before the failed record is left for you."
+        },
+        "kiwiAgent.verifyRetrySeconds": {
+          "type": "integer",
+          "default": 30,
+          "description": "Seconds a test run whose failures are all on files another hand changed waits before running the same suites again; only a second all-foreign failure is left for you."
         },
         "kiwiAgent.cleanup.functionLines": {
           "type": "integer",
@@ -324,8 +354,8 @@
               "name": "Claude",
               "engine": "claude-sdk",
               "models": [
-                "claude-opus-5",
-                "claude-sonnet-5"
+                "claude-opus-5[1m]",
+                "claude-sonnet-5[1m]"
               ]
             }
           ],
@@ -355,6 +385,22 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "compactAtTokens": {
+                "type": "object",
+                "description": "Per model id, the conversation size in tokens at which a session on it compacts; a model not listed follows kiwiAgent.compactAtTokens.",
+                "additionalProperties": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "reasoningControl": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "reasoning_effort"
+                ],
+                "description": "openai-compatible only: how the endpoint takes a profile's effort. Absent, models known to take reasoning_effort get it and others get none."
               }
             }
           }
@@ -367,14 +413,14 @@
               "name": "Claude",
               "default": {
                 "provider": "Claude",
-                "model": "claude-opus-5"
+                "model": "claude-opus-5[1m]"
               }
             },
             {
               "name": "Claude Sonnet",
               "default": {
                 "provider": "Claude",
-                "model": "claude-sonnet-5"
+                "model": "claude-sonnet-5[1m]"
               }
             }
           ],
@@ -419,13 +465,9 @@
               },
               "steps": {
                 "type": "object",
-                "description": "One entry per step that runs on something other than the default: chat, plan, reconcile, implement, cleanup, docs, docs-map.",
+                "description": "One entry per step with a model or an effort of its own: chat, plan, reconcile, implement, fix, cleanup, docs, docs-map, file-decisions. Provider and model go together; an entry may hold only an effort.",
                 "additionalProperties": {
                   "type": "object",
-                  "required": [
-                    "provider",
-                    "model"
-                  ],
                   "properties": {
                     "provider": {
                       "type": "string"

@@ -15,6 +15,7 @@ import type { SessionHooks } from '../session/hooks'
 import type { ModelProfile } from '../session/model-profile'
 import { AsyncQueue } from '../session/async-queue'
 import { SdkEventMapper } from './sdk-event-mapper'
+import { SdkCompaction } from './compaction'
 import { spawnWithRuntime, type NodeRuntime } from './node-runtime'
 import { bareToolName, toolServer } from './tool-server'
 import { ReadTracker } from '../openai-session/tools/read-tracker'
@@ -44,6 +45,8 @@ export type SdkSessionOptions = {
   appendSystemPrompt?: string
   /** Restricts the built-in tools to these names. */
   tools?: string[]
+  /** Compacts once the conversation is this large, when that comes before the window's share; absent or 0 means the share alone. */
+  compactAtTokens?: number
   /** Tools this extension owns, served to the engine in-process on top of the built-ins. */
   ownTools?: Tool[]
   /** The tools a script may call, as our own implementations run in this process. */
@@ -82,6 +85,7 @@ export class SdkSession implements CodeSession {
   private readonly mapper = new SdkEventMapper()
   private readonly abort = new AbortController()
   private readonly query: Query
+  private readonly compaction: SdkCompaction
   private readonly pumping: Promise<void>
   private engineSessionId: string | undefined
   /** What the tools this extension owns run with; a test drives one through it as the engine would. */
@@ -106,6 +110,13 @@ export class SdkSession implements CodeSession {
     this.mcpServers = options.mcpServers
     this.mcp = options.mcpServers ? this.mcpControl() : undefined
     this.query = options.query({ prompt: this.input, options: this.buildOptions() })
+    this.compaction = new SdkCompaction({
+      query: this.query,
+      send: (text) => this.prompt(text),
+      emit: (event) => {
+        if (!this.output.isEnded) this.output.push(event)
+      },
+    }, options.compactAtTokens)
     this.pumping = this.pump()
   }
 
@@ -115,6 +126,15 @@ export class SdkSession implements CodeSession {
   }
 
   send(text: string): void {
+    this.compaction.sent(text)
+    this.prompt(text)
+  }
+
+  compact(): void {
+    this.compaction.request()
+  }
+
+  private prompt(text: string): void {
     this.input.push({
       type: 'user',
       message: { role: 'user', content: text },
@@ -148,6 +168,7 @@ export class SdkSession implements CodeSession {
     // The turn is torn down around the card, so the question goes unanswered:
     // stopping a session never answers it, and the model is told so.
     this.cancelQuestions('Interrupted')
+    this.compaction.cancel()
     await this.query.interrupt()
   }
 
@@ -182,7 +203,9 @@ export class SdkSession implements CodeSession {
       // Questions go through the own AskUser tool on every engine. The engine's built-in one
       // can only be answered through canUseTool, so left in it lands in the permission prompt.
       disallowedTools: ['AskUserQuestion'],
-      env: this.options.env ?? {},
+      // Compaction is this session's to run (SdkCompaction): the engine's own
+      // can fail without a word and leave the turn to overflow its window.
+      env: { ...(this.options.env ?? {}), DISABLE_AUTO_COMPACT: '1' },
     }
     if (profile.effort) options.effort = profile.effort
     if (this.options.resumeEngineSessionId) options.resume = this.options.resumeEngineSessionId
@@ -388,7 +411,7 @@ export class SdkSession implements CodeSession {
     try {
       for await (const message of this.query) {
         this.options.trace?.(describeMessage(message))
-        for (const event of this.mapper.map(message)) {
+        for (const event of this.compaction.filter(message, this.mapper.map(message))) {
           if (event.type === 'session_started') this.engineSessionId = event.engineSessionId
           this.output.push(event)
           if (event.type === 'session_started' && this.mcpServers) void this.reportMcp()

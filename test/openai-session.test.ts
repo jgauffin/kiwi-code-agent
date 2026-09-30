@@ -102,6 +102,7 @@ describe('OpenAiSession', () => {
       'session_started',
       'status',
       'assistant_text',
+      'context_usage',
       'assistant_message',
       'status',
       'turn_done',
@@ -115,6 +116,15 @@ describe('OpenAiSession', () => {
       { role: 'system', content: 'sys' },
       { role: 'user', content: 'hi' },
     ])
+    await s.dispose()
+  })
+
+  it('a_session_given_an_effort_asks_every_turn_with_it', async () => {
+    const model = new ScriptedModel(text('ok'))
+    const s = new OpenAiSession({ id: 's1', profile: { name: 'GLM', engine: 'openai-compatible', model: 'glm' }, cwd: process.cwd(), client: model, tools: [], systemPrompt: 'sys', reasoningEffort: 'high' })
+    s.send('hi')
+    await untilTurnDone(s)
+    expect(model.requests[0]!.reasoningEffort).toBe('high')
     await s.dispose()
   })
 
@@ -311,6 +321,70 @@ describe('OpenAiSession', () => {
     expect(summarising.messages.at(-1)!.content).toContain('old ask')
     expect(afterwards.messages[1]!.content).toContain('the story so far')
     expect(JSON.stringify(afterwards.messages)).not.toContain('xxxx')
+    await s.dispose()
+  })
+
+  it('each_completion_reports_how_full_the_window_is', async () => {
+    const s = session(new ScriptedModel(text('Hello there')))
+    s.send('hi')
+    const events = await untilTurnDone(s)
+    expect(events).toContainEqual({ type: 'context_usage', usedTokens: 10, windowTokens: 128_000, compactAtTokens: 115_200 })
+    await s.dispose()
+  })
+
+  it('a_ceiling_set_below_the_windows_share_compacts_sooner_to_keep_each_request_small', async () => {
+    const model = new ScriptedModel(
+      toolCall('c1', 'Echo', '{"value":"a"}', { promptTokens: 60, completionTokens: 1, cachedTokens: 0 }),
+      text('the story so far'),
+      text('ok'),
+    )
+    const s = new OpenAiSession({
+      id: 's1',
+      profile: { name: 'GLM', engine: 'openai-compatible', model: 'glm' },
+      cwd: process.cwd(),
+      client: model,
+      tools: [echoTool as Tool],
+      systemPrompt: 'sys',
+      contextWindow: 100_000,
+      compactAtTokens: 50,
+      resume: { engineSessionId: 's1', history: [{ role: 'user', content: 'old ask' }, { role: 'assistant', content: 'x'.repeat(4000), toolCalls: [] }] },
+    })
+    s.send('go')
+    const events = await untilTurnDone(s)
+    expect(events).toContainEqual({ type: 'context_usage', usedTokens: 60, windowTokens: 100_000, compactAtTokens: 50 })
+    expect(model.requests[1]!.tools).toEqual([])
+    expect(model.requests[2]!.messages[1]!.content).toContain('the story so far')
+    await s.dispose()
+  })
+
+  it('compacting_between_turns_folds_the_older_turns_without_a_turn_of_its_own', async () => {
+    const model = new ScriptedModel(text('done'), text('the story so far'), text('ok'))
+    const s = crowdedSession(model)
+    s.send('go')
+    await untilTurnDone(s)
+    s.compact()
+    const events: SessionEvent[] = []
+    for await (const e of s.events()) {
+      events.push(e)
+      if (e.type === 'status' && e.status === 'idle') break
+    }
+    expect(events.map((e) => e.type)).toEqual(['status', 'compacted', 'context_usage', 'status'])
+    expect(model.requests[1]!.tools).toEqual([])
+    s.send('next')
+    await untilTurnDone(s)
+    expect(model.requests[2]!.messages[1]!.content).toContain('the story so far')
+    await s.dispose()
+  })
+
+  it('compacting_during_a_turn_folds_before_its_next_request_and_the_turn_carries_on', async () => {
+    const model = new ScriptedModel(text('the story so far'), text('ok'))
+    const s = crowdedSession(model)
+    s.send('go')
+    s.compact()
+    const events = await untilTurnDone(s)
+    expect(model.requests[0]!.tools).toEqual([])
+    expect(model.requests[1]!.messages[1]!.content).toContain('the story so far')
+    expect(events.at(-1)).toMatchObject({ type: 'turn_done', isError: false })
     await s.dispose()
   })
 

@@ -1,8 +1,9 @@
-import type { PlanState } from '../protocol'
+import type { PhaseProfileState, PlanState } from '../protocol'
 import { el } from './dom'
 import {
   CleanupStoppedEvent,
   ImplementRequestedEvent,
+  PhaseProfileChangedEvent,
   PlanFocusRequestedEvent,
   PlanStepSelectedEvent,
   ReviewSubmittedEvent,
@@ -16,6 +17,14 @@ import {
 } from './events'
 import { STEP_LABEL, failureText, planStep, shownSteps, type NextAction, type Step } from './plan-step'
 
+/** Labels the four phases a feature runs a model on carry in the picker row (B1); distinct from `plan-step`'s own step labels, which name the flow the person follows rather than what runs a model. */
+const PHASE_LABEL: { plan: string; reconcile: string; implement: string; cleanup: string } = {
+  plan: 'Blind plan',
+  reconcile: 'Map against code',
+  implement: 'Implement',
+  cleanup: 'Cleanup',
+}
+
 /**
  * The feature session's header, one row: the flow as steps with the current
  * one lit, and at the right the one next thing. The next step is a button
@@ -26,7 +35,8 @@ import { STEP_LABEL, failureText, planStep, shownSteps, type NextAction, type St
  * off contract. A reached step is a button that opens the tab it works in.
  */
 export class PlanBar extends HTMLElement {
-  update(plan: PlanState | undefined): void {
+  /** `profileNames` are every configured profile, for the phase pickers' options (B1). */
+  update(plan: PlanState | undefined, profileNames: string[] = []): void {
     this.hidden = plan === undefined
     this.replaceChildren()
     if (!plan) return
@@ -39,7 +49,52 @@ export class PlanBar extends HTMLElement {
       const state = name === step.current ? `current${step.yours ? ' yours' : ''}` : index < currentIndex ? 'done' : step.reached.includes(name) ? 'reached' : 'future'
       steps.append(this.stepNode(name, state))
     }
-    this.append(steps, ...this.run(plan), ...this.repair(plan), ...this.next(plan))
+    this.append(steps, ...this.run(plan), ...this.repair(plan), ...this.next(plan), this.phaseProfiles(plan, profileNames))
+  }
+
+  /**
+   * The profile each phase will run on next, one picker per phase, shown
+   * even when it is the settings default (B8). Picking a different one holds
+   * it for this feature and this phase alone (B1, B7); picking "Settings
+   * default" clears the choice (B2). A choice naming a profile no longer
+   * configured is offered as its own, marked, option (B6).
+   */
+  private phaseProfiles(plan: PlanState, profileNames: string[]): HTMLElement {
+    const row = el('span', 'phase-profiles')
+    for (const state of plan.phaseProfiles) row.append(this.phaseProfilePicker(state, profileNames))
+    return row
+  }
+
+  private phaseProfilePicker(state: PhaseProfileState, profileNames: string[]): HTMLElement {
+    const wrap = el('label', 'phase-profile')
+    wrap.append(el('span', 'phase-profile-label', PHASE_LABEL[state.step]))
+    const select = document.createElement('select')
+    select.className = 'phase-profile' + ('isDefault' in state && state.isDefault ? ' default' : '')
+    const def = document.createElement('option')
+    def.value = ''
+    def.textContent = 'Settings default'
+    select.append(def)
+    for (const name of profileNames) {
+      const option = document.createElement('option')
+      option.value = name
+      option.textContent = name
+      select.append(option)
+    }
+    if ('missing' in state) {
+      select.classList.add('missing')
+      select.title = `"${state.missing}" is not configured; the ${PHASE_LABEL[state.step]} step refuses to start until this is changed.`
+      const missing = document.createElement('option')
+      missing.value = state.missing
+      missing.textContent = `${state.missing} (not configured)`
+      select.append(missing)
+      select.value = state.missing
+    } else {
+      select.title = state.isDefault ? `${PHASE_LABEL[state.step]} runs on the settings default ("${state.name}").` : `${PHASE_LABEL[state.step]} runs on "${state.name}".`
+      select.value = state.isDefault ? '' : state.name
+    }
+    select.addEventListener('change', () => this.dispatchEvent(new PhaseProfileChangedEvent(state.step, select.value || undefined)))
+    wrap.append(select)
+    return wrap
   }
 
   private stepNode(step: Step, state: string): HTMLElement {

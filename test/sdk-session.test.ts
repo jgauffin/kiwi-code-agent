@@ -12,7 +12,8 @@ import { askUserTool } from '../src/agent/openai-session/tools/ask-user'
 import type { Tool } from '../src/agent/openai-session/tools/tool'
 import type { SessionEvent } from '../src/agent/session/code-session'
 import type { McpServers } from '../src/agent/mcp/mcp-config'
-import { fakeQuery, initMessage, resultMessage } from './fake-query'
+import { COMPACT_COMMAND } from '../src/agent/sdk-session/compaction'
+import { assistantMessage, compactionMessages, compactionRefusedMessages, fakeQuery, initMessage, interruptedResult, promptTooLongMessages, resultMessage } from './fake-query'
 
 const profile = { name: 'Claude', engine: 'claude-sdk' as const, model: 'opus' }
 
@@ -489,6 +490,263 @@ describe('SdkSession', () => {
       await session.dispose()
       const output = await running
       expect(output.text).toContain('did not answer')
+    })
+  })
+
+  describe('compaction', () => {
+    const settle = async () => {
+      for (let i = 0; i < 10; i++) await tick()
+    }
+    const sent = (fake: ReturnType<typeof fakeQuery>) => fake.received.map((m) => m.message.content)
+
+    /** Every event the session emits from now on, as it arrives. */
+    function collect(session: SdkSession): SessionEvent[] {
+      const events: SessionEvent[] = []
+      void (async () => {
+        for await (const e of session.events()) events.push(e)
+      })()
+      return events
+    }
+
+    it('the_engine_is_told_not_to_compact_on_its_own', () => {
+      const fake = fakeQuery()
+      createSession(fake)
+      expect(fake.options!.env).toMatchObject({ DISABLE_AUTO_COMPACT: '1' })
+    })
+
+    it('each_reply_reports_how_full_the_engines_window_is', async () => {
+      const fake = fakeQuery()
+      const session = createSession(fake)
+      const events = collect(session)
+      fake.emit(initMessage())
+      await settle()
+      fake.emit(assistantMessage(25_000))
+      await settle()
+      expect(events).toContainEqual({ type: 'context_usage', usedTokens: 25_000, windowTokens: 200_000, compactAtTokens: 150_000 })
+      await session.dispose()
+    })
+
+    it('a_turn_that_fills_the_window_is_stopped_compacted_and_carried_on_as_the_same_turn', async () => {
+      const fake = fakeQuery()
+      const session = createSession(fake)
+      const events = collect(session)
+      session.send('build the task')
+      fake.emit(initMessage())
+      await settle()
+      fake.emit(assistantMessage(160_000))
+      await settle()
+      expect(fake.interrupted).toBe(1)
+      fake.emit(interruptedResult())
+      await settle()
+      expect(sent(fake).at(-1)).toBe(COMPACT_COMMAND)
+      for (const m of compactionMessages()) fake.emit(m)
+      await settle()
+      expect(sent(fake).at(-1)).toMatch(/compacted/i)
+      fake.emit(resultMessage())
+      await settle()
+      // The host sees one turn that ended well: the stop and the compaction in between are the session's own business.
+      expect(events.filter((e) => e.type === 'turn_done')).toEqual([expect.objectContaining({ isError: false })])
+      expect(events.map((e) => e.type)).toContain('compacted')
+      expect(events.at(-1)).toMatchObject({ type: 'turn_done' })
+      await session.dispose()
+    })
+
+    it('a_ceiling_set_below_the_windows_share_compacts_a_turn_sooner_to_keep_each_request_small', async () => {
+      const fake = fakeQuery()
+      const session = new SdkSession({
+        id: 'sess-1',
+        profile,
+        cwd: '/w',
+        cliPath: '/ext/dist/cli.js',
+        runtime: { command: 'node', args: [], env: {} },
+        compactAtTokens: 100_000,
+        query: fake.query,
+      })
+      const events = collect(session)
+      session.send('build the task')
+      fake.emit(initMessage())
+      await settle()
+      fake.emit(assistantMessage(90_000))
+      await settle()
+      expect(fake.interrupted).toBe(0)
+      fake.emit(assistantMessage(110_000))
+      await settle()
+      expect(fake.interrupted).toBe(1)
+      expect(events).toContainEqual({ type: 'context_usage', usedTokens: 110_000, windowTokens: 200_000, compactAtTokens: 100_000 })
+      await session.dispose()
+    })
+
+    it('a_failed_compaction_ends_the_turn_as_failed_instead_of_carrying_on_into_a_full_window', async () => {
+      const fake = fakeQuery()
+      const session = createSession(fake)
+      const events = collect(session)
+      session.send('build the task')
+      fake.emit(initMessage())
+      await settle()
+      fake.emit(assistantMessage(160_000))
+      await settle()
+      fake.emit(interruptedResult())
+      await settle()
+      for (const m of compactionMessages('Request timed out')) fake.emit(m)
+      await settle()
+      expect(sent(fake).at(-1)).toBe(COMPACT_COMMAND)
+      expect(events.filter((e) => e.type === 'turn_done')).toEqual([
+        expect.objectContaining({ isError: true, errors: ['Compaction failed: Request timed out'] }),
+      ])
+      await session.dispose()
+    })
+
+    it('a_failed_compaction_during_a_turn_is_reported_once_on_the_turn', async () => {
+      const fake = fakeQuery()
+      const session = createSession(fake)
+      const events = collect(session)
+      session.send('build the task')
+      fake.emit(initMessage())
+      await settle()
+      fake.emit(assistantMessage(160_000))
+      await settle()
+      fake.emit(interruptedResult())
+      await settle()
+      for (const m of compactionMessages('Request timed out')) fake.emit(m)
+      await settle()
+      expect(events.filter((e) => JSON.stringify(e).includes('Request timed out')).map((e) => e.type)).toEqual(['turn_done'])
+      await session.dispose()
+    })
+
+    it('a_failed_compaction_between_turns_is_reported_once', async () => {
+      const fake = fakeQuery()
+      const session = createSession(fake)
+      const all = collect(session)
+      session.send('hello')
+      fake.emit(initMessage())
+      fake.emit(resultMessage())
+      await settle()
+      const before = all.length
+      session.compact()
+      for (const m of compactionMessages('Request timed out')) fake.emit(m)
+      await settle()
+      const events = all.slice(before)
+      expect(events.filter((e) => JSON.stringify(e).includes('Request timed out'))).toEqual([
+        { type: 'error', message: 'Compaction failed: Request timed out', fatal: false },
+      ])
+      await session.dispose()
+    })
+
+    it('a_compaction_the_engine_turns_down_is_reported_as_failed_not_as_a_reply', async () => {
+      const fake = fakeQuery()
+      const session = createSession(fake)
+      const all = collect(session)
+      session.send('hello')
+      fake.emit(initMessage())
+      fake.emit(resultMessage())
+      await settle()
+      const before = all.length
+      session.compact()
+      for (const m of compactionRefusedMessages('No messages to compact')) fake.emit(m)
+      await settle()
+      const events = all.slice(before)
+      expect(events.filter((e) => JSON.stringify(e).includes('No messages to compact'))).toEqual([
+        { type: 'error', message: 'Compaction failed: No messages to compact', fatal: false },
+      ])
+      await session.dispose()
+    })
+
+    it('a_turn_whose_compaction_the_engine_turns_down_ends_as_failed_instead_of_carrying_on', async () => {
+      const fake = fakeQuery()
+      const session = createSession(fake)
+      const events = collect(session)
+      session.send('build the task')
+      fake.emit(initMessage())
+      await settle()
+      fake.emit(assistantMessage(160_000))
+      await settle()
+      fake.emit(interruptedResult())
+      await settle()
+      for (const m of compactionRefusedMessages('No messages to compact')) fake.emit(m)
+      await settle()
+      expect(sent(fake).at(-1)).toBe(COMPACT_COMMAND)
+      expect(events.filter((e) => e.type === 'turn_done')).toEqual([
+        expect.objectContaining({ isError: true, errors: ['Compaction failed: No messages to compact'] }),
+      ])
+      await session.dispose()
+    })
+
+    it('a_compaction_asks_for_a_summary_short_enough_to_fit_the_engines_output_limit', async () => {
+      const fake = fakeQuery()
+      const session = createSession(fake)
+      session.send('hello')
+      fake.emit(initMessage())
+      fake.emit(resultMessage())
+      await settle()
+      session.compact()
+      await settle()
+      expect(sent(fake).at(-1)).toMatch(/^\/compact \S/)
+      await session.dispose()
+    })
+
+    it('a_prompt_the_engine_refuses_as_too_long_is_compacted_and_sent_again', async () => {
+      const fake = fakeQuery()
+      const session = createSession(fake)
+      const events = collect(session)
+      session.send('carry on with the task')
+      fake.emit(initMessage())
+      await settle()
+      for (const m of promptTooLongMessages()) fake.emit(m)
+      await settle()
+      expect(sent(fake).at(-1)).toBe(COMPACT_COMMAND)
+      for (const m of compactionMessages()) fake.emit(m)
+      await settle()
+      expect(sent(fake).at(-1)).toBe('carry on with the task')
+      fake.emit(resultMessage())
+      await settle()
+      // The refusal was answered, not suffered: the host sees neither it nor a turn that failed.
+      expect(events.filter((e) => e.type === 'error')).toEqual([])
+      expect(events.filter((e) => e.type === 'turn_done')).toEqual([expect.objectContaining({ isError: false })])
+      // A refusal made before any request says nothing about how full the window is.
+      expect(events.filter((e) => e.type === 'context_usage').map((e) => e.type === 'context_usage' && e.usedTokens)).not.toContain(0)
+      await session.dispose()
+    })
+
+    it('a_prompt_still_too_long_after_compacting_ends_the_turn_as_failed', async () => {
+      const fake = fakeQuery()
+      const session = createSession(fake)
+      const events = collect(session)
+      session.send('carry on with the task')
+      fake.emit(initMessage())
+      await settle()
+      for (const m of promptTooLongMessages()) fake.emit(m)
+      await settle()
+      for (const m of compactionMessages()) fake.emit(m)
+      await settle()
+      for (const m of promptTooLongMessages()) fake.emit(m)
+      await settle()
+      expect(sent(fake).filter((t) => t === COMPACT_COMMAND)).toHaveLength(1)
+      expect(events.filter((e) => e.type === 'turn_done')).toEqual([expect.objectContaining({ isError: true })])
+      expect(events).toContainEqual(expect.objectContaining({ type: 'assistant_message', text: 'Prompt is too long' }))
+      await session.dispose()
+    })
+
+    it('compacting_between_turns_does_not_look_like_a_finished_turn', async () => {
+      const fake = fakeQuery()
+      const session = createSession(fake)
+      const all = collect(session)
+      session.send('hello')
+      fake.emit(initMessage())
+      fake.emit(resultMessage())
+      await settle()
+      const before = all.length
+      session.compact()
+      await settle()
+      expect(sent(fake).at(-1)).toBe(COMPACT_COMMAND)
+      expect(fake.interrupted).toBe(0)
+      fake.setContextUsage({ totalTokens: 21_000, maxTokens: 200_000 })
+      for (const m of compactionMessages()) fake.emit(m)
+      await settle()
+      const events = all.slice(before)
+      expect(events.map((e) => e.type)).not.toContain('turn_done')
+      expect(events).toContainEqual({ type: 'context_usage', usedTokens: 21_000, windowTokens: 200_000, compactAtTokens: 150_000 })
+      expect(events).toContainEqual({ type: 'status', status: 'idle' })
+      await session.dispose()
     })
   })
 })

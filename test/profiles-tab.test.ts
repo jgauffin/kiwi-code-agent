@@ -21,13 +21,14 @@ function snapshot(over: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     profiles: [balanced, opusPlan],
     activeProfile: 'Balanced',
     keys: [{ name: 'berget', stored: false }],
-    permissions: { allow: [], deny: [] },
+    permissions: { allow: [], deny: [], denyGitWrites: false },
     verify: [],
     verifyFailureBudget: 3,
     cleanup: { functionLines: 25, typeLines: 200, fileLines: 400, tests: [], testFunctionLines: 60, testTypeLines: 600, testFileLines: 1200, ignore: [] },
     planIgnore: [],
     nodePath: '',
     traceEngine: false,
+    compactAtTokens: 400_000,
     hasWorkspace: true,
     ...over,
   }
@@ -103,6 +104,43 @@ describe('ProfilesTab profile cards', () => {
     form.dispatchEvent(new Event('submit', { cancelable: true }))
     expect((seen as Profile).steps).toBeDefined()
     node.remove()
+  })
+
+  it('a_step_s_effort_saves_on_its_own_without_overriding_the_model', () => {
+    const node = tab()
+    const form = edit(node, 0)
+    set(form, 'step-implement-effort', 'low')
+    let seen: unknown
+    node.addEventListener(events.ProfileSavedEvent.type, (e) => (seen = e.profile))
+    form.dispatchEvent(new Event('submit', { cancelable: true }))
+    expect((seen as Profile).steps).toEqual({ implement: { effort: 'low' } })
+    expect(cards(tab(snapshot({ profiles: [seen as Profile] })))[0]!.querySelector('.chips')!.textContent).toContain('Implement: low effort')
+    node.remove()
+  })
+
+  it('a_step_s_blank_effort_names_the_one_suggested_for_it', () => {
+    const form = edit(tab(), 0)
+    const blank = (step: string) => form.querySelector<HTMLSelectElement>(`select[name=step-${step}-effort]`)!.options[0]!.textContent
+    expect(blank('plan')).toBe('Suggested (high)')
+    expect(blank('implement')).toBe('Suggested (medium)')
+    expect(blank('chat')).toBe('Same as default')
+  })
+
+  it('the_effort_picker_is_off_for_a_model_that_takes_no_effort_and_follows_the_default_it_inherits', () => {
+    const form = edit(tab(), 0)
+    const effort = (name: string) => form.querySelector<HTMLSelectElement>(`select[name=${name}]`)!
+    expect(effort('step-plan-effort').disabled).toBe(false)
+    set(form, 'default-provider', 'berget')
+    expect(effort('default-effort').disabled).toBe(true)
+    expect(effort('step-plan-effort').disabled).toBe(true)
+  })
+
+  it('levels_the_model_does_not_take_cannot_be_picked', () => {
+    const declared: Provider = { ...berget, reasoningControl: 'reasoning_effort' }
+    const form = edit(tab(snapshot({ providers: [claude, declared] })), 0)
+    set(form, 'default-provider', 'berget')
+    const options = [...form.querySelector<HTMLSelectElement>('select[name=default-effort]')!.options]
+    expect(options.filter((o) => !o.disabled).map((o) => o.value)).toEqual(['', 'low', 'medium', 'high'])
   })
 
   it('add_profile_opens_a_form_past_the_end_and_cancel_closes_it', () => {

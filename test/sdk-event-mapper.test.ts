@@ -125,6 +125,22 @@ describe('SdkEventMapper', () => {
     expect(new SdkEventMapper().map(replay)).toEqual([])
   })
 
+  it('a_failed_compaction_reports_why_instead_of_passing_as_idle', () => {
+    const msg = {
+      type: 'system',
+      subtype: 'status',
+      status: null,
+      compact_result: 'failed',
+      compact_error: 'Request timed out',
+      uuid: 'u',
+      session_id: 's',
+    } as unknown as SDKMessage
+    expect(new SdkEventMapper().map(msg)).toEqual([
+      { type: 'error', message: 'Compaction failed: Request timed out', fatal: false },
+      { type: 'status', status: 'idle' },
+    ])
+  })
+
   it('result_reports_usage_cost_and_duration', () => {
     expect(new SdkEventMapper().map(resultMessage())).toEqual([
       {

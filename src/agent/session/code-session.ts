@@ -90,6 +90,8 @@ export type SessionEvent =
    * what the prompt cost before.
    */
   | { type: 'compacted'; summary?: string; preTokens?: number; postTokens?: number }
+  /** How full the conversation's window is, as the engine budgets it, and the size at which the session compacts; the newest replaces the last. */
+  | { type: 'context_usage'; usedTokens: number; windowTokens: number; compactAtTokens: number }
   /** The session's MCP servers as of now; the newest replaces the last. */
   | { type: 'mcp_servers'; servers: McpServerState[] }
   | { type: 'turn_done'; usage?: TurnUsage; durationMs?: number; isError: boolean; errors: string[] }
@@ -121,6 +123,8 @@ export interface CodeSession {
   respondToQuestion(requestId: string, outcome: QuestionOutcome): boolean
   /** Stop the current turn; the session stays usable. */
   interrupt(): Promise<void>
+  /** Fold the conversation into a summary to make room. A turn in flight carries on after it, as the same turn. */
+  compact(): void
   /** Terminate the engine and release resources. */
   dispose(): Promise<void>
 }

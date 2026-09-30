@@ -30,6 +30,7 @@ describe('a markdown board converts with nothing lost', () => {
       delivers: ['Cancel command', 'Shipped order'],
       files: ['src/orders/cancel.ts', 'src/orders/cancel.test.ts'],
       newFiles: ['src/orders/cancel.test.ts'],
+      foreignFiles: [],
       context: ['src/orders/order.ts', 'src/orders/ship.test.ts'],
       how: '',
       proves: [

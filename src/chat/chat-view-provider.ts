@@ -1,8 +1,9 @@
 import * as vscode from 'vscode'
-import { isBuild, isFeatureless, isPlanning, pickConversationalRun, type SessionManager, type SessionMode, type SessionRecord } from '../agent/session/session-manager'
-import type { ModelProfile } from '../agent/session/model-profile'
+import { isBuild, isFeatureless, isPlanning, pickConversationalRun, stepOf, type SessionManager, type SessionMode, type SessionRecord } from '../agent/session/session-manager'
+import { phaseRefusalMessage, type ModelProfile, type PhaseProfile, type Step } from '../agent/session/model-profile'
+import { PHASE_STEPS, chooseProfile, isPhaseStep, shouldApplyPhaseChoice, type PhaseChoiceStore, type PhaseStepName } from '../agent/session/phase-choices'
 import type { McpServerState, SessionEvent } from '../agent/session/code-session'
-import { blockOf, lastFailure, mostUrgent, nextStatus, type SessionStatus } from '../agent/session/session-status'
+import { appliesModelSwitchNow, blockOf, lastFailure, mostUrgent, nextStatus, type SessionStatus } from '../agent/session/session-status'
 import { readSpecState, setSpecStatus, type SpecState } from '../agent/phases/spec-file'
 import {
   PLAN_DIR,
@@ -15,6 +16,7 @@ import {
   specPath,
 } from '../agent/phases/blind-plan'
 import { assertAllRuled, assertRulingsSent, compactAppliedDecisions, decisionsFile, decisionsPath, openDecisions, pendingDecisions, readDecisions, withRuling } from '../agent/phases/decisions'
+import { contextPath, readScenarioContext } from '../agent/phases/scenario-context'
 import { listPlans } from '../agent/phases/plan-list'
 import { progressLine, reconcileKickoff } from '../agent/phases/reconcile'
 import { TASK_CARRY_ON, assertImplementable, fixKickoff, implementationStarts, taskKickoff, taskSettled } from '../agent/phases/implement'
@@ -31,6 +33,7 @@ import {
   readBoard,
   readTasks,
   recordCleanupDecision,
+  recordVerification,
   sameName,
   tasksDone,
   tasksPath,
@@ -38,7 +41,18 @@ import {
   writeBoard,
   type TasksState,
 } from '../agent/phases/tasks-file'
-import { describeCommand, runVerification, verificationDue, type CommandRunner, type VerificationFailure, type VerifyRule } from '../agent/phases/verification'
+import {
+  attributeWith,
+  countsAgainstBudget,
+  describeCommand,
+  runVerification,
+  verificationDue,
+  type CommandRunner,
+  type HeldFailure,
+  type VerificationFailure,
+  type VerifyRule,
+} from '../agent/phases/verification'
+import { FileHands } from '../agent/session/file-hands'
 import {
   addComment,
   assertApprovable,
@@ -71,6 +85,7 @@ import type {
   CleanupSweep,
   CleanupUnit,
   FromWebview,
+  PhaseProfileState,
   PlanState,
   ResumableChat,
   RunRef,
@@ -94,6 +109,8 @@ export interface Verifier {
   run: CommandRunner
   /** Consecutive failed runs handed to the implementer before the failed record is left for the user. */
   failureBudget(): number
+  /** Seconds a run whose failures are all foreign waits before running the same suites again (`kiwiAgent.verifyRetrySeconds`). */
+  retrySeconds(): number
 }
 
 /** The cleanup after a feature's tests pass: its size limits and what never gets measured, from settings, read when the run starts. */
@@ -152,6 +169,13 @@ export class ChatViewProvider {
   private readonly reviewingDocs = new Set<string>()
   /** Per running session, its MCP servers as the engine last reported them. */
   private readonly mcpServers = new Map<string, McpServerState[]>()
+  /**
+   * A chat session's model switch, picked while its turn was still in
+   * flight: held here rather than applied at once, so that turn finishes on
+   * the model it started on and the switch takes hold on the next prompt
+   * instead (B10).
+   */
+  private readonly pendingModelSwitch = new Map<string, ModelProfile>()
   /** The docs map build in flight: the run's session, where its progress goes, and the turn its caller waits on. */
   private docsMapRun: { sessionId: string; progress: (line: string) => void; done: (errors: string[]) => void } | undefined
   private readonly changed = new vscode.EventEmitter<void>()
@@ -161,7 +185,8 @@ export class ChatViewProvider {
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly sessions: SessionManager,
-    private readonly profileFor: (mode: SessionMode) => ModelProfile,
+    private readonly profileFor: (step: Step, feature?: string, attempt?: number) => PhaseProfile,
+    private readonly phaseChoices: PhaseChoiceStore,
     private readonly profileDefaults: ProfileDefaultsStore,
     private readonly registeredModels: () => ModelProfile[],
     private readonly verifier: Verifier,
@@ -170,6 +195,58 @@ export class ChatViewProvider {
     private readonly permissions: PermissionStore,
     private readonly workspaceRoot: string,
   ) {}
+
+  /**
+   * What a feature's phase runs on: its own choice when it is still
+   * configured (B1), the settings default otherwise (B2). A choice naming a
+   * profile that is gone refuses to start the phase and names what is
+   * missing; the settings default is offered in its place and runs only once
+   * the user takes it (B6).
+   */
+  private async resolvedProfile(step: Step, feature: string | undefined, attempt?: number): Promise<ModelProfile | undefined> {
+    const resolution = this.profileFor(step, feature, attempt)
+    if (resolution.kind === 'ok') return resolution.profile
+    const pick = await vscode.window.showWarningMessage(`KiwiAgent: ${phaseRefusalMessage(step, resolution)}`, `Run on "${resolution.settingsDefault.name}"`)
+    return pick ? resolution.settingsDefault : undefined
+  }
+
+  /**
+   * A choice takes effect on the phase's next turn (B3): before a live
+   * session of a feature's phase is sent another message, its profile is
+   * resolved again, and swapped in when it changed. A turn in flight is never
+   * touched — only a session that is not `underWay` is asked here, right
+   * before the next prompt — and a phase that already ended is not re-run:
+   * nothing calls this outside a `send`.
+   */
+  private async applyPhaseChoice(run: SessionRecord): Promise<void> {
+    if (!run.feature || !isPhaseStep(run.mode)) return
+    const resolution = this.profileFor(stepOf(run), run.feature, run.fixAttempt)
+    if (!shouldApplyPhaseChoice(this.statusOf(run.id), run.profile, resolution)) return
+    if (resolution.kind === 'ok') await this.sessions.setProfile(run.id, resolution.profile)
+  }
+
+  /**
+   * A chat session's own model switch (B9): applied at once when nothing is
+   * in flight, held for the next prompt when the session is `underWay`, so a
+   * turn already running finishes on the model it started on (B10) instead of
+   * having its engine torn down under it.
+   */
+  private async switchModel(id: string, profile: ModelProfile): Promise<void> {
+    if (!appliesModelSwitchNow(this.statusOf(id))) {
+      this.pendingModelSwitch.set(id, profile)
+      return
+    }
+    this.pendingModelSwitch.delete(id)
+    await this.sessions.setProfile(id, profile)
+  }
+
+  /** A model switch picked mid-turn, applied now that the next prompt is about to go out (B10). */
+  private async applyPendingModelSwitch(run: SessionRecord): Promise<void> {
+    const pending = this.pendingModelSwitch.get(run.id)
+    if (!pending) return
+    this.pendingModelSwitch.delete(run.id)
+    await this.sessions.setProfile(run.id, pending)
+  }
 
   /** Whether the session has an editor tab open, its own or its feature's. */
   isOpen(sessionId: string): boolean {
@@ -221,9 +298,11 @@ export class ChatViewProvider {
     )
   }
 
-  async newSession(mode: SessionMode, feature?: string, prompt?: string, host?: ChatPanel): Promise<SessionRecord> {
+  async newSession(mode: SessionMode, feature?: string, prompt?: string, host?: ChatPanel): Promise<SessionRecord | undefined> {
     if (!isFeatureless(mode) && !feature) throw new Error(`A ${mode} session needs a feature name`)
-    const record = await this.sessions.create(this.profileFor(mode), mode, feature)
+    const profile = await this.resolvedProfile(mode, feature)
+    if (!profile) return undefined
+    const record = await this.sessions.create(profile, mode, feature)
     // Approving the plan is the consent for the writes it maps out, so the switch starts on where a build session carries it out.
     if (mode === 'implement' || mode === 'cleanup') this.allowWrites.setEnabled(record.id, true)
     return await this.activate(record, prompt, host)
@@ -351,11 +430,10 @@ export class ChatViewProvider {
       void this.sendState()
     }
     if (event.type === 'ended') this.mcpServers.delete(sessionId)
+    // A run under the plan can hold the floor too, and whether its conversation can be compacted follows its engine.
+    if (event.type === 'session_started' || event.type === 'ended') void this.sendState()
     if (record?.parentId) return
-    if (event.type === 'session_started' || event.type === 'ended') {
-      void this.sendState()
-      this.changed.fire()
-    }
+    if (event.type === 'session_started' || event.type === 'ended') this.changed.fire()
     if (event.type === 'tool_result' && record?.feature && this.isOpen(record.id)) {
       // The session just wrote a plan file (a revision, proposals, a task's progress); the plan bar and view must follow.
       void this.sendState()
@@ -428,8 +506,10 @@ export class ChatViewProvider {
     if (record.mode !== 'plan' || !record.feature || this.sessions.liveChildOf(record.id)) return
     const spec = await readSpecState(specPath(this.workspaceRoot, record.feature))
     if (!spec.exists || spec.status !== 'approved') return
+    const profile = await this.resolvedProfile('reconcile', record.feature)
+    if (!profile) return
     const previous = this.sessions.latest('reconcile', record.feature)
-    const child = await this.sessions.create(this.profileFor('reconcile'), 'reconcile', record.feature, { parentId: record.id, continues: previous })
+    const child = await this.sessions.create(profile, 'reconcile', record.feature, { parentId: record.id, continues: previous })
     this.checks.set(record.id, { live: true, text: 'Checking the spec against the code…' })
     await this.sendState()
     await this.sessions.send(child.id, reconcileKickoff(child.engineSessionId !== undefined))
@@ -480,7 +560,7 @@ export class ChatViewProvider {
     const path = tasksPath(this.workspaceRoot, feature)
     const existing = await readBoard(path)
     await mkdir(dirname(path), { recursive: true })
-    await writeBoard(path, deriveBoard(parseSpec(spec.body), existing))
+    await writeBoard(path, deriveBoard(parseSpec(spec.body), existing, await readScenarioContext(contextPath(this.workspaceRoot, feature))))
     await this.sendState()
     if (existing) return this.implementAfterApproval(plan)
     this.reviewingDocs.add(feature)
@@ -509,7 +589,7 @@ export class ChatViewProvider {
     if (!spec.exists || !tasksStale(spec, await readTasks(path))) return
     const existing = await readBoard(path)
     if (!existing) return
-    await writeBoard(path, deriveBoard(parseSpec(spec.body), existing))
+    await writeBoard(path, deriveBoard(parseSpec(spec.body), existing, await readScenarioContext(contextPath(this.workspaceRoot, feature))))
     await this.sendState()
   }
 
@@ -528,26 +608,34 @@ export class ChatViewProvider {
     await this.sendState()
     let text: string
     let passed = false
+    let held: HeldFailure[] = []
     try {
+      const hands = new FileHands(this.workspaceRoot, `verify-${feature}`, 'implement', feature)
       const outcome = await runVerification({
         cwd: this.workspaceRoot,
         feature,
         rules: this.verifier.rules(),
         run: this.verifier.run,
+        attribute: attributeWith(hands, feature, this.workspaceRoot),
+        retry: { seconds: this.verifier.retrySeconds(), wait: (ms) => new Promise((r) => setTimeout(r, ms)) },
         onStart: (command) => {
           this.verifications.set(feature, { live: true, text: `Running ${describeCommand(command, this.workspaceRoot)}` })
           void this.sendState()
         },
       })
+      held = outcome.held
       if (outcome.record.ok) {
         this.verifyFailures.delete(feature)
         text = `Tests passed: ${outcome.record.text}`
         passed = true
+      } else if (outcome.failures.length === 0 && held.length > 0) {
+        // All foreign on the retry too (`Held rather than verified`): stays in verification, spared from the budget, and asked about below.
+        text = `Tests failed on files another hand changed: ${outcome.record.text}`
       } else {
         const failures = (this.verifyFailures.get(feature) ?? 0) + 1
         this.verifyFailures.set(feature, failures)
         text = `Tests failed: ${outcome.record.text}`
-        if (failures <= this.verifier.failureBudget()) await this.handToImplementer(feature, outcome.failures)
+        if (failures <= this.verifier.failureBudget()) await this.handToImplementer(feature, outcome.failures, failures)
         else text += ` (${failures} in a row; fix it and verify again)`
       }
     } catch (error) {
@@ -556,6 +644,7 @@ export class ChatViewProvider {
     this.verifications.set(feature, { live: false, text })
     await this.sendState()
     this.changed.fire()
+    if (held.length > 0) await this.askAboutForeignFailures(feature, held)
     if (passed) await this.sweepForCleanup(feature)
   }
 
@@ -615,8 +704,10 @@ export class ChatViewProvider {
     const spec = await readSpecState(specPath(this.workspaceRoot, feature))
     if (!spec.exists) return
     // Started by the host, so the run's only board call is the one that records how the task ended.
+    const profile = await this.resolvedProfile('implement', feature)
+    if (!profile) return
     const started = await changeBoard(path, (b) => updateTask(b, task.name, { state: 'in_progress' }))
-    const run = await this.sessions.create(this.profileFor('implement'), 'implement', feature, { parentId: plan.id, task: task.name })
+    const run = await this.sessions.create(profile, 'implement', feature, { parentId: plan.id, task: task.name })
     this.allowWrites.setEnabled(run.id, true)
     await this.sendState()
     const decisions = await readDecisions(decisionsPath(this.workspaceRoot, feature))
@@ -656,15 +747,49 @@ export class ChatViewProvider {
   /**
    * A failed sweep goes to a run of its own under the plan's tab, started on
    * the failure and the tasks it names rather than on whichever task ran last.
+   * `attempt` is how many sweeps in a row have failed: each one tries harder.
    */
-  private async handToImplementer(feature: string, failures: VerificationFailure[]): Promise<void> {
+  private async handToImplementer(feature: string, failures: VerificationFailure[], attempt: number): Promise<void> {
     const board = await readBoard(tasksPath(this.workspaceRoot, feature))
     if (!board) return
     const plan = this.sessions.latest('plan', feature)
-    const run = await this.sessions.create(this.profileFor('implement'), 'implement', feature, plan ? { parentId: plan.id } : {})
+    const profile = await this.resolvedProfile('fix', feature, attempt)
+    if (!profile) return
+    const run = await this.sessions.create(profile, 'implement', feature, { ...(plan ? { parentId: plan.id } : {}), fixAttempt: attempt })
     this.allowWrites.setEnabled(run.id, true)
     await this.sendState()
     await this.sessions.send(run.id, fixKickoff(feature, board, failures, this.workspaceRoot))
+  }
+
+  /**
+   * `Held rather than verified`: the run's failures were foreign both times
+   * and are already recorded on the board, naming the files and the hand.
+   * The user, not the budget, decides what happens to them: run the suites
+   * again, hand them to the implementer as if they were the feature's own,
+   * or accept the feature with them standing.
+   */
+  private async askAboutForeignFailures(feature: string, held: HeldFailure[]): Promise<void> {
+    const lines = held.map((h) => `${describeCommand(h, this.workspaceRoot)} — ${h.files.join(', ')}: ${h.hand}`)
+    const pick = await vscode.window.showWarningMessage(
+      `KiwiAgent: verification for "${feature}" failed only on files another hand changed:\n${lines.join('\n')}`,
+      { modal: true },
+      'Run again',
+      'Hand to implementer anyway',
+      'Accept',
+    )
+    if (pick === 'Run again') await this.verify(feature, true)
+    else if (pick === 'Hand to implementer anyway') await this.handToImplementer(feature, held, this.verifyFailures.get(feature) ?? 1)
+    else if (pick === 'Accept') {
+      await recordVerification(tasksPath(this.workspaceRoot, feature), {
+        at: new Date().toISOString(),
+        ok: true,
+        text: `Accepted despite another hand: ${held.map((h) => describeCommand(h, this.workspaceRoot)).join('; ')}`,
+      })
+      this.verifications.set(feature, { live: false, text: 'Accepted with tests failing on files another hand changed.' })
+      await this.sendState()
+      this.changed.fire()
+      await this.sweepForCleanup(feature)
+    }
   }
 
   /**
@@ -718,7 +843,9 @@ export class ChatViewProvider {
     const busy = this.sessions.liveChildOf(parent.id)
     if (busy) return refuse(`"${busy.title}" is still running under the plan; close it first`)
     const paths = [...new Set(flagged.map((u) => relativeTo(u.path)))]
-    const child = await this.sessions.create(this.profileFor('cleanup'), 'cleanup', feature, { parentId: parent.id, files: paths })
+    const profile = await this.resolvedProfile('cleanup', feature)
+    if (!profile) return
+    const child = await this.sessions.create(profile, 'cleanup', feature, { parentId: parent.id, files: paths })
     this.cleanups.set(feature, { live: true, text: 'Splitting oversized units…' })
     await this.sendState()
     await this.sessions.send(child.id, cleanupKickoff(sizeReport(this.workspaceRoot, flagged), false))
@@ -877,7 +1004,10 @@ export class ChatViewProvider {
   /** One run for the whole build: it reads the changed docs, writes an entry each, and is gone when its turn ends. */
   private async describeDocs(docs: string[], onProgress: (line: string) => void): Promise<void> {
     // The docs it was handed are its whole read scope: an unchanged doc costs nothing, and the code is out of reach.
-    const record = await this.sessions.create(this.profileFor('docs-map'), 'docs-map', undefined, { files: docs })
+    // Featureless, so this always resolves to the settings default (B2) and never refuses (B6).
+    const profile = await this.resolvedProfile('docs-map', undefined)
+    if (!profile) throw new Error('docs-map could not resolve a model profile')
+    const record = await this.sessions.create(profile, 'docs-map', undefined, { files: docs })
     const finished = new Promise<string[]>((resolve) => {
       this.docsMapRun = { sessionId: record.id, progress: onProgress, done: resolve }
     })
@@ -984,7 +1114,12 @@ export class ChatViewProvider {
           return
         }
         // The tab's current run is what the person is talking to; the runs before it are history, and hear nothing.
-        await this.sessions.send(this.currentRun(shown).id, text)
+        const run = this.currentRun(shown)
+        // A choice made since this run last spoke takes effect now, on its next turn (B3).
+        await this.applyPhaseChoice(run)
+        // A model switch picked while a turn of this chat session was in flight takes effect now (B10).
+        await this.applyPendingModelSwitch(run)
+        await this.sessions.send(run.id, text)
         return
       }
       case 'link_open_file': {
@@ -1017,13 +1152,16 @@ export class ChatViewProvider {
         // A task run building holds the floor, so Stop reaches it.
         if (shown) await this.sessions.interrupt(this.currentRun(shown).id)
         return
+      case 'compact':
+        if (shown) this.sessions.compact(this.currentRun(shown).id)
+        return
       case 'set_allow_writes':
         if (shown) this.allowWrites.setEnabled(this.currentRun(shown).id, message.enabled)
         void this.sendState()
         return
       case 'set_session_model': {
         const profile = this.registeredModels().find((m) => m.name === message.name)
-        if (shown && profile) await this.sessions.setProfile(shown.id, profile)
+        if (shown && profile) await this.switchModel(shown.id, profile)
         void this.sendState()
         return
       }
@@ -1038,6 +1176,13 @@ export class ChatViewProvider {
         await this.profileDefaults.set(message.name)
         await this.sendState()
         return
+      case 'set_phase_profile': {
+        const record = this.planRecordOf(shown)
+        if (!record?.feature) return
+        await chooseProfile(this.phaseChoices, record.feature, message.step, message.name)
+        await this.sendState()
+        return
+      }
       case 'switch_session':
         await this.open(message.sessionId, entry)
         return
@@ -1338,7 +1483,14 @@ export class ChatViewProvider {
       atWork: runs.some((r) => r.status === 'planning' || r.status === 'implementing') || check?.live === true || verification?.live === true || cleanup?.live === true,
       ...(blocked ? { blocked } : {}),
       ...(failure ? { failure } : {}),
+      phaseProfiles: PHASE_STEPS.map((step) => this.phaseProfileState(step, feature)),
     }
+  }
+
+  /** One phase's row for the plan view (B8): the profile it will run on next, or the configuration a choice named that is gone (B6). */
+  private phaseProfileState(step: PhaseStepName, feature: string): PhaseProfileState {
+    const resolution = this.profileFor(step, feature)
+    return resolution.kind === 'ok' ? { step, name: resolution.profile.name, isDefault: resolution.isDefault } : { step, missing: resolution.profileName }
   }
 
   /**
@@ -1425,6 +1577,7 @@ export class ChatViewProvider {
         ...(tab ? { tab } : {}),
         ...(run && writesAsked ? { allowWrites: this.allowWrites.isEnabled(run.id) } : {}),
         ...(run && this.mcpServers.has(run.id) ? { mcp: this.mcpServers.get(run.id)! } : {}),
+        compactable: run !== undefined && this.sessions.isLive(run.id),
         ...(plan ? { plan } : {}),
         ...(run ? { currentRun: run.id } : {}),
         ...shared,

@@ -1,7 +1,8 @@
 import * as vscode from 'vscode'
 import type { SessionManager, SessionMode, SessionRecord } from '../agent/session/session-manager'
 import type { SessionStatus } from '../agent/session/session-status'
-import { sessionGroups, type SessionGroups } from './session-groups'
+import { listPlans } from '../agent/phases/plan-list'
+import { sessionGroups, type PlanEntry, type SessionGroups } from './session-groups'
 
 const MODE_LABEL: Record<SessionMode, string> = {
   chat: 'Chat',
@@ -30,7 +31,17 @@ const GROUP: Record<keyof SessionGroups, { label: string; icon: string }> = {
   plans: { label: 'Plans', icon: 'checklist' },
 }
 
-export type SessionNode = { kind: 'group'; group: keyof SessionGroups } | { kind: 'session'; record: SessionRecord }
+export type SessionNode =
+  | { kind: 'group'; group: keyof SessionGroups }
+  | { kind: 'session'; record: SessionRecord }
+  | { kind: 'plan'; plan: PlanEntry }
+
+/** The session a node stands for, if it has one: what stop and remove act on. */
+export function recordOf(node: SessionNode): SessionRecord | undefined {
+  if (node.kind === 'session') return node.record
+  if (node.kind === 'plan') return node.plan.record
+  return undefined
+}
 
 /** The Sessions view: the chats and the plans in a folder each, with their status; click opens one in its own editor tab. */
 export class SessionsTree implements vscode.TreeDataProvider<SessionNode> {
@@ -39,6 +50,7 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode> {
 
   constructor(
     private readonly sessions: SessionManager,
+    private readonly workspaceRoot: string,
     private readonly isOpen: (sessionId: string) => boolean,
     private readonly statusOf: (sessionId: string) => SessionStatus,
   ) {}
@@ -47,15 +59,24 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode> {
     this.changed.fire()
   }
 
-  getChildren(node?: SessionNode): SessionNode[] {
-    const groups = sessionGroups(this.sessions.list())
+  async getChildren(node?: SessionNode): Promise<SessionNode[]> {
+    const groups = sessionGroups(this.sessions.list(), await listPlans(this.workspaceRoot))
     if (!node) return (['chats', 'plans'] as const).filter((g) => groups[g].length > 0).map((group) => ({ kind: 'group', group }))
-    if (node.kind === 'group') return groups[node.group].map((record) => ({ kind: 'session', record }))
-    return []
+    if (node.kind !== 'group') return []
+    if (node.group === 'chats') return groups.chats.map((record) => ({ kind: 'session', record }))
+    // A plan the planner has not written a spec for yet is only its session.
+    return groups.plans.map((plan) => (plan.status === undefined && plan.record ? { kind: 'session', record: plan.record } : { kind: 'plan', plan }))
   }
 
   getTreeItem(node: SessionNode): vscode.TreeItem {
-    return node.kind === 'group' ? this.groupItem(node.group) : this.sessionItem(node.record)
+    switch (node.kind) {
+      case 'group':
+        return this.groupItem(node.group)
+      case 'session':
+        return this.sessionItem(node.record)
+      case 'plan':
+        return this.planItem(node.plan)
+    }
   }
 
   private groupItem(group: keyof SessionGroups): vscode.TreeItem {
@@ -77,6 +98,22 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode> {
     item.tooltip = `${MODE_LABEL[record.mode]} · ${record.profile.name} · ${status.replace('_', ' ')}`
     item.contextValue = 'session'
     item.command = { command: 'kiwiAgent.openSession', title: 'Open Session', arguments: [record.id] }
+    return item
+  }
+
+  /** Opened by its feature, so a spec whose session is gone starts a planner on it rather than showing nothing. */
+  private planItem(plan: PlanEntry): vscode.TreeItem {
+    const stage = plan.status ?? 'no spec yet'
+    const item = plan.record ? this.sessionItem(plan.record) : new vscode.TreeItem(plan.feature)
+    item.id = `plan:${plan.feature}`
+    item.label = plan.feature
+    item.description = plan.record ? `${stage} · ${item.description as string}` : stage
+    if (!plan.record) {
+      item.iconPath = new vscode.ThemeIcon(STATUS_ICON.idle.icon)
+      item.tooltip = `Plan · ${stage}`
+      item.contextValue = 'plan'
+    }
+    item.command = { command: 'kiwiAgent.resumePlan', title: 'Open Plan', arguments: [plan.feature] }
     return item
   }
 }

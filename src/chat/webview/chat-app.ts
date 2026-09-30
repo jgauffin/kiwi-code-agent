@@ -10,10 +10,12 @@ import { PlanTabs } from './plan-tabs'
 import { PlanView } from './plan-view'
 import { STEP_RUNS, planStep, tabFor, type Step, type Tab } from './plan-step'
 import { LinkedFilesRow } from './linked-files-row'
+import type { ContextUsage } from './context-meter'
 import {
   AllowWritesToggledEvent,
   CleanupDecidedEvent,
   CleanupStoppedEvent,
+  CompactRequestedEvent,
   ContinueInChatRequestedEvent,
   DefaultProfileChangedEvent,
   ImplementRequestedEvent,
@@ -22,6 +24,7 @@ import {
   McpReconnectRequestedEvent,
   NewSessionRequestedEvent,
   PermissionDecidedEvent,
+  PhaseProfileChangedEvent,
   PlanFocusRequestedEvent,
   PlanResumeRequestedEvent,
   PlanStepSelectedEvent,
@@ -66,6 +69,8 @@ export class ChatApp extends HTMLElement {
   private tabId: string | undefined
   private creating = false
   private plan: PlanState | undefined
+  /** Every configured profile's name, for the plan bar's per-phase pickers (B1). */
+  private profileNames: string[] = []
   private view: ViewTab = 'chat'
   /** The plan tab last shown, so leaving the chat comes back to it. */
   private planTab: Tab = 'spec'
@@ -77,6 +82,9 @@ export class ChatApp extends HTMLElement {
   private readonly spoke = new Set<string>()
   /** The row waiting for the host to name the open file. */
   private linkTarget: LinkedFilesRow | undefined
+  /** Each run's window as its engine last reported it; the composer shows the one of the run it reaches. */
+  private readonly contextUsage = new Map<string, ContextUsage>()
+  private currentRun: string | undefined
 
   connectedCallback(): void {
     if (this.childElementCount > 0) return
@@ -119,6 +127,7 @@ export class ChatApp extends HTMLElement {
       post({ type: 'link_open_file' })
     })
     this.addEventListener(InterruptRequestedEvent.type, () => post({ type: 'interrupt' }))
+    this.addEventListener(CompactRequestedEvent.type, () => post({ type: 'compact' }))
     this.addEventListener(PermissionDecidedEvent.type, (e) => {
       const sessionId = this.runOf(e.target)
       if (sessionId) post({ type: 'permission', sessionId, requestId: e.requestId, decision: e.decision })
@@ -134,6 +143,7 @@ export class ChatApp extends HTMLElement {
     this.addEventListener(SessionSelectedEvent.type, (e) => post({ type: 'switch_session', sessionId: e.sessionId }))
     this.addEventListener(PlanResumeRequestedEvent.type, (e) => post({ type: 'resume_plan', feature: e.feature }))
     this.addEventListener(DefaultProfileChangedEvent.type, (e) => post({ type: 'set_default_profile', name: e.name }))
+    this.addEventListener(PhaseProfileChangedEvent.type, (e) => post({ type: 'set_phase_profile', step: e.step, ...(e.name ? { name: e.name } : {}) }))
     this.addEventListener(NewSessionRequestedEvent.type, (e) =>
       post({
         type: 'new_session',
@@ -159,12 +169,23 @@ export class ChatApp extends HTMLElement {
         // What the tab shows follows what it is: a session, or no session yet.
         if ((tab === undefined) !== this.creating) this.showCreating(tab === undefined)
         this.newSession.update(message.profiles, { plans: message.plans, chats: message.chats, unfiled: message.unfiled })
+        this.profileNames = message.profiles.names
         this.composer.setSwitches({
           allowWrites: message.allowWrites,
           mcp: message.mcp,
-          model: tab?.mode === 'chat' ? { current: tab.profileName, options: message.models.map((m) => m.name) } : undefined,
+          // A chat session's model is its own to switch (B9); a plan session's phase names its profile
+          // with no switch here — that lives on the plan bar, one per phase (E2).
+          model:
+            tab?.mode === 'chat'
+              ? { current: tab.profileName, options: message.models.map((m) => m.name) }
+              : tab && message.plan
+                ? { current: tab.profileName }
+                : undefined,
           continueInChat: tab?.mode === 'docs',
+          compactable: message.compactable ?? false,
         })
+        this.currentRun = message.currentRun
+        this.showContextUsage()
         this.plan = message.plan
         const current = message.currentRun ? this.sections.get(message.currentRun) : undefined
         if (current) this.makeCurrent(current)
@@ -176,6 +197,15 @@ export class ChatApp extends HTMLElement {
         if (message.sessionId !== this.tabId) return
         this.showCreating(false)
         this.drawRuns(message.runs)
+        this.contextUsage.clear()
+        for (const run of message.runs) {
+          const last = [...run.events].reverse().find((e) => e.type === 'context_usage')
+          if (last?.type === 'context_usage') {
+            const { usedTokens, windowTokens, compactAtTokens } = last
+            this.contextUsage.set(run.sessionId, { usedTokens, windowTokens, compactAtTokens })
+          }
+        }
+        this.showContextUsage()
         this.composer.setHeldByQuestion(this.anyOpenQuestion)
         // A spec that exists is what the session is about; the conversation is one click away.
         this.chatMoved = false
@@ -186,6 +216,11 @@ export class ChatApp extends HTMLElement {
         if (message.sessionId !== this.tabId) return
         const section = this.sectionFor(message.run)
         section.transcript.apply(message.event)
+        if (message.event.type === 'context_usage') {
+          const { usedTokens, windowTokens, compactAtTokens } = message.event
+          this.contextUsage.set(message.run.sessionId, { usedTokens, windowTokens, compactAtTokens })
+          this.showContextUsage()
+        }
         this.composer.setHeldByQuestion(this.anyOpenQuestion)
         // A run the reader has folded away still says that it moved, on its own header.
         if (!section.details.open) section.details.classList.add('moved')
@@ -255,6 +290,10 @@ export class ChatApp extends HTMLElement {
         section.details.classList.remove('moved')
       } else if (!section.details.classList.contains('moved')) section.details.open = false
     }
+  }
+
+  private showContextUsage(): void {
+    this.composer.setContext(this.currentRun ? this.contextUsage.get(this.currentRun) : undefined)
   }
 
   private get anyOpenQuestion(): boolean {
@@ -365,7 +404,7 @@ export class ChatApp extends HTMLElement {
     this.planView.hidden = !planShown
     this.runs.hidden = this.creating || planShown
     this.scopeRuns()
-    this.planBar.update(plan)
+    this.planBar.update(plan, this.profileNames)
     this.planTabs.update(plan, planShown ? this.view : 'chat', this.chatMoved)
     this.planView.update(plan, this.planTab)
   }

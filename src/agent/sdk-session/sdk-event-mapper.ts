@@ -44,8 +44,11 @@ export class SdkEventMapper {
             engineVersion: msg.claude_code_version,
           },
         ]
-      case 'status':
-        return [{ type: 'status', status: msg.status ?? 'idle' }]
+      case 'status': {
+        const status: SessionEvent = { type: 'status', status: msg.status ?? 'idle' }
+        if (msg.compact_result !== 'failed') return [status]
+        return [{ type: 'error', message: `Compaction failed: ${msg.compact_error ?? 'no reason given'}`, fatal: false }, status]
+      }
       case 'compact_boundary':
         return [
           {

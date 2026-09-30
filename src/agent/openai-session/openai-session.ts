@@ -6,13 +6,14 @@ import type { ModelProfile } from '../session/model-profile'
 import { AsyncQueue } from '../session/async-queue'
 import type { McpServers } from '../mcp/mcp-config'
 import type { McpToolHost } from '../mcp/mcp-tool-host'
-import type { ChatCompletionClient, ChatMessage, ToolCall, ToolDefinition, Usage } from './chat-messages'
+import type { ChatCompletionClient, ChatMessage, CompletionRequest, ToolCall, ToolDefinition, Usage } from './chat-messages'
 import { ReadTracker } from './tools/read-tracker'
 import { toDefinition, type Tool, type ToolContext, type ToolOutput } from './tools/tool'
 import { UNANSWERED_TOOL_RESULT } from './history'
 import { isAbsolute, resolve } from 'node:path'
-import { COMPACT_AT, compact, DEFAULT_CONTEXT_WINDOW, isContextTooLong, KEEP_SHARE, pathsReadIn, SUMMARY_MAX_TOKENS, SUMMARY_PROMPT } from './compaction'
+import { COMPACT_AT, compact, DEFAULT_CONTEXT_WINDOW, estimateTokens, isContextTooLong, KEEP_SHARE, pathsReadIn, SUMMARY_MAX_TOKENS, SUMMARY_PROMPT } from './compaction'
 import { FileLedger } from './file-ledger'
+import { compactionPoint } from '../session/compaction-point'
 
 /**
  * Room for a reasoning model to think through a task and then write a whole
@@ -20,6 +21,9 @@ import { FileLedger } from './file-ledger'
  * alone and stop without acting.
  */
 const MAX_OUTPUT_TOKENS = 32768
+
+/** A compaction waiting its place in the queue among the user's turns. */
+const COMPACT = Symbol('compact')
 
 export type OpenAiSessionOptions = {
   id: string
@@ -35,6 +39,10 @@ export type OpenAiSessionOptions = {
   maxRoundsPerTurn?: number
   /** Tokens this model's context holds; a model nobody configured is treated as 128k. */
   contextWindow?: number
+  /** Compacts once the prompt is this large, when that comes before the window's share; absent or 0 means the share alone. */
+  compactAtTokens?: number
+  /** The profile's effort as this endpoint takes it; absent where it takes none. */
+  reasoningEffort?: CompletionRequest['reasoningEffort']
   /** The workspace's MCP servers and the host that connects to them; absent on a session that takes none. */
   mcp?: { host: McpToolHost; servers: McpServers }
 }
@@ -49,7 +57,10 @@ export class OpenAiSession implements CodeSession {
   readonly profile: ModelProfile
   private readonly output = new AsyncQueue<SessionEvent>()
   private readonly messages: ChatMessage[]
-  private readonly queue: string[] = []
+  /** User turns waiting, and compactions asked for while no turn ran. */
+  private readonly queue: (string | typeof COMPACT)[] = []
+  /** A compaction asked for during a turn; it runs before the turn's next request. */
+  private compactRequested = false
   private readonly files = new ReadTracker()
   /** Where the session has been in the workspace; outlives the messages that say so. */
   private readonly ledger = new FileLedger()
@@ -90,6 +101,16 @@ export class OpenAiSession implements CodeSession {
     if (this.disposed) return
     this.queue.push(text)
     if (!this.running) void this.drain()
+  }
+
+  compact(): void {
+    if (this.disposed) return
+    if (this.running) {
+      this.compactRequested = true
+      return
+    }
+    this.queue.push(COMPACT)
+    void this.drain()
   }
 
   events(): AsyncIterable<SessionEvent> {
@@ -154,8 +175,12 @@ export class OpenAiSession implements CodeSession {
     try {
       await this.mcpChain
       while (this.queue.length > 0 && !this.disposed) {
-        const text = this.queue.shift()!
-        this.messages.push({ role: 'user', content: text })
+        const next = this.queue.shift()!
+        if (next === COMPACT) {
+          await this.compactBetweenTurns()
+          continue
+        }
+        this.messages.push({ role: 'user', content: next })
         await this.runTurn()
       }
     } finally {
@@ -178,7 +203,11 @@ export class OpenAiSession implements CodeSession {
           this.emit({ type: 'error', message: `Stopped after ${maxRounds} tool rounds in one turn`, fatal: false, resumable: true })
           return this.finishTurn(usage, started, true, ['max tool rounds'])
         }
-        if (this.promptTokens >= this.contextWindow * COMPACT_AT) await this.compactNow(signal, usage)
+        if (this.compactRequested || this.promptTokens >= this.compactAt) {
+          const asked = this.compactRequested
+          this.compactRequested = false
+          if (!(await this.compactNow(signal, usage)) && asked) this.emitError('Nothing old enough to fold into a summary yet')
+        }
         this.emit({ type: 'status', status: 'requesting' })
         let completion: Awaited<ReturnType<OpenAiSession['complete']>>
         try {
@@ -229,6 +258,7 @@ export class OpenAiSession implements CodeSession {
       messages: this.messages,
       tools: this.definitions,
       maxTokens: MAX_OUTPUT_TOKENS,
+      ...(this.options.reasoningEffort ? { reasoningEffort: this.options.reasoningEffort } : {}),
       signal,
     })) {
       switch (delta.type) {
@@ -252,6 +282,7 @@ export class OpenAiSession implements CodeSession {
           if (delta.usage) {
             addUsage(usage, delta.usage)
             this.promptTokens = delta.usage.promptTokens
+            this.reportUsage(this.promptTokens)
           }
           finishReason = delta.finishReason
           break
@@ -283,14 +314,38 @@ export class OpenAiSession implements CodeSession {
     this.emit({ type: 'status', status: 'compacting' })
     const before = this.promptTokens
     const ledger = this.ledger.render(this.options.cwd)
-    const result = await compact(this.messages, (t) => this.summarise(t, signal, usage), this.contextWindow * KEEP_SHARE, ledger)
+    // The kept tail scales with where compaction happens, so a ceiling well below the window still has something to fold.
+    const keepBudget = this.compactAt * (KEEP_SHARE / COMPACT_AT)
+    const result = await compact(this.messages, (t) => this.summarise(t, signal, usage), keepBudget, ledger)
     if (!result) return false
     this.messages.splice(0, this.messages.length, ...result.messages)
     // A file whose read was folded away is one the model can no longer see, whatever the ledger says it once knew.
     this.files.forgetExcept(pathsReadIn(result.kept).map((p) => (isAbsolute(p) ? p : resolve(this.options.cwd, p))))
     this.promptTokens = 0
     this.emit({ type: 'compacted', summary: result.summary, preTokens: before })
+    // No request has measured the folded conversation yet; the estimate stands in until one does.
+    this.reportUsage(this.messages.reduce((sum, m) => sum + estimateTokens(m), 0))
     return true
+  }
+
+  private get compactAt(): number {
+    return compactionPoint(this.contextWindow, COMPACT_AT, this.options.compactAtTokens)
+  }
+
+  private reportUsage(usedTokens: number): void {
+    this.emit({ type: 'context_usage', usedTokens, windowTokens: this.contextWindow, compactAtTokens: this.compactAt })
+  }
+
+  /** A compaction the user asked for while no turn ran; what it costs is not a turn's, so it ends without one. */
+  private async compactBetweenTurns(): Promise<void> {
+    this.turnAbort = new AbortController()
+    const usage: TurnUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
+    try {
+      if (!(await this.compactNow(this.turnAbort.signal, usage))) this.emitError('Nothing old enough to fold into a summary yet')
+    } catch (error) {
+      if (!this.turnAbort.signal.aborted) this.emitError(`Compaction failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+    this.emit({ type: 'status', status: 'idle' })
   }
 
   /** The summary that stands in for the folded turns, written by the session's own model without tools. */

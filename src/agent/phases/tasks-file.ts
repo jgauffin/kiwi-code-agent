@@ -31,7 +31,9 @@ export type Task = {
   files: string[]
   /** Of `files`, those a mapping run said the task creates; empty on a derived board. */
   newFiles: string[]
-  /** Paths a mapping run read to reach the task; empty on a derived board. */
+  /** Of `files`, those whose current content a foreign hand left rather than this feature's own runs: recorded, not folded silently into the task's work. */
+  foreignFiles: string[]
+  /** Paths the task starts from: where the spec check found its scenario is built, or what a mapping run read on an older board. */
   context: string[]
   /** A mapping run's note to the implementer, markdown; empty on a derived board. */
   how: string
@@ -48,8 +50,8 @@ export type Task = {
   removed: boolean
 }
 
-/** One run of the test commands. */
-export type VerificationRecord = { at: string; ok: boolean; text: string }
+/** One run of the test commands. `foreign`, present only when the run ended in failures that were foreign both times, names the files and the hand behind each: what `Held rather than verified` shows on the board. */
+export type VerificationRecord = { at: string; ok: boolean; text: string; foreign?: { command: string; files: string[]; hand: string }[] }
 
 /**
  * What the user said about the cleanup the size sweep offered: put off until
@@ -103,6 +105,7 @@ const boardSchema = z.object({
       group: z.string().optional(),
       files: z.array(z.string()),
       newFiles: z.array(z.string()).default([]),
+      foreignFiles: z.array(z.string()).default([]),
       context: z.array(z.string()).default([]),
       how: z.string().default(''),
       proves: z.array(z.object({ item: z.string(), file: z.string(), test: z.string() })),
@@ -113,7 +116,14 @@ const boardSchema = z.object({
       removed: z.boolean(),
     }),
   ),
-  verification: z.array(z.object({ at: z.string(), ok: z.boolean(), text: z.string() })),
+  verification: z.array(
+    z.object({
+      at: z.string(),
+      ok: z.boolean(),
+      text: z.string(),
+      foreign: z.array(z.object({ command: z.string(), files: z.array(z.string()), hand: z.string() })).optional(),
+    }),
+  ),
 })
 
 /** A board that does not fit the shape is refused with the field that broke it, never read half. */
@@ -132,7 +142,7 @@ export function parseBoard(text: string, path = 'tasks board'): TaskBoard {
       ...(group !== undefined ? { group } : {}),
       ...(blockedReason !== undefined ? { blockedReason } : {}),
     })),
-    verification,
+    verification: verification.map(({ foreign, ...record }) => ({ ...record, ...(foreign !== undefined ? { foreign } : {}) })),
   }
 }
 
@@ -212,6 +222,8 @@ export type TaskProgress = {
   state?: TaskState
   blockedReason?: string
   files?: string[]
+  /** Of `files`, those a foreign hand's change was found on; recomputed by the caller whenever `files` is given. */
+  foreignFiles?: string[]
   proves?: Proof[]
   note?: string
   built?: string
@@ -239,6 +251,8 @@ export function updateTask(board: TaskBoard, name: string, change: TaskProgress)
     ...(state === 'blocked' ? { blockedReason: reason! } : {}),
     files,
     newFiles: current.newFiles.filter((f) => files.includes(f)),
+    // Not counted as the task's own work by staying silent: a foreign change to a named file is recorded here instead, and drops off once the task no longer names the file.
+    foreignFiles: (change.foreignFiles ?? current.foreignFiles).filter((f) => files.includes(f)),
     proves: change.proves ?? current.proves,
     note: change.note ?? current.note,
     built: change.built ?? current.built,
@@ -252,9 +266,12 @@ export function updateTask(board: TaskBoard, name: string, change: TaskProgress)
  * delivered by construction. Deriving again keeps each task's progress and
  * files; a scenario gone from the spec leaves its task marked removed. A task
  * a mapping run wrote before boards were derived keeps its rules once work on
- * it has started, and gives way while it is still open.
+ * it has started, and gives way while it is still open. `context` is where the
+ * spec check found each scenario is built, by scenario title: the newest check
+ * replaces a task's, and a scenario it left out keeps what the task had.
  */
-export function deriveBoard(spec: Spec, board: TaskBoard = emptyBoard()): TaskBoard {
+export function deriveBoard(spec: Spec, board: TaskBoard = emptyBoard(), context: Map<string, string[]> = new Map()): TaskBoard {
+  const found = new Map([...context].map(([title, paths]) => [title.trim().toLowerCase(), paths]))
   const scenarioTask = (t: Task) => sameName(t.group ?? '', t.name) || spec.scenarios.some((s) => sameName(s.title, t.name))
   const kept = board.tasks.filter((t) => !t.removed && !scenarioTask(t) && t.state !== 'open')
   const derived = new Map<string, { scenario: Scenario; delivers: string[] }>()
@@ -268,10 +285,10 @@ export function deriveBoard(spec: Spec, board: TaskBoard = emptyBoard()): TaskBo
     const entry = derived.get(t.name.trim().toLowerCase())
     if (!entry) return t.removed ? t : { ...t, removed: true }
     derived.delete(t.name.trim().toLowerCase())
-    return { ...t, ...fromScenario(entry.scenario, entry.delivers), removed: false }
+    return { ...t, ...fromScenario(entry.scenario, entry.delivers), context: found.get(t.name.trim().toLowerCase()) ?? t.context, removed: false }
   })
-  for (const { scenario, delivers } of derived.values()) {
-    tasks.push({ ...fromScenario(scenario, delivers), files: [], newFiles: [], context: [], how: '', proves: [], note: '', built: '', state: 'open', removed: false })
+  for (const [key, { scenario, delivers }] of derived) {
+    tasks.push({ ...fromScenario(scenario, delivers), files: [], newFiles: [], foreignFiles: [], context: found.get(key) ?? [], how: '', proves: [], note: '', built: '', state: 'open', removed: false })
   }
   return { ...board, tasks, spec: specFingerprint(spec) }
 }

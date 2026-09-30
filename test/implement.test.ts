@@ -75,6 +75,11 @@ describe('implement phase', () => {
     expect(prompt).toContain("saying so in the task's note")
   })
 
+  it('no_read_before_edit_instruction_since_the_stale_write_guard_enforces_it', () => {
+    const prompt = implementPrompt('Order cancellation', cwd)
+    expect(prompt).not.toContain('Read a file before editing')
+  })
+
   it('a_run_does_its_one_task_and_reads_in_batches', () => {
     const prompt = implementPrompt('Order cancellation', cwd)
     expect(prompt).toContain('one task')

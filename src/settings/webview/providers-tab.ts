@@ -1,3 +1,4 @@
+import type { ReasoningControl } from '../../agent/session/effort'
 import type { Engine, Provider } from '../../agent/session/model-profile'
 import type { SettingsSnapshot } from '../protocol'
 import { ApiKeySetEvent, ModelsRefreshRequestedEvent, ProviderRemovedEvent, ProviderSavedEvent } from './events'
@@ -6,6 +7,12 @@ import { button, el, field, heading, note, select, settingsFileLink, textInput }
 const ENGINES: { value: Engine; label: string }[] = [
   { value: 'claude-sdk', label: 'Claude (Agent SDK)' },
   { value: 'openai-compatible', label: 'OpenAI-compatible (own loop, API key)' },
+]
+
+const REASONING_CONTROLS: { value: ReasoningControl | ''; label: string }[] = [
+  { value: '', label: 'As known for the model' },
+  { value: 'reasoning_effort', label: 'reasoning_effort (low, medium, high)' },
+  { value: 'none', label: 'None: send no effort' },
 ]
 
 const engineLabel = (engine: Engine): string => ENGINES.find((e) => e.value === engine)?.label ?? engine
@@ -93,19 +100,26 @@ export class ProvidersTab extends HTMLElement {
     const name = textInput('name', provider.name, { placeholder: 'berget' })
     name.required = true
     const baseUrlInput = textInput('baseUrl', provider.baseUrl ?? '', { placeholder: 'https://api.berget.ai/v1' })
+    const reasoning = select('reasoningControl', REASONING_CONTROLS, provider.reasoningControl ?? '')
     const apiKeyValue = textInput('apiKeyValue', '', { placeholder: key?.stored ? 'Replace the stored key' : 'Paste the key' })
     apiKeyValue.type = 'password'
     const offered = this.discovered.get(provider.name) ?? []
     const models = new ModelListField()
-    models.configure(provider.models, offered)
+    models.configure(provider.models, offered, provider.compactAtTokens ?? {}, snapshot.compactAtTokens)
 
     /** What the form holds right now, as a `Provider` to save; shared so a refresh saves the same thing Save would. */
-    const current = (): Provider => ({
-      name: name.value.trim(),
-      engine: engine.value as Engine,
-      models: models.values(),
-      ...(engine.value === 'openai-compatible' ? { baseUrl: baseUrlInput.value.trim() } : {}),
-    })
+    const current = (): Provider => {
+      const limits = models.limits()
+      const control = reasoning.value as ReasoningControl | ''
+      return {
+        name: name.value.trim(),
+        engine: engine.value as Engine,
+        models: models.values(),
+        ...(engine.value === 'openai-compatible' ? { baseUrl: baseUrlInput.value.trim() } : {}),
+        ...(Object.keys(limits).length > 0 ? { compactAtTokens: limits } : {}),
+        ...(engine.value === 'openai-compatible' && control ? { reasoningControl: control } : {}),
+      }
+    }
     /** Saves what the form holds; a refresh's own network call must not cost what was typed if it fails. */
     const persist = () => {
       const saved = current()
@@ -129,6 +143,7 @@ export class ProvidersTab extends HTMLElement {
       field('Base URL', baseUrlInput),
       refresh,
       el('span', 'hint', 'Refresh saves the provider first, so a failed request never costs what you typed.'),
+      field('Effort', reasoning, { hint: 'How the endpoint takes a profile’s effort. The same model may take it on one host and not another.' }),
     )
     const keyField = field('API key', apiKeyValue, { hint: ' ' })
     const keyHint = keyField.querySelector<HTMLElement>('.hint')!
@@ -160,7 +175,14 @@ export class ProvidersTab extends HTMLElement {
     save.textContent = 'Save'
     const controls = el('div', 'controls')
     controls.append(save, cancel)
-    form.append(field('Name', name), field('Engine', engine), openai, ...keyControls, field('Models', models), controls)
+    form.append(
+      field('Name', name),
+      field('Engine', engine),
+      openai,
+      ...keyControls,
+      field('Models', models, { hint: 'Beside each model, the conversation size in tokens at which it compacts: every request re-sends the whole conversation, so a pricier model may be worth compacting sooner. Blank follows the global setting.' }),
+      controls,
+    )
     form.addEventListener('submit', (event) => {
       event.preventDefault()
       this.editing = undefined
@@ -191,45 +213,69 @@ export class ProvidersTab extends HTMLElement {
   }
 }
 
-/** The model list of a provider's form: one row per model, an offer row per model the endpoint reported but the list lacks. */
+/** One model of a provider's form, as typed so far: its id, and its compaction limit or blank for the global one. */
+type ModelRow = { model: string; limit: string }
+
+/**
+ * The model list of a provider's form: one row per model with its compaction
+ * limit, an offer row per model the endpoint reported but the list lacks.
+ */
 class ModelListField extends HTMLElement {
-  private models: string[] = []
+  private rows: ModelRow[] = []
+  private fallback = 0
 
   /** Built once per form draw, since the list it starts from is fixed for that draw. */
-  configure(models: string[], offered: string[]): void {
-    this.models = [...models]
+  configure(models: string[], offered: string[], limits: Record<string, number>, fallbackTokens: number): void {
+    this.rows = models.map((model) => ({ model, limit: limits[model] === undefined ? '' : String(limits[model]) }))
+    this.fallback = fallbackTokens
     this.className = 'model-list'
     this.draw(offered.filter((m) => !models.includes(m)))
   }
 
   values(): string[] {
-    return [...this.querySelectorAll<HTMLInputElement>('input[name=model]')].map((i) => i.value.trim()).filter((v) => v !== '')
+    return this.typed().map((r) => r.model.trim()).filter((v) => v !== '')
+  }
+
+  /** The limits typed, by model; a blank or unreadable one is left out so the model follows the global setting. */
+  limits(): Record<string, number> {
+    const entries = this.typed()
+      .map((r) => [r.model.trim(), Number.parseInt(r.limit, 10)] as const)
+      .filter(([model, tokens]) => model !== '' && Number.isInteger(tokens) && tokens >= 0)
+    return Object.fromEntries(entries)
+  }
+
+  /** The rows as the inputs hold them now, so a redraw keeps what was typed. */
+  private typed(): ModelRow[] {
+    return [...this.querySelectorAll<HTMLElement>('.row')].map((row) => ({
+      model: row.querySelector<HTMLInputElement>('input[name=model]')?.value ?? '',
+      limit: row.querySelector<HTMLInputElement>('input[name=compactAtTokens]')?.value ?? '',
+    }))
+  }
+
+  private redraw(offers: string[], change: (rows: ModelRow[]) => ModelRow[]): void {
+    this.rows = change(this.typed())
+    this.draw(offers)
   }
 
   private draw(offers: string[]): void {
     this.replaceChildren()
-    this.models.forEach((model, index) => {
-      const input = textInput('model', model)
-      const remove = button('×', () => {
-        this.models.splice(index, 1)
-        this.draw(offers)
-      }, 'remove')
+    this.rows.forEach((entry, index) => {
+      const model = textInput('model', entry.model)
+      const limit = textInput('compactAtTokens', entry.limit, { placeholder: `${this.fallback} (global)` })
+      limit.type = 'number'
+      limit.min = '0'
+      limit.title = 'Compact a conversation on this model once it is this many tokens. Blank follows the global setting on the Advanced tab.'
+      const remove = button('×', () => this.redraw(offers, (rows) => rows.filter((_, i) => i !== index)), 'remove')
       const row = el('div', 'row')
-      row.append(input, remove)
+      row.append(model, limit, remove)
       this.append(row)
     })
-    this.append(button('Add model', () => {
-      this.models.push('')
-      this.draw(offers)
-    }, 'add'))
+    this.append(button('Add model', () => this.redraw(offers, (rows) => [...rows, { model: '', limit: '' }]), 'add'))
     if (offers.length > 0) {
       const offerRow = el('div', 'offers')
       offerRow.append(el('span', 'hint', 'The endpoint also serves:'))
       for (const model of offers) {
-        offerRow.append(button(model, () => {
-          this.models.push(model)
-          this.draw(offers.filter((m) => m !== model))
-        }, 'offer'))
+        offerRow.append(button(model, () => this.redraw(offers.filter((m) => m !== model), (rows) => [...rows, { model, limit: '' }]), 'offer'))
       }
       this.append(offerRow)
     }

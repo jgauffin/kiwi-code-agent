@@ -1,5 +1,6 @@
 import { DOCS_DIR, PLAN_DIR, SPECS_GLOB, featureSlug } from './blind-plan'
 import { KEEP_RULING, decisionsFile } from './decisions'
+import { contextFile } from './scenario-context'
 import { MARKDOWN_SEARCH_TOOL } from '../openai-session/tools/markdown-search'
 import { DOC_READING } from '../openai-session/tools/markdown/outline-gate'
 import { CODE_OUTLINE_TOOL } from '../code-outline/code-outline-tool'
@@ -16,7 +17,7 @@ export function reconcileScope(feature: string): Scope {
     // `**` does not match a dot-prefixed segment, so the map's root is named:
     // the run is given the type indexes the summary points it at.
     readable: ['**', `${MAP_ROOT}/**`],
-    writable: [decisionsFile(feature)],
+    writable: [decisionsFile(feature), contextFile(feature)],
   }
 }
 
@@ -32,7 +33,7 @@ export function reconcileKickoff(continued: boolean): string {
   return !continued
     ? 'Check the spec against the code and write the decisions.'
     : [
-        'The spec changed since you checked it. Read it again and check the change: update the decisions it touches, leave the rest as they are, and write what is new.',
+        'The spec changed since you checked it. Read it again and check the change: update the decisions and the context entries it touches, leave the rest as they are, and write what is new.',
         'What you read of the code holds unless a tool result says a file changed; do not read it again to be sure.',
       ].join(' ')
 }
@@ -45,6 +46,7 @@ export function reconcileKickoff(continued: boolean): string {
 export function reconcilePrompt(feature: string, cwd: string): string {
   const spec = `${PLAN_DIR}/${featureSlug(feature)}.spec.md`
   const decisions = decisionsFile(feature)
+  const context = contextFile(feature)
   return `You are checking the approved spec for the feature "${feature}" against the source code it will be built in.
 
 The spec at \`${spec}\` under ${cwd} was written blind, from product intent alone, so that the code's mistakes would not become requirements. Your job is the other half: find what in the code stands in the feature's way before any of it is built, so the user rules on it now rather than after half the work is done. You are not grading the spec. A rule the code accommodates without incident is not mentioned. An empty list of decisions is a valid result: the build then starts without the user being asked anything.
@@ -80,7 +82,19 @@ Rules:
 - Titles are stable. On a re-run, keep a decision that still holds, append \` [withdrawn]\` to the heading of one that no longer applies, and add new ones. A decision marked \` [applied]\` is settled: one ruled \`${KEEP_RULING}\` means the spec stands and the code changes, and its finding reaches the implementer as it is; do not report it again.
 - Do not paste code.
 - The spec is not yours to write: its rules are the planner's and the user's.
-- With no decision to report, write no file. When the decisions are written, or there are none, stop. Say nothing more: decisions are read from where you wrote them.`
+- With no decision to report, write no file.
+
+Also, every run, the context file \`${context}\`: under each scenario of the spec, the files its work will change or build on, as you found them while checking, most important first. Each scenario becomes a task whose implementer starts from these files instead of searching the code again. A scenario that builds something new names where it goes and what it builds on.
+
+\`\`\`markdown
+# Where ${feature} is built
+
+## Cancelling an order
+- src/orders/order.ts
+- src/orders/order-service.ts
+\`\`\`
+
+When the context and the decisions are written, or there are no decisions, stop. Say nothing more: both are read from where you wrote them.`
 }
 
 /** What a run under a session is doing right now, as the plan bar shows it; undefined when the event says nothing worth showing. */

@@ -178,6 +178,45 @@ chat-app {
         opacity: 1;
       }
     }
+
+    /* The profile each phase runs on next: one small picker per phase, always shown so the settings default is as visible as a choice. */
+    & .phase-profiles {
+      display: inline-flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.3rem 0.6rem;
+      width: 100%;
+      opacity: 0.85;
+      font-size: 0.9em;
+    }
+
+    & .phase-profile {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+
+      & .phase-profile-label {
+        color: var(--vscode-descriptionForeground);
+      }
+
+      & select {
+        background: var(--vscode-dropdown-background);
+        color: var(--vscode-dropdown-foreground);
+        border: 1px solid var(--vscode-dropdown-border);
+        border-radius: 3px;
+        padding: 0.05rem 0.2rem;
+
+        &.default {
+          opacity: 0.75;
+        }
+
+        /* A choice naming a profile that is gone: the phase refuses to start on it (B6). */
+        &.missing {
+          border-color: var(--vscode-inputValidation-warningBorder);
+          color: var(--vscode-inputValidation-warningForeground, inherit);
+        }
+      }
+    }
   }
 
   /* The plan's tabs and the chat as one strip: what the session has to show, each counted when it needs the reader. */
@@ -1804,6 +1843,26 @@ chat-app {
           cursor: pointer;
         }
       }
+
+      & .context {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+
+        & .left {
+          color: var(--vscode-descriptionForeground);
+
+          &.low {
+            color: var(--vscode-editorWarning-foreground, var(--vscode-errorForeground));
+          }
+        }
+
+        & .compact {
+          display: inline-flex;
+          align-items: center;
+          padding: 0.25rem 0.4rem;
+        }
+      }
     }
 
     & .mcp-servers {
@@ -1911,7 +1970,8 @@ button {
   &.skip,
   &.back,
   &.link-file,
-  &.continue-in-chat {
+  &.continue-in-chat,
+  &.compact {
     background: var(--vscode-button-secondaryBackground, var(--vscode-input-background));
     color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
     border: 1px solid var(--vscode-button-border, var(--vscode-input-border, transparent));

@@ -20,5 +20,4 @@ vitest.config.mts
 *.vsix
 .env
 PROMPTS.md
-LICENSE.md
 dist/prompts.cjs
