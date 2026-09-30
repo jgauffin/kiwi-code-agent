@@ -1,8 +1,8 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { anyLimit, oversized, oversizedFiles, sizeReport, type Limits, type Thresholds } from '../src/agent/cleanup/oversized'
+import { anyLimit, DEFAULT_TEST_GLOBS, oversized, oversizedFiles, sizeReport, type Limits, type Thresholds } from '../src/agent/cleanup/oversized'
 import type { Unit } from '../src/agent/cleanup/unit-size'
 
 const limits: Thresholds = { functionLines: 25, typeLines: 200, fileLines: 400 }
@@ -70,6 +70,23 @@ describe('oversized', () => {
         [],
       )
       expect(found.map((u) => u.name)).toEqual(['big'])
+    } finally {
+      await rm(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it('by_default_a_file_named_as_a_test_in_any_case_is_a_test_file_and_other_names_holding_test_are_not', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'oversized-'))
+    try {
+      const tests = ['src/Shop/OrderServiceTests.cs', 'src/OrderServiceTest.java', 'order_test.go', 'TEST_cart.py', 'cart.test.ts', 'cart.spec.ts']
+      const sources = ['src/Shop/OrderService.cs', 'src/attestation.ts', 'Shop.Tests/OrderFixture.cs', 'src/test/java/Orders.java']
+      const paths = [...tests, ...sources].map((p) => join(cwd, p))
+      for (const path of paths) {
+        await mkdir(dirname(path), { recursive: true })
+        await writeFile(path, 'a\nb\n')
+      }
+      const found = await oversizedFiles(cwd, paths, { source: { ...off, fileLines: 1 }, tests: off, testGlobs: DEFAULT_TEST_GLOBS }, [])
+      expect(found.map((u) => u.path)).toEqual(sources.map((p) => join(cwd, p)))
     } finally {
       await rm(cwd, { recursive: true, force: true })
     }

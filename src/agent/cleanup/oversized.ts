@@ -11,6 +11,18 @@ export type Thresholds = { functionLines: number; typeLines: number; fileLines: 
  */
 export type Limits = { source: Thresholds; tests: Thresholds; testGlobs: string[] }
 
+/**
+ * A file name that starts or ends with "test", which covers the conventions of
+ * most languages (`FooTests.cs`, `FooTest.java`, `foo_test.go`, `test_foo.py`)
+ * without taking in a name that merely holds it (`attestation.ts`). Also the
+ * `kiwiAgent.cleanup.tests` default in package.json; the two must agree.
+ */
+export const DEFAULT_TEST_GLOBS = ['**/*.test.*', '**/*test.*', '**/*tests.*', '**/test*', '**/*.spec.*']
+
+/** Test globs ignore case: `Shop.Tests` and `TEST_cart.py` are tests as much as `cart.test.ts`. */
+const isTest = (rel: string, globs: string[]): boolean =>
+  globs.some((glob) => matchesGlob(rel.toLowerCase(), glob.toLowerCase()))
+
 export type Oversized = Unit & { path: string; threshold: number }
 
 /** Beyond this a file is not measured: it is generated or data, not a unit anyone splits. */
@@ -45,7 +57,7 @@ export async function oversizedFiles(cwd: string, files: string[], limits: Limit
     if (matches(ignore)) continue
     const text = await readText(path)
     if (text === undefined) continue
-    found.push(...oversized(path, measureUnits(path, text), matches(limits.testGlobs) ? limits.tests : limits.source))
+    found.push(...oversized(path, measureUnits(path, text), isTest(rel, limits.testGlobs) ? limits.tests : limits.source))
   }
   return found
 }

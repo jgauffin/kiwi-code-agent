@@ -33,7 +33,7 @@ Passing tests say nothing about whether the implementation left behind a functio
 - a function whose cyclomatic complexity is over `kiwiAgent.cleanup.functionComplexity`
 - a file whose code lines, blanks and comments excluded, are over `kiwiAgent.cleanup.fileLines`
 
-A limit of `0` is off. Tests are ignored by default, and the ignore list is yours. Only files an implement session edited are measured — something changed through the shell is not among them — and a file that is no longer there is passed over rather than reported.
+A limit of `0` is off. A file whose name starts or ends with "test", in any case, is held to separate, larger test limits, since a test file stays one file per tested file. The ignore list is yours. Only files an implement session edited are measured — something changed through the shell is not among them — and a file that is no longer there is passed over rather than reported.
 
 The measure does not parse your code. It knows the branching keywords and operators of a fixed set of languages and counts them; a nested function's branches count toward the function it sits in. A file in a language it does not know is measured as a file only, and no function of it is ever flagged. That is a deliberate ceiling: a crude measure that states its own limits beats a clever one that quietly guesses.
 

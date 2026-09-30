@@ -2,7 +2,7 @@
   "name": "kiwipow-agent",
   "displayName": "Kiwipow Agent",
   "description": "Coding sessions in VS Code with a choice of model engine per session.",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "publisher": "CoderrAB",
   "icon": "docs/logos/kiwipow-agent-logo-128.png",
   "galleryBanner": {
@@ -318,10 +318,12 @@
           },
           "default": [
             "**/*.test.*",
-            "**/*.spec.*",
-            "**/__tests__/**"
+            "**/*test.*",
+            "**/*tests.*",
+            "**/test*",
+            "**/*.spec.*"
           ],
-          "description": "Workspace-relative globs of test files, measured against the test limits: a test file stays one file per tested file, so it may grow larger."
+          "description": "Workspace-relative globs of test files, matched ignoring case and measured against the test limits: a test file stays one file per tested file, so it may grow larger."
         },
         "kiwiAgent.cleanup.testFunctionLines": {
           "type": "integer",

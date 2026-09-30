@@ -1,4 +1,4 @@
-import type { Limits } from '../agent/cleanup/oversized'
+import { DEFAULT_TEST_GLOBS, type Limits } from '../agent/cleanup/oversized'
 import { type ModelChoice, type Profile, type Provider, type StepChoice } from '../agent/session/model-profile'
 import { STEPS } from '../agent/session/session-manager'
 import type { VerifyRule } from '../agent/phases/verification'
@@ -84,7 +84,7 @@ export function readCleanupLimits(config: ConfigPort): Limits {
       typeLines: config.get('cleanup.testTypeLines', 600),
       fileLines: config.get('cleanup.testFileLines', 1200),
     },
-    testGlobs: config.get<string[]>('cleanup.tests', []),
+    testGlobs: config.get<string[]>('cleanup.tests', DEFAULT_TEST_GLOBS),
   }
 }
 

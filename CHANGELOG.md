@@ -1,9 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.2.2
 
 - Renamed to Kiwipow Agent. The Marketplace ID is now `CoderrAB.kiwipow-agent`; uninstall `CoderrAB.kiwi-agent` and install the new one. Settings keep their `kiwiAgent.*` names.
 - MCP servers can be set for the user in `~/.mcp.json`, with the workspace's `.mcp.json` over it; Claude Code's user-wide list, which it keeps in `~/.claude.json`, is copied there on first run.
+- The cleanup holds a file to the test limits when its name starts or ends with "test" in any case (`FooTests.cs`, `FooTest.java`, `foo_test.go`, `test_foo.py`), not only `*.test.*`.
 
 ## 0.2.1
 
