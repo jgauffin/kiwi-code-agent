@@ -7,13 +7,12 @@ import type { Spec } from '../agent/phases/spec-model'
 import type { CleanupDecision, Task, VerificationRecord } from '../agent/phases/tasks-file'
 import type { UnitKind } from '../agent/cleanup/unit-size'
 import type { ModelProfile } from '../agent/session/model-profile'
-import type { PhaseStepName } from '../agent/session/phase-choices'
 import type { SessionMode } from '../agent/session/session-manager'
 import type { RunBlock, SessionStatus } from '../agent/session/session-status'
 import type { ProfileDefaults } from '../settings/settings-store'
 import type { CleanupProgress } from './cleanup-progress'
 
-/** The session an editor tab shows; its `title` is what the tab is named. */
+/** The session the chat view shows; its `title` heads the view. */
 export type SessionTab = {
   id: string
   title: string
@@ -84,12 +83,7 @@ export type PlanState = {
   blocked?: RunBlock
   /** A run of the feature whose last turn failed, and why: nothing retries it, so the dev has to be told. */
   failure?: RunFailure
-  /** The profile each phase will run on next, by step; `isDefault` marks one running on the settings default rather than a choice made for this feature (B8). */
-  phaseProfiles: PhaseProfileState[]
 }
-
-/** One phase's resolved profile as the plan view shows it (B8), or the configuration it refused to start on (B6). */
-export type PhaseProfileState = { step: PhaseStepName; name: string; isDefault: boolean } | { step: PhaseStepName; missing: string }
 
 export type RunFailure = { mode: SessionMode; message: string }
 
@@ -135,13 +129,13 @@ export type RunSection = RunRef & { events: SessionEvent[] }
 /** A plan on disk the new-session screen offers to pick up; verified ones are finished and not offered. */
 export type ResumablePlan = { feature: string; status: 'draft' | 'approved' }
 
-/** A chat with no editor tab open the new-session screen offers to reopen; its transcript is the context it comes back with. */
+/** A chat not shown that the new-session screen offers to reopen; its transcript is the context it comes back with. */
 export type ResumableChat = { sessionId: string; title: string; startedAt: string }
 
 export type ToWebview =
   | {
       type: 'state'
-      /** The session this editor tab shows; absent while it shows the new-session screen. */
+      /** The session the tab shows; absent while it shows the new-session screen. */
       tab?: SessionTab
       /** Every run under the tab, oldest first; empty on the new-session screen. */
       runs: RunControls[]
@@ -149,7 +143,7 @@ export type ToWebview =
       plan?: PlanState
       /** Plans under `plan/` still in progress, for the new-session screen's pick-up list. */
       plans: ResumablePlan[]
-      /** Chats with no editor tab open, newest first, for the same list. */
+      /** Chats no tab is showing, newest first, for the same list. */
       chats: ResumableChat[]
       /** Decisions in `plan/unfiled-decisions.md` waiting to be filed into the specs and docs, for the same list. */
       unfiled: number
@@ -207,14 +201,12 @@ export type FromWebview =
   | { type: 'continue_in_chat' }
   /** Tries one of the run's MCP servers again. */
   | { type: 'reconnect_mcp'; sessionId: string; server: string }
-  /** Opens the session in its own editor tab, revealing the tab it already has. */
+  /** Switches the view to the session. */
   | { type: 'switch_session'; sessionId: string }
   /** `prompt`, when given, is sent as the first message; `files` are linked files it should read. */
   | { type: 'new_session'; mode: SessionMode; feature?: string; prompt?: string; files?: string[] }
   /** Sets the profile new sessions run on. */
   | { type: 'set_default_profile'; name: string }
-  /** Sets, or clears when `name` is absent, the profile the active plan's named phase runs on (B1, B7); clearing returns the phase to the settings default (B2). */
-  | { type: 'set_phase_profile'; step: PhaseStepName; name?: string }
   /** Opens the plan session behind a spec on disk, or starts one on it when none remains; what it offers follows the spec's status. */
   | { type: 'resume_plan'; feature: string }
   /** Approves the draft and starts its check against the code; refused while a comment is open. */

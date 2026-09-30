@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { parseSpec, specFingerprint } from '../src/agent/phases/spec-model'
 import {
   deliveredBy,
@@ -6,6 +9,8 @@ import {
   nextTask,
   parseBoard,
   provenBy,
+  readBoard,
+  recordVerification,
   renderBoard,
   started,
   stateOfBoard,
@@ -18,6 +23,7 @@ import {
   withCleanupDecision,
   withRecord,
   withSpecFingerprint,
+  writeBoard,
 } from '../src/agent/phases/tasks-file'
 import { board, task } from './task-board-fixture'
 
@@ -256,4 +262,31 @@ describe('the board derived from the spec', () => {
       ['Refunding', ['Refund on cancel'], false],
     ])
   })
+})
+
+describe('the board on disk under parallel sessions', () => {
+  const withDir = async (use: (path: string) => Promise<void>) => {
+    const dir = await mkdtemp(join(tmpdir(), 'tasks-file-'))
+    try {
+      await use(join(dir, 'orders.tasks.json'))
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }
+
+  it('changes_made_at_the_same_time_are_all_kept', () =>
+    withDir(async (path) => {
+      await writeBoard(path, board(task('A')))
+      await Promise.all(Array.from({ length: 20 }, (_, i) => recordVerification(path, { at: `run ${i}`, ok: false, text: '`npm test` in .' })))
+      expect((await readBoard(path))!.verification).toHaveLength(20)
+    }))
+
+  it('a_shorter_board_written_over_a_longer_one_leaves_no_tail_of_it', () =>
+    withDir(async (path) => {
+      const long = board(task('A', { note: 'x'.repeat(4000) }))
+      const short = board(task('A'))
+      await Promise.all(Array.from({ length: 20 }, (_, i) => writeBoard(path, i % 2 === 0 ? long : short)))
+      const text = await readFile(path, 'utf8')
+      expect(() => parseBoard(text)).not.toThrow()
+    }))
 })

@@ -41,6 +41,8 @@ const extensionHost = {
   format: 'cjs',
   target: 'node22',
   external: ['vscode'],
+  // A shipped skill's markdown that a prompt also embeds, so both read the same text.
+  loader: { '.md': 'text' },
   sourcemap: true,
   logLevel: 'info',
 }

@@ -9,7 +9,7 @@ export function postToHost(message: unknown): void {
   api.postMessage(message)
 }
 
-/** What VS Code hands back when it revives this panel after a reload: the session the tab showed. */
+/** What VS Code hands back when it resolves the view again after a reload: the session it showed. */
 export function rememberTab(tabId: string | undefined): void {
   api.setState({ tabId })
 }

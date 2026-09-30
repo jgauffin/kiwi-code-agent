@@ -1,4 +1,5 @@
 import type { SessionEvent } from './code-session'
+import { sameModelProfile, type ModelProfile } from './model-profile'
 import { isPlanning, type SessionMode } from './session-manager'
 
 /**
@@ -13,6 +14,9 @@ const working = (mode: SessionMode): SessionStatus => (isPlanning(mode) ? 'plann
 
 /** The engine is at work on a turn, not stopped on the user. */
 export const underWay = (status: SessionStatus): boolean => status === 'planning' || status === 'implementing'
+
+/** A feature run takes its profile as settings now resolve it before its next turn; a turn in flight finishes on the model it started on. */
+export const takesProfile = (status: SessionStatus, current: ModelProfile, resolved: ModelProfile): boolean => !underWay(status) && !sameModelProfile(current, resolved)
 
 /**
  * Whether a chat session's freshly picked model switch takes hold at once

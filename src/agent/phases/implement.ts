@@ -161,6 +161,7 @@ Rules:
 - The decisions file is not yours to change, and the spec only as above.
 - Never edit \`${DOCS_DIR}/\`: intent is the user's.
 - Do not re-explore what the hand-off already names.
+- Code and comments never refer to the spec, its rule names or the task: those move on and the reference goes stale. Where a business rule is not obvious from the code, explain it in a short comment in the domain's own words.
 - ${DOC_READING}
 - ${CODE_READING} Before writing a test, outline the test file or folder it belongs in: the rule may already be proven, and the neighbouring tests show the pattern to follow.
 - ${SCRIPT_WRITING}

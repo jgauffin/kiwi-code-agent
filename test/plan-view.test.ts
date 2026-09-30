@@ -309,6 +309,30 @@ describe('PlanView', () => {
     expect(node.querySelector('.decision .ruling .text')!.textContent).toBe('do both')
   })
 
+  it('an_own_ruling_box_opens_empty_on_the_next_decision_and_rules_that_one', () => {
+    const open = (title: string) => ({ title, on: [], finding: 'f', proposals: ['refuse it'], state: 'open' as const, line: 0, end: 0 })
+    const state = (decisions: PlanState['decisions']) => plan({ stage: 'ruling', status: 'approved', commentable: false, decisions, pendingDecisions: 2 })
+    const node = view(state([open('Refund'), open('Shipped')]), 'decisions')
+    const actions: unknown[] = []
+    node.addEventListener(ReviewActionEvent.type, (e) => actions.push((e as InstanceType<typeof ReviewActionEvent>).action))
+
+    node.querySelector<HTMLButtonElement>('.option.own')!.click()
+    node.querySelector('textarea')!.value = 'do both'
+    buttons(node, 'Rule')[0]!.click()
+    node.update(state([{ ...open('Refund'), state: 'ruled', ruling: 'do both' } as never, open('Shipped')]), 'decisions')
+
+    expect(node.querySelector('.decision .title')!.textContent).toBe('Shipped')
+    node.querySelector<HTMLButtonElement>('.option.own')!.click()
+    const area = node.querySelector('textarea')!
+    expect(area.value).toBe('')
+    area.value = 'queue it'
+    buttons(node, 'Rule')[0]!.click()
+    expect(actions).toEqual([
+      { type: 'rule_decision', decision: 'Refund', ruling: 'do both' },
+      { type: 'rule_decision', decision: 'Shipped', ruling: 'queue it' },
+    ])
+  })
+
   it('the_card_shows_the_rules_as_the_spec_has_them_beside_what_the_code_does', () => {
     const decisions = [
       { title: 'Shipped', on: ['Cancel command', 'Shipped order', 'Renamed away'], finding: '`Order.cancel` refuses it', proposals: [], state: 'open' as const, line: 0, end: 0 },

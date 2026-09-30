@@ -62,6 +62,8 @@ export type SessionRecord = {
   fixAttempt?: number
   /** The run's job is done (its task settled, its fix handed back to the test run): history, never again what the person talks to. */
   settled?: true
+  /** The findings are delivered, so the session carries on with the full tool set: its narrow scope had the evaluation to protect, and there is none left to draw. */
+  opened?: true
   /**
    * Engine-side conversation id, what lets a closed session continue. For the
    * Claude SDK it is the engine's own, inherited from the session this one
@@ -229,6 +231,21 @@ export class SessionManager {
     const previous = this.require(id)
     await this.close(id)
     return await this.create(previous.profile, 'chat', undefined, { continues: previous })
+  }
+
+  /**
+   * A session that has said its findings goes on with the full tool set, in
+   * place: the person answers in the conversation they are reading rather than
+   * in a second session that starts out empty. The engine stops, as it does on
+   * a model switch, and the next prompt brings one up on the wider setup and
+   * resumes the conversation.
+   */
+  async openUp(id: string): Promise<void> {
+    const record = this.require(id)
+    if (record.opened) return
+    record.opened = true
+    await this.store.save(this.records)
+    await this.close(id)
   }
 
   async send(id: string, text: string): Promise<void> {

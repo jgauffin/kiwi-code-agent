@@ -1,4 +1,3 @@
-import type { PhaseStepName } from '../../agent/session/phase-choices'
 import type { SessionMode } from '../../agent/session/session-manager'
 import type { QuestionOutcome } from '../../agent/session/user-question'
 import type { ReviewAction, UserPermissionDecision } from '../protocol'
@@ -217,7 +216,7 @@ export class PlanViewSelectedEvent extends Event {
   }
 }
 
-/** Open a session that has no editor tab of its own yet; one is given to it. */
+/** Switch the view to a session it is not showing. */
 export class SessionSelectedEvent extends Event {
   static readonly type = 'session-selected'
   constructor(public readonly sessionId: string) {
@@ -261,17 +260,6 @@ export class DefaultProfileChangedEvent extends Event {
   static readonly type = 'default-profile-changed'
   constructor(public readonly name: string) {
     super(DefaultProfileChangedEvent.type, { bubbles: true })
-  }
-}
-
-/** The plan bar's picker on one phase: the profile it runs on from its next turn, or `undefined` to return it to the settings default (B1, B2). */
-export class PhaseProfileChangedEvent extends Event {
-  static readonly type = 'phase-profile-changed'
-  constructor(
-    public readonly step: PhaseStepName,
-    public readonly name: string | undefined,
-  ) {
-    super(PhaseProfileChangedEvent.type, { bubbles: true })
   }
 }
 
@@ -324,6 +312,5 @@ declare global {
     [ContinueInChatRequestedEvent.type]: ContinueInChatRequestedEvent
     [McpReconnectRequestedEvent.type]: McpReconnectRequestedEvent
     [DefaultProfileChangedEvent.type]: DefaultProfileChangedEvent
-    [PhaseProfileChangedEvent.type]: PhaseProfileChangedEvent
   }
 }

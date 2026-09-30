@@ -749,7 +749,31 @@ describe('SessionManager', () => {
       }
     })
 
-    it('a_docs_evaluation_continued_in_chat_keeps_its_model_and_conversation_and_stops_its_own_engine', async () => {
+    it('a_code_plan_continued_in_chat_keeps_its_model_and_conversation_and_stops_its_own_engine', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+      try {
+        const { manager, engines } = setup(dir)
+        const planning = await manager.create(berget, 'code-plan')
+        await manager.send(planning.id, 'plan the filter')
+        engines[0]!.out.push({ type: 'session_started', engineSessionId: planning.id, model: 'glm' })
+        await tick()
+
+        const chat = await manager.continueInChat(planning.id)
+        expect(chat).toMatchObject({ mode: 'chat', profile: berget, engineSessionId: planning.id })
+        expect(manager.isLive(planning.id)).toBe(false)
+        await manager.send(chat.id, 'build it')
+        await tick()
+        expect((await manager.conversation(chat.id)).filter((e) => e.type === 'user_message').map((e) => e.text)).toEqual([
+          'plan the filter',
+          'build it',
+        ])
+        await manager.disposeAll()
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
+
+    it('a_docs_evaluation_that_opened_up_keeps_its_own_tab_and_conversation_and_waits_for_the_next_prompt', async () => {
       const dir = await mkdtemp(join(tmpdir(), 'sm-'))
       try {
         const { manager, engines } = setup(dir)
@@ -758,12 +782,13 @@ describe('SessionManager', () => {
         engines[0]!.out.push({ type: 'session_started', engineSessionId: docs.id, model: 'glm' })
         await tick()
 
-        const chat = await manager.continueInChat(docs.id)
-        expect(chat).toMatchObject({ mode: 'chat', profile: berget, engineSessionId: docs.id })
+        await manager.openUp(docs.id)
+        expect(manager.get(docs.id)).toMatchObject({ mode: 'docs', opened: true })
+        // The engine stops so the next prompt brings one up on the wider setup, in the session the person is reading.
         expect(manager.isLive(docs.id)).toBe(false)
-        await manager.send(chat.id, 'move docs/external out')
+        await manager.send(docs.id, 'move docs/external out')
         await tick()
-        expect((await manager.conversation(chat.id)).filter((e) => e.type === 'user_message').map((e) => e.text)).toEqual([
+        expect((await manager.conversation(docs.id)).filter((e) => e.type === 'user_message').map((e) => e.text)).toEqual([
           'evaluate',
           'move docs/external out',
         ])

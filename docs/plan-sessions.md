@@ -1,6 +1,8 @@
 # Plan sessions
 
-Two modes on the new-session screen:
+The new-session screen is in two tabs: **Code**, the session types that work in the code, and **Maintenance**, the jobs that keep the intent the code is planned from in order (*Evaluate docs*, *File decisions*), which are nobody's errand of the day and so wait apart from the work.
+
+Two modes on the Code tab:
 
 - **Plan**: for work the code shapes, such as a UI on its framework and components. The planner first says in chat what it understands you want and asks what is unclear, before it reads any code, so the plan follows your intent rather than what the code suggests. Then it reads the code and proposes the plan in chat, read-only, with the repo map and docs map in its prompt. No spec, review or task board. *Continue in chat* carries the conversation into a chat with the full tool set, which starts building the agreed plan.
 - **Feature planning**: the rest of this page.
@@ -15,7 +17,7 @@ Blind planning of one feature. The session can read `docs/**`, the root README a
 
 The session starts with the docs map: every doc it may read, what that doc is for, and one line per heading. It opens one file instead of the tree, and cites a section as `path#Heading` with the heading spelled as the map spells it. The map is built from the docs alone, so a blind session reading it stays blind, and a rebuild re-reads only the docs whose content changed. *KiwiAgent: Build Docs Map* builds it on demand; a plan session builds it first when it is behind.
 
-*Evaluate docs*, on the new-session screen, is the other side of that: a session with the planner's own read scope that says in chat where the docs' arrangement costs a planner (what has to be read whole, what cannot be cited, what nothing links to) and changes what you pick, one confirmed write at a time. It never proposes renaming a heading an approved spec cites without naming the citations that would have to follow.
+*Evaluate docs*, on the new-session screen's Maintenance tab, is the other side of that: a session with the planner's own read scope that says in chat where the docs' arrangement costs a planner (what has to be read whole, what cannot be cited, what nothing links to) and changes what you pick, one confirmed write at a time. It never proposes renaming a heading an approved spec cites without naming the citations that would have to follow. Once it has said its findings the session opens up — full tool set, same conversation — so you answer it where you read it, and work past the docs needs no second session.
 
 ### The view
 
@@ -33,6 +35,10 @@ The spec is committed; the review, decisions and tasks are working files under `
 
 *KiwiAgent: Migrate plans* brings plans written before the contract into it; old ids become names until the planner is asked to name them.
 
+### From a chat
+
+A chat, or a docs evaluation once it has opened up, answers where a feature stands from its files, and writes draft specs from the docs when asked: it proposes the feature list first, and each spec is held to the same contract. This is the way into a project with docs but no specs yet. Each draft then appears in the Sessions view to review and approve as usual.
+
 ### Unfiled decisions
 
-What you decide outside planning reaches the next planner. An answer to an implementer's question amends the rules of the task it asked about. Anything that reaches other features, from an implement run, a plan session or a chat, goes into `plan/unfiled-decisions.md` (`### Title`, `- decided:`, `- affects:`), which the planner reads as your latest word. The ↩ menu shows how many are waiting; picking them starts *File decisions*, a session with the planner's read scope. It proposes where each entry goes, amends the specs and docs you pick, one confirmed write at a time, and deletes an entry once it is filed. An implemented spec is not amended: the change is a feature to plan.
+What you decide outside planning reaches the next planner. An answer to an implementer's question amends the rules of the task it asked about. Anything that reaches other features, from an implement run, a plan session or a chat, goes into `plan/unfiled-decisions.md` (`### Title`, `- decided:`, `- affects:`), which the planner reads as your latest word. The Maintenance tab of the new-session screen counts how many are waiting; *File decisions* there is a session with the planner's read scope. It proposes where each entry goes, amends the specs and docs you pick, one confirmed write at a time, and deletes an entry once it is filed. An implemented spec is not amended: the change is a feature to plan.

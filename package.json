@@ -27,7 +27,7 @@
     "planning"
   ],
   "engines": {
-    "vscode": "^1.100.0",
+    "vscode": "^1.106.0",
     "node": ">=22.0.0"
   },
   "categories": [
@@ -36,8 +36,8 @@
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
-    "onWebviewPanel:kiwiAgent.chatPanel",
-    "onWebviewPanel:kiwiAgent.settingsPanel"
+    "onWebviewPanel:kiwiAgent.settingsPanel",
+    "onWebviewPanel:kiwiAgent.chatPanel"
   ],
   "contributes": {
     "viewsContainers": {
@@ -65,7 +65,7 @@
       },
       {
         "command": "kiwiAgent.openChat",
-        "title": "KiwiAgent: Open Chat in Editor",
+        "title": "KiwiAgent: New Session Tab",
         "icon": "media/kiwi.svg"
       },
       {
@@ -112,7 +112,7 @@
     "menus": {
       "editor/title": [
         {
-          "command": "kiwiAgent.newSession",
+          "command": "kiwiAgent.openChat",
           "group": "navigation@100"
         }
       ],
@@ -502,7 +502,7 @@
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "prompts": "esbuild scripts/prompts.ts --bundle --platform=node --format=cjs --target=node22 --external:vscode --log-level=warning --outfile=dist/prompts.cjs && node dist/prompts.cjs",
+    "prompts": "esbuild scripts/prompts.ts --bundle --platform=node --format=cjs --target=node22 --external:vscode --loader:.md=text --log-level=warning --outfile=dist/prompts.cjs && node dist/prompts.cjs",
     "package": "npm run typecheck && node esbuild.mjs --target=win32-x64 && vsce package --no-dependencies --target win32-x64 && node esbuild.mjs --target=win32-arm64 && vsce package --no-dependencies --target win32-arm64",
     "link-dev": "node scripts/link-dev.mjs",
     "unlink-dev": "node scripts/link-dev.mjs --unlink",

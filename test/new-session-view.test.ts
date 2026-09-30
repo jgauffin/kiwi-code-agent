@@ -20,8 +20,16 @@ function view(profiles = { names: ['Claude', 'Kimi'], active: 'Claude' }, pickUp
 
 const options = (select: HTMLSelectElement) => [...select.options].map((o) => o.textContent)
 
-const card = (node: HTMLElement, name: 'chat' | 'code-plan' | 'plan' | 'docs') =>
-  [...node.querySelectorAll<HTMLButtonElement>('.types button')][{ chat: 0, 'code-plan': 1, plan: 2, docs: 3 }[name]]!
+const tab = (node: HTMLElement, name: 'code' | 'maintenance') =>
+  [...node.querySelectorAll<HTMLButtonElement>('.screens .tab')][name === 'code' ? 0 : 1]!
+
+/** The maintenance cards are on the other tab, so reaching one opens it first. */
+function card(node: HTMLElement, name: 'chat' | 'code-plan' | 'plan' | 'docs' | 'file-decisions'): HTMLButtonElement {
+  const maintenance = name === 'docs' || name === 'file-decisions'
+  tab(node, maintenance ? 'maintenance' : 'code').click()
+  const at = maintenance ? { docs: 0, 'file-decisions': 1 }[name] : { chat: 0, 'code-plan': 1, plan: 2 }[name]
+  return [...node.querySelectorAll<HTMLButtonElement>('.types button')][at]!
+}
 
 function type(node: HTMLElement, selector: string, text: string): void {
   const field = node.querySelector<HTMLTextAreaElement>(selector)!
@@ -179,7 +187,6 @@ describe('NewSessionView pick-up list', () => {
   it('every_piece_of_work_left_on_disk_is_offered', () => {
     const node = view(undefined, waiting)
     expect(picks(node).map((p) => p.querySelector('strong')!.textContent)).toEqual([
-      '2 unfiled decisions',
       'Orders',
       'Why does the cart double-count?',
     ])
@@ -190,7 +197,7 @@ describe('NewSessionView pick-up list', () => {
     const node = view(undefined, waiting)
     let seen: unknown
     node.addEventListener(events.PlanResumeRequestedEvent.type, (e) => (seen = e.feature))
-    picks(node)[1]!.click()
+    picks(node)[0]!.click()
     expect(seen).toBe('Orders')
     node.remove()
   })
@@ -199,17 +206,70 @@ describe('NewSessionView pick-up list', () => {
     const node = view(undefined, waiting)
     let seen: unknown
     node.addEventListener(events.SessionSelectedEvent.type, (e) => (seen = e.sessionId))
-    picks(node)[2]!.click()
+    picks(node)[1]!.click()
     expect(seen).toBe('s9')
     node.remove()
   })
 
-  it('picking_the_unfiled_decisions_starts_the_session_that_files_them', () => {
+  it('work_to_pick_up_is_the_code_tab_s_own_and_does_not_follow_to_maintenance', () => {
     const node = view(undefined, waiting)
+    tab(node, 'maintenance').click()
+    expect(node.querySelector('.pick-up')).toBeNull()
+    node.remove()
+  })
+})
+
+const cards = (node: HTMLElement) => [...node.querySelectorAll<HTMLElement>('.types button strong')].map((s) => s.textContent)
+
+describe('NewSessionView tabs', () => {
+  it('the_code_tab_offers_the_session_types_that_work_in_the_code', () => {
+    const node = view()
+    expect(cards(node)).toEqual(['Chat', 'Plan', 'Feature planning'])
+    node.remove()
+  })
+
+  it('the_maintenance_tab_offers_the_jobs_that_keep_the_intent_in_order', () => {
+    const node = view()
+    tab(node, 'maintenance').click()
+    expect(cards(node)).toEqual(['Evaluate docs', 'File decisions'])
+    node.remove()
+  })
+
+  it('a_tab_opens_on_its_first_job_so_it_is_never_cards_with_nothing_under_them', () => {
+    const node = view()
+    tab(node, 'maintenance').click()
+    expect(node.querySelector('.docs-fields')).not.toBeNull()
+    tab(node, 'code').click()
+    expect(node.querySelector('.chat-fields')).not.toBeNull()
+    node.remove()
+  })
+
+  it('the_maintenance_tab_counts_what_waits_to_be_filed', () => {
+    const node = view(undefined, { plans: [], chats: [], unfiled: 2 })
+    expect(tab(node, 'maintenance').querySelector('.waiting')!.textContent).toBe('2')
+    node.remove()
+  })
+
+  it('nothing_waiting_leaves_the_maintenance_tab_uncounted', () => {
+    const node = view()
+    expect(tab(node, 'maintenance').querySelector('.waiting')).toBeNull()
+    node.remove()
+  })
+
+  it('the_filing_card_starts_the_session_that_files_the_decisions', () => {
+    const node = view(undefined, { plans: [], chats: [], unfiled: 2 })
+    card(node, 'file-decisions').click()
     let seen: unknown
-    node.addEventListener(events.NewSessionRequestedEvent.type, (e) => (seen = e.mode))
-    picks(node)[0]!.click()
-    expect(seen).toBe('file-decisions')
+    node.addEventListener(events.NewSessionRequestedEvent.type, (e) => (seen = [e.mode, e.feature, e.prompt]))
+    node.querySelector('.filing-fields')!.dispatchEvent(new Event('submit', { cancelable: true }))
+    expect(seen).toEqual(['file-decisions', undefined, undefined])
+    node.remove()
+  })
+
+  it('with_nothing_to_file_the_card_says_so_and_offers_no_session_to_start', () => {
+    const node = view()
+    card(node, 'file-decisions').click()
+    expect(node.querySelector('.filing-fields button[type=submit]')).toBeNull()
     node.remove()
   })
 })

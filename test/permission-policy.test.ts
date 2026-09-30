@@ -210,6 +210,16 @@ describe('PermissionPolicy', () => {
     expect(commandLines('Bash', 'cd .. && ls', [])).toEqual([{ text: 'cd ..', rule: 'Bash(cd ..)' }, { text: 'ls', passes: 'read-only' }])
   })
 
+  it.runIf(process.platform === 'win32')('git_bash_drive_paths_stand_for_the_windows_drive_they_name', async () => {
+    const p = policy({})
+    expect(await use(p, 'Bash', { command: 'cd /d/work/repo && ls' })).toEqual({ allow: true })
+    expect(await use(p, 'Bash', { command: 'cd /d/work/repo/src && ls' })).toEqual({ allow: true })
+    expect(await use(p, 'Bash', { command: 'cd /d/work && ls' })).toBeUndefined()
+    expect(await use(policy({ allow: ['Bash(cd /e/elsewhere)'] }), 'Bash', { command: 'cd E:/elsewhere/deep && ls' })).toEqual({ allow: true })
+    // PowerShell reads the same path as a folder on the current drive.
+    expect(await use(p, 'PowerShell', { command: 'cd /d/work/repo; ls' })).toBeUndefined()
+  })
+
   it('a_cd_rule_allows_its_own_directory_and_below_it_and_no_other', async () => {
     const outside = process.platform === 'win32' ? 'E:/elsewhere' : '/elsewhere'
     const p = policy({ allow: [`Bash(cd ${outside})`] })

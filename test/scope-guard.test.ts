@@ -127,6 +127,11 @@ describe('blind plan helpers', () => {
     expect(featureSlug('   ')).toBe('feature')
   })
 
+  it('feature_slug_keeps_accented_letters_as_their_base_letter', () => {
+    expect(featureSlug('Återbetalning för köp')).toBe('aterbetalning-for-kop')
+    expect(featureSlug('Ändra ÅÄÖ')).toBe('andra-aao')
+  })
+
   it('spec_lives_under_plan_in_the_workspace', () => {
     expect(specPath(cwd, 'Order cancellation')).toBe(`${cwd}${process.platform === 'win32' ? '\\' : '/'}plan${process.platform === 'win32' ? '\\' : '/'}order-cancellation.spec.md`)
   })

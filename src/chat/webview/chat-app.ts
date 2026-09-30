@@ -25,7 +25,6 @@ import {
   McpReconnectRequestedEvent,
   NewSessionRequestedEvent,
   PermissionDecidedEvent,
-  PhaseProfileChangedEvent,
   PlanFocusRequestedEvent,
   PlanResumeRequestedEvent,
   PlanStepSelectedEvent,
@@ -48,7 +47,7 @@ import {
 } from './events'
 
 /**
- * Root of the chat UI, one editor tab's worth. Talks to the extension host;
+ * Root of the chat UI in the sidebar view. Talks to the extension host;
  * children talk to it through events. Shows the new-session screen until a
  * session is started on the tab, then that session: its conversation, or in
  * a feature session one tab of the plan or the chat of the phase picked on
@@ -68,7 +67,7 @@ export class ChatApp extends HTMLElement {
   ])
   private readonly chatsHost = document.createElement('div')
   private readonly composer = new ChatComposer()
-  /** The session this editor tab shows, absent while it shows the new-session screen. */
+  /** The session the view shows, absent while it shows the new-session screen. */
   private tabId: string | undefined
   private tab: SessionTab | undefined
   private models: string[] = []
@@ -76,8 +75,6 @@ export class ChatApp extends HTMLElement {
   private plan: PlanState | undefined
   /** Every run under the tab as the host last described it. */
   private runs: RunControls[] = []
-  /** Every configured profile's name, for the plan bar's per-phase pickers (B1). */
-  private profileNames: string[] = []
   private view: ViewTab = 'chat'
   /** The plan tab last shown, so leaving the chat comes back to it. */
   private planTab: Tab = 'spec'
@@ -153,7 +150,6 @@ export class ChatApp extends HTMLElement {
     this.addEventListener(SessionSelectedEvent.type, (e) => post({ type: 'switch_session', sessionId: e.sessionId }))
     this.addEventListener(PlanResumeRequestedEvent.type, (e) => post({ type: 'resume_plan', feature: e.feature }))
     this.addEventListener(DefaultProfileChangedEvent.type, (e) => post({ type: 'set_default_profile', name: e.name }))
-    this.addEventListener(PhaseProfileChangedEvent.type, (e) => post({ type: 'set_phase_profile', step: e.step, ...(e.name ? { name: e.name } : {}) }))
     this.addEventListener(NewSessionRequestedEvent.type, (e) =>
       post({
         type: 'new_session',
@@ -179,7 +175,6 @@ export class ChatApp extends HTMLElement {
         // What the tab shows follows what it is: a session, or no session yet.
         if ((tab === undefined) !== this.creating) this.showCreating(tab === undefined)
         this.newSession.update(message.profiles, { plans: message.plans, chats: message.chats, unfiled: message.unfiled })
-        this.profileNames = message.profiles.names
         this.tab = tab
         this.models = message.models.map((m) => m.name)
         this.runs = message.runs
@@ -265,7 +260,8 @@ export class ChatApp extends HTMLElement {
       // A chat session's model is its own to switch (B9); a feature's run names the profile its phase runs on
       // with no switch here — that lives on the plan bar, one per phase (E2).
       model: tab?.mode === 'chat' ? { current: tab.profileName, options: this.models } : target && this.plan ? { current: target.profileName } : undefined,
-      continueInChat: tab?.mode === 'docs' || tab?.mode === 'code-plan',
+      // Only a code plan has a chat to go on to: the docs evaluation opens up in place once it has said its findings.
+      continueInChat: tab?.mode === 'code-plan',
       compactable: target?.live ?? false,
     })
     this.composer.setContext(target ? this.contextUsage.get(target.sessionId) : undefined)
@@ -363,7 +359,7 @@ export class ChatApp extends HTMLElement {
     this.chatsHost.hidden = this.creating || planShown
     for (const [p, chat] of this.chats) chat.hidden = p !== phase
     const moved = plan ? [...this.movedPhases].map((p) => stepOf(p, plan)) : []
-    this.planBar.update(plan, this.profileNames, { ...(this.selected ? { selected: this.selected } : {}), moved })
+    this.planBar.update(plan, { ...(this.selected ? { selected: this.selected } : {}), moved })
     this.planTabs.update(plan, planShown ? this.view : 'chat', this.chatMoved, `Chat · ${PHASE_LABEL[phase]}`)
     this.planView.update(plan, this.planTab)
   }

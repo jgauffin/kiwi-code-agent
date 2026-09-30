@@ -44,7 +44,7 @@ export function recordOf(node: SessionNode): SessionRecord | undefined {
   return undefined
 }
 
-/** The Sessions view: the chats and the plans in a folder each, with their status; click opens one in its own editor tab. */
+/** The Sessions view: the chats and the plans in a folder each, with their status; click shows one in the chat view. */
 export class SessionsTree implements vscode.TreeDataProvider<SessionNode> {
   private readonly changed = new vscode.EventEmitter<void>()
   readonly onDidChangeTreeData = this.changed.event
@@ -94,7 +94,7 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode> {
     const status = this.statusOf(record.id)
     const { icon, color } = STATUS_ICON[status]
     item.id = record.id
-    item.description = `${record.profile.name} · ${status.replace('_', ' ')}${this.isOpen(record.id) ? ' · open' : ''}`
+    item.description = `${record.profile.name} · ${status.replace('_', ' ')}${this.isOpen(record.id) ? ' · shown' : ''}`
     item.iconPath = new vscode.ThemeIcon(icon, color ? new vscode.ThemeColor(color) : undefined)
     item.tooltip = `${MODE_LABEL[record.mode]} · ${record.profile.name} · ${status.replace('_', ' ')}`
     item.contextValue = 'session'

@@ -99,7 +99,7 @@ Scope is not the same as access. A planner that may read everything under `docs/
 
 Inside a doc, every session reads by section. The first whole-file Read of a markdown doc over 200 lines in a session answers with its outline (headings with line spans) instead; a second whole-file Read goes through. MarkdownSearch returns each match with its closest heading as `path#Heading` and that section's span, and returns nothing from a file the session may not read. Plan files are exempt from the outline, and so is the docs-map run, which describes every section.
 
-How the docs are arranged is therefore part of how well the product can be planned, and it is nobody's job by default. The docs evaluation is that job: a session with the planner's own read scope that says where the arrangement costs a planner, and changes the docs when the user says which. Work past the docs, such as moving files out of `docs/`, is done by continuing the evaluation in chat, which carries its conversation on with the full tool set. It judges discovery, never correctness: whether the docs are right is settled against the code, in phase 2, on one feature at a time.
+How the docs are arranged is therefore part of how well the product can be planned, and it is nobody's job by default. The docs evaluation is that job: a session with the planner's own read scope that says where the arrangement costs a planner, and changes the docs when the user says which. The narrow scope has only the findings to protect, so once they are said the session opens up: it goes on in the same conversation with the full tool set, and work past the docs, such as moving files out of `docs/`, is answered where it was read rather than in a session of its own. It judges discovery, never correctness: whether the docs are right is settled against the code, in phase 2, on one feature at a time.
 
 ## Phase 2: Check against code
 
@@ -158,7 +158,7 @@ Tools: Read, Write, Edit, Glob, Grep, JsonSchema, JsonQuery, MarkdownSearch, Bas
 
 ## Unfiled decisions
 
-A decision the user makes outside planning, one a blind planner could otherwise decide differently, is intent the planner cannot see. The session that hears it records it where the planner reads. Within the task being built, it amends the spec. Reaching further, from an implement run, a plan session or a chat, it becomes an entry in `plan/unfiled-decisions.md`: committed, readable in phase 1, and outweighing a doc or spec that says otherwise. Written in the product's language, never a path or a symbol. *File decisions* is a session with the planner's read scope that moves each entry into the specs and docs it names, each write confirmed, and deletes it once filed; an implemented spec is not amended, since the change is a feature to plan. The pick-up menu shows how many entries wait.
+A decision the user makes outside planning, one a blind planner could otherwise decide differently, is intent the planner cannot see. The session that hears it records it where the planner reads. Within the task being built, it amends the spec. Reaching further, from an implement run, a plan session or a chat, it becomes an entry in `plan/unfiled-decisions.md`: committed, readable in phase 1, and outweighing a doc or spec that says otherwise. Written in the product's language, never a path or a symbol. *File decisions* is a session with the planner's read scope that moves each entry into the specs and docs it names, each write confirmed, and deletes it once filed; an implemented spec is not amended, since the change is a feature to plan. The new-session screen's Maintenance tab counts how many entries wait.
 
 ## Migration
 
@@ -202,11 +202,9 @@ Run id, per-phase transcript, tool calls, token spend, checkpoint reasons under 
 
 Phase 1 wants the strongest reasoner, phase 3 wants throughput. Profiles carry engine, model and effort.
 
-The model is chosen per feature for each phase that runs one — blind plan, map against code, implement, cleanup — while verification runs no model and takes no choice. A choice is the user's own way of working rather than part of what the feature is, so it lives beside the feature and not in its plan files.
+Which model a phase runs on is set in the active profile alone, one entry per step, never per feature or from the plan view: the way of working is the user's, not the feature's. A profile changed in settings reaches a feature's runs on their next turn.
 
-A choice naming a profile the settings no longer configure refuses the phase and names what is missing, offering the settings default for the user to take: a session running on a model nobody picked is worse than one that will not start.
-
-What a chat session runs on and what a feature's phases run on say nothing about each other. Where nothing is chosen, the settings default stands.
+What a chat session runs on and what a feature's phases run on say nothing about each other.
 
 ## Waiting for the person
 

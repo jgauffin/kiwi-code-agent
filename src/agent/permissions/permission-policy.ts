@@ -98,7 +98,13 @@ export class PermissionPolicy implements SessionHooks {
       .filter((rule) => rule.pattern !== undefined && ruleCoversTool(rule.tool, toolName))
       .map((rule) => cdRuleDirectory(rule.pattern!))
       .filter((directory): directory is string => directory !== undefined)
-    return { canEnter: (path) => this.paths.inside(path) || directories.some((directory) => this.paths.under(directory, path)) }
+      .map((directory) => shellPath(toolName, directory))
+    return {
+      canEnter: (target) => {
+        const path = shellPath(toolName, target)
+        return this.paths.inside(path) || directories.some((directory) => this.paths.under(directory, path))
+      },
+    }
   }
 
   private isReadOnly(tool: ToolUse, context: ReadOnlyContext): boolean {
@@ -172,4 +178,11 @@ export class PermissionPolicy implements SessionHooks {
         : [input['file_path'] ?? input['notebook_path'] ?? input['path']]
     return raw.filter((p): p is string => typeof p === 'string').map((p) => this.paths.relative(p))
   }
+}
+
+/** Bash on Windows is Git Bash, which writes `D:\src` as `/d/src`. PowerShell reads that as a folder on the current drive. */
+function shellPath(toolName: string, path: string): string {
+  if (process.platform !== 'win32' || toolName !== 'Bash') return path
+  const drive = /^\/([a-zA-Z])(?:\/|$)/.exec(path)
+  return drive ? `${drive[1]}:/${path.slice(3)}` : path
 }

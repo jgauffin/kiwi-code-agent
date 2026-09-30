@@ -124,30 +124,6 @@ export function providerModel(provider: Provider, model: string): ModelProfile {
   }
 }
 
-/**
- * What a feature's phase runs on: the profile the user chose for it, if any
- * and still configured (B1), the settings default otherwise (B2). A choice
- * naming a profile that is no longer configured is never silently swapped
- * for the default: `missing` says which configuration is gone and what the
- * default would be, so the caller can refuse to start the phase and offer it
- * instead (B6) rather than running one nobody chose.
- */
-export type PhaseProfile =
-  | { kind: 'ok'; profile: ModelProfile; isDefault: boolean }
-  | { kind: 'missing'; profileName: string; settingsDefault: ModelProfile }
-
-export function resolvePhase(step: Step, chosen: string | undefined, profiles: Profile[], providers: Provider[], settingsDefault: ModelProfile, attempt = 1): PhaseProfile {
-  if (!chosen) return { kind: 'ok', profile: settingsDefault, isDefault: true }
-  const profile = profiles.find((p) => p.name === chosen)
-  if (!profile) return { kind: 'missing', profileName: chosen, settingsDefault }
-  return { kind: 'ok', profile: resolveStep(profile, providers, step, attempt), isDefault: false }
-}
-
-/** What B6's refusal tells the person: the missing configuration, named, and the default on offer in its place. */
-export function phaseRefusalMessage(step: Step, resolution: Extract<PhaseProfile, { kind: 'missing' }>): string {
-  return `"${resolution.profileName}" is not configured. Run this ${step} on the settings default ("${resolution.settingsDefault.name}") instead?`
-}
-
 /** Whether two resolved profiles would run a session the same way; used to tell a changed choice from one that resolved to the same place. */
 export function sameModelProfile(a: ModelProfile, b: ModelProfile): boolean {
   return (

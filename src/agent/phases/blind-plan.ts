@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import { ASK_USER_TOOL } from '../openai-session/tools/ask-user'
 import { MARKDOWN_SEARCH_TOOL } from '../openai-session/tools/markdown-search'
 import { DOC_READING } from '../openai-session/tools/markdown/outline-gate'
+import SPEC_CONTRACT from '../../../assets/plugin/skills/spec-writing/contract.md'
 import { KEEP_RULING } from './ruling'
 import type { Scope } from './scope-guard'
 import { UNFILED_DECISIONS, UNFILED_FILE } from './unfiled-decisions'
@@ -16,6 +17,8 @@ export function featureSlug(feature: string): string {
   return (
     feature
       .toLowerCase()
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '')
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')
       .slice(0, 60) || 'feature'
@@ -83,43 +86,9 @@ First, direction. In chat, not in a file: the few decisions that shape the featu
 you propose, with the reason) and the questions whose answer would change that. A short message, then stop and wait. Write nothing until the user says go: 
 a full plan in the wrong direction is wasted, so the user steers first.
 
-Then, the spec. When the user accepts or adjusts the direction, write one file, \`${PLAN_DIR}/${slug}.spec.md\` under ${cwd}, with Write. Structure:
-
-\`\`\`markdown
----
-feature: ${feature}
-status: draft
----
-
-# ${feature}
-
-## Goal
-One paragraph: who, what, why. Domain language only.
-
-## Cancelling an order
-One line on the situation, when the title is not enough.
-- **Cancel command**: one observable rule, written so a test can prove it (${DOCS_DIR}/intent/orders.md#Cancellation)
-  - **Shipped order**: situation → expected outcome, an edge of the rule above
-- **Refund on cancel**: a rule intent is silent on, settled by you as the sensible default
-
-## Open questions
-- **Partial refunds**: something intent does not settle and only the user can
-\`\`\`
-
-The spec is a contract, and the extension holds you to it on every write:
-- \`## Goal\` first, as prose. Then one \`##\` section per scenario: a situation from the user's side, named as the user would say it. A small feature has one scenario; a feature is rarely more than four.
-- A scenario holds rules, \`- **Name**: ...\`, that make up the situation. An edge case, \`  - **Name**: ...\`, is indented under the rule it qualifies: it is a situation that rule has to survive. An edge case that is a rule of its own is a rule. Nothing nests deeper.
-- Rules are few and coarse, each one something a single test can prove, and each one sentence: what the rule has to survive is an edge case, and why it holds is not written in the spec. There are no invariants, acceptance criteria or task sections: an invariant is a rule, an acceptance criterion restates one, and the tests that prove each rule are the implementer's evidence, recorded on the tasks later. Anything else is reported back to you as off contract.
-- Only Goal and one scenario are always there. Open questions exists when there is one, and holds only what is still unanswered: a question the user answered becomes a rule or an edge case.
-
-Rules:
-- To the point, not complete. A rule earns its place only if leaving it out would change what gets built or how it is tested. Do not restate a rule as an edge case, do not spec the obvious, do not cover every situation that could be imagined. A feature described in two sentences is usually a page, not five.
-- No tasks: the build takes one per scenario, and what to do and where is settled against the code. A task written blind would only restate the rules.
+Then, the spec. When the user accepts or adjusts the direction, write one file, \`${PLAN_DIR}/${slug}.spec.md\` under ${cwd}, with Write. ${SPEC_CONTRACT.trim().replaceAll('<feature>', feature)}
 - Settle what you can. Where intent is silent but a sensible default exists, take it and say so in the direction; a question is for what only the user can answer, and you put it with the \`${ASK_USER_TOOL}\` tool and carry on with the answer rather than writing it down and stopping.
 - The user's answers become rules in this spec. The part of an answer that reaches features other than this one is recorded for them: ${UNFILED_DECISIONS}
-- Every rule, edge case and question has a name, the bold lead-in of its line: a few words that say what it is about, unique in the spec, the way a test or a function is named. The name is what a comment, a task, a test and a decision refer to, so it never changes once written: on revision you add, or mark a rule \` [removed]\`, never rename or delete. A rule you must rename keeps the old name in a note after the new one, \`- **New name** (was Old name): ...\`, and the extension follows the rename through every file. Moving a rule to another scenario keeps its name.
-- A rule that comes from a section of \`${DOCS_DIR}/**\` or of another feature's spec ends with its citation in parentheses, as \`(path#Heading)\`, after the text. A rule without a citation is your own default. The citation is what a later check against the code reads instead of the docs, so it must be exact.
-- No code paths, class names or code: that is the implementation's business and you cannot know it.
 - Decisions live apart from the spec in \`${WORK_DIR}/${slug}.decisions.md\`, written by a separate check of the approved spec against the code: one \`###\` per decision, with an \`on\` line naming the rules it concerns and a \`finding\` line saying what the code does and what the spec says. Each is something the user rules on. When asked, add one to three \`- proposed: ...\` lines under each decision that has none, with Edit: each a distinct way to settle it, written as the rule's new text as it would stand in the spec (one sentence, no argument, no reference to the decision; observable behaviour, not how it is built). Keeping the rule as it stands is always offered to the user, so do not propose it. With them goes your own pick: \`- recommended: <n>\` naming a \`proposed\` line by its number, or \`${KEEP_RULING}\`, and \`- because: <one sentence>\` saying why. A proposal is not a ruling: change no rule until the user has ruled. The \`- ruling: ...\` line is the user's, written for you: \`${KEEP_RULING}\` means the rule stands and the code will change, so nothing in the spec moves; the text of a proposal means it replaces the rule verbatim; anything else is the user's own decision, which you work into the rules as it says (revise the rule, or add an edge case). When rulings are handed to you, revise the rules each decision names per its ruling, append \` [applied]\` to that decision's heading in the decisions file, and touch nothing else there.
 - \`${DOCS_DIR}/\` is the user's. You edit it only when the user asks you to, and each write is confirmed by them.
 - The user reviews the draft by commenting on its rules and striking the ones that should not be built; comments, strikes and your answers to them live in \`${WORK_DIR}/${slug}.review.md\`. A submitted review is direction, not a question: revise the spec as it asks, mark every struck rule removed without renaming anything, never bring a struck rule back on your own, and answer every comment in that file as addressed or disagreed with a reason.

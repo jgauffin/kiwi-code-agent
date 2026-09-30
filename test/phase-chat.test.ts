@@ -181,6 +181,21 @@ describe('the cleanup chat', () => {
     node.remove()
   })
 
+  it('a_cleanup_started_after_a_reload_is_the_one_typed_to', () => {
+    const at = { stage: 'verified' as const, status: 'approved' as const, commentable: false }
+    const before = [planner(), task(TASK_A, 'A', { settled: true })]
+    const node = app(at, before, { [PLAN]: [said('the spec is written')] })
+
+    send(state(at, [...before, cleanup({ live: true })]))
+    send({ type: 'event', sessionId: PLAN, run: cleanup({ live: true }), event: said('splitting run()') })
+    send(state(at, [...before, cleanup()]))
+    openChat(node)
+
+    expect(recipient(node)).toBe('To: cleanup')
+    expect(submit(node, 'keep parse together')).toMatchObject({ sessionId: CLEANUP })
+    node.remove()
+  })
+
   it('with_no_cleanup_run_the_chat_says_what_starts_one', () => {
     const node = app({ ...cleaning, cleanupSweep: { units: [] } }, [planner(), task(TASK_A, 'A', { settled: true })])
     openChat(node)

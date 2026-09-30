@@ -1,9 +1,8 @@
 import * as vscode from 'vscode'
 import { isBuild, isFeatureless, isPlanning, stepOf, type SessionManager, type SessionMode, type SessionRecord } from '../agent/session/session-manager'
-import { phaseRefusalMessage, type ModelProfile, type PhaseProfile, type Step } from '../agent/session/model-profile'
-import { PHASE_STEPS, chooseProfile, isPhaseStep, shouldApplyPhaseChoice, type PhaseChoiceStore, type PhaseStepName } from '../agent/session/phase-choices'
+import type { ModelProfile, Step } from '../agent/session/model-profile'
 import type { McpServerState, SessionEvent } from '../agent/session/code-session'
-import { appliesModelSwitchNow, blockOf, lastFailure, mostUrgent, nextStatus, type SessionStatus } from '../agent/session/session-status'
+import { appliesModelSwitchNow, blockOf, lastFailure, mostUrgent, nextStatus, takesProfile, type SessionStatus } from '../agent/session/session-status'
 import { readSpecState, setSpecStatus, type SpecState } from '../agent/phases/spec-file'
 import {
   PLAN_DIR,
@@ -88,7 +87,6 @@ import type {
   CleanupSweep,
   CleanupUnit,
   FromWebview,
-  PhaseProfileState,
   PlanState,
   ResumableChat,
   RunControls,
@@ -136,19 +134,19 @@ export interface ProfileDefaultsStore {
   set(name: string): Promise<void>
 }
 
-/** The editor panel's view type; a serializer registered under it brings the panel back after a reload. */
+/** The chat tabs' webview type; VS Code hands tabs of this type back after a window reload. */
 export const CHAT_PANEL_TYPE = 'kiwiAgent.chatPanel'
 
-/** What an editor tab is called before a session is started on it. */
+/** What a tab is called before a session is started on it. */
 const NEW_SESSION_TITLE = 'New session'
 
-/** One editor tab: the panel and the session tab it shows, which a blank one has yet to be given. */
+/** A chat tab in the editor area and the session tab it shows; absent while it shows the new-session screen. */
 type ChatPanel = { panel: vscode.WebviewPanel; tabId?: string }
 
 /**
- * Hosts the chat UI: one editor tab per session, named after it. The provider
- * routes each session's events to the panel that shows it and tracks every
- * session's status for the Sessions view.
+ * Hosts the chat UI: one editor tab per session, so a session keeps running
+ * in view while another is started. The provider routes each session's events
+ * to its tab and tracks every session's status for the Sessions view.
  */
 export class ChatViewProvider {
   private readonly panels = new Set<ChatPanel>()
@@ -191,8 +189,8 @@ export class ChatViewProvider {
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly sessions: SessionManager,
-    private readonly profileFor: (step: Step, feature?: string, attempt?: number) => PhaseProfile,
-    private readonly phaseChoices: PhaseChoiceStore,
+    /** What a step runs on: the active profile's model for it. `attempt` counts the fixes of a failed test run. */
+    private readonly profileFor: (step: Step, attempt?: number) => ModelProfile,
     private readonly profileDefaults: ProfileDefaultsStore,
     private readonly registeredModels: () => ModelProfile[],
     private readonly verifier: Verifier,
@@ -202,33 +200,11 @@ export class ChatViewProvider {
     private readonly workspaceRoot: string,
   ) {}
 
-  /**
-   * What a feature's phase runs on: its own choice when it is still
-   * configured (B1), the settings default otherwise (B2). A choice naming a
-   * profile that is gone refuses to start the phase and names what is
-   * missing; the settings default is offered in its place and runs only once
-   * the user takes it (B6).
-   */
-  private async resolvedProfile(step: Step, feature: string | undefined, attempt?: number): Promise<ModelProfile | undefined> {
-    const resolution = this.profileFor(step, feature, attempt)
-    if (resolution.kind === 'ok') return resolution.profile
-    const pick = await vscode.window.showWarningMessage(`KiwiAgent: ${phaseRefusalMessage(step, resolution)}`, `Run on "${resolution.settingsDefault.name}"`)
-    return pick ? resolution.settingsDefault : undefined
-  }
-
-  /**
-   * A choice takes effect on the phase's next turn (B3): before a live
-   * session of a feature's phase is sent another message, its profile is
-   * resolved again, and swapped in when it changed. A turn in flight is never
-   * touched — only a session that is not `underWay` is asked here, right
-   * before the next prompt — and a phase that already ended is not re-run:
-   * nothing calls this outside a `send`.
-   */
-  private async applyPhaseChoice(run: SessionRecord): Promise<void> {
-    if (!run.feature || !isPhaseStep(run.mode)) return
-    const resolution = this.profileFor(stepOf(run), run.feature, run.fixAttempt)
-    if (!shouldApplyPhaseChoice(this.statusOf(run.id), run.profile, resolution)) return
-    if (resolution.kind === 'ok') await this.sessions.setProfile(run.id, resolution.profile)
+  /** Models are chosen in the profiles alone: a feature run takes a profile changed in settings on its next turn. A chat keeps its own switch. */
+  private async followProfile(run: SessionRecord): Promise<void> {
+    if (isFeatureless(run.mode)) return
+    const resolved = this.profileFor(stepOf(run), run.fixAttempt)
+    if (takesProfile(this.statusOf(run.id), run.profile, resolved)) await this.sessions.setProfile(run.id, resolved)
   }
 
   /**
@@ -254,7 +230,7 @@ export class ChatViewProvider {
     await this.sessions.setProfile(run.id, pending)
   }
 
-  /** Whether the session has an editor tab open, its own or its feature's. */
+  /** Whether a tab shows the session, its own or its feature's. */
   isOpen(sessionId: string): boolean {
     const record = this.sessions.get(sessionId)
     return record !== undefined && this.panelOf(this.tabIdOf(record)) !== undefined
@@ -267,70 +243,83 @@ export class ChatViewProvider {
   }
 
   private panelOf(tabId: string): ChatPanel | undefined {
-    return [...this.panels].find((p) => p.tabId === tabId)
+    for (const entry of this.panels) if (entry.tabId === tabId) return entry
+    return undefined
   }
 
   /**
-   * A new editor panel, or one VS Code revived after a window reload. The
-   * revived one names the session it showed; a session removed meanwhile
-   * leaves the tab on the new-session screen rather than empty.
+   * A tab VS Code restores after a window reload, its state naming the
+   * session it showed. A session removed meanwhile, or already shown by
+   * another tab, leaves it on the new-session screen.
    */
-  adoptPanel(panel: vscode.WebviewPanel, tabId?: string): ChatPanel {
-    const shown = tabId && this.sessions.get(tabId) ? tabId : undefined
-    const entry: ChatPanel = { panel, ...(shown ? { tabId: shown } : {}) }
+  restore(panel: vscode.WebviewPanel, state: { tabId?: string } | undefined): void {
+    const tabId = state?.tabId
+    this.adopt(panel, tabId && this.sessions.get(tabId) && !this.panelOf(tabId) ? tabId : undefined)
+  }
+
+  /** A new tab on the new-session screen; the tabs already open keep their sessions in view. */
+  showNewSession(): void {
+    this.createPanel(undefined)
+  }
+
+  private createPanel(tabId: string | undefined): ChatPanel {
+    const panel = vscode.window.createWebviewPanel(CHAT_PANEL_TYPE, NEW_SESSION_TITLE, vscode.ViewColumn.Active, {
+      enableScripts: true,
+      // A tab in the background still takes its session's events; a discarded page would miss them.
+      retainContextWhenHidden: true,
+      localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist')],
+    })
+    return this.adopt(panel, tabId)
+  }
+
+  private adopt(panel: vscode.WebviewPanel, tabId: string | undefined): ChatPanel {
+    const entry: ChatPanel = { panel, ...(tabId ? { tabId } : {}) }
+    panel.iconPath = vscode.Uri.joinPath(this.extensionUri, 'media', 'kiwi.svg')
     this.panels.add(entry)
     this.attach(entry)
     panel.onDidDispose(() => {
       this.panels.delete(entry)
       this.changed.fire()
     })
-    // The Sessions view marks the session being looked at, which changes as tabs take focus.
-    panel.onDidChangeViewState(() => this.changed.fire())
+    this.changed.fire()
     return entry
   }
 
-  /** The new-session screen in an editor tab of its own; one blank tab is enough, so an open one is revealed. */
-  showNewSession(): void {
-    const blank = [...this.panels].find((p) => p.tabId === undefined)
-    if (blank) blank.panel.reveal(blank.panel.viewColumn)
-    else this.createPanel()
-    // The plan list is read fresh, so a spec written since the last state is offered.
-    void this.sendState()
+  /**
+   * Brings the session's tab up: the tab already showing it, else `into`
+   * (the tab the request came from), else a new one.
+   */
+  private show(tabId: string, into: ChatPanel | undefined): void {
+    const open = this.panelOf(tabId)
+    if (open) open.panel.reveal()
+    else if (into && this.panels.has(into)) {
+      into.tabId = tabId
+      into.panel.reveal()
+    } else this.createPanel(tabId)
   }
 
-  private createPanel(): ChatPanel {
-    return this.adoptPanel(
-      vscode.window.createWebviewPanel(CHAT_PANEL_TYPE, NEW_SESSION_TITLE, vscode.ViewColumn.Active, { retainContextWhenHidden: true }),
-    )
-  }
-
-  async newSession(mode: SessionMode, feature?: string, prompt?: string, host?: ChatPanel): Promise<SessionRecord | undefined> {
+  /** `into` is the tab the session is started from, which then shows it; without one the session gets its own tab. */
+  async newSession(mode: SessionMode, feature?: string, prompt?: string, into?: ChatPanel): Promise<SessionRecord | undefined> {
     if (!isFeatureless(mode) && !feature) throw new Error(`A ${mode} session needs a feature name`)
-    const profile = await this.resolvedProfile(mode, feature)
-    if (!profile) return undefined
-    const record = await this.sessions.create(profile, mode, feature)
+    const record = await this.sessions.create(this.profileFor(mode), mode, feature)
     // Approving the plan is the consent for the writes it maps out, so the switch starts on where a build session carries it out.
     if (mode === 'implement' || mode === 'cleanup') this.allowWrites.setEnabled(record.id, true)
-    return await this.activate(record, prompt, host)
+    return await this.activate(record, prompt, into)
   }
 
   /**
    * Shows a newly created session, and sends its first prompt when there is
-   * one. A run on a feature joins the editor tab that feature already has; the
-   * new-session tab it was started from becomes its tab when it needs one.
+   * one. A run on a feature joins the tab that feature already has.
    */
-  private async activate(record: SessionRecord, prompt?: string, host?: ChatPanel): Promise<SessionRecord> {
-    await this.reveal(record, host)
+  private async activate(record: SessionRecord, prompt?: string, into?: ChatPanel): Promise<SessionRecord> {
+    await this.reveal(record, into)
     if (prompt) await this.sessions.send(record.id, prompt)
     return record
   }
 
-  /** Brings the session's editor tab up: the one it has, the blank tab it was started from, or a new one. */
-  private async reveal(record: SessionRecord, host?: ChatPanel): Promise<void> {
+  private async reveal(record: SessionRecord, into?: ChatPanel): Promise<void> {
     const tabId = this.tabIdOf(record)
-    const entry = this.panelOf(tabId) ?? host ?? this.createPanel()
-    entry.tabId = tabId
-    entry.panel.reveal(entry.panel.viewColumn)
+    this.show(tabId, into)
     await this.sendState()
     await this.sendTranscript(tabId)
     this.changed.fire()
@@ -348,7 +337,7 @@ export class ChatViewProvider {
    * bar then offers what the stage allows: review and mapping on a draft,
    * implement on an approved one, the test run on a tested board.
    */
-  async resumePlan(feature: string, host?: ChatPanel): Promise<void> {
+  async resumePlan(feature: string, into?: ChatPanel): Promise<void> {
     const path = specPath(this.workspaceRoot, feature)
     const state = await readSpecState(path)
     if (!state.exists) throw new Error(`No spec for "${feature}" under ${PLAN_DIR}/.`)
@@ -358,13 +347,13 @@ export class ChatViewProvider {
     }
     // The list is newest first; the latest session on the spec is the one that knows it best.
     const owner = this.sessions.list().find((r) => r.mode === 'plan' && r.feature && specPath(this.workspaceRoot, r.feature) === path)
-    if (owner) await this.open(owner.id, host)
-    else await this.newSession('plan', feature, resumePlanPrompt(feature), host)
+    if (owner) await this.open(owner.id, into)
+    else await this.newSession('plan', feature, resumePlanPrompt(feature), into)
   }
 
-  async open(sessionId: string, host?: ChatPanel): Promise<void> {
+  async open(sessionId: string, into?: ChatPanel): Promise<void> {
     const record = this.sessions.get(sessionId)
-    if (record) await this.reveal(record, host)
+    if (record) await this.reveal(record, into)
   }
 
   /** Stopping a session stops the feature it stands for: every run under it, not the one it is keyed by. Its tab closes with it. */
@@ -450,6 +439,10 @@ export class ChatViewProvider {
       if (record.parentId) void this.followBoard(feature)
       else void this.followAmendment(feature).then(() => this.followBoard(feature))
     }
+    // The evaluation has been said: the session goes on with the full tool set, so what it found is worked on where it was read.
+    if (event.type === 'turn_done' && !event.isError && record?.mode === 'docs' && !record.opened) {
+      void this.sessions.openUp(record.id).then(() => this.sendState())
+    }
     if (event.type === 'turn_done' && record?.mode === 'plan' && record.feature) {
       // However the turn ended, the rulings are no longer in flight: Approve is the user's again, on the spec as it stands.
       const applied = this.applying.delete(record.feature)
@@ -512,10 +505,8 @@ export class ChatViewProvider {
     if (record.mode !== 'plan' || !record.feature || this.sessions.liveChildOf(record.id)) return
     const spec = await readSpecState(specPath(this.workspaceRoot, record.feature))
     if (!spec.exists || spec.status !== 'approved') return
-    const profile = await this.resolvedProfile('reconcile', record.feature)
-    if (!profile) return
     const previous = this.sessions.latest('reconcile', record.feature)
-    const child = await this.sessions.create(profile, 'reconcile', record.feature, { parentId: record.id, continues: previous })
+    const child = await this.sessions.create(this.profileFor('reconcile'), 'reconcile', record.feature, { parentId: record.id, continues: previous })
     this.checks.set(record.id, { live: true, text: 'Checking the spec against the code…' })
     await this.sendState()
     await this.sessions.send(child.id, reconcileKickoff(child.engineSessionId !== undefined))
@@ -714,8 +705,7 @@ export class ChatViewProvider {
     const spec = await readSpecState(specPath(this.workspaceRoot, feature))
     if (!spec.exists) return
     // Started by the host, so the run's only board call is the one that records how the task ended.
-    const profile = await this.resolvedProfile('implement', feature)
-    if (!profile) return
+    const profile = this.profileFor('implement')
     const started = await changeBoard(path, (b) => updateTask(b, task.name, { state: 'in_progress' }))
     const run = await this.sessions.create(profile, 'implement', feature, { parentId: plan.id, task: task.name })
     this.allowWrites.setEnabled(run.id, true)
@@ -764,9 +754,7 @@ export class ChatViewProvider {
     const board = await readBoard(tasksPath(this.workspaceRoot, feature))
     if (!board) return
     const plan = this.sessions.latest('plan', feature)
-    const profile = await this.resolvedProfile('fix', feature, attempt)
-    if (!profile) return
-    const run = await this.sessions.create(profile, 'implement', feature, { ...(plan ? { parentId: plan.id } : {}), fixAttempt: attempt })
+    const run = await this.sessions.create(this.profileFor('fix', attempt), 'implement', feature, { ...(plan ? { parentId: plan.id } : {}), fixAttempt: attempt })
     this.allowWrites.setEnabled(run.id, true)
     await this.sendState()
     await this.sessions.send(run.id, fixKickoff(feature, board, failures, this.workspaceRoot))
@@ -854,9 +842,7 @@ export class ChatViewProvider {
     const busy = this.sessions.liveChildOf(parent.id)
     if (busy) return refuse(`"${busy.title}" is still running under the plan; close it first`)
     const paths = [...new Set(flagged.map((u) => relativeTo(u.path)))]
-    const profile = await this.resolvedProfile('cleanup', feature)
-    if (!profile) return
-    const child = await this.sessions.create(profile, 'cleanup', feature, { parentId: parent.id, files: paths })
+    const child = await this.sessions.create(this.profileFor('cleanup'), 'cleanup', feature, { parentId: parent.id, files: paths })
     this.cleanups.set(feature, { live: true, text: 'Splitting oversized units…' })
     this.cleanupProgress.set(feature, startProgress(flagged.map((u) => this.cleanupUnit(u))))
     await this.sendState()
@@ -1065,10 +1051,7 @@ export class ChatViewProvider {
   /** One run for the whole build: it reads the changed docs, writes an entry each, and is gone when its turn ends. */
   private async describeDocs(docs: string[], onProgress: (line: string) => void): Promise<void> {
     // The docs it was handed are its whole read scope: an unchanged doc costs nothing, and the code is out of reach.
-    // Featureless, so this always resolves to the settings default (B2) and never refuses (B6).
-    const profile = await this.resolvedProfile('docs-map', undefined)
-    if (!profile) throw new Error('docs-map could not resolve a model profile')
-    const record = await this.sessions.create(profile, 'docs-map', undefined, { files: docs })
+    const record = await this.sessions.create(this.profileFor('docs-map'), 'docs-map', undefined, { files: docs })
     const finished = new Promise<string[]>((resolve) => {
       this.docsMapRun = { sessionId: record.id, progress: onProgress, done: resolve }
     })
@@ -1156,7 +1139,7 @@ export class ChatViewProvider {
     })
   }
 
-  /** What the tab the message came from shows, or nothing while it shows the new-session screen. */
+  /** The session the tab shows, or nothing while it shows the new-session screen. */
   private shownBy(entry: ChatPanel): SessionRecord | undefined {
     return entry.tabId ? this.sessions.get(entry.tabId) : undefined
   }
@@ -1178,15 +1161,14 @@ export class ChatViewProvider {
         if (!message.sessionId) throw new Error('The message names no conversation to go to.')
         const run = this.targetOf(shown, message.sessionId, true)
         if (run.mode === 'cleanup') await this.reengageCleanup(run)
-        // A choice made since this run last spoke takes effect now, on its next turn (B3).
-        await this.applyPhaseChoice(run)
+        await this.followProfile(run)
         // A model switch picked while a turn of this chat session was in flight takes effect now (B10).
         await this.applyPendingModelSwitch(run)
         await this.sessions.send(run.id, text)
         return
       }
       case 'link_open_file': {
-        // A chat panel of its own leaves no active text editor, so the file beside it is the one meant.
+        // With focus in the view there may be no active text editor, so the file on screen is the one meant.
         const editor = vscode.window.activeTextEditor ?? vscode.window.visibleTextEditors[0]
         if (!editor) {
           void vscode.window.showWarningMessage('KiwiAgent: no file is open in the editor to link.')
@@ -1228,11 +1210,9 @@ export class ChatViewProvider {
         return
       }
       case 'continue_in_chat':
-        // The chat carries the conversation on, so it takes over the tab the session had. A code plan continues to be built.
-        if (shown?.mode === 'docs' || shown?.mode === 'code-plan') {
-          const kickoff = shown.mode === 'code-plan' ? codePlanBuildKickoff() : undefined
-          await this.activate(await this.sessions.continueInChat(shown.id), kickoff, entry)
-        }
+        // The chat carries the conversation on, so it takes over the tab the session had, and it starts on the build:
+        // a chat that opens with nothing to do would show an empty tab and wait.
+        if (shown?.mode === 'code-plan') await this.activate(await this.sessions.continueInChat(shown.id), codePlanBuildKickoff(), entry)
         return
       case 'reconnect_mcp':
         if (shown) await this.sessions.reconnectMcp(this.targetOf(shown, message.sessionId, false).id, message.server)
@@ -1241,13 +1221,6 @@ export class ChatViewProvider {
         await this.profileDefaults.set(message.name)
         await this.sendState()
         return
-      case 'set_phase_profile': {
-        const record = this.planRecordOf(shown)
-        if (!record?.feature) return
-        await chooseProfile(this.phaseChoices, record.feature, message.step, message.name)
-        await this.sendState()
-        return
-      }
       case 'switch_session':
         await this.open(message.sessionId, entry)
         return
@@ -1551,19 +1524,12 @@ export class ChatViewProvider {
       atWork: runs.some((r) => r.status === 'planning' || r.status === 'implementing') || check?.live === true || verification?.live === true || cleanup?.live === true,
       ...(blocked ? { blocked } : {}),
       ...(failure ? { failure } : {}),
-      phaseProfiles: PHASE_STEPS.map((step) => this.phaseProfileState(step, feature)),
     }
-  }
-
-  /** One phase's row for the plan view (B8): the profile it will run on next, or the configuration a choice named that is gone (B6). */
-  private phaseProfileState(step: PhaseStepName, feature: string): PhaseProfileState {
-    const resolution = this.profileFor(step, feature)
-    return resolution.kind === 'ok' ? { step, name: resolution.profile.name, isDefault: resolution.isDefault } : { step, missing: resolution.profileName }
   }
 
   /**
    * A tab is the feature, however many runs it takes, and otherwise the one
-   * session that belongs to no feature. Its title names the editor tab: the
+   * session that belongs to no feature. Its title heads the view: the
    * feature, or the chat's own title, which its first message sets.
    */
   private tab(record: SessionRecord): SessionTab {
@@ -1604,8 +1570,8 @@ export class ChatViewProvider {
   }
 
   /**
-   * Every open tab is brought up to date, and renamed when its session was:
-   * a chat is named by its first message, so its editor tab is too.
+   * Every tab is brought up to date, and its caption follows the session's
+   * name: a chat is named by its first message.
    */
   private async sendState(): Promise<void> {
     const plans = await listPlans(this.workspaceRoot).catch((error: unknown) => {
@@ -1625,7 +1591,7 @@ export class ChatViewProvider {
     }
     for (const entry of this.panels) {
       const record = this.shownBy(entry)
-      // A session removed under its tab leaves the tab on the new-session screen rather than on a session that is gone.
+      // A session removed under the tab leaves it on the new-session screen rather than on a session that is gone.
       if (entry.tabId && !record) delete entry.tabId
       const tab = record ? this.tab(record) : undefined
       entry.panel.title = tab?.title ?? NEW_SESSION_TITLE
@@ -1647,7 +1613,7 @@ export class ChatViewProvider {
   }
 
   /**
-   * The chats with no editor tab open: closing a tab leaves the record and the
+   * The chats no tab is showing: closing one keeps the record and the
    * transcript, so the chat is offered back rather than lost. Only so many,
    * newest first: the state goes out on every status change, and a workspace's
    * whole history would ride along with it.
@@ -1665,13 +1631,13 @@ export class ChatViewProvider {
     const record = this.sessions.get(sessionId)
     if (!record) return
     const tabId = this.tabIdOf(record)
-    const panel = this.panelOf(tabId)
-    if (!panel) return
+    const entry = this.panelOf(tabId)
+    if (!entry) return
     const runs: RunSection[] = []
     for (const run of this.runsOf(record)) {
       runs.push({ ...this.runRef(run), events: await this.sessions.transcript(run.id) })
     }
-    void panel.panel.webview.postMessage({ type: 'transcript', sessionId: tabId, runs } satisfies ToWebview)
+    void entry.panel.webview.postMessage({ type: 'transcript', sessionId: tabId, runs } satisfies ToWebview)
   }
 
   private runRef(run: SessionRecord): RunRef {
@@ -1690,8 +1656,9 @@ export class ChatViewProvider {
       profileName: run.profile.name,
       live: this.sessions.isLive(run.id),
       settled: run.settled === true,
-      // Planning phases auto-allow their in-scope writes and deny the rest, so the switch has nothing to decide there.
-      ...(!isPlanning(run.mode) ? { allowWrites: this.allowWrites.isEnabled(run.id) } : {}),
+      // Planning phases auto-allow their in-scope writes and deny the rest, so the switch has nothing to decide there;
+      // a session that has opened up writes wherever the rules let it, and the switch is its own again.
+      ...(!isPlanning(run.mode) || run.opened ? { allowWrites: this.allowWrites.isEnabled(run.id) } : {}),
       ...(this.mcpServers.has(run.id) ? { mcp: this.mcpServers.get(run.id)! } : {}),
     }
   }

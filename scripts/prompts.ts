@@ -4,7 +4,7 @@
  * Prompts are rendered by calling the real functions with placeholder
  * arguments, so the file never drifts from the code. Run: npm run prompts
  */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -169,8 +169,11 @@ async function main(): Promise<void> {
     toolEntry(skillTool([{ name: '<skill>', description: '<skill description>', dir: '<dir>' }]), `${tools}/skill.ts`),
   ]
 
-  const skillFile = 'assets/plugin/skills/run-script/SKILL.md'
-  const skills: Entry[] = [{ title: 'run-script', source: `[${skillFile}](${skillFile})`, text: readFileSync(skillFile, 'utf8'), lang: 'markdown' }]
+  const skillsDir = 'assets/plugin/skills'
+  const skills: Entry[] = readdirSync(skillsDir).sort().map((name) => {
+    const skillFile = `${skillsDir}/${name}/SKILL.md`
+    return { title: name, source: `[${skillFile}](${skillFile})`, text: readFileSync(skillFile, 'utf8'), lang: 'markdown' }
+  })
 
   const doc = [
     '# Prompts and instructions',

@@ -16,6 +16,14 @@
 - decided: MCP servers are read from `~/.mcp.json` for every workspace with the workspace's own `.mcp.json` over it by name, one format at both levels. Claude Code keeps the user's servers inside its own settings file instead, so on first run they are copied out into `~/.mcp.json` verbatim; the copy is skipped whenever that file already exists, so a server the user later removes stays removed and no migration flag is kept anywhere. Servers Claude Code holds per project are left alone.
 - affects: MCP servers, docs/settings.md, docs/intent/agent.md
 
-### A session is an editor tab of its own, named after itself
-- decided: Every chat and every plan opens as its own editor tab named by the session — a chat by its first message, a plan by its feature name — instead of a strip of sub-tabs inside one shared panel; the sidebar holds only the Sessions list, whose "+" opens a blank tab, and work waiting to be picked up (plans on disk, chats with no tab open, decisions not yet filed) is offered on that blank tab's new-session screen. Every run of one feature — planning, checking, implementing, cleanup — still shares the feature's single tab.
+### The new-session screen splits work in the code from maintenance
+- decided: The new-session screen is in two tabs. Code holds the session types that work in the code (Chat, Plan, Feature planning) and the work waiting to be picked up; Maintenance holds the jobs that keep the intent in order — evaluating the docs, filing the unfiled decisions — counting on the tab what waits to be filed. A maintenance job is not a session type among the others, and what waits to be filed is offered there rather than in the pick-up list.
+- affects: starting a new session, sessions and tabs, docs evaluation, filing unfiled decisions, picking up a plan
+
+### A session with a narrow scope opens up once it has said its findings
+- decided: The docs evaluation goes on in its own conversation with the full tool set once its findings are said, rather than offering to be continued in a new chat: the narrow scope is there to keep the code out of the findings, and there are none left to draw. The user answers in the session they read the findings in. Continuing in a new chat is left to the plan against the code, which opens on the build it agreed to.
+- affects: docs evaluation continued in chat, sessions and tabs, plan against the code
+
+### Every session has its own editor tab
+- decided: The chat lives in editor tabs, one per session, captioned by its name (a chat by its first message, a plan by its feature name), so a session at work is never hidden by starting another. The agent icon and "+" always open a new tab on the new-session screen, where work waiting to be picked up (plans on disk, chats not shown, decisions not yet filed) is offered; a session started there takes that tab. Clicking a session in the Sessions list brings up its tab, or opens one. The docs evaluation and the decision filing are listed with the chats, so a closed tab can be reopened. Every run of one feature (planning, checking, implementing, cleanup) shares the feature's one tab.
 - affects: sessions and tabs, starting a new session, picking up a plan, filing unfiled decisions, docs evaluation continued in chat

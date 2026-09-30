@@ -13,10 +13,10 @@ const events = await import('../src/chat/webview/events')
 
 const decision = (over: Partial<Decision>): Decision => ({ title: 'Shipped orders', on: [], finding: 'code', proposals: ['drop'], state: 'open', line: 0, end: 0, ...over })
 
-function bar(state: PlanState, profileNames: string[] = []): InstanceType<typeof PlanBar> {
+function bar(state: PlanState): InstanceType<typeof PlanBar> {
   const node = new PlanBar()
   document.body.appendChild(node)
-  node.update(state, profileNames)
+  node.update(state)
   return node
 }
 
@@ -166,63 +166,10 @@ describe('PlanBar steps', () => {
   })
 })
 
-describe('PlanBar phase profiles', () => {
-  const pickers = (node: HTMLElement) => [...node.querySelectorAll<HTMLSelectElement>('select.phase-profile')]
-
-  it('B8_the_bar_shows_every_phase_and_the_profile_it_will_run_on_including_the_settings_default', () => {
-    const node = bar(
-      plan({
-        phaseProfiles: [
-          { step: 'plan', name: 'Balanced', isDefault: true },
-          { step: 'reconcile', name: 'Balanced', isDefault: true },
-          { step: 'implement', name: 'Fast', isDefault: false },
-          { step: 'cleanup', name: 'Balanced', isDefault: true },
-        ],
-      }),
-      ['Balanced', 'Fast'],
-    )
-    const selects = pickers(node)
-    expect(selects).toHaveLength(4)
-    // A phase on the settings default shows it selected under "Settings default", not hidden.
-    expect(selects[0]!.value).toBe('')
-    expect(selects[0]!.classList.contains('default')).toBe(true)
-    expect(selects[0]!.selectedOptions[0]!.textContent).toBe('Settings default')
-    // A phase with its own choice shows that profile selected.
-    expect(selects[2]!.value).toBe('Fast')
-    expect(selects[2]!.classList.contains('default')).toBe(false)
-  })
-
-  it('B1_picking_a_profile_for_one_phase_asks_the_host_to_choose_it_for_that_phase_alone', () => {
-    const node = bar(
-      plan({ phaseProfiles: [{ step: 'implement', name: 'Balanced', isDefault: true }] }),
-      ['Balanced', 'Fast'],
-    )
-    const select = pickers(node)[0]!
-    let seen: InstanceType<typeof events.PhaseProfileChangedEvent> | undefined
-    node.addEventListener(events.PhaseProfileChangedEvent.type, (e) => (seen = e as InstanceType<typeof events.PhaseProfileChangedEvent>))
-    select.value = 'Fast'
-    select.dispatchEvent(new Event('change'))
-    expect(seen?.step).toBe('implement')
-    expect(seen?.name).toBe('Fast')
-  })
-
-  it('B2_picking_settings_default_clears_the_choice_rather_than_naming_a_profile', () => {
-    const node = bar(plan({ phaseProfiles: [{ step: 'plan', name: 'Fast', isDefault: false }] }), ['Balanced', 'Fast'])
-    const select = pickers(node)[0]!
-    let seen: InstanceType<typeof events.PhaseProfileChangedEvent> | undefined
-    node.addEventListener(events.PhaseProfileChangedEvent.type, (e) => (seen = e as InstanceType<typeof events.PhaseProfileChangedEvent>))
-    select.value = ''
-    select.dispatchEvent(new Event('change'))
-    expect(seen?.step).toBe('plan')
-    expect(seen?.name).toBeUndefined()
-  })
-
-  it('B6_a_choice_naming_a_profile_no_longer_configured_shows_what_is_missing', () => {
-    const node = bar(plan({ phaseProfiles: [{ step: 'cleanup', missing: 'Gone' }] }), ['Balanced'])
-    const select = pickers(node)[0]!
-    expect(select.classList.contains('missing')).toBe(true)
-    expect(select.value).toBe('Gone')
-    expect(select.selectedOptions[0]!.textContent).toContain('Gone')
+describe('PlanBar models', () => {
+  it('the_bar_offers_no_model_choice_since_models_are_chosen_in_the_profiles', () => {
+    const node = bar(plan())
+    expect(node.querySelector('select')).toBeNull()
   })
 })
 

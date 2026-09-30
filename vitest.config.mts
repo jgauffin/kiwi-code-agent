@@ -1,6 +1,14 @@
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
+  // Markdown imports as its text, as esbuild's `text` loader bundles it.
+  plugins: [
+    {
+      name: 'markdown-as-text',
+      enforce: 'pre',
+      transform: (code, id) => (id.endsWith('.md') ? { code: `export default ${JSON.stringify(code)}`, map: null } : undefined),
+    },
+  ],
   test: {
     include: ['test/**/*.test.ts'],
     // One worker process per file (the default) spawns 98 processes for this

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { reasoningEffortFor } from '../src/agent/session/effort'
-import { choiceFor, phaseRefusalMessage, providerModel, resolvePhase, resolveStep, sameModelProfile, type ModelProfile, type Profile, type Provider } from '../src/agent/session/model-profile'
+import { choiceFor, providerModel, resolveStep, sameModelProfile, type ModelProfile, type Profile, type Provider } from '../src/agent/session/model-profile'
 
 const claude: Provider = { name: 'Claude', engine: 'claude-sdk', models: ['claude-opus-5', 'claude-sonnet-5'] }
 const berget: Provider = { name: 'berget', engine: 'openai-compatible', baseUrl: 'https://api.berget.ai/v1', models: ['moonshotai/Kimi-K3'] }
@@ -12,7 +12,6 @@ const profile: Profile = {
 }
 
 const cheap: Profile = { name: 'Cheap', default: { provider: 'berget', model: 'moonshotai/Kimi-K3' } }
-const settingsDefault: ModelProfile = { name: 'Balanced', engine: 'claude-sdk', model: 'claude-sonnet-5' }
 
 describe('resolveStep', () => {
   it('a_step_with_no_entry_of_its_own_runs_the_default', () => {
@@ -106,37 +105,6 @@ describe('effort', () => {
   it('a_provider_declaring_no_reasoning_control_beats_the_table', () => {
     const openai: Provider = { name: 'openai', engine: 'openai-compatible', baseUrl: 'https://api.openai.com/v1', models: ['gpt-5'], reasoningControl: 'none' }
     expect(effortOf({ name: 'Gpt', default: { provider: 'openai', model: 'gpt-5' } }, [openai], 'plan')).toBeUndefined()
-  })
-})
-
-describe('resolvePhase', () => {
-  it('B1_a_phase_with_a_choice_runs_on_the_configured_profile_it_names', () => {
-    const resolution = resolvePhase('implement', 'Cheap', [profile, cheap], [claude, berget], settingsDefault)
-    expect(resolution).toEqual({
-      kind: 'ok',
-      isDefault: false,
-      profile: { name: 'Cheap', engine: 'openai-compatible', model: 'moonshotai/Kimi-K3', baseUrl: 'https://api.berget.ai/v1', apiKeySecret: 'berget' },
-    })
-  })
-
-  it('B2_a_phase_with_no_choice_runs_on_the_settings_default', () => {
-    expect(resolvePhase('reconcile', undefined, [profile, cheap], [claude, berget], settingsDefault)).toEqual({
-      kind: 'ok',
-      profile: settingsDefault,
-      isDefault: true,
-    })
-  })
-
-  it('B6_a_choice_naming_a_profile_no_longer_configured_refuses_and_names_the_missing_configuration', () => {
-    const resolution = resolvePhase('cleanup', 'Gone', [profile], [claude, berget], settingsDefault)
-    expect(resolution).toEqual({ kind: 'missing', profileName: 'Gone', settingsDefault })
-  })
-
-  it('B6_the_refusal_message_names_the_missing_configuration_and_offers_the_settings_default', () => {
-    const resolution = resolvePhase('cleanup', 'Gone', [profile], [claude, berget], settingsDefault)
-    if (resolution.kind !== 'missing') throw new Error('expected a missing resolution')
-    expect(phaseRefusalMessage('cleanup', resolution)).toMatch(/"Gone"/)
-    expect(phaseRefusalMessage('cleanup', resolution)).toMatch(/"Balanced"/)
   })
 })
 

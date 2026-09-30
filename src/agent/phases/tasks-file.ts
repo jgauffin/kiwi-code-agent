@@ -1,7 +1,8 @@
+import { randomUUID } from 'node:crypto'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
-import { readOptional } from '../workspace-files'
+import { readOptional, replaceFile } from '../workspace-files'
 import { WORK_DIR, featureSlug } from './blind-plan'
 import { specFingerprint, type Scenario, type Spec } from './spec-model'
 
@@ -155,8 +156,28 @@ export async function readBoard(path: string): Promise<TaskBoard | undefined> {
   return text === undefined ? undefined : parseBoard(text, path)
 }
 
-export async function writeBoard(path: string, board: TaskBoard): Promise<void> {
-  await writeFile(path, renderBoard(board), 'utf8')
+export function writeBoard(path: string, board: TaskBoard): Promise<void> {
+  return queued(path, () => replaceBoard(path, board))
+}
+
+/** A reader never sees a board half written: it is staged beside the file and renamed into place. */
+async function replaceBoard(path: string, board: TaskBoard): Promise<void> {
+  const staged = `${path}.${randomUUID()}.tmp`
+  await writeFile(staged, renderBoard(board), 'utf8')
+  await replaceFile(staged, path)
+}
+
+const pending = new Map<string, Promise<unknown>>()
+
+/** Parallel sessions change the same board; each change waits for the one before it, so none is lost. */
+function queued<T>(path: string, work: () => Promise<T>): Promise<T> {
+  const next = (pending.get(path) ?? Promise.resolve()).then(work, work)
+  const settled = next.catch(() => undefined)
+  pending.set(path, settled)
+  void settled.then(() => {
+    if (pending.get(path) === settled) pending.delete(path)
+  })
+  return next
 }
 
 export function stateOfBoard(board: TaskBoard | undefined): TasksState {
@@ -308,12 +329,14 @@ export const withCleanupDecision = (board: TaskBoard, decision: CleanupDecision)
 export const withRecord = (board: TaskBoard, record: VerificationRecord): TaskBoard => ({ ...board, verification: [record, ...board.verification] })
 
 /** Reads, changes and writes the board in one go, so a change never lands on a copy another writer has since replaced. */
-export async function changeBoard(path: string, change: (board: TaskBoard) => TaskBoard): Promise<TaskBoard> {
-  const board = await readBoard(path)
-  if (!board) throw new Error(`No tasks board at ${path}.`)
-  const next = change(board)
-  await writeBoard(path, next)
-  return next
+export function changeBoard(path: string, change: (board: TaskBoard) => TaskBoard): Promise<TaskBoard> {
+  return queued(path, async () => {
+    const board = await readBoard(path)
+    if (!board) throw new Error(`No tasks board at ${path}.`)
+    const next = change(board)
+    await replaceBoard(path, next)
+    return next
+  })
 }
 
 export async function stampSpecFingerprint(path: string, fingerprint: string): Promise<void> {

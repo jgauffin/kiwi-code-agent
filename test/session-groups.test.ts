@@ -24,9 +24,7 @@ describe('sessionGroups', () => {
         record('orphan-implement', 'implement', { feature: 'login' }),
         record('check', 'reconcile', { feature: 'login', parentId: 'plan' }),
         record('cleanup', 'cleanup', { feature: 'login', parentId: 'plan' }),
-        record('docs', 'docs'),
         record('map', 'docs-map'),
-        record('filing', 'file-decisions'),
         record('plan', 'plan', { feature: 'login' }),
         record('chat', 'chat'),
       ],
@@ -35,6 +33,12 @@ describe('sessionGroups', () => {
 
     expect(groups.chats.map((r) => r.id)).toEqual(['chat'])
     expect(groups.plans.map((p) => p.record?.id)).toEqual(['plan'])
+  })
+
+  it('lists_the_docs_evaluation_and_the_decision_filing_with_the_chats_so_a_closed_tab_can_be_reopened', () => {
+    const groups = sessionGroups([record('docs', 'docs'), record('filing', 'file-decisions'), record('chat', 'chat')], [])
+
+    expect(groups.chats.map((r) => r.id)).toEqual(['docs', 'filing', 'chat'])
   })
 
   it('lists_a_code_plan_with_the_chats_since_it_is_a_conversation_not_a_feature', () => {

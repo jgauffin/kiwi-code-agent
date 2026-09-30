@@ -31,7 +31,6 @@ function plan(): PlanState {
     applyingRulings: false,
     reviewingDocs: false,
     atWork: true,
-    phaseProfiles: [],
   }
 }
 

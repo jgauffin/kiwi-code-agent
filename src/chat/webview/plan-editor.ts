@@ -9,18 +9,28 @@ import { button } from './plan-parts'
  * when it closes, and nothing touches it in between.
  */
 export class PlanEditor extends HTMLElement {
+  /** Built for the box now open; a reconnect while open keeps what is typed. */
+  private open = false
+
   connectedCallback(): void {
-    if (this.childElementCount > 0) return
+    if (this.open) return
+    this.open = true
     const area = document.createElement('textarea')
     area.value = this.getAttribute('text') ?? ''
     area.rows = 3
     area.placeholder = this.getAttribute('placeholder') ?? ''
     const save = button(this.getAttribute('label') ?? 'Save', () => {
       const text = area.value.trim()
-      if (text) this.dispatchEvent(new EditorClosedEvent(text))
+      if (text) this.close(text)
     })
-    this.append(area, save, button('Cancel', () => this.dispatchEvent(new EditorClosedEvent())))
+    this.replaceChildren(area, save, button('Cancel', () => this.close()))
     queueMicrotask(() => area.focus())
+  }
+
+  // The conditional re-inserts this same element when a box opens again, so a closed one must start over from its text attribute.
+  private close(text?: string): void {
+    this.open = false
+    this.dispatchEvent(new EditorClosedEvent(text))
   }
 }
 

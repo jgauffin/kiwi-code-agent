@@ -5,8 +5,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk'
 import { SessionManager, type SessionRecord, type SessionStore } from './agent/session/session-manager'
 import { recordOf, SessionsTree, type SessionNode } from './chat/sessions-tree'
 import { reasoningEffortFor } from './agent/session/effort'
-import { providerModel, resolvePhase, resolveStep, type ModelProfile, type PhaseProfile, type Step } from './agent/session/model-profile'
-import { choiceFor, chooseProfile, type FeaturePhaseChoices, type PhaseChoiceStore } from './agent/session/phase-choices'
+import { providerModel, resolveStep, type ModelProfile, type Step } from './agent/session/model-profile'
 import type { CodeSession } from './agent/session/code-session'
 import { SdkSession } from './agent/sdk-session/sdk-session'
 import { hostExecutableAsNode, type NodeRuntime } from './agent/sdk-session/node-runtime'
@@ -134,12 +133,6 @@ export function activate(context: vscode.ExtensionContext): void {
   const store: SessionStore = {
     list: () => context.workspaceState.get<SessionRecord[]>('sessions', []),
     save: (records) => Promise.resolve(context.workspaceState.update('sessions', records)),
-  }
-
-  // Per feature and per user, beside the sessions themselves rather than in the spec or the tasks file (B7).
-  const phaseChoiceStore: PhaseChoiceStore = {
-    read: () => context.workspaceState.get<FeaturePhaseChoices>('modelChoices', {}),
-    save: (choices) => Promise.resolve(context.workspaceState.update('modelChoices', choices)),
   }
 
   /** The test run once a feature's board is all tested: the `kiwiAgent.verify` rules, read when the run starts. */
@@ -272,7 +265,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const modeSetup = async (record: SessionRecord, onProgress: StartProgress): Promise<ModeSetup> => {
     switch (record.mode) {
       case 'chat':
-        return {}
+        // A chat may write a spec when asked to, held to the contract like the planner's.
+        return { hooks: new SpecContract(workspaceRoot) }
       case 'implement': {
         if (!record.feature) throw new Error('An implement session needs a feature name')
         return {
@@ -300,6 +294,8 @@ export function activate(context: vscode.ExtensionContext): void {
           toolNames: CODE_PLAN_TOOLS,
         }
       case 'docs': {
+        // The findings are said, so what follows is ordinary work on them: no scope left to keep, and the full tool set to do it with.
+        if (record.opened) return { hooks: new SpecContract(workspaceRoot) }
         const scope = docsEvaluationScope(planIgnore())
         return {
           hooks: new ScopeGuard(workspaceRoot, scope),
@@ -544,8 +540,7 @@ export function activate(context: vscode.ExtensionContext): void {
   chat = new ChatViewProvider(
     context.extensionUri,
     sessions,
-    (step, feature, attempt) => phaseProfileFor(phaseChoiceStore, step, feature, attempt),
-    phaseChoiceStore,
+    profileFor,
     {
       read: () => settings.profileDefaults(),
       set: (name) => settings.save('activeProfile', name),
@@ -566,16 +561,13 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     output,
-    // The panel says which session it showed, so a reload brings each tab back on its own session.
     vscode.window.registerWebviewPanelSerializer(CHAT_PANEL_TYPE, {
-      deserializeWebviewPanel: (panel, state: { tabId?: string } | undefined) => {
-        chat.adoptPanel(panel, state?.tabId)
-        return Promise.resolve()
-      },
+      deserializeWebviewPanel: async (panel, state: { tabId?: string } | undefined) => chat.restore(panel, state),
     }),
     vscode.window.registerTreeDataProvider('kiwiAgent.sessions', tree),
     chat.onDidChange(() => tree.refresh()),
     vscode.commands.registerCommand('kiwiAgent.newSession', () => chat.showNewSession()),
+    // Always a tab of its own: reusing one would hide a session that is still at work.
     vscode.commands.registerCommand('kiwiAgent.openChat', () => chat.showNewSession()),
     vscode.commands.registerCommand('kiwiAgent.openSession', (id: string) => chat.open(id)),
     vscode.commands.registerCommand('kiwiAgent.resumePlan', (feature: string) =>
@@ -635,7 +627,7 @@ function watchSpecs(workspaceRoot: string, onChange: () => void): vscode.Disposa
   return vscode.Disposable.from(watcher, watcher.onDidCreate(onChange), watcher.onDidChange(onChange), watcher.onDidDelete(onChange))
 }
 
-/** What a step runs on absent any feature choice: the settings default, resolved against the providers it names. */
+/** What a step runs on: the active profile's model for it, resolved against the providers it names. `attempt` counts the fixes of a failed test run. */
 function profileFor(step: Step, attempt?: number): ModelProfile {
   const { providers, profiles, activeProfile } = readModelSettings(configPort())
   const profile = profiles.find((p) => p.name === activeProfile) ?? profiles[0]
@@ -644,21 +636,6 @@ function profileFor(step: Step, attempt?: number): ModelProfile {
     void vscode.window.showWarningMessage(`KiwiAgent: profile "${activeProfile}" not found, using "${profile.name}".`)
   }
   return resolveStep(profile, providers, step, attempt)
-}
-
-/**
- * What a feature's phase runs on: its own choice, from `phaseChoiceStore`,
- * when the profile it names is still configured, the settings default
- * otherwise (B1, B2). A step with no feature (chat and the modes that stand
- * on their own) never has a choice to look up. `attempt` counts the fixes of
- * a failed test run.
- */
-function phaseProfileFor(phaseChoiceStore: PhaseChoiceStore, step: Step, feature: string | undefined, attempt?: number): PhaseProfile {
-  const settingsDefault = profileFor(step, attempt)
-  if (!feature) return { kind: 'ok', profile: settingsDefault, isDefault: true }
-  const { providers, profiles } = readModelSettings(configPort())
-  const chosen = choiceFor(phaseChoiceStore.read(), feature, step)
-  return resolvePhase(step, chosen, profiles, providers, settingsDefault, attempt)
 }
 
 /** Every model the providers serve, as the chat picker offers them. */
