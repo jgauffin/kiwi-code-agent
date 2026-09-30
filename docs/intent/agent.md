@@ -13,7 +13,7 @@ A session runs on one engine, chosen per session or per phase:
 
 The extension only sees `CodeSession`: send a prompt, stream events, answer permission requests, interrupt. Engines differ below that line.
 
-Both take the workspace's `.mcp.json`: Claude through its own MCP client, the own loop through a client per server. The tools carry the same names and fall under the same permission rules on either engine, so a project's servers work the same whichever model runs.
+Both take the user's `~/.mcp.json` and the workspace's `.mcp.json` over it: Claude through its own MCP client, the own loop through a client per server. The tools carry the same names and fall under the same permission rules on either engine, so a project's servers work the same whichever model runs.
 
 ## Shape
 

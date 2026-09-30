@@ -1,6 +1,7 @@
-import { readFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
+import { readOptional } from '../workspace-files'
 import { TOOL_SERVER_NAME } from '../sdk-session/tool-server'
 
 /**
@@ -18,6 +19,9 @@ export type McpServers = Record<string, McpServerConfig>
 export const MCP_CONFIG_FILE = '.mcp.json'
 
 export const mcpConfigPath = (workspaceRoot: string): string => join(workspaceRoot, MCP_CONFIG_FILE)
+
+/** The same file in the home directory, holding the servers every workspace gets. */
+export const userMcpConfigPath = (home: string): string => join(home, MCP_CONFIG_FILE)
 
 type Env = Record<string, string | undefined>
 
@@ -43,6 +47,9 @@ const nameSchema = z
   .regex(/^[A-Za-z0-9][\w-]*$/, 'a server name is letters, digits, - and _')
   .refine((name) => !name.includes('__'), 'a server name cannot contain __')
   .refine((name) => name !== TOOL_SERVER_NAME, `"${TOOL_SERVER_NAME}" is the extension's own server`)
+
+/** Whether a name would be accepted, so a copy from elsewhere can leave out what the file refuses. */
+export const isUsableServerName = (name: string): boolean => nameSchema.safeParse(name).success
 
 const fileSchema = z.object({
   mcpServers: z.record(nameSchema, z.union([stdioSchema, remoteSchema])).default({}),
@@ -100,18 +107,24 @@ function normalise(config: z.infer<typeof stdioSchema> | z.infer<typeof remoteSc
   }
 }
 
-/** The workspace's servers. No file is no servers; a broken file is an error naming the file. */
-export async function readMcpConfig(workspaceRoot: string, env: Env = process.env): Promise<McpServers> {
-  let text: string
-  try {
-    text = await readFile(mcpConfigPath(workspaceRoot), 'utf8')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {}
-    throw error
-  }
+/**
+ * The servers in force: the user's `~/.mcp.json` serves every workspace and
+ * the workspace's own `.mcp.json` goes over it, so a workspace can replace a
+ * user server by name. No file is no servers; a broken file is an error
+ * naming the file.
+ */
+export async function readMcpConfig(workspaceRoot: string, env: Env = process.env, home: string = homedir()): Promise<McpServers> {
+  const user = await readServerFile(userMcpConfigPath(home), env)
+  const workspace = await readServerFile(mcpConfigPath(workspaceRoot), env)
+  return { ...user, ...workspace }
+}
+
+async function readServerFile(path: string, env: Env): Promise<McpServers> {
+  const text = await readOptional(path)
+  if (text === undefined) return {}
   try {
     return parseMcpConfig(text, env)
   } catch (error) {
-    throw new Error(`${MCP_CONFIG_FILE}: ${error instanceof Error ? error.message : String(error)}`)
+    throw new Error(`${path}: ${error instanceof Error ? error.message : String(error)}`)
   }
 }

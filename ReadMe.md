@@ -28,7 +28,7 @@ A VS Code coding agent that plans a feature before it reads your code, and calls
 - **Claude** through the Claude Agent SDK.
 - **Any OpenAI-compatible endpoint** on KiwiAgent's own tool loop.
 - A profile picks the model per step: the strongest reasoner for planning and mapping, a fast cheap one for implementation.
-- Your `.mcp.json` servers, `CLAUDE.md`/`AGENTS.md`, skills and permission rules work the same on both.
+- Your `.mcp.json` servers (the workspace's and `~/.mcp.json`, with Claude Code's user-wide list moved there on first run), `CLAUDE.md`/`AGENTS.md`, skills and permission rules work the same on both.
 
 ## Also
 

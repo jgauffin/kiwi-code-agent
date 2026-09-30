@@ -12,6 +12,10 @@
 - decided: Verification separates its failures by whose change they stand on: a failing test in a file only another hand changed is foreign, it is retried after a wait rather than handed to the implementer, it spends none of the verify failure budget, and a feature left with foreign failures waits for the user instead of reaching verified.
 - affects: parallell session support, cleanup phase, docs/intent/agent.md, docs/settings.md
 
+### The user's MCP servers live in `~/.mcp.json`, and Claude Code's list is moved there once
+- decided: MCP servers are read from `~/.mcp.json` for every workspace with the workspace's own `.mcp.json` over it by name, one format at both levels. Claude Code keeps the user's servers inside its own settings file instead, so on first run they are copied out into `~/.mcp.json` verbatim; the copy is skipped whenever that file already exists, so a server the user later removes stays removed and no migration flag is kept anywhere. Servers Claude Code holds per project are left alone.
+- affects: MCP servers, docs/settings.md, docs/intent/agent.md
+
 ### A session is an editor tab of its own, named after itself
 - decided: Every chat and every plan opens as its own editor tab named by the session — a chat by its first message, a plan by its feature name — instead of a strip of sub-tabs inside one shared panel; the sidebar holds only the Sessions list, whose "+" opens a blank tab, and work waiting to be picked up (plans on disk, chats with no tab open, decisions not yet filed) is offered on that blank tab's new-session screen. Every run of one feature — planning, checking, implementing, cleanup — still shares the feature's single tab.
 - affects: sessions and tabs, starting a new session, picking up a plan, filing unfiled decisions, docs evaluation continued in chat

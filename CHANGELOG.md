@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- MCP servers can be set for the user in `~/.mcp.json`, with the workspace's `.mcp.json` over it; Claude Code's user-wide list, which it keeps in `~/.claude.json`, is copied there on first run.
+
 ## 0.2.1
 
 - Conversations compact at 700k tokens by default (`kiwiAgent.compactAtTokens`), even when the window holds more; a provider can set its own limit per model.
