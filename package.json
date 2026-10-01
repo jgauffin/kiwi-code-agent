@@ -27,7 +27,7 @@
     "planning"
   ],
   "engines": {
-    "vscode": "^1.106.0",
+    "vscode": "^1.100.0",
     "node": ">=22.0.0"
   },
   "categories": [
@@ -188,6 +188,12 @@
           },
           "default": [],
           "description": "Workspace-relative globs a Plan session must not read, carved out of docs/**, the root README and plan/*.spec.md. Example: docs/api/**."
+        },
+        "kiwiAgent.cutCoveredDocs": {
+          "type": "boolean",
+          "default": false,
+          "scope": "resource",
+          "description": "When a spec is approved, the planner cuts the doc sections it now covers or contradicts, each edit confirmed. Off: the planner lists them in chat and edits only what you ask."
         },
         "kiwiAgent.docsMap.style": {
           "type": "string",

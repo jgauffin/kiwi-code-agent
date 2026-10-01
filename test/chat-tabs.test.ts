@@ -42,7 +42,7 @@ const checkRun = (): RunControls => ({ sessionId: CHECK, mode: 'reconcile', titl
 
 const state = (runs: RunControls[] = [planRun()]): Extract<ToWebview, { type: 'state' }> => ({
   type: 'state',
-  tab: { id: SESSION, title: 'Orders', mode: 'plan', profileName: 'Claude', status: 'idle' },
+  tab: { id: SESSION, title: 'Orders', mode: 'plan', access: 'scoped', profileName: 'Claude', status: 'idle' },
   runs,
   plan: plan(),
   plans: [],
@@ -197,7 +197,7 @@ describe("the composer's model switch follows the session it belongs to", () => 
     const { plan: _plan, ...rest } = state([{ sessionId: SESSION, mode: 'chat', title: 'Untitled', profileName: 'Careful', live: false, settled: false }])
     send({
       ...rest,
-      tab: { id: SESSION, title: 'Untitled', mode: 'chat', profileName: 'Careful', status: 'idle' },
+      tab: { id: SESSION, title: 'Untitled', mode: 'chat', access: 'scoped', profileName: 'Careful', status: 'idle' },
       models: [
         { name: 'Careful', engine: 'claude-sdk', model: 'opus' },
         { name: 'Fast', engine: 'claude-sdk', model: 'sonnet' },

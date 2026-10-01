@@ -27,13 +27,13 @@ export const globTool: Tool<typeof schema> = {
         const full = resolve(root, entry)
         const info = await stat(full).catch(() => undefined)
         if (info?.isFile()) found.push({ path: full, mtime: info.mtimeMs })
-        if (found.length >= 1000) break
       }
     } catch (error) {
       return fail(`Glob failed: ${(error as Error).message}`)
     }
-    if (found.length === 0) return ok('No files matched.')
+    if (found.length === 0) return ok('No files matched.', [])
     found.sort((a, b) => b.mtime - a.mtime)
-    return ok(truncate(found.map((f) => f.path).join('\n')))
+    const paths = found.map((f) => f.path)
+    return ok(truncate(paths.join('\n')), paths)
   },
 }

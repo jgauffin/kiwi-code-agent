@@ -118,6 +118,23 @@ describe('a shell call on the permission card', () => {
     expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'allow' }])
   })
 
+  it('a_call_the_engine_asks_about_though_every_command_passes_is_answered_as_a_whole_and_says_why', () => {
+    const request = shellRequest()
+    request.commands = [
+      { text: 'cp a /tmp/b', passes: 'Bash(cp:*)' },
+      { text: 'ls -la', passes: 'read-only' },
+    ]
+    request.reason = 'Writes outside the working directory'
+    const { card: c, decisions } = card(request)
+
+    expect(rows(c).flatMap(buttons)).toEqual([])
+    expect(c.querySelector('.reason')?.textContent).toBe('Writes outside the working directory')
+    const allow = [...c.querySelectorAll('button')].find((b) => b.textContent === 'Allow')
+    expect([...c.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Allow', 'Deny'])
+    allow!.click()
+    expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'allow' }])
+  })
+
   it('an_allowed_call_leaves_only_the_complete_command_and_takes_no_more_input', () => {
     const { card: c, decisions } = card(shellRequest())
 

@@ -35,6 +35,9 @@ export const README_GLOB = '{README,ReadMe,Readme,readme}.md'
 /** Every feature's spec: an approved one is that feature's definition, so a later planner reads it as it reads the docs. */
 export const SPECS_GLOB = `${PLAN_DIR}/*.spec.md`
 
+/** Said to every session that changes code, so a rule the user approved is not broken by one that never knew it was there. */
+export const SPEC_READING = `The approved specs under \`${SPECS_GLOB}\` define what the product does, one named rule per line; a draft is still a proposal. Before you change how something behaves, find the specs that cover it and keep to their rules. Breaking a rule is the user's call: ask first, and once they agree, amend the rule in its spec, or record the decision as unfiled when it reaches further.`
+
 /** `ignored` comes from the `kiwiAgent.planIgnore` setting: docs the planner must not see. */
 export function blindPlanScope(feature: string, ignored: string[] = []): Scope {
   const slug = featureSlug(feature)
@@ -183,4 +186,26 @@ export function docsReviewPrompt(feature: string): string {
     '',
     'The user updates the docs, or asks you to: then edit only what you listed, and each write is confirmed by them.',
   ].join('\n')
+}
+
+/**
+ * The message the planner gets on approval when the user chose to cut the
+ * docs a spec covers: two records of one rule drift apart, and the spec is
+ * the one the build keeps honest. The spec itself is not touched: any change
+ * to it, citations included, sends it back to the check against the code.
+ */
+export function docsCutPrompt(feature: string): string {
+  const spec = `${PLAN_DIR}/${featureSlug(feature)}.spec.md`
+  return [
+    `The spec at \`${spec}\` is approved and is now the definition of "${feature}".`,
+    '',
+    `Read again the docs under \`${DOCS_DIR}/\` you cited or built on, and cut each section the spec now covers or contradicts down to what no spec holds: the domain brief, constraints every feature has to respect, features not yet planned. Delete a section left with nothing. Leave the spec as it is: a citation into a cut section stays as the record of where the rule came from.`,
+    '',
+    'Each edit is confirmed by the user. Then, in chat, one line per doc section you cut, and stop.',
+  ].join('\n')
+}
+
+/** What the planner is asked about the docs on approval, per `kiwiAgent.cutCoveredDocs`. */
+export function docsAfterApprovalPrompt(feature: string, cutCoveredDocs: boolean): string {
+  return cutCoveredDocs ? docsCutPrompt(feature) : docsReviewPrompt(feature)
 }

@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { projectScriptsInstruction } from '../src/agent/permissions/package-scripts'
 import { IMPLEMENT_TOOLS, assertImplementable, fixKickoff, implementPrompt, implementationStarts, taskKickoff, taskSettled } from '../src/agent/phases/implement'
 import { decisions } from '../src/agent/phases/decisions'
 import type { SpecState } from '../src/agent/phases/spec-file'
 import { parseSpecText } from '../src/agent/phases/spec-model'
 import { UNFILED_DECISIONS } from '../src/agent/phases/unfiled-decisions'
+import { SPEC_READING } from '../src/agent/phases/blind-plan'
 import { board as boardOf, task, tasksState as board } from './task-board-fixture'
 
 const cwd = process.platform === 'win32' ? 'D:\\work\\repo' : '/work/repo'
@@ -133,6 +138,21 @@ describe('implement phase', () => {
     expect(prompt).toContain(UNFILED_DECISIONS)
     expect(prompt).toContain('a rule the task delivers')
     expect(prompt).not.toContain('The spec and the decisions file are not yours to change')
+  })
+
+  it('other_features_approved_specs_bind_the_implementer_too', () => {
+    expect(implementPrompt('Order cancellation', cwd)).toContain(SPEC_READING)
+  })
+
+  it('an_implementer_in_a_node_project_runs_its_tools_through_package_json_scripts', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'implement-'))
+    try {
+      expect(implementPrompt('Order cancellation', root)).not.toContain('package.json scripts')
+      await writeFile(join(root, 'package.json'), '{}')
+      expect(implementPrompt('Order cancellation', root)).toContain(`- ${projectScriptsInstruction(root)}`)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 })
 

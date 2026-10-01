@@ -1,10 +1,11 @@
+import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { runScriptTool } from '../src/agent/openai-session/tools/run-script'
 import { ReadTracker } from '../src/agent/openai-session/tools/read-tracker'
-import { ok, type ToolContext, type ToolOutput } from '../src/agent/openai-session/tools/tool'
+import { ok, truncate, type ToolContext, type ToolOutput } from '../src/agent/openai-session/tools/tool'
 
 type Call = { name: string; input: unknown }
 
@@ -89,14 +90,34 @@ describe('RunScript', () => {
 
   it('runs_other_tools_through_the_sessions_own_dispatch', async () => {
     const { ctx, calls } = await context()
-    const result = await runScriptTool().execute({ script: 'return await bash({ command: "npm test" })' }, ctx)
-    expect(calls).toEqual([{ name: 'Bash', input: { command: 'npm test' } }])
-    expect(result.text).toBe('Bash output')
+    const result = await runScriptTool().execute({ script: 'return await jsonQuery({ file_path: "a.json", expr: "$" })' }, ctx)
+    expect(calls).toEqual([{ name: 'JsonQuery', input: { file_path: 'a.json', expr: '$' } }])
+    expect(result.text).toBe('JsonQuery output')
+  })
+
+  it('a_script_runs_no_shell_commands_so_it_never_floods_the_user_with_prompts', async () => {
+    const { ctx, calls } = await context()
+    const result = await runScriptTool().execute({ script: 'return typeof bash' }, ctx)
+    expect(result.text).toBe('undefined')
+    expect(calls).toEqual([])
+  })
+
+  it('glob_gives_a_script_every_path_as_an_array', async () => {
+    const paths = Array.from({ length: 3000 }, (_, i) => `src/module-with-a-long-name-${i}.ts`)
+    const { ctx } = await context({ call: async () => ok(truncate(paths.join('\n')), paths) })
+    const result = await runScriptTool().execute({ script: 'const files = await glob({ pattern: "src/**/*.ts" }); return files.length' }, ctx)
+    expect(result.text).toBe('3000')
+  })
+
+  it('no_match_gives_an_empty_array_not_a_sentence', async () => {
+    const { ctx } = await context({ call: async () => ok('No files matched.', []) })
+    const result = await runScriptTool().execute({ script: 'return (await glob({ pattern: "*.cs" })).length' }, ctx)
+    expect(result.text).toBe('0')
   })
 
   it('lets_a_script_catch_a_denied_tool_call', async () => {
     const { ctx } = await context({ call: async () => ({ text: 'Denied by user', isError: true }) })
-    const result = await runScriptTool().execute({ script: 'try { await bash({ command: "x" }) } catch (e) { return "caught: " + e.message }' }, ctx)
+    const result = await runScriptTool().execute({ script: 'try { await grep({ pattern: "x" }) } catch (e) { return "caught: " + e.message }' }, ctx)
     expect(result.text).toBe('caught: Denied by user')
   })
 
@@ -175,6 +196,58 @@ describe('RunScript', () => {
       const { ctx } = await context({ authorize: async (name) => (name === 'Write' ? 'Blocked: no writes' : undefined), review: async () => ({ kind: 'allow' }) })
       const result = await runScriptTool().execute({ script: 'try { await write("a.ts", "x") } catch (e) { return e.message }' }, ctx)
       expect(result.text).toContain('Blocked: no writes')
+    })
+
+    it('a_move_reaches_the_user_as_the_destination_created_and_the_source_removed', async () => {
+      const reviews: string[][] = []
+      const { ctx, dir } = await context({
+        review: async (_title, edits) => {
+          reviews.push(edits.map((e) => (e.summary ? e.summary : e.label)))
+          return { kind: 'allow' }
+        },
+      })
+      await writeFile(join(dir, 'old.ts'), 'x\n')
+      await runScriptTool().execute({ script: 'await move("old.ts", "src/new.ts")' }, ctx)
+      expect(reviews).toEqual([['src/new.ts', 'old.ts: removed']])
+      expect(await readFile(join(dir, 'src', 'new.ts'), 'utf8')).toBe('x\n')
+      expect(existsSync(join(dir, 'old.ts'))).toBe(false)
+    })
+
+    it('a_declined_move_leaves_both_ends_as_they_were', async () => {
+      const { ctx, dir } = await context({ review: async () => ({ kind: 'deny' }) })
+      await writeFile(join(dir, 'old.ts'), 'x')
+      await runScriptTool().execute({ script: 'await move("old.ts", "new.ts")' }, ctx)
+      expect(existsSync(join(dir, 'old.ts'))).toBe(true)
+      expect(existsSync(join(dir, 'new.ts'))).toBe(false)
+    })
+
+    it('a_removed_file_reads_as_gone_for_the_rest_of_the_script', async () => {
+      const { ctx, dir } = await context({ review: async () => ({ kind: 'deny' }) })
+      await writeFile(join(dir, 'a.ts'), 'x')
+      const script = 'await remove("a.ts"); const there = await exists("a.ts"); try { await read("a.ts") } catch (e) { return [there, e.message] }'
+      const result = await runScriptTool().execute({ script }, ctx)
+      expect(JSON.parse(result.text.split('\n').slice(0, -1).join('\n'))).toEqual([false, 'a.ts does not exist: the script removed it'])
+    })
+
+    it('a_file_created_and_removed_within_the_script_is_not_put_to_the_user', async () => {
+      const { ctx } = await context({ review: async () => { throw new Error('should not ask') } })
+      const result = await runScriptTool().execute({ script: 'await write("tmp.ts", "x"); await remove("tmp.ts"); return "done"' }, ctx)
+      expect(result).toEqual({ text: 'done', isError: false })
+    })
+
+    it('a_copy_never_overwrites_its_destination', async () => {
+      const { ctx, dir } = await context()
+      await writeFile(join(dir, 'a.ts'), 'a')
+      await writeFile(join(dir, 'b.ts'), 'b')
+      const result = await runScriptTool().execute({ script: 'try { await copy("a.ts", "b.ts") } catch (e) { return e.message }' }, ctx)
+      expect(result.text).toBe('Destination already exists: b.ts')
+    })
+
+    it('a_folder_is_moved_file_by_file_or_with_the_Move_tool', async () => {
+      const { ctx, dir } = await context()
+      await mkdir(join(dir, 'pkg'))
+      const result = await runScriptTool().execute({ script: 'try { await move("pkg", "lib") } catch (e) { return e.message }' }, ctx)
+      expect(result.text).toContain('use the Move tool')
     })
 
     it('fails_an_edit_whose_text_is_ambiguous', async () => {

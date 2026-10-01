@@ -10,6 +10,7 @@ const ctx: ModeContext = {
   cleanupLimits: () => ({ source: { functionLines: 0, typeLines: 0, fileLines: 0 }, tests: { functionLines: 0, typeLines: 0, fileLines: 0 }, testGlobs: [] }),
   withMap: async (_record, prompt) => `${prompt}\n[repo map]`,
   withDocs: async (_record, prompt) => `${prompt}\n[docs map]`,
+  withMemories: async (_record, prompt) => `${prompt}\n[memories]`,
 }
 
 const record = (mode: SessionMode, extra: Partial<SessionRecord> = {}): SessionRecord => ({
@@ -40,8 +41,8 @@ describe('modeSetup', () => {
     expect(setup.toolNames?.length).toBeGreaterThan(0)
   })
 
-  it('a docs session that delivered its findings works with the full tool set and no scope', async () => {
-    const setup = await modeSetup(record('docs', { opened: true }), ctx)
+  it.each(['docs', 'code-plan'] as const)('a %s session granted full access works with the full tool set and no scope', async (mode) => {
+    const setup = await modeSetup(record(mode, { access: 'full' }), ctx)
     expect(setup.toolNames).toBeUndefined()
     expect(setup.readable).toBeUndefined()
     expect(setup.systemPrompt).toBeUndefined()
@@ -59,5 +60,18 @@ describe('modeSetup', () => {
     const setup = await modeSetup(record('chat'), ctx)
     expect(setup.systemPrompt).toBeUndefined()
     expect(setup.toolNames).toBeUndefined()
+  })
+
+  it.each(['implement', 'code-plan', 'docs', 'file-decisions', 'docs-map', 'reconcile', 'cleanup'] as const)(
+    'every session that may read the code starts with the memories: %s',
+    async (mode) => {
+      const setup = await modeSetup(record(mode, { feature: 'f', files: ['a.ts'] }), ctx)
+      expect(setup.systemPrompt).toContain('[memories]')
+    },
+  )
+
+  it('the blind planner gets no memories', async () => {
+    const setup = await modeSetup(record('plan', { feature: 'f' }), ctx)
+    expect(setup.systemPrompt).not.toContain('[memories]')
   })
 })

@@ -1,7 +1,8 @@
+import type { MemoryScope } from '../../agent/memory/memories'
 import type { Profile, Provider } from '../../agent/session/model-profile'
 import type { EditableSettings, SettingKey, SettingsTarget } from '../protocol'
 
-export type SettingsTab = 'models' | 'permissions' | 'project' | 'advanced'
+export type SettingsTab = 'models' | 'permissions' | 'project' | 'memories' | 'advanced'
 
 export class SettingsTabSelectedEvent extends Event {
   static readonly type = 'settings-tab-selected'
@@ -104,6 +105,28 @@ export class SettingsFileRequestedEvent extends Event {
   }
 }
 
+/** "Open" on a memory: its own file, to change it by hand. */
+export class MemoryOpenedEvent extends Event {
+  static readonly type = 'memory-opened'
+  constructor(
+    public readonly scope: MemoryScope,
+    public readonly file: string,
+  ) {
+    super(MemoryOpenedEvent.type, { bubbles: true })
+  }
+}
+
+/** "Forget" on a memory: it and its index line go, in its own scope. */
+export class MemoryForgottenEvent extends Event {
+  static readonly type = 'memory-forgotten'
+  constructor(
+    public readonly scope: MemoryScope,
+    public readonly title: string,
+  ) {
+    super(MemoryForgottenEvent.type, { bubbles: true })
+  }
+}
+
 declare global {
   interface HTMLElementEventMap {
     [SettingsTabSelectedEvent.type]: SettingsTabSelectedEvent
@@ -117,5 +140,7 @@ declare global {
     [ApiKeySetEvent.type]: ApiKeySetEvent
     [RuleListChangedEvent.type]: RuleListChangedEvent
     [SettingsFileRequestedEvent.type]: SettingsFileRequestedEvent
+    [MemoryOpenedEvent.type]: MemoryOpenedEvent
+    [MemoryForgottenEvent.type]: MemoryForgottenEvent
   }
 }

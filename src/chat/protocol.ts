@@ -17,6 +17,7 @@ export type SessionTab = {
   id: string
   title: string
   mode: SessionMode
+  access: 'scoped' | 'full'
   profileName: string
   status: SessionStatus
 }
@@ -197,8 +198,8 @@ export type FromWebview =
   | { type: 'set_allow_writes'; sessionId: string; enabled: boolean }
   /** Switches the active chat session to a model named as `models` on `state` lists it. */
   | { type: 'set_session_model'; name: string }
-  /** Carries the active docs evaluation's conversation into a new chat with the full tool set. */
-  | { type: 'continue_in_chat' }
+  /** Approves the shown code plan: the session goes on to build it with the full tool set. */
+  | { type: 'approve_plan' }
   /** Tries one of the run's MCP servers again. */
   | { type: 'reconnect_mcp'; sessionId: string; server: string }
   /** Switches the view to the session. */

@@ -66,6 +66,8 @@ export type SessionEvent =
       input: unknown
       title?: string
       description?: string
+      /** Why the engine asks about a call the rules may already let through, such as a write outside the workspace. */
+      reason?: string
       /** The change the call proposes, shown in place of the raw arguments. */
       edit?: FileEditChange
       /** Several files' changes asked about as one: a script's whole run, applied or dropped together. */

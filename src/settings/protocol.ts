@@ -1,3 +1,4 @@
+import type { MemoryEntry, MemoryScope } from '../agent/memory/memories'
 import type { Profile, Provider } from '../agent/session/model-profile'
 import type { VerifyRule } from '../agent/phases/verification'
 
@@ -24,6 +25,9 @@ export type SettingsSnapshot = {
     ignore: string[]
   }
   planIgnore: string[]
+  cutCoveredDocs: boolean
+  /** Every memory kept, for this project and for the person, each already named by its own scope. */
+  memories: { project: MemoryEntry[]; user: MemoryEntry[] }
   nodePath: string
   traceEngine: boolean
   /** The conversation size at which a session compacts, when that comes before the window runs short; 0 for none. */
@@ -52,6 +56,7 @@ export type EditableSettings = {
   'cleanup.testFileLines': number
   'cleanup.ignore': string[]
   planIgnore: string[]
+  cutCoveredDocs: boolean
 }
 
 export type SettingKey = keyof EditableSettings
@@ -87,3 +92,7 @@ export type FromSettingsWebview =
   | { type: 'set_api_key'; name: string; value: string }
   /** Opens the settings.json behind a tab, for what the panel does not edit. */
   | { type: 'open_settings_file'; target: SettingsTarget }
+  /** Opens a memory's own file, to change it by hand. */
+  | { type: 'open_memory'; scope: MemoryScope; file: string }
+  /** The note and its index line go for a project memory; the matching bullet goes for a user one. */
+  | { type: 'forget_memory'; scope: MemoryScope; title: string }

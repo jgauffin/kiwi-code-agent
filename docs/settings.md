@@ -26,6 +26,7 @@ The keys, for settings.json:
 - `kiwiAgent.traceEngine`: one line per Claude engine message in the Kiwipow Agent output channel, to see what the engine sends (thinking deltas, status) when the UI shows nothing.
 - `kiwiAgent.verify`: test commands run once every task of a feature is marked tested, over the files the tasks name, in the directory of the nearest `project` file; a repo with a backend and a frontend runs each suite once, and only the suites the feature touched. A failure is handed to the implement session, up to `kiwiAgent.verifyFailureBudget` consecutive failures. Default: `dotnet test` of the `.csproj` owning a `.cs` file, `npm test` in the `package.json` folder owning a `.ts` file.
 - `kiwiAgent.planIgnore`: globs under `docs/` feature planning must not see. The docs map does not describe them and the docs evaluation does not judge them.
+- `kiwiAgent.cutCoveredDocs`: on approval the planner cuts the doc sections the spec now covers or contradicts, each edit confirmed. Off (the default), it lists them in chat and edits only what you ask.
 - Command *Kiwipow Agent: Build Docs Map* describes the docs that changed since the last build. A planning session and a docs evaluation do it themselves when the map is behind.
 - `kiwiAgent.docsMap.style`: `described` (default) has a model write one line per section; `outline` gives headings with line ranges and each doc's opening paragraph, read at session start at no model cost. Set it to compare the two.
 

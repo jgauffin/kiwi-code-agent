@@ -1,5 +1,13 @@
 # Unfiled decisions
 
+### Memories are kept in Claude Code's memory files
+- decided: The agent's project-wide and user-wide memories are kept in Claude Code's memory layout rather than a store of our own, so a session on the Claude Agent SDK reads them natively while a session on an OpenAI-compatible endpoint reaches the same notes through the agent's memory tools; memories stay with the person's own files and are never kept in the workspace's source.
+- affects: project and user wide memories, instructions and skills, docs/settings.md, docs/intent/agent.md
+
+### A feature-planning session is given no memories
+- decided: Memories reach every session that may read the code but never the blind planner, since a memory is learned while working in the code and a lesson about how to plan belongs in the planning instructions instead.
+- affects: project and user wide memories, docs/intent/agent.md
+
 ### Staged script changes are judged by the permission rules
 - decided: The changes a script stages are an ordinary write: the "Allow writes" switch, an allow rule covering every staged file, or a deny rule answers for them, and the combined diff is put to the user only when the rules leave the decision open.
 - affects: running a script, permissions and the Allow writes switch, file edit diff

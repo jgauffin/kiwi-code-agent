@@ -39,6 +39,16 @@ describe('MarkdownSearch', () => {
     })
   })
 
+  it('a_script_gets_each_match_with_its_section_as_data', async () => {
+    await withDocs({ 'docs/orders.md': ORDERS }, async (ctx) => {
+      const result = await markdownSearchTool().execute({ query: 'intro|ships', regex: true }, ctx)
+      expect(result.items).toEqual([
+        { file: 'docs/orders.md', line: 1, text: 'Orders may be cancelled, says the intro.', heading: null, start: null, end: null },
+        { file: 'docs/orders.md', line: 15, text: 'An order may be cancelled until it ships (see path#Heading).', heading: 'Cancelling', start: 13, end: 15 },
+      ])
+    })
+  })
+
   it('match_before_any_heading_names_the_file', async () => {
     await withDocs({ 'docs/orders.md': ORDERS }, async (ctx) => {
       const text = await search(ctx, { query: 'intro' })

@@ -239,11 +239,11 @@ export class SessionModelChangedEvent extends Event {
   }
 }
 
-/** The composer's "Continue in chat", on a docs evaluation only: carry its conversation into a chat with the full tool set. */
-export class ContinueInChatRequestedEvent extends Event {
-  static readonly type = 'continue-in-chat-requested'
+/** The composer's "Approve plan", on a code plan only: the session goes on to build it with the full tool set. */
+export class PlanApprovedEvent extends Event {
+  static readonly type = 'plan-approved'
   constructor() {
-    super(ContinueInChatRequestedEvent.type, { bubbles: true })
+    super(PlanApprovedEvent.type, { bubbles: true })
   }
 }
 
@@ -309,7 +309,7 @@ declare global {
     [ChatTargetChangedEvent.type]: ChatTargetChangedEvent
     [AllowWritesToggledEvent.type]: AllowWritesToggledEvent
     [SessionModelChangedEvent.type]: SessionModelChangedEvent
-    [ContinueInChatRequestedEvent.type]: ContinueInChatRequestedEvent
+    [PlanApprovedEvent.type]: PlanApprovedEvent
     [McpReconnectRequestedEvent.type]: McpReconnectRequestedEvent
     [DefaultProfileChangedEvent.type]: DefaultProfileChangedEvent
   }

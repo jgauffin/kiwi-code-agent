@@ -143,6 +143,12 @@ describe('the CodeSearch tool', () => {
       expect(await search(dir, 'return 0')).toContain('src/cart.ts: Cart.total (12-14)\n  13: return 0')
     }))
 
+  it('a_script_gets_each_match_with_its_declaration_as_data', () =>
+    withWorkspace({ 'src/cart.ts': CART }, async (dir) => {
+      const out = await codeSearchTool().execute({ query: 'return 0', path: 'src' }, ctx(dir))
+      expect(out.items).toEqual([{ file: 'src/cart.ts', line: 13, text: expect.stringContaining('return 0'), declaration: 'Cart.total', inDoc: false, start: 12, end: 14 }])
+    }))
+
   it('a_match_outside_every_declaration_says_so', () =>
     withWorkspace({ 'src/a.ts': "import { x } from 'y'\n" }, async (dir) => {
       expect(await search(dir, 'import')).toContain('src/a.ts: (outside any declaration)')

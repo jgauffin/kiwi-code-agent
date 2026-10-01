@@ -2094,7 +2094,7 @@ button {
   &.skip,
   &.back,
   &.link-file,
-  &.continue-in-chat,
+  &.approve-plan,
   &.compact {
     background: var(--vscode-button-secondaryBackground, var(--vscode-input-background));
     color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));

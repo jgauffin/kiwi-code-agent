@@ -203,6 +203,14 @@ describe('Glob and Grep', () => {
     expect(result.text.split('\n').sort()).toEqual([join('src', 'a.ts'), join('src', 'c.md'), join('src', 'sub', 'b.ts')])
   })
 
+  it('grep_shows_the_model_200_matches_and_gives_a_script_every_one', async () => {
+    await writeFile(join(dir, 'src', 'many.ts'), Array.from({ length: 250 }, (_, i) => `answer ${i}`).join('\n'))
+    const result = await grepTool.execute({ pattern: 'answer', path: join(dir, 'src', 'many.ts') }, ctx)
+    expect(result.text.split('\n').filter((l) => l.includes(':answer')).length).toBe(200)
+    expect(result.text).toContain('[showing 200 of 250 matches]')
+    expect(result.items).toHaveLength(250)
+  })
+
   it('grep_rejects_an_invalid_regex_as_a_tool_error', async () => {
     const result = await grepTool.execute({ pattern: '(' }, ctx)
     expect(result.isError).toBe(true)

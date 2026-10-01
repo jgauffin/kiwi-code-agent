@@ -28,20 +28,24 @@ export type ModeContext = {
   cleanupLimits(): Limits
   withMap(record: SessionRecord, systemPrompt: string): Promise<string>
   withDocs(record: SessionRecord, systemPrompt: string): Promise<string>
+  /** The project's and the person's memory index, for every mode but the blind planner. */
+  withMemories(record: SessionRecord, systemPrompt: string): Promise<string>
 }
 
 export async function modeSetup(record: SessionRecord, ctx: ModeContext): Promise<ModeSetup> {
   const { workspaceRoot } = ctx
+  // A chat may write a spec when asked to, held to the contract like the planner's.
+  const chat = { hooks: new SpecContract(workspaceRoot) }
+  if (record.access === 'full') return chat
   switch (record.mode) {
     case 'chat':
-      // A chat may write a spec when asked to, held to the contract like the planner's.
-      return { hooks: new SpecContract(workspaceRoot) }
+      return chat
     case 'implement': {
       if (!record.feature) throw new Error('An implement session needs a feature name')
       return {
         // The user's answers amend the task's rules, held to the contract like the planner's writes.
         hooks: composeHooks(new TaskBoardGuard(workspaceRoot, record.feature), new SpecContract(workspaceRoot)),
-        systemPrompt: await ctx.withMap(record, implementPrompt(record.feature, workspaceRoot, ctx.verifyRules())),
+        systemPrompt: await ctx.withMemories(record, await ctx.withMap(record, implementPrompt(record.feature, workspaceRoot, ctx.verifyRules()))),
         toolNames: IMPLEMENT_TOOLS,
       }
     }
@@ -57,18 +61,16 @@ export async function modeSetup(record: SessionRecord, ctx: ModeContext): Promis
       }
     }
     case 'code-plan':
-      // Read-only by its tool set: nothing to scope, and the build happens in the chat it continues into.
+      // Read-only by its tool set: nothing to scope, and the build happens once the plan is approved.
       return {
-        systemPrompt: await ctx.withMap(record, await ctx.withDocs(record, codePlanPrompt(workspaceRoot))),
+        systemPrompt: await ctx.withMemories(record, await ctx.withMap(record, await ctx.withDocs(record, codePlanPrompt(workspaceRoot)))),
         toolNames: CODE_PLAN_TOOLS,
       }
     case 'docs': {
-      // The findings are said, so what follows is ordinary work on them: no scope left to keep, and the full tool set to do it with.
-      if (record.opened) return { hooks: new SpecContract(workspaceRoot) }
       const scope = docsEvaluationScope(ctx.planIgnore())
       return {
         hooks: new ScopeGuard(workspaceRoot, scope),
-        systemPrompt: await ctx.withDocs(record, docsEvaluationPrompt(workspaceRoot)),
+        systemPrompt: await ctx.withMemories(record, await ctx.withDocs(record, docsEvaluationPrompt(workspaceRoot))),
         toolNames: DOCS_EVALUATION_TOOLS,
         readable: readableIn(scope),
       }
@@ -77,7 +79,7 @@ export async function modeSetup(record: SessionRecord, ctx: ModeContext): Promis
       const scope = fileDecisionsScope(ctx.planIgnore())
       return {
         hooks: composeHooks(new ScopeGuard(workspaceRoot, scope), new SpecContract(workspaceRoot)),
-        systemPrompt: await ctx.withDocs(record, fileDecisionsPrompt(workspaceRoot)),
+        systemPrompt: await ctx.withMemories(record, await ctx.withDocs(record, fileDecisionsPrompt(workspaceRoot))),
         toolNames: FILE_DECISIONS_TOOLS,
         readable: readableIn(scope),
       }
@@ -86,7 +88,7 @@ export async function modeSetup(record: SessionRecord, ctx: ModeContext): Promis
       return {
         // The entry contract answers on the write that broke it, so a bad anchor never reaches a planner's prompt.
         hooks: composeHooks(new ScopeGuard(workspaceRoot, docsMapScope(record.files ?? [])), new DocsMapContract(workspaceRoot)),
-        systemPrompt: docsMapPrompt(workspaceRoot),
+        systemPrompt: await ctx.withMemories(record, docsMapPrompt(workspaceRoot)),
         toolNames: DOCS_MAP_TOOLS,
       }
     }
@@ -98,7 +100,7 @@ export async function modeSetup(record: SessionRecord, ctx: ModeContext): Promis
           new SpecContract(workspaceRoot),
           new ScenarioContextContract(workspaceRoot, record.feature),
         ),
-        systemPrompt: await ctx.withMap(record, reconcilePrompt(record.feature, workspaceRoot)),
+        systemPrompt: await ctx.withMemories(record, await ctx.withMap(record, reconcilePrompt(record.feature, workspaceRoot))),
         toolNames: RECONCILE_TOOLS,
       }
     }
@@ -106,7 +108,7 @@ export async function modeSetup(record: SessionRecord, ctx: ModeContext): Promis
       if (!record.feature || !record.files) throw new Error('A cleanup session needs a feature name and the files to split')
       return {
         hooks: new ScopeGuard(workspaceRoot, cleanupScope(record.files)),
-        systemPrompt: cleanupPrompt(record.feature, workspaceRoot, ctx.cleanupLimits()),
+        systemPrompt: await ctx.withMemories(record, cleanupPrompt(record.feature, workspaceRoot, ctx.cleanupLimits())),
         toolNames: CLEANUP_TOOLS,
       }
     }

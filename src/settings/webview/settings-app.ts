@@ -4,6 +4,8 @@ import type { FromSettingsWebview, SettingsSnapshot, ToSettingsWebview } from '.
 import { AdvancedTab } from './advanced-tab'
 import {
   ApiKeySetEvent,
+  MemoryForgottenEvent,
+  MemoryOpenedEvent,
   ModelsRefreshRequestedEvent,
   ProfileRemovedEvent,
   ProfileSavedEvent,
@@ -14,6 +16,7 @@ import {
   SettingsTabSelectedEvent,
   type SettingsTab,
 } from './events'
+import { MemoriesTab } from './memories-tab'
 import { ModelsSection } from './models-section'
 import { PermissionsTab } from './permissions-tab'
 import { ProjectTab } from './project-tab'
@@ -24,6 +27,7 @@ const TABS: { tab: SettingsTab; label: string }[] = [
   { tab: 'models', label: 'Models' },
   { tab: 'permissions', label: 'Permissions' },
   { tab: 'project', label: 'Project' },
+  { tab: 'memories', label: 'Memories' },
   { tab: 'advanced', label: 'Advanced' },
 ]
 
@@ -39,6 +43,7 @@ export class SettingsApp extends HTMLElement {
     models: this.modelsSection,
     permissions: new PermissionsTab(),
     project: new ProjectTab(),
+    memories: new MemoriesTab(),
     advanced: new AdvancedTab(),
   }
   private tab: SettingsTab = 'models'
@@ -62,6 +67,8 @@ export class SettingsApp extends HTMLElement {
     this.addEventListener(ModelsRefreshRequestedEvent.type, (e) => post({ type: 'refresh_models', name: e.name, baseUrl: e.baseUrl, apiKeyValue: e.apiKeyValue }))
     this.addEventListener(ApiKeySetEvent.type, (e) => post({ type: 'set_api_key', name: e.name, value: e.value }))
     this.addEventListener(SettingsFileRequestedEvent.type, (e) => post({ type: 'open_settings_file', target: e.scope }))
+    this.addEventListener(MemoryOpenedEvent.type, (e) => post({ type: 'open_memory', scope: e.scope, file: e.file }))
+    this.addEventListener(MemoryForgottenEvent.type, (e) => post({ type: 'forget_memory', scope: e.scope, title: e.title }))
 
     onHostMessage<ToSettingsWebview>((message) => this.receive(message))
     post({ type: 'ready' })

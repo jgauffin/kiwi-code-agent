@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { ScopeGuard } from '../src/agent/phases/scope-guard'
 import { RECONCILE_TOOLS, progressLine, reconcileKickoff, reconcilePrompt, reconcileScope } from '../src/agent/phases/reconcile'
-import { blindPlanPrompt, decisionsHandoffPrompt, docsReviewPrompt, rulingsHandoffPrompt } from '../src/agent/phases/blind-plan'
+import { blindPlanPrompt, decisionsHandoffPrompt, docsAfterApprovalPrompt, docsCutPrompt, docsReviewPrompt, rulingsHandoffPrompt } from '../src/agent/phases/blind-plan'
 
 const cwd = process.platform === 'win32' ? 'D:\\work\\repo' : '/work/repo'
 const guard = new ScopeGuard(cwd, reconcileScope('Order cancellation'))
@@ -160,6 +160,18 @@ describe('the handoffs to the planner', () => {
     expect(prompt).toContain('one line per doc section')
     expect(prompt).toContain('Edit nothing')
     expect(prompt).toContain('asks you to')
+  })
+
+  it('cutting_covered_docs_is_opt_in_and_otherwise_the_planner_only_lists_them', () => {
+    expect(docsAfterApprovalPrompt('Order cancellation', false)).toBe(docsReviewPrompt('Order cancellation'))
+    expect(docsAfterApprovalPrompt('Order cancellation', true)).toBe(docsCutPrompt('Order cancellation'))
+  })
+
+  it('cutting_covered_docs_leaves_the_approved_spec_alone_since_a_changed_spec_is_checked_against_the_code_again', () => {
+    const prompt = docsCutPrompt('Order cancellation')
+    expect(prompt).toContain('plan/order-cancellation.spec.md')
+    expect(prompt).toContain('covers or contradicts')
+    expect(prompt).toContain('Leave the spec as it is')
   })
 })
 

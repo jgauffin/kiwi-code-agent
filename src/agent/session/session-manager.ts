@@ -8,8 +8,8 @@ import { nextStatus, underWay, type SessionStatus } from './session-status'
  * `plan` writes a feature's spec blind, `reconcile` checks it against the code
  * (together: feature planning), `implement` builds the approved spec, `cleanup`
  * splits what the implementation left oversized. `code-plan` agrees on intent
- * and then plans against the code, with no spec, and is built in the chat it
- * continues into. `docs` judges how the docs a blind planner reads are
+ * and then plans against the code, with no spec, and is built in the same
+ * session once the plan is approved. `docs` judges how the docs a blind planner reads are
  * arranged, `docs-map` describes them so it can find its way, and
  * `file-decisions` files the user's unfiled decisions into the specs and docs;
  * none of those belongs to a feature.
@@ -62,8 +62,12 @@ export type SessionRecord = {
   fixAttempt?: number
   /** The run's job is done (its task settled, its fix handed back to the test run): history, never again what the person talks to. */
   settled?: true
-  /** The findings are delivered, so the session carries on with the full tool set: its narrow scope had the evaluation to protect, and there is none left to draw. */
-  opened?: true
+  /**
+   * What the session may do: `scoped` (the default) by its mode, `full` with the
+   * chat's tool set. Granted one way and in place, once a plan is approved or an
+   * evaluation delivered: the scope had that work to protect, and there is none left.
+   */
+  access?: 'scoped' | 'full'
   /**
    * Engine-side conversation id, what lets a closed session continue. For the
    * Claude SDK it is the engine's own, inherited from the session this one
@@ -75,6 +79,9 @@ export type SessionRecord = {
   cutOff?: true
   createdAt: string
 }
+
+/** The mode a session behaves as now: one granted full access works like a chat. */
+export const actingMode = (record: SessionRecord): SessionMode => (record.access === 'full' ? 'chat' : record.mode)
 
 /** The step a session's profile resolves as: a fix of a failed test sweep is an implement session but a step of its own. */
 export const stepOf = (record: SessionRecord): Step => (record.fixAttempt !== undefined ? 'fix' : record.mode)
@@ -143,6 +150,12 @@ export type EventDecorator = (sessionId: string, event: SessionEvent) => Promise
 
 const noDecoration: EventDecorator = async (_sessionId, event) => event
 
+/** A stored record in today's shape: one written before modes existed is a chat, one stored as `opened` has full access. */
+function fromStore(stored: SessionRecord & { opened?: true }): SessionRecord {
+  const { opened, ...record } = stored
+  return { ...record, mode: record.mode ?? 'chat', ...(opened ? { access: 'full' as const } : {}) }
+}
+
 /**
  * Owns the list of sessions and the live engines behind them. A session is
  * started lazily on its first prompt, and continued from its engine session
@@ -165,8 +178,7 @@ export class SessionManager {
     private readonly listener: SessionListener,
     private readonly decorate: EventDecorator = noDecoration,
   ) {
-    // Records written before modes existed are chat sessions.
-    this.records = store.list().map((r) => ({ ...r, mode: r.mode ?? 'chat' }))
+    this.records = store.list().map(fromStore)
   }
 
   list(): SessionRecord[] {
@@ -223,27 +235,15 @@ export class SessionManager {
   }
 
   /**
-   * A chat that carries a session's conversation on with the full tool set, for
-   * work past what that session's mode allows. It keeps the profile so the engine
-   * resumes, and the session it continues stops: one engine per conversation.
+   * The session goes on with the full tool set, in place: the person carries on
+   * in the session they are reading rather than in a second one. The engine
+   * stops, as it does on a model switch, and the next prompt brings one up on
+   * the wider setup and resumes the thread.
    */
-  async continueInChat(id: string): Promise<SessionRecord> {
-    const previous = this.require(id)
-    await this.close(id)
-    return await this.create(previous.profile, 'chat', undefined, { continues: previous })
-  }
-
-  /**
-   * A session that has said its findings goes on with the full tool set, in
-   * place: the person answers in the conversation they are reading rather than
-   * in a second session that starts out empty. The engine stops, as it does on
-   * a model switch, and the next prompt brings one up on the wider setup and
-   * resumes the conversation.
-   */
-  async openUp(id: string): Promise<void> {
+  async grantFullAccess(id: string): Promise<void> {
     const record = this.require(id)
-    if (record.opened) return
-    record.opened = true
+    if (record.access === 'full') return
+    record.access = 'full'
     await this.store.save(this.records)
     await this.close(id)
   }
@@ -446,7 +446,7 @@ export class SessionManager {
   }
 
   private notify(record: SessionRecord, event: SessionEvent): void {
-    this.statuses.set(record.id, nextStatus(this.statuses.get(record.id) ?? 'idle', record.mode, event))
+    this.statuses.set(record.id, nextStatus(this.statuses.get(record.id) ?? 'idle', actingMode(record), event))
     this.listener(record.id, event)
   }
 

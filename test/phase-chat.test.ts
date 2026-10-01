@@ -27,7 +27,7 @@ const send = (message: ToWebview) => window.dispatchEvent(new MessageEvent('mess
 function state(at: Partial<PlanState> | undefined, runs: RunControls[]): Extract<ToWebview, { type: 'state' }> {
   return {
     type: 'state',
-    tab: { id: runs[0]!.sessionId, title: 'Orders', mode: runs[0]!.mode, profileName: 'Claude', status: 'idle' },
+    tab: { id: runs[0]!.sessionId, title: 'Orders', mode: runs[0]!.mode, access: 'scoped', profileName: 'Claude', status: 'idle' },
     runs,
     ...(at ? { plan: planState(at) } : {}),
     plans: [],

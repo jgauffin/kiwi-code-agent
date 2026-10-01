@@ -17,7 +17,6 @@ import {
   CleanupDecidedEvent,
   CleanupStoppedEvent,
   CompactRequestedEvent,
-  ContinueInChatRequestedEvent,
   DefaultProfileChangedEvent,
   ImplementRequestedEvent,
   InterruptRequestedEvent,
@@ -25,6 +24,7 @@ import {
   McpReconnectRequestedEvent,
   NewSessionRequestedEvent,
   PermissionDecidedEvent,
+  PlanApprovedEvent,
   PlanFocusRequestedEvent,
   PlanResumeRequestedEvent,
   PlanStepSelectedEvent,
@@ -145,7 +145,7 @@ export class ChatApp extends HTMLElement {
     })
     this.addEventListener(AllowWritesToggledEvent.type, (e) => this.toTarget((sessionId) => post({ type: 'set_allow_writes', sessionId, enabled: e.enabled })))
     this.addEventListener(SessionModelChangedEvent.type, (e) => post({ type: 'set_session_model', name: e.name }))
-    this.addEventListener(ContinueInChatRequestedEvent.type, () => post({ type: 'continue_in_chat' }))
+    this.addEventListener(PlanApprovedEvent.type, () => post({ type: 'approve_plan' }))
     this.addEventListener(McpReconnectRequestedEvent.type, (e) => this.toTarget((sessionId) => post({ type: 'reconnect_mcp', sessionId, server: e.server })))
     this.addEventListener(SessionSelectedEvent.type, (e) => post({ type: 'switch_session', sessionId: e.sessionId }))
     this.addEventListener(PlanResumeRequestedEvent.type, (e) => post({ type: 'resume_plan', feature: e.feature }))
@@ -257,11 +257,16 @@ export class ChatApp extends HTMLElement {
     this.composer.setSwitches({
       allowWrites: target?.allowWrites,
       mcp: target?.mcp,
-      // A chat session's model is its own to switch (B9); a feature's run names the profile its phase runs on
-      // with no switch here — that lives on the plan bar, one per phase (E2).
-      model: tab?.mode === 'chat' ? { current: tab.profileName, options: this.models } : target && this.plan ? { current: target.profileName } : undefined,
-      // Only a code plan has a chat to go on to: the docs evaluation opens up in place once it has said its findings.
-      continueInChat: tab?.mode === 'code-plan',
+      // A chat session's model is its own to switch (B9), as is one granted full access; a feature's run names the
+      // profile its phase runs on with no switch here — that lives on the plan bar, one per phase (E2).
+      model:
+        tab?.mode === 'chat' || tab?.access === 'full'
+          ? { current: tab.profileName, options: this.models }
+          : target && this.plan
+            ? { current: target.profileName }
+            : undefined,
+      // Only a code plan waits on an approval: the docs evaluation is granted full access once it has said its findings.
+      approvePlan: tab?.mode === 'code-plan' && tab.access === 'scoped',
       compactable: target?.live ?? false,
     })
     this.composer.setContext(target ? this.contextUsage.get(target.sessionId) : undefined)

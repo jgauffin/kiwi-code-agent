@@ -5,9 +5,9 @@ import './context-meter'
 import type { ContextMeter, ContextUsage } from './context-meter'
 import {
   AllowWritesToggledEvent,
-  ContinueInChatRequestedEvent,
   InterruptRequestedEvent,
   McpReconnectRequestedEvent,
+  PlanApprovedEvent,
   PromptSubmittedEvent,
   SessionModelChangedEvent,
 } from './events'
@@ -22,13 +22,13 @@ type ModelSwitch = { current: string; options?: string[] }
 
 /**
  * The composer's per-session switches; `undefined` hides a switch the session has no use for.
- * `continueInChat` offers to carry a restricted session's conversation into a chat.
+ * `approvePlan` offers to approve a code plan and build it in the same session.
  */
 type Switches = {
   allowWrites: boolean | undefined
   mcp: McpServerState[] | undefined
   model: ModelSwitch | undefined
-  continueInChat?: boolean
+  approvePlan?: boolean
   /** An engine holds the conversation, so it can be compacted. */
   compactable?: boolean
 }
@@ -58,7 +58,7 @@ export class ChatComposer extends HTMLElement {
             </select>
           </label>
           <span class="model-current" if="modelReadOnly" title="This session's phase runs on the profile chosen for it, from the plan bar.">{{modelCurrent}}</span>
-          <button type="button" class="continue-in-chat" if="continueInChat" title="Carry this conversation into a chat with the full tool set." r-click="continueInChat()">Continue in chat</button>
+          <button type="button" class="approve-plan" if="approvePlan" title="Approve the plan and build it here, with the full tool set." r-click="approvePlan()">Approve plan</button>
           <linked-files-row class="linked-files"></linked-files-row>
         </span>
         <context-meter class="context"></context-meter>
@@ -122,7 +122,7 @@ export class ChatComposer extends HTMLElement {
   }
 
   private render(): void {
-    const { allowWrites, mcp, model, continueInChat } = this.switches
+    const { allowWrites, mcp, model, approvePlan } = this.switches
     this.template.render(
       {
         blocked: this.blocked,
@@ -139,7 +139,7 @@ export class ChatComposer extends HTMLElement {
         modelReadOnly: model !== undefined && model.options === undefined,
         modelCurrent: model?.current ?? '',
         models: (model?.options ?? []).map((name) => ({ name, selected: name === model?.current })),
-        continueInChat: continueInChat ?? false,
+        approvePlan: approvePlan ?? false,
       },
       {
         reconnect: (s: McpServerState) => this.dispatchEvent(new McpReconnectRequestedEvent(s.name)),
@@ -154,7 +154,7 @@ export class ChatComposer extends HTMLElement {
           }
         },
         changeModel: (event: Event) => this.dispatchEvent(new SessionModelChangedEvent((event.target as HTMLSelectElement).value)),
-        continueInChat: () => this.dispatchEvent(new ContinueInChatRequestedEvent()),
+        approvePlan: () => this.dispatchEvent(new PlanApprovedEvent()),
         stop: () => this.dispatchEvent(new InterruptRequestedEvent()),
         toggleAllowWrites: (event: Event) => {
           this.dispatchEvent(new AllowWritesToggledEvent((event.target as HTMLInputElement).checked))

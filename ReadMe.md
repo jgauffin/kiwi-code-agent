@@ -16,14 +16,11 @@ A VS Code coding agent that plans a feature before it reads your code, and calls
 
 | | What it does | Why you want it |
 |---|---|---|
-| **Feature planning, blind to the code** | The planner reads your docs and approved specs, never the code (enforced at the tool call), and writes a spec of named rules. | A planner that reads the code inherits its bugs as requirements; this one plans from intent. |
-| **You rule on disagreements** | The spec is mapped against the code; each conflict becomes a decision card with both sides and proposed rewordings. | Nothing is silently absorbed. You decide whether the spec or the code is wrong. |
-| **Done means proven** | Every task names the test that proves each rule it delivers; the plan view shows each rule's task and test, or the gap. | No "done" without evidence you can click through. |
-| **Targeted verification** | When all tasks are tested, your test commands run over just the projects the feature touched; a failure goes back to the implementer. | Only the suites that matter run, and red never reaches you as finished. |
-| **Scripts instead of turns** | The model writes one JavaScript program that reads, greps, runs commands and edits across many files, in a sandbox that reaches nothing but those gated functions. Edits are staged and shown as one diff to approve. | One turn instead of dozens: faster, and only the result enters the context, not every file along the way. |
-| **Cleanup after green** | Functions, types and files that grew past your limits are split once tests pass. | The feature lands without leaving a mess. |
-| **Specs compound** | An approved spec is read by the next planner like a doc. | What one feature settled reaches the next without restating it. |
-| **Docs evaluation** | Reads your docs the way the planner does and says where their arrangement costs a plan, then fixes what you pick. | Better docs, better plans. |
+| **Plans from intent, not from code** | The planner reads your docs and approved specs, never the code (enforced at the tool call), and writes a spec of named rules. A separate check then reads the code and turns each disagreement into a decision you rule on. | A planner that reads the code inherits its bugs as requirements. Here a bug surfaces as a question with your name on it. |
+| **Approved rules stay approved** | Every session that changes code (chat, code plan, implement) checks the approved specs that cover the change and asks before breaking a rule. Decisions made along the way are filed where the next planner reads them. | A rule you settled in March is not undone by a chat in June. |
+| **Done comes with evidence** | Every task names the test that proves each rule it delivers, and the plan view shows each rule's test or the gap. When all tasks are tested, your test commands run over just the projects the feature touched; a failure goes back to the implementer. | No "done" without evidence you can click through, and only the suites that matter run. |
+| **One script, one diff** | The model writes one JavaScript program that reads, searches, moves and edits across many files, in a sandbox that reaches nothing but gated functions. Edits are staged and shown as one diff to approve. | One turn instead of dozens: faster, cheaper, and you review a diff instead of a conversation. |
+| **Safe with parallel agents** | A session cannot write a file it has not read, or one that changed since; the refusal names the session that changed it. A test failing only on another session's change is held for you, not handed to your implementer. | Run several agents in one workspace without them fixing, or overwriting, each other's work. |
 
 ## Any model, per step
 
@@ -34,6 +31,8 @@ A VS Code coding agent that plans a feature before it reads your code, and calls
 
 ## Also
 
+- **Cleanup after green**: functions, types and files that grew past your limits are split once tests pass.
+- **Docs evaluation**: reads your docs the way the planner does, says where their arrangement costs a plan, and fixes what you pick. Optionally, the planner cuts the doc sections an approved spec now covers, so intent lives in one place.
 - **Chat sessions** for everyday work, with the full tool set.
 - **Plan sessions** for work the code shapes, such as a UI on its framework: intent is agreed before the code is read, then the plan is made against the code and built in a chat.
 - **Prompts that don't nag.** Read-only tools and commands, your `package.json` scripts and your test commands run without asking; other shell calls are prompted command by command.

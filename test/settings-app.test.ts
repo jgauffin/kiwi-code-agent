@@ -10,6 +10,7 @@ const { SettingsApp } = await import('../src/settings/webview/settings-app')
 const { PermissionsTab } = await import('../src/settings/webview/permissions-tab')
 const { ProjectTab } = await import('../src/settings/webview/project-tab')
 const { AdvancedTab } = await import('../src/settings/webview/advanced-tab')
+const { MemoriesTab } = await import('../src/settings/webview/memories-tab')
 const events = await import('../src/settings/webview/events')
 
 export function snapshot(over: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
@@ -23,6 +24,8 @@ export function snapshot(over: Partial<SettingsSnapshot> = {}): SettingsSnapshot
     verifyFailureBudget: 3,
     cleanup: { functionLines: 25, typeLines: 200, fileLines: 400, tests: ['**/*.test.*'], testFunctionLines: 60, testTypeLines: 600, testFileLines: 1200, ignore: [] },
     planIgnore: [],
+    cutCoveredDocs: false,
+    memories: { project: [], user: [] },
     nodePath: '',
     traceEngine: false,
     compactAtTokens: 400_000,
@@ -168,6 +171,15 @@ describe('ProjectTab', () => {
     expect(saved(tab, () => change(input, 'docs/intent/drafts/**'))).toEqual({ key: 'planIgnore', value: ['docs/intent/drafts/**'] })
   })
 
+  it('cutting_covered_docs_is_a_planning_choice_saved_under_its_key', () => {
+    const tab = new ProjectTab()
+    tab.update(snapshot())
+    const box = tab.querySelector<HTMLInputElement>('.planning input[name="cutCoveredDocs"]')!
+    expect(box.checked).toBe(false)
+    box.checked = true
+    expect(saved(tab, () => box.dispatchEvent(new Event('change', { bubbles: true })))).toEqual({ key: 'cutCoveredDocs', value: true })
+  })
+
   it('test_file_globs_and_test_limits_save_under_their_own_keys', () => {
     const tab = new ProjectTab()
     tab.update(snapshot())
@@ -175,5 +187,61 @@ describe('ProjectTab', () => {
     expect(saved(tab, () => change(glob, '**/*.spec.*'))).toEqual({ key: 'cleanup.tests', value: ['**/*.spec.*'] })
     const lines = tab.querySelector<HTMLInputElement>('input[name="cleanup.testFileLines"]')!
     expect(saved(tab, () => change(lines, '900'))).toEqual({ key: 'cleanup.testFileLines', value: 900 })
+  })
+})
+
+describe('MemoriesTab', () => {
+  it('memories_can_be_listed_each_with_its_own_scope', () => {
+    const tab = new MemoriesTab()
+    tab.update(
+      snapshot({
+        memories: {
+          project: [{ title: 'Blue means clickable', file: 'blue.md', summary: 'Non-interactive UI never uses button/badge/focus blue.' }],
+          user: [{ title: 'Likes short replies', file: 'CLAUDE.md', summary: 'say less, not more.' }],
+        },
+      }),
+    )
+    const titles = (scope: string) => [...tab.querySelectorAll<HTMLElement>(`.${scope} .memory .title`)].map((n) => n.textContent)
+    expect(titles('project')).toEqual(['Blue means clickable'])
+    expect(titles('user')).toEqual(['Likes short replies'])
+  })
+
+  it('a_scope_with_nothing_remembered_says_so_instead_of_an_empty_list', () => {
+    const tab = new MemoriesTab()
+    tab.update(snapshot())
+    expect(tab.textContent).toContain('Nothing remembered for this project yet.')
+    expect(tab.textContent).toContain('Nothing remembered about you yet.')
+  })
+
+  it('opening_a_memory_posts_its_scope_and_file_to_the_host', () => {
+    posted.length = 0
+    const app = new SettingsApp()
+    document.body.appendChild(app)
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'settings', snapshot: snapshot({ memories: { project: [{ title: 'Blue means clickable', file: 'blue.md', summary: 'say so' }], user: [] } }) },
+      }),
+    )
+    const tab = (label: string) => [...app.querySelectorAll<HTMLButtonElement>('.tabs .tab')].find((t) => t.textContent === label)!
+    tab('Memories').click()
+    app.querySelector<HTMLButtonElement>('.project .memory button')!.click()
+    expect(posted).toContainEqual({ type: 'open_memory', scope: 'project', file: 'blue.md' })
+    app.remove()
+  })
+
+  it('forgetting_a_memory_posts_its_scope_and_title_to_the_host', () => {
+    posted.length = 0
+    const app = new SettingsApp()
+    document.body.appendChild(app)
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { type: 'settings', snapshot: snapshot({ memories: { project: [], user: [{ title: 'Likes short replies', file: 'CLAUDE.md', summary: 'say less' }] } }) },
+      }),
+    )
+    const tab = (label: string) => [...app.querySelectorAll<HTMLButtonElement>('.tabs .tab')].find((t) => t.textContent === label)!
+    tab('Memories').click()
+    app.querySelector<HTMLButtonElement>('.user .memory .remove')!.click()
+    expect(posted).toContainEqual({ type: 'forget_memory', scope: 'user', title: 'Likes short replies' })
+    app.remove()
   })
 })

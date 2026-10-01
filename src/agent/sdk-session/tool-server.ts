@@ -30,6 +30,7 @@ export function toMcpTool<S extends z.ZodObject>(t: Tool<S>, ctx: ToolContext): 
       const output = await t.execute(args as z.infer<S>, ctx)
       return { content: [{ type: 'text', text: output.text }], isError: output.isError }
     },
-    { annotations: { readOnlyHint: t.readOnly } },
+    // The prompts name these tools, so the model must see them without a tool search first.
+    { annotations: { readOnlyHint: t.readOnly }, alwaysLoad: true },
   )
 }

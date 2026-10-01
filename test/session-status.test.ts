@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { appliesModelSwitchNow, blockOf, lastFailure, mostUrgent, nextStatus, type SessionStatus } from '../src/agent/session/session-status'
 import type { SessionEvent } from '../src/agent/session/code-session'
-import type { SessionMode } from '../src/agent/session/session-manager'
+import { actingMode, type SessionMode, type SessionRecord } from '../src/agent/session/session-manager'
 
 function run(mode: SessionMode, events: SessionEvent[], from: SessionStatus = 'idle'): SessionStatus[] {
   const out: SessionStatus[] = []
@@ -101,6 +101,12 @@ describe('session status', () => {
     expect(blockOf([{ mode: 'plan', status: 'needs_human' }, { mode: 'implement', status: 'implementing' }])).toBeUndefined()
     expect(blockOf([{ mode: 'plan', status: 'needs_approval' }, { mode: 'implement', status: 'needs_answer' }])).toEqual({ on: 'answer', mode: 'implement' })
     expect(blockOf([{ mode: 'reconcile', status: 'needs_approval' }])).toEqual({ on: 'approval', mode: 'reconcile' })
+  })
+
+  it('a_code_plan_granted_full_access_builds_and_goes_idle_like_a_chat', () => {
+    const plan: SessionRecord = { id: 'p', title: 't', profile: { name: 'P', engine: 'claude-sdk', model: 'm' }, mode: 'code-plan', createdAt: '' }
+    expect(run(actingMode(plan), [{ type: 'user_message', text: 'x' }, turnDone()])).toEqual(['planning', 'needs_human'])
+    expect(run(actingMode({ ...plan, access: 'full' }), [{ type: 'user_message', text: 'x' }, turnDone()])).toEqual(['implementing', 'idle'])
   })
 
   it('a_finished_chat_turn_is_idle_but_a_finished_plan_turn_needs_the_human', () => {

@@ -1,6 +1,6 @@
 ---
 name: run-script
-description: Writing programs for the RunScript tool, which runs JavaScript in a sandbox with file, search and shell access. Use for analysis over many files, cross-referencing contents, or the same edit across many files, instead of one tool call per file.
+description: Writing programs for the RunScript tool, which runs JavaScript in a sandbox with file and search access. Use for analysis over many files, cross-referencing contents, or the same edit across many files, instead of one tool call per file.
 ---
 
 # RunScript
@@ -20,15 +20,22 @@ Reading and searching, no prompt:
   slash. `exists(path)`: whether there is anything at the path. Both are free within the project;
   a path outside it is put to the user.
 - `glob({ pattern, path? })`, `grep({ pattern, path?, include?, case_insensitive?, output_mode? })`:
-  the same as the Glob and Grep tools, returning their text.
+  the same as the Glob and Grep tools, returning an array: paths for `glob` and for `grep` with
+  `output_mode: 'files_with_matches'`, `file:line:text` lines otherwise. Empty when nothing
+  matches. Every match is in the array, also past what the tools show you.
+- `codeSearch({ query, path?, regex?, case_sensitive? })`: every match as
+  `{ file, line, text, declaration, inDoc, start, end }`, where `declaration` is the qualified name
+  of what the line sits in (`Cart.total`, null outside any) and `start`-`end` its lines.
+- `markdownSearch({ query, path?, regex?, case_sensitive? })`: every match as
+  `{ file, line, text, heading, start, end }`, `heading` being the section it sits in (null before the first).
 - `jsonQuery(args)`, `jsonSchema(args)`, `codeOutline({ path, symbol })`: the same as the tools of that name.
-- `bash({ command, description? })`: the same as the Bash tool, asked per command as usual.
-  A denied or failing call throws; catch it to carry on.
+- A denied or failing call throws; catch it to carry on.
 
 Changing files, staged:
 
 - `write(path, content)`, `edit({ file_path, old_string, new_string, replace_all? })`,
-  `replace(path, pattern, replacement, flags = 'g')`.
+  `replace(path, pattern, replacement, flags = 'g')`, `move(source, destination)`,
+  `copy(source, destination)`, `remove(path)`.
 - Nothing is written while the script runs. Changes are collected, and when the script ends the
   user sees every changed file as one diff and approves or declines the whole set.
 - `read` returns the staged content of a file the script has already changed.
@@ -37,13 +44,20 @@ Changing files, staged:
 - `preview()` returns the staged diffs as text. Use it as a dry run: return it and look before
   deciding on a second script.
 - `edit` follows the Edit tool: `old_string` must occur once unless `replace_all` is set.
+- `move` and `copy` take text files and never overwrite the destination; a move is shown as the
+  new file plus the old one removed. For a folder, glob its files and move each. A binary file
+  goes through the Move or Copy tool instead. After `remove`, `read` and `exists` see the file as gone.
+
+Not in a script: shell commands, asking the user, loading a skill and the task board. A loop of
+commands would be a loop of permission prompts, and the others' answers are for you to weigh;
+call them yourself before or after the script.
 
 ## Examples
 
 Rename a call across the project:
 
 ```js
-const files = (await glob({ pattern: 'src/**/*.ts' })).split('\n').filter(Boolean)
+const files = await glob({ pattern: 'src/**/*.ts' })
 let total = 0
 for (const f of files) total += (await replace(f, '\\bgetUser\\(', 'fetchUser(')).matches
 return `${total} calls in ${files.length} files`
@@ -66,7 +80,7 @@ Find files that import a module but never use its default export:
 
 ```js
 const hits = []
-for (const f of (await glob({ pattern: 'src/**/*.ts' })).split('\n').filter(Boolean)) {
+for (const f of await glob({ pattern: 'src/**/*.ts' })) {
   const text = await read(f)
   if (/from '\.\/legacy'/.test(text) && !/\blegacy\./.test(text)) hits.push(f)
 }

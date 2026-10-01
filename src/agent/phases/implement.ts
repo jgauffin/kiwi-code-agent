@@ -1,4 +1,4 @@
-import { DOCS_DIR, PLAN_DIR, featureSlug } from './blind-plan'
+import { DOCS_DIR, PLAN_DIR, SPEC_READING, featureSlug } from './blind-plan'
 import { ASK_USER_TOOL } from '../openai-session/tools/ask-user'
 import { MARKDOWN_SEARCH_TOOL } from '../openai-session/tools/markdown-search'
 import { DOC_READING } from '../openai-session/tools/markdown/outline-gate'
@@ -6,6 +6,7 @@ import { CODE_OUTLINE_TOOL } from '../code-outline/code-outline-tool'
 import { CODE_READING } from '../code-outline/code-outline-gate'
 import { CODE_SEARCH_TOOL } from '../code-outline/code-search'
 import { SCRIPT_WRITING } from '../script/script-gate'
+import { projectScriptsInstruction } from '../permissions/package-scripts'
 import { rulingKind, type Decision } from './decisions'
 import { UNFILED_DECISIONS } from './unfiled-decisions'
 import type { SpecState } from './spec-file'
@@ -134,6 +135,7 @@ function verifyCommands(rules: VerifyRule[]): string {
  */
 export function implementPrompt(feature: string, cwd: string, rules: VerifyRule[] = []): string {
   const spec = `${PLAN_DIR}/${featureSlug(feature)}.spec.md`
+  const scripts = projectScriptsInstruction(cwd)
   return `You are implementing one task of the feature "${feature}", from its approved spec at \`${spec}\` under ${cwd}. The first message hands you the task in full from the board, the text of the spec rules it delivers, any finding in the code the user ruled to change so the spec stands, and what earlier tasks left: what each one built, by name and file. Earlier tasks were built by runs of their own and later ones will be; this run does its one task and stops. A run started on a failed test sweep has the failure as its task instead, and the tasks it names.
 
 The spec is the contract: goal, rules and edge cases. Every rule has a name, the bold lead-in of its line. A human approved it; do not reinterpret it. Where the code and the spec disagree, the spec wins. Where the spec is silent, do the simplest thing that satisfies it and record the choice in the task's note.
@@ -160,11 +162,12 @@ The next feature is planned blind from the docs and specs, so an answer that set
 Rules:
 - The decisions file is not yours to change, and the spec only as above.
 - Never edit \`${DOCS_DIR}/\`: intent is the user's.
+- Other features' specs bind you as your own does. ${SPEC_READING}
 - Do not re-explore what the hand-off already names.
 - Code and comments never refer to the spec, its rule names or the task: those move on and the reference goes stale. Where a business rule is not obvious from the code, explain it in a short comment in the domain's own words.
 - ${DOC_READING}
 - ${CODE_READING} Before writing a test, outline the test file or folder it belongs in: the rule may already be proven, and the neighbouring tests show the pattern to follow.
-- ${SCRIPT_WRITING}
+- ${SCRIPT_WRITING}${scripts ? `\n- ${scripts}` : ''}
 - Shell commands already run in ${cwd}; do not cd there.
 - Tested means you ran the task's tests and they passed, not that you stopped. A task you marked tested without a run of your own is a false record.
 - When your task is tested or blocked, say in a sentence or two what you did and stop. The next task starts in a run of its own, and the full sweep runs once every task is tested; it is not your test run.`

@@ -46,7 +46,7 @@ export function codeSearchTool(canRead: (relPath: string) => boolean = () => tru
       const limit = input.limit ?? 50
       const hits: Hit[] = []
       const places = new Set<string>()
-      let matched = 0
+      const items: CodeMatch[] = []
       let searched = 0
 
       for await (const file of walk(root, undefined)) {
@@ -62,24 +62,33 @@ export function codeSearchTool(canRead: (relPath: string) => boolean = () => tru
           const found = pattern.exec(lines[i]!)
           if (!found) continue
           nodes ??= outlineCode(file, text)
-          const title = titleOf(shown, nodes, i + 1)
-          matched++
+          const match = matchAt(shown, nodes, i + 1, lines[i]!)
+          const title = titleOf(match)
           places.add(title)
+          items.push(match)
           if (hits.length < limit) hits.push({ title, line: i + 1, text: clip(lines[i]!, found.index) })
         }
       }
 
-      if (matched === 0) return ok(`No matches in ${searched} source file${searched === 1 ? '' : 's'}.`)
-      return ok(truncate(render(hits, matched, places.size)))
+      if (items.length === 0) return ok(`No matches in ${searched} source file${searched === 1 ? '' : 's'}.`, [])
+      return ok(truncate(render(hits, items.length, places.size)), items)
     },
   }
 }
 
-function titleOf(file: string, nodes: CodeNode[], line: number): string {
+/** One match as a script gets it; `declaration` is null outside any. */
+type CodeMatch = { file: string; line: number; text: string; declaration: string | null; inDoc: boolean; start: number | null; end: number | null }
+
+function matchAt(file: string, nodes: CodeNode[], line: number, text: string): CodeMatch {
   const at = declarationAt(nodes, line)
-  if (!at) return `${file}: (outside any declaration)`
+  if (!at) return { file, line, text, declaration: null, inDoc: false, start: null, end: null }
   const node = at.chain[at.chain.length - 1]!
-  return `${file}: ${at.inDoc ? 'doc of ' : ''}${qualifiedName(at.chain)} (${rangeStart(node)}-${node.endLine})`
+  return { file, line, text, declaration: qualifiedName(at.chain), inDoc: at.inDoc, start: rangeStart(node), end: node.endLine }
+}
+
+function titleOf(match: CodeMatch): string {
+  if (match.declaration === null) return `${match.file}: (outside any declaration)`
+  return `${match.file}: ${match.inDoc ? 'doc of ' : ''}${match.declaration} (${match.start}-${match.end})`
 }
 
 function render(hits: Hit[], matched: number, places: number): string {

@@ -91,7 +91,7 @@ Hand-coded, read-only, Azure DevOps. Server-side filtering is the enforcement.
 
 The whole of `docs/**` and every spec is phase 1 scope. What phase 1 is kept from is the code and what travels with it: source, PRs, build output, generated context, the check's files. Those drift with the code in the same direction and arrive labelled as authority.
 
-`docs/**` holds what no spec holds: the domain brief, the constraints, the features not yet planned. Once a spec is approved it is the feature's definition, and the doc it was planned from may say less, or otherwise. Nobody trims that by hand unprompted, so once the check against the code comes back clean the plan session lists in chat, per doc section, what now reads differently from the spec or is covered by it and can go. The user edits, or tells the planner to, and each of its writes into `docs/**` is confirmed.
+`docs/**` holds what no spec holds: the domain brief, the constraints, the features not yet planned. Once a spec is approved it is the feature's definition, and the doc it was planned from may say less, or otherwise. Nobody trims that by hand unprompted, so once the check against the code comes back clean the plan session lists in chat, per doc section, what now reads differently from the spec or is covered by it and can go. The user edits, or tells the planner to, and each of its writes into `docs/**` is confirmed. With `kiwiAgent.cutCoveredDocs` on, the planner cuts those sections itself, each write confirmed, and leaves the spec untouched: a changed spec goes back to the check.
 
 ### Finding the way in
 
@@ -213,6 +213,10 @@ A plan, check or implement session hands back to the person whenever its turn en
 ## What a session is offered
 
 A session's phase decides what its model can do: a capability outside the phase is not offered, so the model never proposes it and there is nothing to turn down.
+
+## Approved rules bind every session
+
+Every session that changes code (chat, code plan, implement) is told where the approved specs are, checks those that cover what it changes, and asks the user before it breaks a rule. A rule kept honest by the session's own reasoning beats a control layer watching edits behind its back; a broken test is already caught by the test runs.
 
 ## Parked
 

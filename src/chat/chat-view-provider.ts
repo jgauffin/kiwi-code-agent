@@ -1,5 +1,5 @@
 import * as vscode from 'vscode'
-import { isBuild, isFeatureless, isPlanning, stepOf, type SessionManager, type SessionMode, type SessionRecord } from '../agent/session/session-manager'
+import { actingMode, isBuild, isFeatureless, isPlanning, stepOf, type SessionManager, type SessionMode, type SessionRecord } from '../agent/session/session-manager'
 import type { ModelProfile, Step } from '../agent/session/model-profile'
 import type { McpServerState, SessionEvent } from '../agent/session/code-session'
 import { appliesModelSwitchNow, blockOf, lastFailure, mostUrgent, nextStatus, takesProfile, type SessionStatus } from '../agent/session/session-status'
@@ -7,7 +7,7 @@ import { readSpecState, setSpecStatus, type SpecState } from '../agent/phases/sp
 import {
   PLAN_DIR,
   decisionsHandoffPrompt,
-  docsReviewPrompt,
+  docsAfterApprovalPrompt,
   featureSlug,
   migrateSpecPrompt,
   resumePlanPrompt,
@@ -95,6 +95,9 @@ type ChatPanel = { panel: vscode.WebviewPanel; tabId?: string }
 
 /** One kind of message from the tab. */
 type WebviewMessage<T extends FromWebview['type']> = Extract<FromWebview, { type: T }>
+
+/** Read when a spec is approved, so a change in settings applies to the next approval. */
+const cutCoveredDocs = (): boolean => vscode.workspace.getConfiguration('kiwiAgent').get<boolean>('cutCoveredDocs', false)
 
 /**
  * Hosts the chat UI: one editor tab per session, so a session keeps running
@@ -363,7 +366,7 @@ export class ChatViewProvider {
     const record = this.sessions.get(sessionId)
     if (record) {
       const before = this.statuses.get(sessionId) ?? 'idle'
-      const after = nextStatus(before, record.mode, event)
+      const after = nextStatus(before, actingMode(record), event)
       const failure = lastFailure(this.failures.get(sessionId), event)
       const failureChanged = failure !== this.failures.get(sessionId)
       if (failure === undefined) this.failures.delete(sessionId)
@@ -415,8 +418,8 @@ export class ChatViewProvider {
       else void this.build.followAmendment(feature).then(() => this.build.followBoard(feature))
     }
     // The evaluation has been said: the session goes on with the full tool set, so what it found is worked on where it was read.
-    if (event.type === 'turn_done' && !event.isError && record?.mode === 'docs' && !record.opened) {
-      void this.sessions.openUp(record.id).then(() => this.sendState())
+    if (event.type === 'turn_done' && !event.isError && record?.mode === 'docs' && record.access !== 'full') {
+      void this.sessions.grantFullAccess(record.id).then(() => this.sendState())
     }
     if (event.type === 'turn_done' && record?.mode === 'plan' && record.feature) {
       // However the turn ended, the rulings are no longer in flight: Approve is the user's again, on the spec as it stands.
@@ -536,7 +539,7 @@ export class ChatViewProvider {
     await this.sendState()
     if (existing) return this.build.implementAfterApproval(plan)
     this.reviewingDocs.add(feature)
-    await this.sendToPlanner(plan, docsReviewPrompt(feature))
+    await this.sendToPlanner(plan, docsAfterApprovalPrompt(feature, cutCoveredDocs()))
   }
 
   /** A build the last window cut off mid-turn goes on where it stood. */
@@ -751,10 +754,13 @@ export class ChatViewProvider {
         void this.sendState()
         return
       }
-      case 'continue_in_chat':
-        // The chat carries the conversation on, so it takes over the tab the session had, and it starts on the build:
-        // a chat that opens with nothing to do would show an empty tab and wait.
-        if (shown?.mode === 'code-plan') await this.activate(await this.sessions.continueInChat(shown.id), codePlanBuildKickoff(), entry)
+      case 'approve_plan':
+        // The approval is the go-ahead, so the build starts at once rather than waiting on another prompt.
+        if (shown?.mode === 'code-plan' && shown.access !== 'full') {
+          await this.sessions.grantFullAccess(shown.id)
+          await this.sessions.send(shown.id, codePlanBuildKickoff())
+          await this.sendState()
+        }
         return
       case 'reconnect_mcp':
         if (shown) await this.sessions.reconnectMcp(this.targetOf(shown, message.sessionId, false).id, message.server)
@@ -884,7 +890,7 @@ export class ChatViewProvider {
     if (checkDue(await readSpecState(path), tasks, decisions)) return this.startCheck(record)
     // A board an earlier mapping left, current with the spec: nothing to check, the docs listing and the build follow.
     this.reviewingDocs.add(feature)
-    await this.sendToPlanner(record, docsReviewPrompt(feature))
+    await this.sendToPlanner(record, docsAfterApprovalPrompt(feature, cutCoveredDocs()))
   }
 
   private async sendRulings(shown: SessionRecord | undefined): Promise<void> {
@@ -1091,6 +1097,7 @@ export class ChatViewProvider {
       id: this.tabIdOf(record),
       title: record.feature ?? record.title,
       mode: record.mode,
+      access: record.access ?? 'scoped',
       profileName: record.profile.name,
       status: mostUrgent(this.runsOf(record).map((r) => this.statusOf(r.id))),
     }
@@ -1210,8 +1217,8 @@ export class ChatViewProvider {
       live: this.sessions.isLive(run.id),
       settled: run.settled === true,
       // Planning phases auto-allow their in-scope writes and deny the rest, so the switch has nothing to decide there;
-      // a session that has opened up writes wherever the rules let it, and the switch is its own again.
-      ...(!isPlanning(run.mode) || run.opened ? { allowWrites: this.allowWrites.isEnabled(run.id) } : {}),
+      // a session granted full access writes wherever the rules let it, and the switch is its own again.
+      ...(!isPlanning(actingMode(run)) ? { allowWrites: this.allowWrites.isEnabled(run.id) } : {}),
       ...(this.mcpServers.has(run.id) ? { mcp: this.mcpServers.get(run.id)! } : {}),
     }
   }

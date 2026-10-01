@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { Profile, Provider } from '../src/agent/session/model-profile'
 import type { SettingsTarget } from '../src/settings/protocol'
-import { SettingsStore, type ConfigPort, type SecretPort } from '../src/settings/settings-store'
+import type { MemoryEntry, MemoryScope } from '../src/agent/memory/memories'
+import { SettingsStore, type ConfigPort, type MemoryPort, type SecretPort } from '../src/settings/settings-store'
 
 type Written = { key: string; value: unknown; target: SettingsTarget }
 
@@ -42,10 +43,21 @@ const bergetProvider: Provider = { name: 'berget', engine: 'openai-compatible', 
 const opus: Profile = { name: 'Opus', default: { provider: 'Claude', model: 'claude-opus-5' } }
 const kimi: Profile = { name: 'Kimi', default: { provider: 'berget', model: 'moonshotai/Kimi-K3' } }
 
+/** Remembers what it was asked to forget, rather than touching any real files. */
+function fakeMemory(project: MemoryEntry[] = [], user: MemoryEntry[] = []) {
+  const forgotten: { scope: MemoryScope; title: string }[] = []
+  const port: MemoryPort = {
+    list: async () => ({ project, user }),
+    forget: async (scope, title) => void forgotten.push({ scope, title }),
+  }
+  return { port, forgotten }
+}
+
 function store(config: Record<string, unknown>, options: { hasWorkspace?: boolean; secrets?: string[] } = {}) {
   const cfg = fakeConfig(config, options.hasWorkspace ?? true)
   const sec = fakeSecrets(options.secrets)
-  return { store: new SettingsStore(cfg.port, sec.port), ...cfg, secrets: sec.keys }
+  const mem = fakeMemory()
+  return { store: new SettingsStore(cfg.port, sec.port, mem.port), ...cfg, secrets: sec.keys, memory: mem }
 }
 
 const withModels = (providers: Provider[], profiles: Profile[], activeProfile: string) => ({ providers, profiles, activeProfile })
@@ -259,6 +271,24 @@ describe('SettingsStore api keys', () => {
   it('profile_defaults_names_every_profile_and_the_one_in_use', () => {
     const { store: s } = store(withModels([claudeProvider, bergetProvider], [opus, kimi], 'Kimi'))
     expect(s.profileDefaults()).toEqual({ names: ['Opus', 'Kimi'], active: 'Kimi' })
+  })
+})
+
+describe('SettingsStore memories', () => {
+  it('the_snapshot_lists_every_memory_the_memory_port_holds', async () => {
+    const cfg = fakeConfig({})
+    const sec = fakeSecrets()
+    const project = [{ title: 'Blue means clickable', file: 'blue.md', summary: 'say so' }]
+    const user = [{ title: 'Likes short replies', file: 'CLAUDE.md', summary: 'say less' }]
+    const mem = fakeMemory(project, user)
+    const s = new SettingsStore(cfg.port, sec.port, mem.port)
+    expect((await s.snapshot()).memories).toEqual({ project, user })
+  })
+
+  it('forgetting_a_memory_passes_its_scope_and_title_straight_to_the_memory_port', async () => {
+    const { store: s, memory } = store({})
+    await s.forgetMemory('project', 'Blue means clickable')
+    expect(memory.forgotten).toEqual([{ scope: 'project', title: 'Blue means clickable' }])
   })
 })
 

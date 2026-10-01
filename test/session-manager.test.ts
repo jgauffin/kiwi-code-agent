@@ -749,21 +749,24 @@ describe('SessionManager', () => {
       }
     })
 
-    it('a_code_plan_continued_in_chat_keeps_its_model_and_conversation_and_stops_its_own_engine', async () => {
+    it('approving_a_code_plan_grants_full_access_in_the_same_session_and_resumes_its_thread', async () => {
       const dir = await mkdtemp(join(tmpdir(), 'sm-'))
       try {
         const { manager, engines } = setup(dir)
-        const planning = await manager.create(berget, 'code-plan')
+        const planning = await manager.create(profile, 'code-plan')
         await manager.send(planning.id, 'plan the filter')
-        engines[0]!.out.push({ type: 'session_started', engineSessionId: planning.id, model: 'glm' })
+        engines[0]!.out.push({ type: 'session_started', engineSessionId: 'eng-plan', model: 'opus' })
         await tick()
 
-        const chat = await manager.continueInChat(planning.id)
-        expect(chat).toMatchObject({ mode: 'chat', profile: berget, engineSessionId: planning.id })
+        await manager.grantFullAccess(planning.id)
+        expect(manager.list()).toHaveLength(1)
+        expect(manager.get(planning.id)).toMatchObject({ mode: 'code-plan', access: 'full', engineSessionId: 'eng-plan' })
+        // The engine stops so the next prompt brings one up on the full setup, on the plan's thread.
         expect(manager.isLive(planning.id)).toBe(false)
-        await manager.send(chat.id, 'build it')
+        await manager.send(planning.id, 'build it')
         await tick()
-        expect((await manager.conversation(chat.id)).filter((e) => e.type === 'user_message').map((e) => e.text)).toEqual([
+        expect(engines[1]!.resumedFrom).toBe('eng-plan')
+        expect((await manager.conversation(planning.id)).filter((e) => e.type === 'user_message').map((e) => e.text)).toEqual([
           'plan the filter',
           'build it',
         ])
@@ -773,7 +776,21 @@ describe('SessionManager', () => {
       }
     })
 
-    it('a_docs_evaluation_that_opened_up_keeps_its_own_tab_and_conversation_and_waits_for_the_next_prompt', async () => {
+    it('a_session_stored_as_opened_up_loads_with_full_access', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+      try {
+        const store = memoryStore()
+        const stored = { id: 'd1', title: 'Docs evaluation', profile, mode: 'docs', opened: true, createdAt: '2026-01-01T00:00:00.000Z' }
+        await store.save([stored as unknown as SessionRecord])
+        const manager = new SessionManager(store, async (r) => new FakeSession(r.id, r.profile, r.engineSessionId), (id) => RunLog.forSession(dir, id), () => {})
+        expect(manager.get('d1')).toMatchObject({ access: 'full' })
+        expect(manager.get('d1')).not.toHaveProperty('opened')
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
+
+    it('a_docs_evaluation_granted_full_access_keeps_its_own_tab_and_conversation_and_waits_for_the_next_prompt', async () => {
       const dir = await mkdtemp(join(tmpdir(), 'sm-'))
       try {
         const { manager, engines } = setup(dir)
@@ -782,8 +799,8 @@ describe('SessionManager', () => {
         engines[0]!.out.push({ type: 'session_started', engineSessionId: docs.id, model: 'glm' })
         await tick()
 
-        await manager.openUp(docs.id)
-        expect(manager.get(docs.id)).toMatchObject({ mode: 'docs', opened: true })
+        await manager.grantFullAccess(docs.id)
+        expect(manager.get(docs.id)).toMatchObject({ mode: 'docs', access: 'full' })
         // The engine stops so the next prompt brings one up on the wider setup, in the session the person is reading.
         expect(manager.isLive(docs.id)).toBe(false)
         await manager.send(docs.id, 'move docs/external out')

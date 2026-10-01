@@ -49,7 +49,7 @@ export type SdkSessionOptions = {
   compactAtTokens?: number
   /** Tools this extension owns, served to the engine in-process on top of the built-ins. */
   ownTools?: Tool[]
-  /** The tools a script may call, as our own implementations run in this process. */
+  /** The built-ins a script may call, as our own implementations run in this process; a script reaches the own tools too. */
   scriptTools?: Tool[]
   /** The workspace's MCP servers; absent on a session that takes none. */
   mcpServers?: McpServers
@@ -206,6 +206,10 @@ export class SdkSession implements CodeSession {
       // Compaction is this session's to run (SdkCompaction): the engine's own
       // can fail without a word and leave the turn to overflow its window.
       env: { ...(this.options.env ?? {}), DISABLE_AUTO_COMPACT: '1' },
+      // Memory is this session's to write, through the ordinary tools and the hook that
+      // validates and caps it; the engine's own hidden auto-memory tool would otherwise
+      // write the same project folder on its own, unseen by that hook.
+      settings: { autoMemoryEnabled: false },
     }
     if (profile.effort) options.effort = profile.effort
     if (this.options.resumeEngineSessionId) options.resume = this.options.resumeEngineSessionId
@@ -325,6 +329,7 @@ export class SdkSession implements CodeSession {
       ctx.signal.addEventListener('abort', () => {
         if (this.pending.delete(requestId)) resolve({ behavior: 'deny', message: 'Cancelled' })
       })
+      const reason = ctx.decisionReason ?? (ctx.blockedPath ? `Touches ${ctx.blockedPath}` : undefined)
       this.output.push({
         type: 'permission_request',
         requestId,
@@ -333,6 +338,7 @@ export class SdkSession implements CodeSession {
         input,
         ...(ctx.title ? { title: ctx.title } : {}),
         ...(ctx.description ? { description: ctx.description } : {}),
+        ...(reason ? { reason } : {}),
       })
     })
   }
@@ -347,7 +353,7 @@ export class SdkSession implements CodeSession {
     const use = (toolName: string, input: unknown) => ({ toolName, input, toolUseId: crypto.randomUUID() })
     return {
       call: async (name, input) => {
-        const tool = this.options.scriptTools?.find((t) => t.name === name)
+        const tool = [...(this.options.ownTools ?? []), ...(this.options.scriptTools ?? [])].find((t) => t.name === name)
         if (!tool) return fail(`Unknown tool: ${name}`)
         const parsed = tool.schema.safeParse(input)
         if (!parsed.success) return fail(`Invalid arguments for ${name}: ${parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ')}`)

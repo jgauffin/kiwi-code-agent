@@ -35,7 +35,8 @@ export type ToolContext = {
   review?: (title: string, edits: FileEditChange[]) => Promise<PermissionDecision>
 }
 
-export type ToolOutput = { text: string; isError: boolean }
+/** `items`: the whole result, uncut, as plain JSON values for a script to work through; the model reads `text`. */
+export type ToolOutput = { text: string; isError: boolean; items?: unknown[] }
 
 export interface Tool<S extends z.ZodObject = z.ZodObject> {
   readonly name: string
@@ -54,7 +55,7 @@ export function toDefinition(tool: Tool): ToolDefinition {
   return { name: tool.name, description: tool.description, parameters }
 }
 
-export const ok = (text: string): ToolOutput => ({ text, isError: false })
+export const ok = (text: string, items?: unknown[]): ToolOutput => ({ text, isError: false, ...(items ? { items } : {}) })
 export const fail = (text: string): ToolOutput => ({ text, isError: true })
 
 /** Tool output past this size is cut; the model can narrow its request. */

@@ -1,15 +1,23 @@
 # Article series: A coding agent that plans blind
 
-For dev.to. Short, plain, no hype. One mechanism per article, each grounded in what ships.
+For dev.to. Short, plain, no hype. One idea per article, each grounded in what ships, all following one running example: order cancellation, where the code silently refunds nothing over 500.
 
-| # | Working title | Subject | File |
+Files are numbered in publishing order.
+
+| # | Title | Subject | File |
 |---|---|---|---|
-| 1 | The planner is not allowed to read your code | Blind planning: scope enforced at the tool call, the spec contract, why order matters | [01-plan-blind.md](01-plan-blind.md) |
-| 2 | Named rules, and the test that proves each one | Spec contract, tasks that name delivered rules, `proves:` lines, `no task` / `no test` | [02-named-rules.md](02-named-rules.md) |
-| 3 | The code is the presumed-wrong party | Mapping the spec against the repo, decisions, rulings, authority order | [03-presumed-wrong.md](03-presumed-wrong.md) |
-| 4 | A finish nothing has an opinion about | Mechanical verification and the one-pass cleanup: complexity and file size, no taste | [04-mechanical-finish.md](04-mechanical-finish.md) |
-| 5 | One workflow, a different model per step | `CodeSession`, the Claude SDK's JS build and any OpenAI-compatible endpoint, profiles per step | [05-engine-per-step.md](05-engine-per-step.md) |
-| 6 | A sandbox instead of forty tool calls | `RunScript`: QuickJS realm, host functions only, staged edits reviewed as one diff | [06-script-sandbox.md](06-script-sandbox.md) |
-| 7 | Permissions as a workflow, not a dialog | Read-only classification, shell splitting, project-defined commands, per-phase scope | [07-permissions-as-workflow.md](07-permissions-as-workflow.md) |
+| 0 | Five things I wanted from a coding agent, so I built one | Overview: the five USPs, who it is for | [00-five-things.md](00-five-things.md) |
+| 1 | One feature, from a sentence to green tests | Walkthrough of the running example, step by step | [01-one-feature.md](01-one-feature.md) |
+| 2 | A sandbox instead of forty tool calls | `RunScript`: QuickJS realm, gated host functions, staged edits reviewed as one diff | [02-script-sandbox.md](02-script-sandbox.md) |
+| 3 | The planner is not allowed to read your code | Blind planning: scope enforced at the tool call, why order matters | [03-plan-blind.md](03-plan-blind.md) |
+| 4 | The code is the presumed-wrong party | Checking the approved spec against the repo, decisions, rulings | [04-presumed-wrong.md](04-presumed-wrong.md) |
+| 5 | Why my coding agent isn't allowed to grade its own work | Mechanical verification and the one-pass cleanup | [05-grade-own-work.md](05-grade-own-work.md) |
+| 6 | Every rule gets a test, or it shows | Named rules, the board derived from the spec, a test named per rule | [06-every-rule-tested.md](06-every-rule-tested.md) |
+| 7 | One workflow, a different model per step | Profiles per step, Claude and any OpenAI-compatible endpoint | [07-engine-per-step.md](07-engine-per-step.md) |
+| 8 | Permissions as a workflow, not a dialog | Read-only classification, shell parsing, project commands, per-phase scope | [08-permissions-as-workflow.md](08-permissions-as-workflow.md) |
 
-Held back, possible part 8: the docs map and the *Evaluate docs* session — how the arrangement of the docs decides how well a feature can be planned.
+Links between articles point at the GitHub copies; replace each with its dev.to URL once that article is published.
+
+Screenshots: [screenshots.md](screenshots.md).
+
+Held back, possible part 9: the docs map and the *Evaluate docs* session: how the arrangement of the docs decides how well a feature can be planned.

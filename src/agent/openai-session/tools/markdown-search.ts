@@ -46,7 +46,7 @@ export function markdownSearchTool(canRead: (relPath: string) => boolean = () =>
       const limit = input.limit ?? 50
       const hits: Hit[] = []
       const sectionsHit = new Set<string>()
-      let matched = 0
+      const items: DocMatch[] = []
       let searched = 0
 
       for await (const file of walk(root, undefined)) {
@@ -63,7 +63,7 @@ export function markdownSearchTool(canRead: (relPath: string) => boolean = () =>
           if (!found) continue
           sections ??= parseSections(text)
           const section = sectionAt(sections, i + 1)
-          matched++
+          items.push({ file: shown, line: i + 1, text: lines[i]!, heading: section?.heading ?? null, start: section?.line ?? null, end: section?.endLine ?? null })
           sectionsHit.add(`${shown}#${section?.line ?? 0}`)
           if (hits.length < limit) {
             hits.push({ file: shown, section, firstHeading: sections[0]?.line, line: i + 1, text: clip(lines[i]!, found.index) })
@@ -71,11 +71,14 @@ export function markdownSearchTool(canRead: (relPath: string) => boolean = () =>
         }
       }
 
-      if (matched === 0) return ok(`No matches in ${searched} markdown file${searched === 1 ? '' : 's'}.`)
-      return ok(truncate(render(hits, matched, sectionsHit.size)))
+      if (items.length === 0) return ok(`No matches in ${searched} markdown file${searched === 1 ? '' : 's'}.`, [])
+      return ok(truncate(render(hits, items.length, sectionsHit.size)), items)
     },
   }
 }
+
+/** One match as a script gets it; `heading` is null before the first heading. */
+type DocMatch = { file: string; line: number; text: string; heading: string | null; start: number | null; end: number | null }
 
 function render(hits: Hit[], matched: number, sections: number): string {
   const out: string[] = []

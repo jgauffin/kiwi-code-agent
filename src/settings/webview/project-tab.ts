@@ -10,7 +10,7 @@ type NumberKey =
   | 'cleanup.testTypeLines'
   | 'cleanup.testFileLines'
 import { RuleListChangedEvent, SettingSavedEvent } from './events'
-import { button, el, field, heading, note, numberInput, onChange, settingsFileLink, textInput } from './fields'
+import { button, checkField, checkbox, el, field, heading, note, numberInput, onChange, settingsFileLink, textInput } from './fields'
 import { NO_WORKSPACE_NOTE } from './permissions-tab'
 import { RuleList } from './rule-list'
 
@@ -19,7 +19,7 @@ export class ProjectTab extends HTMLElement {
   private signature = ''
 
   update(snapshot: SettingsSnapshot): void {
-    const signature = JSON.stringify([snapshot.verify, snapshot.verifyFailureBudget, snapshot.cleanup, snapshot.planIgnore, snapshot.hasWorkspace])
+    const signature = JSON.stringify([snapshot.verify, snapshot.verifyFailureBudget, snapshot.cleanup, snapshot.planIgnore, snapshot.cutCoveredDocs, snapshot.hasWorkspace])
     if (signature === this.signature) return
     this.signature = signature
     this.replaceChildren()
@@ -58,6 +58,7 @@ export class ProjectTab extends HTMLElement {
       el('h3', '', 'Planning'),
       this.globs('Hidden from the planner', 'planIgnore', snapshot.planIgnore, disabled, 'docs/drafts/**'),
       note('The blind planner reads docs/**, the README and every spec, except these.'),
+      this.cutDocs(snapshot.cutCoveredDocs, disabled),
     )
 
     this.append(verify, cleanup, planning, settingsFileLink('workspace'))
@@ -75,6 +76,12 @@ export class ProjectTab extends HTMLElement {
       this.dispatchEvent(new SettingSavedEvent(key, parsed))
     })
     return field(label, input, hint ? { hint } : {})
+  }
+
+  private cutDocs(checked: boolean, disabled: boolean): HTMLElement {
+    const box = checkbox('cutCoveredDocs', checked, { disabled })
+    onChange(box, () => this.dispatchEvent(new SettingSavedEvent('cutCoveredDocs', box.checked)))
+    return checkField('Cut docs an approved spec covers', box, 'On approval the planner cuts the doc sections the spec now holds, each edit confirmed. Off: it lists them and edits only what you ask.')
   }
 
   private globs(label: string, key: 'cleanup.tests' | 'cleanup.ignore' | 'planIgnore', values: string[], disabled: boolean, placeholder: string): HTMLElement {

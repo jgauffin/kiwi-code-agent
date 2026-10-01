@@ -1,26 +1,35 @@
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { z } from 'zod'
+import { CODE_SEARCH_TOOL } from '../../code-outline/code-search'
 import { fileEditChange, type FileEditChange } from '../../edits/file-edit-diff'
 import { unifiedDiff } from '../../edits/unified-diff'
 import { DEFAULT_SANDBOX_OPTIONS, runSandboxed, type HostCall } from '../../script/sandbox'
+import { MARKDOWN_SEARCH_TOOL } from './markdown-search'
 import { fail, ok, truncate, type Tool, type ToolContext } from './tool'
 
 const schema = z.object({
   script: z.string().describe('The body of an async JavaScript function. `await` and `return` work at the top level.'),
 })
 
-/** The script's function for each tool it may use; the arguments are the tool's own, as one object. */
+/**
+ * The script's function for each tool it may use; the arguments are the tool's own, as one object.
+ * A tool is here when it answers with data a program can use and changes nothing: what a script
+ * changes goes through the staged functions below, so the user judges it as one diff. AskUser,
+ * Skill and the task board are left out because their answers are for the model, not a loop.
+ * Bash is left out because a loop of commands is a loop of permission prompts.
+ */
 const TOOL_FUNCTIONS: Record<string, string> = {
   glob: 'Glob',
   grep: 'Grep',
-  bash: 'Bash',
+  codeSearch: CODE_SEARCH_TOOL,
+  markdownSearch: MARKDOWN_SEARCH_TOOL,
+  codeOutline: 'CodeOutline',
   jsonQuery: 'JsonQuery',
   jsonSchema: 'JsonSchema',
-  codeOutline: 'CodeOutline',
 }
 
-const HOST_FUNCTIONS = ['read', 'readdir', 'exists', 'write', 'edit', 'preview', ...Object.keys(TOOL_FUNCTIONS)]
+const HOST_FUNCTIONS = ['read', 'readdir', 'exists', 'write', 'edit', 'move', 'copy', 'remove', 'preview', ...Object.keys(TOOL_FUNCTIONS)]
 
 /**
  * `replace` is written in the guest so its regular expression runs inside the
@@ -38,7 +47,8 @@ globalThis.replace = async (path, pattern, replacement, flags = 'g') => {
 };
 `
 
-type Staged = { before: string; after: string }
+/** A file as the script leaves it: `after` is null once removed; `existed` says whether it was on disk before. */
+type Staged = { before: string; after: string | null; existed: boolean }
 
 /**
  * Runs a script in an embedded interpreter that can reach nothing but the
@@ -50,7 +60,7 @@ export function runScriptTool(): Tool<typeof schema> {
   return {
     name: 'RunScript',
     description:
-      'Runs a JavaScript program (the body of an async function) that reads and analyses files or command output, or edits many files, in one step: the tool for what you would otherwise write in python, node or powershell through the shell. Its functions: read(path), readdir(path), exists(path), write(path, content), edit({ file_path, old_string, new_string, replace_all }), replace(path, regex, replacement, flags), preview(), glob({ pattern, path }), grep({ pattern, path, include }), jsonQuery(args), jsonSchema(args), codeOutline({ path, symbol }), bash({ command }); String, RegExp, JSON and the rest of plain JavaScript work, Node modules and the network do not. It returns only what the program returns or logs, and edits are shown to the user together and applied only once approved. The run-script skill has the details and examples.',
+      'Runs a JavaScript program (the body of an async function) that reads and analyses files, or changes many files, in one step: the tool for the same change across files, for reading many files to answer one question, and for what you would otherwise write in python, node or powershell through the shell. Its functions: read(path), readdir(path), exists(path); staged changes write(path, content), edit({ file_path, old_string, new_string, replace_all }), replace(path, regex, replacement, flags), move(source, destination), copy(source, destination), remove(path), preview(); and the tools glob({ pattern, path }), grep({ pattern, path, include, output_mode }), codeSearch({ query, path, regex }), markdownSearch({ query, path, regex }), codeOutline({ path, symbol }), jsonQuery(args), jsonSchema(args). glob, grep, codeSearch and markdownSearch return arrays with every match. String, RegExp, JSON and the rest of plain JavaScript work; shell commands, Node modules and the network do not. It returns only what the program returns or logs, and changes are shown to the user together and applied only once approved. The run-script skill has the details and examples.',
     schema,
     // A script can do nothing on its own; every call it makes is gated when made.
     readOnly: true,
@@ -88,6 +98,11 @@ function hostFor(ctx: ToolContext, staged: Map<string, Staged>): HostCall {
         return stage(ctx, staged, pathArg(first, 'write'), textArg(second, 'write(path, content)'))
       case 'edit':
         return edit(ctx, staged, first as EditArgs)
+      case 'move':
+      case 'copy':
+        return transfer(ctx, staged, name, pathArg(first, name), pathArg(second, `${name}(source, destination)`))
+      case 'remove':
+        return remove(ctx, staged, pathArg(first, 'remove'))
       case 'preview':
         return preview(ctx, staged)
     }
@@ -95,7 +110,7 @@ function hostFor(ctx: ToolContext, staged: Map<string, Staged>): HostCall {
     if (!tool) throw new Error(`Unknown function: ${name}`)
     const output = await ctx.call!(tool, first ?? {})
     if (output.isError) throw new Error(output.text)
-    return output.text
+    return output.items ?? output.text
   }
 }
 
@@ -133,11 +148,15 @@ async function listDirectory(ctx: ToolContext, path: string): Promise<string[]> 
   return entries.map((entry) => (entry.isDirectory() ? `${entry.name}/` : entry.name)).sort()
 }
 
-/** A file the script has staged counts as there, as `read` already treats it. */
+/** A file the script has staged counts as there, and one it has removed as gone, as `read` already treats them. */
 async function pathExists(ctx: ToolContext, staged: Map<string, Staged>, path: string): Promise<boolean> {
   await look(ctx, 'Exists', path)
-  const full = absolute(ctx, path)
-  if (staged.has(full)) return true
+  return present(staged, absolute(ctx, path))
+}
+
+async function present(staged: Map<string, Staged>, full: string): Promise<boolean> {
+  const held = staged.get(full)
+  if (held) return held.after !== null
   try {
     await stat(full)
     return true
@@ -147,25 +166,35 @@ async function pathExists(ctx: ToolContext, staged: Map<string, Staged>, path: s
   }
 }
 
-/** The file as the script has left it so far: its own staged version when it has one, else what is on disk (empty for a file that does not exist yet). */
-async function currentContent(ctx: ToolContext, staged: Map<string, Staged>, path: string, mustExist = true): Promise<string> {
-  await refuse(ctx, 'Read', { file_path: path })
-  const full = absolute(ctx, path)
-  const held = staged.get(full)
-  if (held) return held.after
+/** What is on disk, or null for a file that does not exist. */
+async function onDisk(full: string): Promise<string | null> {
   try {
     return await readFile(full, 'utf8')
   } catch (error) {
-    if (!mustExist && (error as NodeJS.ErrnoException).code === 'ENOENT') return ''
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
     throw error
   }
+}
+
+/** The file as the script has left it so far: its own staged version when it has one, else what is on disk. */
+async function currentContent(ctx: ToolContext, staged: Map<string, Staged>, path: string): Promise<string> {
+  await refuse(ctx, 'Read', { file_path: path })
+  const full = absolute(ctx, path)
+  const held = staged.get(full)
+  if (held && held.after === null) throw new Error(`${path} does not exist: the script removed it`)
+  if (held) return held.after!
+  return readFile(full, 'utf8')
 }
 
 async function stage(ctx: ToolContext, staged: Map<string, Staged>, path: string, content: string): Promise<null> {
   await refuse(ctx, 'Write', { file_path: path, content })
   const full = absolute(ctx, path)
-  const before = staged.get(full)?.before ?? (await currentContent(ctx, new Map(), path, false))
-  staged.set(full, { before, after: content })
+  const held = staged.get(full)
+  if (held) held.after = content
+  else {
+    const before = await onDisk(full)
+    staged.set(full, { before: before ?? '', after: content, existed: before !== null })
+  }
   return null
 }
 
@@ -184,12 +213,48 @@ async function edit(ctx: ToolContext, staged: Map<string, Staged>, args: EditArg
   return stage(ctx, staged, path, updated)
 }
 
-const changed = (staged: Map<string, Staged>) => [...staged].filter(([, s]) => s.before !== s.after)
+/**
+ * A move is staged as the destination created and the source removed, so it
+ * joins the one diff. Text files only: a folder or a binary file goes through
+ * the Move or Copy tool, which works on the disk directly.
+ */
+async function transfer(ctx: ToolContext, staged: Map<string, Staged>, kind: 'move' | 'copy', source: string, destination: string): Promise<null> {
+  await refuse(ctx, kind === 'move' ? 'Move' : 'Copy', { source, destination })
+  const full = absolute(ctx, source)
+  if (!staged.has(full) && (await stat(full).catch(() => undefined))?.isDirectory())
+    throw new Error(`${kind} takes a file, and ${source} is a folder: glob its files and ${kind} each, or use the ${kind === 'move' ? 'Move' : 'Copy'} tool`)
+  const content = await currentContent(ctx, staged, source)
+  if (content.includes('\u0000')) throw new Error(`${source} is not a text file: use the ${kind === 'move' ? 'Move' : 'Copy'} tool`)
+  if (await present(staged, absolute(ctx, destination))) throw new Error(`Destination already exists: ${destination}`)
+  await stage(ctx, staged, destination, content)
+  if (kind === 'move') await remove(ctx, staged, source)
+  return null
+}
+
+async function remove(ctx: ToolContext, staged: Map<string, Staged>, path: string): Promise<null> {
+  await refuse(ctx, 'Write', { file_path: path, content: '' })
+  const full = absolute(ctx, path)
+  const held = staged.get(full)
+  if (held?.after === null) throw new Error(`${path} does not exist: the script removed it`)
+  if (held) held.after = null
+  else {
+    const before = await onDisk(full)
+    if (before === null) throw new Error(`Not found: ${path}`)
+    staged.set(full, { before, after: null, existed: true })
+  }
+  return null
+}
+
+/** A file created and removed again within the script never reaches the user. */
+const changed = (staged: Map<string, Staged>) =>
+  [...staged].filter(([, s]) => (s.after === null ? s.existed : !s.existed || s.before !== s.after))
 
 function preview(ctx: ToolContext, staged: Map<string, Staged>): string {
   const files = changed(staged)
   if (files.length === 0) return 'No changes staged.'
-  return files.map(([path, s]) => [`--- ${label(ctx, path)}`, ...unifiedDiff(s.before, s.after, 3)].join('\n')).join('\n\n')
+  return files
+    .map(([path, s]) => (s.after === null ? `--- ${label(ctx, path)} (removed)` : [`--- ${label(ctx, path)}`, ...unifiedDiff(s.before, s.after, 3)].join('\n')))
+    .join('\n\n')
 }
 
 const label = (ctx: ToolContext, path: string) => {
@@ -201,11 +266,21 @@ async function applyStaged(ctx: ToolContext, staged: Map<string, Staged>): Promi
   const files = changed(staged)
   if (files.length === 0) return { text: '', isError: false }
   if (!ctx.review) return { text: 'The script staged changes, but this session cannot put them to the user; nothing was written.', isError: true }
-  const edits: FileEditChange[] = files.map(([path, s]) => fileEditChange({ path, label: label(ctx, path), states: [s.before, s.after] }))
+  const edits: FileEditChange[] = files.map(([path, s]) =>
+    s.after === null
+      ? fileEditChange({ path, label: label(ctx, path), unreadable: 'removed' })
+      : fileEditChange({ path, label: label(ctx, path), states: [s.before, s.after] }),
+  )
   const title = `Apply changes to ${files.length} file${files.length === 1 ? '' : 's'}`
   const decision = await ctx.review(title, edits)
   if (decision.kind === 'deny') return { text: `The user declined the changes${decision.message ? `: ${decision.message}` : ''}; nothing was written.`, isError: true }
   for (const [path, s] of files) {
+    if (s.after === null) {
+      await rm(path)
+      ctx.files.forget(path)
+      ctx.ledger?.forget(path)
+      continue
+    }
     await mkdir(dirname(path), { recursive: true })
     await writeFile(path, s.after, 'utf8')
     await ctx.files.markRead(path)

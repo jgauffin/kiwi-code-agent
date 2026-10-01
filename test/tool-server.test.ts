@@ -21,6 +21,10 @@ describe('tool server', () => {
     expect(mcp.annotations).toEqual({ readOnlyHint: true })
   })
 
+  it('own_tools_are_always_loaded_so_the_prompts_can_name_them', () => {
+    expect(toMcpTool(jsonSchemaTool, ctx)._meta).toEqual({ 'anthropic/alwaysLoad': true })
+  })
+
   it('handler_runs_the_tool_and_maps_its_output_and_error_flag', async () => {
     const mcp = toMcpTool(jsonQueryTool, ctx)
     const ok = await mcp.handler({ file_path: 'orders.json', expr: '$.orders[*].id', limit: undefined, max_string: undefined }, {})

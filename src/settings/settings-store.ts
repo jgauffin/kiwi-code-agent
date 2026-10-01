@@ -1,4 +1,5 @@
 import { DEFAULT_TEST_GLOBS, type Limits } from '../agent/cleanup/oversized'
+import type { MemoryEntry, MemoryScope } from '../agent/memory/memories'
 import { type ModelChoice, type Profile, type Provider, type StepChoice } from '../agent/session/model-profile'
 import { STEPS } from '../agent/session/session-manager'
 import type { VerifyRule } from '../agent/phases/verification'
@@ -30,6 +31,12 @@ export function secretKey(name: string): string {
 /** What a session runs on by default, as the new-session screen shows and sets it. */
 export type ProfileDefaults = { names: string[]; active: string }
 
+/** Memories, read and forgotten off the files they actually live in rather than `kiwiAgent` configuration. */
+export type MemoryPort = {
+  list(): Promise<{ project: MemoryEntry[]; user: MemoryEntry[] }>
+  forget(scope: MemoryScope, title: string): Promise<void>
+}
+
 /**
  * Where each setting is written: what the model runs on and how the host runs
  * it belong to the person; what the agent may do and how a project is checked
@@ -56,6 +63,7 @@ const TARGETS: Record<SettingKey | 'profiles' | 'providers', SettingsTarget> = {
   'cleanup.testFileLines': 'workspace',
   'cleanup.ignore': 'workspace',
   planIgnore: 'workspace',
+  cutCoveredDocs: 'workspace',
 }
 
 /**
@@ -92,6 +100,7 @@ export class SettingsStore {
   constructor(
     private readonly config: ConfigPort,
     private readonly secrets: SecretPort,
+    private readonly memory: MemoryPort,
   ) {}
 
   async snapshot(): Promise<SettingsSnapshot> {
@@ -111,6 +120,8 @@ export class SettingsStore {
       verifyFailureBudget: this.config.get('verifyFailureBudget', 3),
       cleanup: this.cleanup(),
       planIgnore: this.config.get<string[]>('planIgnore', []),
+      cutCoveredDocs: this.config.get('cutCoveredDocs', false),
+      memories: await this.memory.list(),
       nodePath: this.config.get('nodePath', ''),
       traceEngine: this.config.get('traceEngine', false),
       compactAtTokens: this.config.get('compactAtTokens', DEFAULT_COMPACT_AT_TOKENS),
@@ -178,6 +189,10 @@ export class SettingsStore {
     if (!name.trim()) throw new Error('An API key needs the provider it belongs to.')
     // Empty means no key: a Claude provider then runs on the editor's login again.
     await (value === '' ? this.secrets.delete(name) : this.secrets.store(name, value))
+  }
+
+  async forgetMemory(scope: MemoryScope, title: string): Promise<void> {
+    await this.memory.forget(scope, title)
   }
 
   private models(): ModelSettings {

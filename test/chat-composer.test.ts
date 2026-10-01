@@ -141,20 +141,22 @@ describe('ChatComposer model switch', () => {
   })
 })
 
-describe('ChatComposer continue in chat', () => {
-  it('a_session_not_offered_the_handover_shows_no_button', () => {
+describe('ChatComposer approve plan', () => {
+  it('a_session_with_no_plan_to_approve_shows_no_button', () => {
     const node = composer()
     node.setSwitches({ allowWrites: undefined, mcp: undefined, model: undefined })
-    expect(node.querySelector('.continue-in-chat')).toBeNull()
+    expect(node.querySelector('.approve-plan')).toBeNull()
   })
 
-  it('the_button_asks_to_carry_the_conversation_into_a_chat', async () => {
-    const { ContinueInChatRequestedEvent } = await import('../src/chat/webview/events')
+  it('the_button_approves_the_plan', async () => {
+    const { PlanApprovedEvent } = await import('../src/chat/webview/events')
     const node = composer()
-    node.setSwitches({ allowWrites: undefined, mcp: undefined, model: undefined, continueInChat: true })
+    node.setSwitches({ allowWrites: undefined, mcp: undefined, model: undefined, approvePlan: true })
     let asked = false
-    node.addEventListener(ContinueInChatRequestedEvent.type, () => (asked = true))
-    node.querySelector<HTMLButtonElement>('.continue-in-chat')!.click()
+    node.addEventListener(PlanApprovedEvent.type, () => (asked = true))
+    const button = node.querySelector<HTMLButtonElement>('.approve-plan')!
+    expect(button.textContent).toBe('Approve plan')
+    button.click()
     expect(asked).toBe(true)
   })
 })

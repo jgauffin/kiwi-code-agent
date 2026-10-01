@@ -3,7 +3,7 @@ import type { PreToolUseOutcome, SessionHooks, ToolUse } from '../session/hooks'
 
 /** Said in every prompt, so RunScript is the model's first move rather than the gate's correction. */
 export const SCRIPT_WRITING =
-  'For a program over files (the same edit across files, a regex rewrite, parsing JSON, XML or HTML, cross-referencing contents) use RunScript, not python, node or powershell through the shell: its JavaScript reads, greps, globs and runs shell commands, and its edits reach the user as one diff.'
+  'The same change in more than two files, or reading several files to answer one question about them, is one RunScript, not a tool call per file. Use it too for what you would write in python, node or powershell through the shell (a regex rewrite, parsing JSON, XML or HTML): its JavaScript reads, greps, globs and searches code, and its changes reach the user as one diff.'
 
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell'])
 
@@ -32,8 +32,8 @@ export class ScriptGate implements SessionHooks {
     this.pointed.add(command)
     return {
       deny: [
-        'This runs a program through the shell. Write it for RunScript instead: read, write, edit, replace, glob, grep, readdir, jsonQuery and bash are its functions, and its edits go to the user as one diff (the run-script skill has examples).',
-        'If it needs what RunScript cannot do (a library, a binary or zip file, the network), run the same command again.',
+        'This runs a program through the shell. Write it for RunScript instead: read, write, edit, replace, move, glob, grep, codeSearch, readdir and jsonQuery are among its functions, and its changes go to the user as one diff (the run-script skill has examples).',
+        'If it needs what RunScript cannot do (a shell command, a library, a binary or zip file, the network), run the same command again.',
       ].join('\n'),
     }
   }

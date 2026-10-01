@@ -23,8 +23,9 @@ import type { SessionSwitch, SizeLimits, Verifier } from './chat/feature-runs'
 import { openDraftPlanAction } from './chat/open-draft-plan'
 import { watchOwnBundle } from './dev-reload'
 import { SessionEngines } from './session-engines'
+import { forgetMemory, listMemories, memoryPath } from './agent/memory/memories'
 import { SETTINGS_PANEL_TYPE, SettingsPanel } from './settings/settings-panel'
-import { SettingsStore, readCleanupLimits, readModelSettings, secretKey, type ConfigPort } from './settings/settings-store'
+import { SettingsStore, readCleanupLimits, readModelSettings, secretKey, type ConfigPort, type MemoryPort } from './settings/settings-store'
 
 /** The `kiwiAgent` section as the settings store and the session factory both read it. */
 function configPort(): ConfigPort {
@@ -170,23 +171,36 @@ export function activate(context: vscode.ExtensionContext): void {
       sessionAllowed.set(sessionId, [...current, ...rules.filter((r) => !current.includes(r))])
     },
   }
-  const settings = new SettingsStore(configPort(), {
-    has: async (name) => (await context.secrets.get(secretKey(name))) !== undefined,
-    store: (name, value) => Promise.resolve(context.secrets.store(secretKey(name), value)),
-    move: async (from, to) => {
-      const value = await context.secrets.get(secretKey(from))
-      if (value === undefined) return
-      await context.secrets.store(secretKey(to), value)
-      await context.secrets.delete(secretKey(from))
+  const memoryPort: MemoryPort = {
+    list: () => listMemories(workspaceRoot),
+    forget: (scope, title) => forgetMemory(scope, title, workspaceRoot),
+  }
+  const settings = new SettingsStore(
+    configPort(),
+    {
+      has: async (name) => (await context.secrets.get(secretKey(name))) !== undefined,
+      store: (name, value) => Promise.resolve(context.secrets.store(secretKey(name), value)),
+      move: async (from, to) => {
+        const value = await context.secrets.get(secretKey(from))
+        if (value === undefined) return
+        await context.secrets.store(secretKey(to), value)
+        await context.secrets.delete(secretKey(from))
+      },
+      delete: (name) => Promise.resolve(context.secrets.delete(secretKey(name))),
     },
-    delete: (name) => Promise.resolve(context.secrets.delete(secretKey(name))),
-  })
-  const settingsPanel = new SettingsPanel(context.extensionUri, settings, async ({ name, baseUrl, apiKeyValue }) => {
-    if (!baseUrl) return []
-    const apiKey = apiKeyValue || (await context.secrets.get(secretKey(name)))
-    if (!apiKey) throw new Error(`No API key typed or stored for "${name}".`)
-    return new OpenAiClient({ baseUrl, apiKey }).listModels()
-  })
+    memoryPort,
+  )
+  const settingsPanel = new SettingsPanel(
+    context.extensionUri,
+    settings,
+    async ({ name, baseUrl, apiKeyValue }) => {
+      if (!baseUrl) return []
+      const apiKey = apiKeyValue || (await context.secrets.get(secretKey(name)))
+      if (!apiKey) throw new Error(`No API key typed or stored for "${name}".`)
+      return new OpenAiClient({ baseUrl, apiKey }).listModels()
+    },
+    (scope, file) => memoryPath(scope, file, workspaceRoot),
+  )
   chat = new ChatViewProvider(
     context.extensionUri,
     sessions,

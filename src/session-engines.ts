@@ -37,6 +37,7 @@ import type { Tool } from './agent/openai-session/tools/tool'
 import { codeOutlineTool } from './agent/code-outline/code-outline-tool'
 import { CODE_READING, CodeOutlineGate } from './agent/code-outline/code-outline-gate'
 import { codeSearchTool } from './agent/code-outline/code-search'
+import { RepeatedEdit } from './agent/script/repeated-edit'
 import { SCRIPT_WRITING, ScriptGate } from './agent/script/script-gate'
 import { indexSkills } from './agent/skills/skill-index'
 import { connectMcp } from './agent/mcp/mcp-connect'
@@ -44,8 +45,11 @@ import type { McpServerSet } from './agent/mcp/mcp-servers'
 import { McpToolHost } from './agent/mcp/mcp-tool-host'
 import { FileEditRecorder } from './agent/edits/file-edit-recorder'
 import type { PermissionPolicy } from './agent/permissions/permission-policy'
-import { PLAN_DIR } from './agent/phases/blind-plan'
+import { projectScriptsInstruction } from './agent/permissions/package-scripts'
+import { PLAN_DIR, SPEC_READING } from './agent/phases/blind-plan'
 import { CHAT_DECISIONS, UnfiledContract } from './agent/phases/unfiled-decisions'
+import { MemoryContract, memoryWritingInstructions } from './agent/memory/memories'
+import { chatMemorySection, withMemories } from './agent/memory/session-context'
 import { scratchDir, scratchInstruction } from './agent/scratch/scratch-folder'
 import { withRepoMap, workspaceRepoMap } from './agent/repo-map/session-context'
 import { outlineDocsMap, withDocsMap, workspaceDocsMap, type DocsMapStyle } from './agent/docs-map/session-context'
@@ -153,7 +157,10 @@ export class SessionEngines {
     // A key stored on the provider is the user's choice over the editor's Claude login; none leaves that login in charge.
     const anthropicKey = profile.apiKeySecret ? await context.secrets.get(secretKey(profile.apiKeySecret)) : undefined
     this.traceStart(record, anthropicKey ? `using the API key "${profile.apiKeySecret}"` : 'no API key stored, using the editor login')
-    const scriptTools = [globTool, grepTool, bashTool(), jsonSchemaTool, jsonQueryTool, codeOutlineTool]
+    // A mode with a prompt of its own already carries its memories from `modeSetup`; the chat
+    // prompt is built here, so both scopes are added for it the same way.
+    const chatMemories = setup.systemPrompt === undefined ? await chatMemorySection(workspaceRoot) : undefined
+    const scriptTools = [globTool, grepTool]
     const offered = allowed(setup, ownTools)
     this.sessionTools.set(record.id, [...offered, ...scriptTools])
     return new SdkSession({
@@ -177,7 +184,9 @@ export class SessionEngines {
       ...(setup.hooks ? { hooks: setup.hooks } : {}),
       ...(setup.systemPrompt !== undefined
         ? { systemPrompt: setup.systemPrompt + scratchLine }
-        : { appendSystemPrompt: `${DOC_READING}\n${CODE_READING}\n${SCRIPT_WRITING}\n${CHAT_DECISIONS}${scratchLine}` }),
+        : {
+            appendSystemPrompt: `${DOC_READING}\n${CODE_READING}\n${SCRIPT_WRITING}\n${projectScriptsInstruction(workspaceRoot)}\n${SPEC_READING}\n${CHAT_DECISIONS}\n${memoryWritingInstructions(workspaceRoot)}${chatMemories ? `\n\n${chatMemories}` : ''}${scratchLine}`,
+          }),
       ...(setup.toolNames ? { tools: setup.toolNames } : {}),
       compactAtTokens: this.compactAtTokens(profile),
       query,
@@ -245,15 +254,24 @@ export class SessionEngines {
     // After the mode's scope, so a doc the session may not read is never outlined. The docs map
     // describes every section, so it reads docs whole; plan files are the work and are read whole too.
     const gate: SessionHooks[] = record.mode === 'docs-map' ? [] : [new OutlineGate(workspaceRoot, [`${PLAN_DIR}/**`]), new CodeOutlineGate(workspaceRoot)]
-    if (!setup.toolNames || setup.toolNames.includes('RunScript')) gate.push(new ScriptGate())
+    if (!setup.toolNames || setup.toolNames.includes('RunScript')) gate.push(new ScriptGate(), new RepeatedEdit())
     // Every session that writes is held to the same check, whatever it writes and whichever engine runs it.
     const staleWrites = new StaleWriteGuard(workspaceRoot, new FileHands(workspaceRoot, record.id, record.mode, record.feature))
     // Told on its next tool result, whichever tool that is, when another hand changed a file this session saw.
     const notice = new NoticeOfAnotherHand(workspaceRoot, new FileHands(workspaceRoot, record.id, record.mode, record.feature))
-    // The permission rules apply to every session; a mode's own hooks may still deny. Any session may record an unfiled decision.
+    // The permission rules apply to every session; a mode's own hooks may still deny. Any session may record an unfiled decision or a memory.
     return {
       ...setup,
-      hooks: composeHooks(this.deps.policyFor(record.id), ...(setup.hooks ? [setup.hooks] : []), ...gate, staleWrites, notice, new UnfiledContract(workspaceRoot), recorder),
+      hooks: composeHooks(
+        this.deps.policyFor(record.id),
+        ...(setup.hooks ? [setup.hooks] : []),
+        ...gate,
+        staleWrites,
+        notice,
+        new UnfiledContract(workspaceRoot),
+        new MemoryContract(workspaceRoot),
+        recorder,
+      ),
     }
   }
 
@@ -265,6 +283,7 @@ export class SessionEngines {
       cleanupLimits: () => readCleanupLimits(this.deps.config),
       withMap: (record, systemPrompt) => this.withMap(record, systemPrompt, onProgress),
       withDocs: (record, systemPrompt) => this.withDocs(record, systemPrompt, onProgress),
+      withMemories: (record, systemPrompt) => withMemories(record.mode, systemPrompt, this.deps.workspaceRoot),
     }
   }
 

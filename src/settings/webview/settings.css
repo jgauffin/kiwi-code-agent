@@ -238,7 +238,8 @@ settings-app {
 
   /* One profile or provider: a card at rest, a form while edited; both keep the same frame so the list does not jump. */
   & .profile,
-  & .provider {
+  & .provider,
+  & .memory {
     display: flex;
     flex-direction: column;
     gap: 0.4rem;
@@ -286,6 +287,27 @@ settings-app {
       display: flex;
       gap: 0.4rem;
       margin-top: 0.2rem;
+    }
+
+    /* A memory row: title and summary stacked, controls beside rather than under since there is nothing else to show. */
+    & .text {
+      display: flex;
+      flex-direction: column;
+      gap: 0.1rem;
+    }
+
+    & .summary {
+      color: var(--vscode-descriptionForeground);
+    }
+  }
+
+  & .memory {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+
+    & .controls {
+      margin-top: 0;
     }
   }
 

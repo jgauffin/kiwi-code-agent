@@ -4,6 +4,9 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { buildSystemPrompt } from '../src/agent/openai-session/system-prompt'
 import { CHAT_DECISIONS } from '../src/agent/phases/unfiled-decisions'
+import { SPEC_READING } from '../src/agent/phases/blind-plan'
+import { memoryWritingInstructions } from '../src/agent/memory/memories'
+import { projectScriptsInstruction } from '../src/agent/permissions/package-scripts'
 
 let cwd: string
 let home: string
@@ -55,5 +58,30 @@ describe('buildSystemPrompt', () => {
 
   it('a_decision_settled_in_chat_is_recorded_as_unfiled_for_the_blind_planner', async () => {
     expect(await buildSystemPrompt(cwd, undefined, home)).toContain(CHAT_DECISIONS)
+  })
+
+  it('a_chat_keeps_to_the_approved_specs_and_asks_before_breaking_a_rule', async () => {
+    expect(await buildSystemPrompt(cwd, undefined, home)).toContain(SPEC_READING)
+  })
+
+  it('a_correction_or_a_standing_rule_is_told_apart_from_a_single_use_fact_and_written_down', async () => {
+    expect(await buildSystemPrompt(cwd, undefined, home)).toContain(memoryWritingInstructions(cwd, home))
+  })
+
+  it('a_node_project_runs_its_tools_through_npm_run_scripts', async () => {
+    await file(join(cwd, 'package.json'), '{}')
+    const prompt = await buildSystemPrompt(cwd, undefined, home)
+    expect(prompt).toContain(projectScriptsInstruction(cwd))
+    expect(prompt).toContain('`npm run <script>`')
+  })
+
+  it('a_bun_project_runs_its_tools_through_bun_run_scripts', async () => {
+    await file(join(cwd, 'package.json'), '{}')
+    await file(join(cwd, 'bun.lock'), '')
+    expect(await buildSystemPrompt(cwd, undefined, home)).toContain('`bun run <script>`')
+  })
+
+  it('a_project_without_package_json_is_not_told_about_scripts', async () => {
+    expect(projectScriptsInstruction(cwd)).toBe('')
   })
 })

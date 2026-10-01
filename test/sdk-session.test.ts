@@ -92,6 +92,29 @@ describe('SdkSession', () => {
     await session.dispose()
   })
 
+  it('a_call_the_engine_asks_about_on_its_own_account_carries_the_engines_reason', async () => {
+    const fake = fakeQuery()
+    const session = createSession(fake)
+    void fake.options!.canUseTool!('Bash', { command: 'cp a /tmp/b' }, {
+      signal: new AbortController().signal,
+      toolUseID: 'tu_5',
+      decisionReason: 'Writes outside the working directory',
+      blockedPath: '/tmp/b',
+    })
+    const [request] = await take(session, 1)
+    expect(request).toMatchObject({ type: 'permission_request', reason: 'Writes outside the working directory' })
+    await session.dispose()
+  })
+
+  it('without_a_reason_the_engine_names_the_blocked_path', async () => {
+    const fake = fakeQuery()
+    const session = createSession(fake)
+    void fake.options!.canUseTool!('Bash', { command: 'cp a /tmp/b' }, { signal: new AbortController().signal, toolUseID: 'tu_6', blockedPath: '/tmp/b' })
+    const [request] = await take(session, 1)
+    expect(request).toMatchObject({ type: 'permission_request', reason: 'Touches /tmp/b' })
+    await session.dispose()
+  })
+
   it('deny_carries_the_user_message_back_to_the_model', async () => {
     const fake = fakeQuery()
     const session = createSession(fake)
@@ -227,7 +250,12 @@ describe('SdkSession', () => {
     const fake = fakeQuery()
     createSession(fake)
     expect(fake.options!.mcpServers).toBeUndefined()
-    expect(fake.options!.settings).toBeUndefined()
+  })
+
+  it('the_engines_own_hidden_auto_memory_is_off_so_memory_writes_go_through_the_ordinary_tools_instead', () => {
+    const fake = fakeQuery()
+    createSession(fake)
+    expect(fake.options!.settings).toEqual({ autoMemoryEnabled: false })
   })
 
   describe('workspace MCP servers', () => {
@@ -378,12 +406,12 @@ describe('SdkSession', () => {
   })
 
   describe('running a script', () => {
-    const bash: Tool = {
-      name: 'Bash',
+    const grep: Tool = {
+      name: 'Grep',
       description: '',
-      schema: z.object({ command: z.string() }),
-      readOnly: false,
-      execute: async (input) => ({ text: `ran ${(input as { command: string }).command}`, isError: false }),
+      schema: z.object({ pattern: z.string() }),
+      readOnly: true,
+      execute: async () => ({ text: 'a.ts:1:x', isError: false, items: ['a.ts:1:x'] }),
     }
 
     function scriptingSession(fake: ReturnType<typeof fakeQuery>, cwd: string) {
@@ -394,27 +422,29 @@ describe('SdkSession', () => {
         cliPath: '/ext/dist/cli.js',
         runtime: { command: 'node', args: [], env: {} },
         query: fake.query,
-        scriptTools: [bash],
+        scriptTools: [grep],
       })
     }
 
-    it('a_shell_call_from_a_script_is_asked_about_and_runs_only_once_allowed', async () => {
+    it('a_script_runs_a_built_in_as_our_own_implementation', async () => {
       const session = scriptingSession(fakeQuery(), '/w')
-      const running = runScriptTool().execute({ script: 'return await bash({ command: "npm test" })' }, session.toolContext)
-      const [request] = await take(session, 1)
-      expect(request).toMatchObject({ type: 'permission_request', toolName: 'Bash', input: { command: 'npm test' } })
-      session.respondToPermission((request as { requestId: string }).requestId, { kind: 'allow' })
-      expect((await running).text).toBe('ran npm test')
+      const result = await runScriptTool().execute({ script: 'return (await grep({ pattern: "x" })).length' }, session.toolContext)
+      expect(result.text).toBe('1')
       await session.dispose()
     })
 
-    it('a_denied_shell_call_from_a_script_throws_inside_the_script', async () => {
-      const session = scriptingSession(fakeQuery(), '/w')
-      const script = 'try { await bash({ command: "rm -rf x" }) } catch (e) { return e.message }'
-      const running = runScriptTool().execute({ script }, session.toolContext)
-      const [request] = await take(session, 1)
-      session.respondToPermission((request as { requestId: string }).requestId, { kind: 'deny' })
-      expect((await running).text).toBe('Denied by user')
+    it('a_script_reaches_the_own_tools_as_well_as_the_built_ins', async () => {
+      const codeSearch: Tool = {
+        name: 'CodeSearch',
+        description: '',
+        schema: z.object({ query: z.string() }),
+        readOnly: true,
+        execute: async () => ({ text: '1 match', isError: false, items: [{ declaration: 'Cart.total' }] }),
+      }
+      const fake = fakeQuery()
+      const session = new SdkSession({ id: 'sess-1', profile, cwd: '/w', cliPath: '/ext/dist/cli.js', runtime: { command: 'node', args: [], env: {} }, query: fake.query, ownTools: [codeSearch], scriptTools: [grep] })
+      const result = await runScriptTool().execute({ script: 'return (await codeSearch({ query: "total" }))[0].declaration' }, session.toolContext)
+      expect(result.text).toBe('Cart.total')
       await session.dispose()
     })
 

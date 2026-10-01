@@ -41,6 +41,7 @@ export class PermissionCard extends HTMLElement {
     <div class="prompt" unless="settled">
       <strong>{{heading}}</strong>
       <p class="description" if="hasDescription">{{description}}</p>
+      <p class="reason" if="hasReason">{{reason}}</p>
       <ul class="commands" if="isShell">
         <li loop="l in lines" class="command">
           <code></code>
@@ -53,6 +54,10 @@ export class PermissionCard extends HTMLElement {
           </span>
         </li>
       </ul>
+      <div class="actions" if="askedAnyway">
+        <button type="button" class="allow" r-click="allowWhole('once')">Allow</button>
+        <button type="button" class="deny" r-click="denyWhole()">Deny</button>
+      </div>
       <div class="whole" unless="isShell">
         <div class="body"></div>
         <div class="actions" if="pending">
@@ -106,6 +111,8 @@ export class PermissionCard extends HTMLElement {
     const isShell = isShellTool(r.toolName) && this.lines.length > 0
     // A tool is allowed as a whole, whatever its arguments; a file write per call, the session's "Allow writes" covers the rest.
     const wholeRule = isShell ? undefined : projectRuleFor(r.toolName)
+    // The engine may ask on its own account about a call every rule lets through; no line is left to answer, so the call is.
+    const askedAnyway = isShell && this.decision === undefined && this.lines.every((line) => line.passes)
     this.classList.toggle('allowed', settled)
     this.template.render(
       {
@@ -113,7 +120,10 @@ export class PermissionCard extends HTMLElement {
         heading: this.heading(r),
         hasDescription: Boolean(r.description) && !isShellTool(r.toolName),
         description: r.description ?? '',
+        hasReason: Boolean(r.reason),
+        reason: r.reason ?? '',
         isShell,
+        askedAnyway,
         lines: this.lines.map((line, index) => this.lineRow(line, index)),
         wholeRule: wholeRule ?? '',
         wholeLabel: wholeRule ? ruleLabel(wholeRule) : '',
