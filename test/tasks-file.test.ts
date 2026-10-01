@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { decisions } from '../src/agent/phases/decisions'
 import { parseSpec, specFingerprint } from '../src/agent/phases/spec-model'
 import {
+  TESTS_ONLY_HOW,
   deliveredBy,
   deriveBoard,
   nextTask,
@@ -122,7 +124,7 @@ describe('tasks board', () => {
   })
 
   it('names_the_file_by_the_feature_slug', () => {
-    expect(tasksFile('Order cancellation')).toBe('.agent/plan/order-cancellation.tasks.json')
+    expect(tasksFile('Order cancellation')).toBe('.kiwi/specs/order-cancellation.tasks.json')
   })
 })
 
@@ -261,6 +263,29 @@ describe('the board derived from the spec', () => {
       ['Cancelling an order', ['Shipped order'], false],
       ['Refunding', ['Refund on cancel'], false],
     ])
+  })
+
+  it('a_clean_check_on_built_behaviour_derives_tasks_that_only_add_tests', () => {
+    const derived = deriveBoard(two, undefined, undefined, true)
+    expect(derived.tasks.map((t) => [t.name, t.how])).toEqual([
+      ['Cancelling an order', TESTS_ONLY_HOW],
+      ['Refunding', TESTS_ONLY_HOW],
+    ])
+    // Behaviour not marked built is planned and built as usual, whatever the check found.
+    expect(deriveBoard(two).tasks.map((t) => t.how)).toEqual(['', ''])
+  })
+
+  it('drift_on_built_behaviour_builds_only_the_scenario_the_check_disagreed_with', () => {
+    const onCancel = decisions('### Cancel keeps a shipped order\n- on: Cancel command\n- finding: f')
+    const derived = deriveBoard(two, undefined, undefined, true, onCancel)
+    expect(derived.tasks.map((t) => [t.name, t.how])).toEqual([
+      ['Cancelling an order', ''],
+      ['Refunding', TESTS_ONLY_HOW],
+    ])
+    // A decision no longer standing does not hold a scenario to building: it goes back to tests only.
+    const withdrawn = decisions('### Cancel keeps a shipped order [withdrawn]\n- on: Cancel command\n- finding: f')
+    const settled = deriveBoard(two, undefined, undefined, true, withdrawn)
+    expect(settled.tasks.find((t) => t.name === 'Cancelling an order')?.how).toBe(TESTS_ONLY_HOW)
   })
 })
 

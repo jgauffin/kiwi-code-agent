@@ -147,19 +147,19 @@ describe('SpecContract hook', () => {
   it('hands_the_problems_back_on_the_write_that_caused_them_and_stays_quiet_otherwise', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'contract-'))
     try {
-      await mkdir(join(dir, 'plan'))
+      await mkdir(join(dir, 'specs'))
       const hook = new SpecContract(dir)
       const write = (file: string) => hook.postToolUse({ toolName: 'Write', input: { file_path: file }, toolUseId: 't', output: 'ok', isError: false })
-      await writeFile(join(dir, 'plan', 'x.spec.md'), `---\nstatus: draft\n---\n${spec}`)
-      expect(await write('plan/x.spec.md')).toBeUndefined()
-      await writeFile(join(dir, 'plan', 'x.spec.md'), '# X\n\n## Goal\ng\n\n## Invariants\n- I1: x\n')
-      const outcome = await write(join(dir, 'plan', 'x.spec.md'))
-      expect(outcome?.additionalContext).toContain('`plan/x.spec.md` is off contract')
+      await writeFile(join(dir, 'specs', 'x.spec.md'), `---\nstatus: draft\n---\n${spec}`)
+      expect(await write('specs/x.spec.md')).toBeUndefined()
+      await writeFile(join(dir, 'specs', 'x.spec.md'), '# X\n\n## Goal\ng\n\n## Invariants\n- I1: x\n')
+      const outcome = await write(join(dir, 'specs', 'x.spec.md'))
+      expect(outcome?.additionalContext).toContain('`specs/x.spec.md` is off contract')
       expect(outcome?.additionalContext).toContain('- I1: x')
       // Other files and other tools are none of the contract's business.
-      await writeFile(join(dir, 'plan', 'x.tasks.md'), '- I1: x\n')
-      expect(await write('plan/x.tasks.md')).toBeUndefined()
-      expect(await hook.postToolUse({ toolName: 'Read', input: { file_path: 'plan/x.spec.md' }, toolUseId: 't', output: '', isError: false })).toBeUndefined()
+      await writeFile(join(dir, 'specs', 'x.tasks.md'), '- I1: x\n')
+      expect(await write('specs/x.tasks.md')).toBeUndefined()
+      expect(await hook.postToolUse({ toolName: 'Read', input: { file_path: 'specs/x.spec.md' }, toolUseId: 't', output: '', isError: false })).toBeUndefined()
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

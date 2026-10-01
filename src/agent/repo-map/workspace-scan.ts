@@ -1,7 +1,8 @@
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { IGNORED_DIRS } from '../openai-session/tools/glob'
-import { MAP_ROOT, byPath } from './map-files'
+import { KIWI_DIR } from '../kiwi-dir'
+import { byPath } from './map-files'
 
 /**
  * One walk of the workspace that every part of the build works from: the source
@@ -12,9 +13,6 @@ import { MAP_ROOT, byPath } from './map-files'
  * search tools skip — plus its generated folder and, when the workspace has
  * one, what `.gitignore` names.
  */
-
-/** The agent's generated root; its own output is not workspace source. */
-export const AGENT_DIR = MAP_ROOT.split('/')[0]!
 
 /** Languages the type index understands; the map has nothing to say about other files. */
 export const SOURCE_EXTENSIONS = ['.cs', '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']
@@ -69,7 +67,7 @@ async function walk(cwd: string, prefix: string, ignored: IgnorePredicate, into:
   }
 }
 
-const skipDir = (name: string): boolean => IGNORED_DIRS.has(name) || name === AGENT_DIR
+const skipDir = (name: string): boolean => IGNORED_DIRS.has(name) || name === KIWI_DIR
 
 export type IgnorePredicate = (path: string, isDir: boolean) => boolean
 

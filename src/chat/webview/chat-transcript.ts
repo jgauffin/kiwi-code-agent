@@ -154,37 +154,13 @@ export class ChatTranscript extends HTMLElement {
         this.activity = this.currentActivity()
         break
       }
-      case 'tool_result': {
+      case 'tool_result':
         if (this.questionCalls.has(event.toolUseId)) break
         this.pendingTools.delete(event.toolUseId)
         this.dropAnsweredPrompt(event.toolUseId)
         this.activity = this.currentActivity()
-        const details = this.tools.get(event.toolUseId)
-        const result = document.createElement('pre')
-        result.className = event.isError ? 'result error' : 'result'
-        renderAnsi(event.text, result)
-        if (details) {
-          details.classList.add('done')
-          details.classList.toggle('failed', event.isError)
-          // A written file speaks through its diff; the tool's confirmation says nothing more.
-          if (event.edit && !event.isError) {
-            // An edit the user allowed at a prompt has already been read; one that ran on its own has not.
-            const unread = !this.approvedByHand.has(event.toolUseId)
-            showEdit(details, event.edit, unread)
-            // Only the newest unread edit stays open, so a run of edits does not bury the conversation.
-            if (unread) {
-              if (this.openEdit) this.openEdit.open = false
-              this.openEdit = details
-            }
-            break
-          }
-          if (event.edit) showEdit(details, event.edit, true)
-          details.appendChild(result)
-        } else {
-          this.insert(result, event.parentToolUseId)
-        }
+        this.toolResult(event)
         break
-      }
       case 'permission_request': {
         const card = new PermissionCard()
         card.className = 'permission'
@@ -224,20 +200,10 @@ export class ChatTranscript extends HTMLElement {
       case 'compacted':
         this.insert(compactionMarker(event))
         break
-      case 'turn_done': {
+      case 'turn_done':
         this.activity = undefined
-        const line = document.createElement('p')
-        line.className = event.isError ? 'turn error' : 'turn'
-        const usage = event.usage
-        const parts = []
-        if (usage) parts.push(formatUsage(usage))
-        if (usage?.costUsd) parts.push(`$${usage.costUsd.toFixed(4)}`)
-        if (event.durationMs) parts.push(`${(event.durationMs / 1000).toFixed(1)}s`)
-        if (event.errors.length) parts.push(event.errors.join('; '))
-        line.textContent = parts.join(' · ')
-        this.insert(line)
+        this.insert(turnLine(event))
         break
-      }
       case 'error': {
         const message = block(event.fatal ? 'error fatal' : 'error', event.message)
         if (event.resumable) this.offerResume(message)
@@ -354,6 +320,34 @@ export class ChatTranscript extends HTMLElement {
     return details
   }
 
+  /** A result goes into its call's step; one whose call is not shown stands on its own. */
+  private toolResult(event: Extract<SessionEvent, { type: 'tool_result' }>): void {
+    const details = this.tools.get(event.toolUseId)
+    const result = document.createElement('pre')
+    result.className = event.isError ? 'result error' : 'result'
+    renderAnsi(event.text, result)
+    if (!details) {
+      this.insert(result, event.parentToolUseId)
+      return
+    }
+    details.classList.add('done')
+    details.classList.toggle('failed', event.isError)
+    // A written file speaks through its diff; the tool's confirmation says nothing more.
+    if (event.edit && !event.isError) {
+      // An edit the user allowed at a prompt has already been read; one that ran on its own has not.
+      const unread = !this.approvedByHand.has(event.toolUseId)
+      showEdit(details, event.edit, unread)
+      // Only the newest unread edit stays open, so a run of edits does not bury the conversation.
+      if (unread) {
+        if (this.openEdit) this.openEdit.open = false
+        this.openEdit = details
+      }
+      return
+    }
+    if (event.edit) showEdit(details, event.edit, true)
+    details.appendChild(result)
+  }
+
   /** Subagent output nests under the tool call that spawned it. */
   private insert(element: HTMLElement, parentToolUseId?: string): void {
     const parent = parentToolUseId ? this.tools.get(parentToolUseId) : undefined
@@ -409,6 +403,20 @@ function compactionMarker(event: Extract<SessionEvent, { type: 'compacted' }>): 
   summary.textContent = `Context compacted${sizes}`
   details.append(summary, block('compaction-summary', event.summary))
   return details
+}
+
+/** The line closing a turn: what it used, what it cost, how long it took, and why it failed. */
+function turnLine(event: Extract<SessionEvent, { type: 'turn_done' }>): HTMLElement {
+  const line = document.createElement('p')
+  line.className = event.isError ? 'turn error' : 'turn'
+  const usage = event.usage
+  const parts = []
+  if (usage) parts.push(formatUsage(usage))
+  if (usage?.costUsd) parts.push(`$${usage.costUsd.toFixed(4)}`)
+  if (event.durationMs) parts.push(`${(event.durationMs / 1000).toFixed(1)}s`)
+  if (event.errors.length) parts.push(event.errors.join('; '))
+  line.textContent = parts.join(' · ')
+  return line
 }
 
 /** Where the session switched to another model, so a reader can place which model produced what follows (B13). */

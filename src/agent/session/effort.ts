@@ -17,9 +17,11 @@ export const STEP_EFFORT: Partial<Record<Step, Effort>> = {
   fix: 'medium',
   cleanup: 'low',
   'code-plan': 'high',
+  'code-build': 'medium',
   'docs-map': 'low',
   docs: 'medium',
   'file-decisions': 'medium',
+  'doc-migration': 'medium',
 }
 
 /** How an OpenAI-compatible endpoint takes effort: not at all, or as `reasoning_effort` (low, medium, high). */

@@ -13,8 +13,8 @@ const tree = {
   'ReadMe.md': 'not source',
   'node_modules/dep/index.ts': 'export const dep = 1',
   'bin/Debug/Built.cs': 'public class Built {}',
-  '.agent/repo-map/summary.md': 'generated',
-  '.agent/runs/s/notes.ts': 'generated',
+  '.kiwi/repo-map/summary.md': 'generated',
+  '.kiwi/runs/s/notes.ts': 'generated',
   'generated/Model.cs': 'public class Model {}',
   'src/web/app.generated.ts': 'export const gen = 1',
 }

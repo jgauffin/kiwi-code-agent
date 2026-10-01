@@ -1,8 +1,9 @@
 import { permissionResolved, type CodeSession, type PermissionDecision, type SessionEvent } from './code-session'
-import type { ModelProfile, Step } from './model-profile'
+import { sameModelProfile, type ModelProfile, type Step } from './model-profile'
 import type { RunLog } from '../runs/run-log'
 import { answerText, UNANSWERED_RESULT, type QuestionOutcome, type UserQuestionRequest } from './user-question'
 import { nextStatus, underWay, type SessionStatus } from './session-status'
+import { errorMessage } from '../../error-message'
 
 /**
  * `plan` writes a feature's spec blind, `reconcile` checks it against the code
@@ -10,37 +11,60 @@ import { nextStatus, underWay, type SessionStatus } from './session-status'
  * splits what the implementation left oversized. `code-plan` agrees on intent
  * and then plans against the code, with no spec, and is built in the same
  * session once the plan is approved. `docs` judges how the docs a blind planner reads are
- * arranged, `docs-map` describes them so it can find its way, and
- * `file-decisions` files the user's unfiled decisions into the specs and docs;
- * none of those belongs to a feature.
+ * arranged, `docs-map` describes them so it can find its way,
+ * `file-decisions` files the user's unfiled decisions into the specs and docs,
+ * and `doc-migration` prunes what a settled spec already says from the docs
+ * and offers the rest as specs of their own; none of those belongs to a
+ * feature.
  */
-export type SessionMode = 'chat' | 'plan' | 'reconcile' | 'implement' | 'cleanup' | 'code-plan' | 'docs' | 'docs-map' | 'file-decisions'
+export type SessionMode = 'chat' | 'plan' | 'reconcile' | 'implement' | 'cleanup' | 'code-plan' | 'docs' | 'docs-map' | 'file-decisions' | 'doc-migration'
 
 /** Planning rather than building: no blanket allow for writes. */
 export const isPlanning = (mode: Step): boolean =>
-  mode === 'plan' || mode === 'reconcile' || mode === 'code-plan' || mode === 'docs' || mode === 'file-decisions'
+  mode === 'plan' || mode === 'reconcile' || mode === 'code-plan' || mode === 'docs' || mode === 'file-decisions' || mode === 'doc-migration'
+
+/**
+ * Whether the composer offers "Allow writes". A planning mode's writes are the
+ * user's to confirm one by one, except where the job is editing the docs: the
+ * switch then lets writes through, and the mode's scope still bounds them.
+ */
+export const offersAllowWrites = (mode: SessionMode): boolean => !isPlanning(mode) || mode === 'file-decisions' || mode === 'doc-migration'
 
 /**
  * The steps a profile names a model for, in the order the settings page lists
  * them. A step is a mode: what a session is for is what decides how strong a
  * model it earns, so there is no second vocabulary to keep in step.
  */
-export const STEPS: { step: Step; label: string; hint: string }[] = [
-  { step: 'chat', label: 'Chat', hint: 'Work in the code with the full tool set.' },
-  { step: 'plan', label: 'Feature planning', hint: 'Write the spec from the intent docs, blind to the code.' },
-  { step: 'code-plan', label: 'Plan', hint: 'Agree on intent, then plan against the code.' },
-  { step: 'reconcile', label: 'Check against code', hint: 'Name each disagreement between the approved spec and the code before it is built.' },
-  { step: 'implement', label: 'Implement', hint: 'Build the approved spec, task by task, with a test per rule.' },
-  { step: 'fix', label: 'Fix', hint: 'Mend what a failed test run names; one effort level harder each time it fails again.' },
-  { step: 'cleanup', label: 'Cleanup', hint: 'Split what the implementation left oversized.' },
-  { step: 'docs', label: 'Evaluate docs', hint: 'Judge how the docs a blind planner reads are arranged.' },
-  { step: 'docs-map', label: 'Docs map', hint: 'Describe the docs so a blind planner can find its way.' },
-  { step: 'file-decisions', label: 'File decisions', hint: "File the user's unfiled decisions into the specs and docs they belong in." },
+export const STEPS: { step: Step; group: StepGroup; label: string; hint: string }[] = [
+  { step: 'chat', group: 'Chat', label: 'Chat', hint: 'Work in the code with the full tool set.' },
+  { step: 'code-plan', group: 'Plan', label: 'Planning', hint: 'Agree on intent, then plan against the code.' },
+  { step: 'code-build', group: 'Plan', label: 'Build', hint: "Build the approved plan in the plan's own conversation, so on the same engine." },
+  { step: 'plan', group: 'Feature planning', label: 'Spec', hint: 'Write the spec from the intent docs, blind to the code.' },
+  { step: 'reconcile', group: 'Feature planning', label: 'Check against code', hint: 'Name each disagreement between the approved spec and the code before it is built.' },
+  { step: 'implement', group: 'Feature planning', label: 'Implement', hint: 'Build the approved spec, task by task, with a test per rule.' },
+  { step: 'fix', group: 'Feature planning', label: 'Fix', hint: 'Mend what a failed test run names; one effort level harder each time it fails again.' },
+  { step: 'cleanup', group: 'Feature planning', label: 'Cleanup', hint: 'Split what the implementation left oversized.' },
+  { step: 'docs', group: 'Maintenance', label: 'Evaluate docs', hint: 'Judge how the docs a blind planner reads are arranged.' },
+  { step: 'docs-map', group: 'Maintenance', label: 'Docs map', hint: 'Describe the docs so a blind planner can find its way.' },
+  { step: 'file-decisions', group: 'Maintenance', label: 'File decisions', hint: "File the user's unfiled decisions into the specs and docs they belong in." },
+  { step: 'doc-migration', group: 'Maintenance', label: 'Doc migration', hint: 'Prune what the settled specs already say from the docs, and offer the rest as specs.' },
 ]
+
+/** The kind of session a step belongs to: the settings page shows one group at a time. */
+export type StepGroup = 'Chat' | 'Plan' | 'Feature planning' | 'Maintenance'
+
+export const STEP_GROUPS: StepGroup[] = ['Chat', 'Plan', 'Feature planning', 'Maintenance']
+
+/** A step named where its group is not shown around it: "Feature planning · Spec". */
+export function stepTitle(step: Step): string {
+  const entry = STEPS.find((s) => s.step === step)
+  if (!entry) return step
+  return entry.group === entry.label ? entry.label : `${entry.group} · ${entry.label}`
+}
 
 /** The modes that stand on their own rather than on a feature's plan files. */
 export const isFeatureless = (mode: Step): boolean =>
-  mode === 'chat' || mode === 'code-plan' || mode === 'docs' || mode === 'docs-map' || mode === 'file-decisions'
+  mode === 'chat' || mode === 'code-plan' || mode === 'docs' || mode === 'docs-map' || mode === 'file-decisions' || mode === 'doc-migration'
 
 /** A build, not a conversation: it has no tab and no entry of its own, and nobody prompts it. */
 export const isBuild = (mode: SessionMode): boolean => mode === 'docs-map'
@@ -77,6 +101,10 @@ export type SessionRecord = {
   engineSessionId?: string
   /** The host went away while the turn was under way and not waiting on the user: the next host carries it on. */
   cutOff?: true
+  /** "Allow writes" is on: writes in the project pass without a prompt, within what the mode lets the session touch. */
+  allowWrites?: true
+  /** Permission rules the person allowed for this session, in force beside the project's. Kept across engines and hosts. */
+  allowed?: string[]
   createdAt: string
 }
 
@@ -96,6 +124,7 @@ function titleFor(mode: SessionMode, feature: string | undefined): string {
   if (mode === 'docs') return 'Docs evaluation'
   if (mode === 'docs-map') return 'Docs map'
   if (mode === 'file-decisions') return 'Filing decisions'
+  if (mode === 'doc-migration') return 'Doc migration'
   if (!feature) return 'New session'
   switch (mode) {
     case 'plan':
@@ -238,14 +267,35 @@ export class SessionManager {
    * The session goes on with the full tool set, in place: the person carries on
    * in the session they are reading rather than in a second one. The engine
    * stops, as it does on a model switch, and the next prompt brings one up on
-   * the wider setup and resumes the thread.
+   * the wider setup and resumes the thread, on `continuesOn` where the grant
+   * moves it to another model.
    */
-  async grantFullAccess(id: string): Promise<void> {
+  async grantFullAccess(id: string, continuesOn?: ModelProfile): Promise<void> {
     const record = this.require(id)
     if (record.access === 'full') return
+    // The thread carries only within one engine, and a plan agreed in chat exists nowhere else.
+    if (continuesOn && continuesOn.engine !== record.profile.engine) {
+      throw new Error(`"${record.title}" cannot continue on ${continuesOn.model}: its conversation is on the ${record.profile.engine} engine and does not carry over to ${continuesOn.engine}.`)
+    }
     record.access = 'full'
+    if (continuesOn) record.profile = continuesOn
     await this.store.save(this.records)
     await this.close(id)
+  }
+
+  /** In force from the next call on; the engine is not restarted, since the rules are read on every call. */
+  async allowForSession(id: string, rules: string[]): Promise<void> {
+    const record = this.require(id)
+    const current = record.allowed ?? []
+    record.allowed = [...current, ...rules.filter((r) => !current.includes(r))]
+    await this.store.save(this.records)
+  }
+
+  async setAllowWrites(id: string, enabled: boolean): Promise<void> {
+    const record = this.require(id)
+    if (enabled) record.allowWrites = true
+    else delete record.allowWrites
+    await this.store.save(this.records)
   }
 
   async send(id: string, text: string): Promise<void> {
@@ -269,7 +319,7 @@ export class SessionManager {
       session = await this.ensureLive(record)
     } catch (error) {
       // The start-up is over either way; the chat must stop showing it as under way.
-      await this.emit(record, { type: 'error', message: error instanceof Error ? error.message : String(error), fatal: true })
+      await this.emit(record, { type: 'error', message: errorMessage(error), fatal: true })
       throw error
     }
     session.send(text)
@@ -325,6 +375,18 @@ export class SessionManager {
     if (continued) record.engineSessionId = continued
     else delete record.engineSessionId
     await this.store.save(this.records)
+  }
+
+  /**
+   * A fix run handed the next failed sweep: its thread carries on, the attempt
+   * counts up, and the profile that attempt resolves to takes hold on the next
+   * turn, as a model switch would.
+   */
+  async retryFix(id: string, attempt: number, profile: ModelProfile): Promise<void> {
+    const record = this.require(id)
+    record.fixAttempt = attempt
+    if (sameModelProfile(record.profile, profile)) await this.store.save(this.records)
+    else await this.setProfile(id, profile)
   }
 
   async interrupt(id: string): Promise<void> {
@@ -439,7 +501,7 @@ export class SessionManager {
     this.logFor(record.id)
       .append(event)
       .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error)
+        const message = errorMessage(error)
         this.listener(record.id, { type: 'error', message: `Run log write failed: ${message}`, fatal: false })
       })
     this.notify(record, event)

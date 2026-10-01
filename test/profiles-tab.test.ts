@@ -1,9 +1,13 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { Profile, Provider } from '../src/agent/session/model-profile'
 import type { SettingsSnapshot } from '../src/settings/protocol'
 
 ;(globalThis as Record<string, unknown>).acquireVsCodeApi = () => ({ postMessage: () => {} })
+
+// Test files share a worker, so the module registry is cleared first: what
+// loads here is this file's own, bound to its stub and its document.
+vi.resetModules()
 
 const { ProfilesTab } = await import('../src/settings/webview/profiles-tab')
 const events = await import('../src/settings/webview/events')
@@ -24,10 +28,11 @@ function snapshot(over: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     permissions: { allow: [], deny: [], denyGitWrites: false },
     verify: [],
     verifyFailureBudget: 3,
-    cleanup: { functionLines: 25, typeLines: 200, fileLines: 400, tests: [], testFunctionLines: 60, testTypeLines: 600, testFileLines: 1200, ignore: [] },
+    cleanup: { functionLines: 60, functionComplexity: 15, typeLines: 200, fileLines: 400, tests: [], testFunctionLines: 120, testFunctionComplexity: 15, testTypeLines: 600, testFileLines: 1200, ignore: [] },
     planIgnore: [],
     cutCoveredDocs: false,
     memories: { project: [], user: [] },
+    bundles: { available: [], applied: [], suggested: [], offerPending: false },
     nodePath: '',
     traceEngine: false,
     compactAtTokens: 400_000,
@@ -72,7 +77,7 @@ describe('ProfilesTab profile cards', () => {
   it('a_card_shows_the_default_and_every_step_that_overrides_it', () => {
     const node = tab()
     expect(cards(node)[0]!.querySelector('.chips')!.textContent).toContain('default Claude · claude-sonnet-5')
-    expect(cards(node)[1]!.querySelector('.chips')!.textContent).toContain('Feature planning: Claude · claude-opus-5 (high)')
+    expect(cards(node)[1]!.querySelector('.chips')!.textContent).toContain('Feature planning · Spec: Claude · claude-opus-5 (high)')
     expect(cards(node)[1]!.querySelector('.chips')!.textContent).not.toContain('Implement')
     node.remove()
   })
@@ -98,13 +103,49 @@ describe('ProfilesTab profile cards', () => {
   it('checking_a_step_override_saves_it_alongside_the_default', () => {
     const node = tab()
     const form = edit(node, 0)
-    const box = form.querySelector<HTMLInputElement>('.choice-row:nth-of-type(3) input[type=checkbox]')!
+    const box = form.querySelector<HTMLInputElement>('input[name=step-plan-override]')!
     box.checked = true
     box.dispatchEvent(new Event('change', { bubbles: true }))
     let seen: unknown
     node.addEventListener(events.ProfileSavedEvent.type, (e) => (seen = e.profile))
     form.dispatchEvent(new Event('submit', { cancelable: true }))
     expect((seen as Profile).steps).toBeDefined()
+    node.remove()
+  })
+
+  it('steps_are_grouped_in_a_tab_per_mode_and_only_the_selected_one_shows', () => {
+    const node = tab()
+    const form = edit(node, 0)
+    const tabs = [...form.querySelectorAll<HTMLButtonElement>('.subtabs .tab')]
+    expect(tabs.map((t) => t.textContent)).toEqual(['Chat', 'Plan', 'Feature planning', 'Maintenance'])
+    const shown = () => [...form.querySelectorAll<HTMLElement>('.step-pane')].filter((p) => !p.hidden)
+    expect(shown()).toHaveLength(1)
+    tabs[1]!.click()
+    expect(shown()).toHaveLength(1)
+    expect([...shown()[0]!.querySelectorAll('.choice-row .label')].map((l) => l.textContent)).toEqual(['Planning', 'Build'])
+    node.remove()
+  })
+
+  it('a_step_edited_in_a_hidden_tab_still_saves', () => {
+    const node = tab()
+    const form = edit(node, 0)
+    ;[...form.querySelectorAll<HTMLButtonElement>('.subtabs .tab')].find((t) => t.textContent === 'Plan')!.click()
+    set(form, 'step-code-build-effort', 'low')
+    ;[...form.querySelectorAll<HTMLButtonElement>('.subtabs .tab')].find((t) => t.textContent === 'Chat')!.click()
+    let seen: unknown
+    node.addEventListener(events.ProfileSavedEvent.type, (e) => (seen = e.profile))
+    form.dispatchEvent(new Event('submit', { cancelable: true }))
+    expect((seen as Profile).steps).toEqual({ 'code-build': { effort: 'low' } })
+    node.remove()
+  })
+
+  it('the_selected_tab_survives_a_redraw', () => {
+    const node = tab()
+    const form = edit(node, 0)
+    ;[...form.querySelectorAll<HTMLButtonElement>('.subtabs .tab')].find((t) => t.textContent === 'Maintenance')!.click()
+    node.update(snapshot({ activeProfile: 'Opus plan' }))
+    const active = node.querySelector<HTMLButtonElement>('form.profile .subtabs .tab.active')
+    expect(active?.textContent).toBe('Maintenance')
     node.remove()
   })
 

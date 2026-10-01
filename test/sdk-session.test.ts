@@ -388,7 +388,7 @@ describe('SdkSession', () => {
     })
 
     const allowed = await hooks.PreToolUse![0]!.hooks[0]!(
-      { ...base, hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: 'plan/x.spec.md' }, tool_use_id: 't3' },
+      { ...base, hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: 'specs/x.spec.md' }, tool_use_id: 't3' },
       't3',
       ctx,
     )

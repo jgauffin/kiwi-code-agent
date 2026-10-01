@@ -8,7 +8,7 @@ export const OUTLINE_THRESHOLD_LINES = 200
 
 /** Said in every prompt, so the ranged read is the model's first move rather than the gate's correction. */
 export const DOC_READING =
-  "Find before you read docs: MarkdownSearch gives each match with the section it sits in, and Read of a long markdown file answers with its outline first; then Read only the section's line range."
+  "Find before you read docs: MarkdownSearch gives each match with the section it sits in, and Read of a long markdown file answers with its outline first; then Read only the section's line range. Read every doc or section you already know you need in one reply, not one per turn."
 
 /**
  * Answers the first whole-file Read of a long markdown doc with its outline.

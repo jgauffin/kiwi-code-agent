@@ -1,7 +1,8 @@
 import { ASK_USER_TOOL } from '../openai-session/tools/ask-user'
 import { MARKDOWN_SEARCH_TOOL } from '../openai-session/tools/markdown-search'
 import { DOC_READING } from '../openai-session/tools/markdown/outline-gate'
-import { DOCS_DIR, PLAN_DIR, README_GLOB, SPECS_GLOB } from './blind-plan'
+import { EDIT_WRITING } from '../openai-session/tools/edit'
+import { DOCS_DIR, SPECS_DIR, README_GLOB, SPECS_GLOB } from './blind-plan'
 import type { Scope } from './scope-guard'
 
 /**
@@ -31,7 +32,17 @@ export function docsEvaluationScope(ignored: string[] = []): Scope {
  * Write and Edit are here for the changes the user asks for, not for the
  * evaluation itself: the scope leaves both to the permission prompt.
  */
-export const DOCS_EVALUATION_TOOLS = ['Read', 'Glob', MARKDOWN_SEARCH_TOOL, 'Write', 'Edit', ASK_USER_TOOL]
+export const DOCS_EVALUATION_TOOLS = ['Read', 'Glob', MARKDOWN_SEARCH_TOOL, 'Write', 'Edit', 'MultiEdit', ASK_USER_TOOL]
+
+/**
+ * Ends the reply that presents the findings. It hands the session to the
+ * user's changes (full access and the Allow writes switch), so it is the
+ * model's word that the evaluation is done, not the end of a turn: a turn may
+ * end on a question. An HTML comment, so the rendered chat does not show it.
+ */
+export const EVALUATION_DELIVERED = '<!-- evaluation delivered -->'
+
+export const deliversEvaluation = (text: string): boolean => text.includes(EVALUATION_DELIVERED)
 
 /** The first message: there is nothing to configure, so the session starts on the job. */
 export function docsEvaluationKickoff(): string {
@@ -63,7 +74,9 @@ What counts as a finding:
 
 Say it in chat, one line per finding: the section as \`path#Heading\` (or the doc, when it is the whole file), what it costs a planner today, and the change in one sentence. Strongest first: what saves the most reading, or fixes the most citations. A finding earns its place only if a planner is measurably better off. If the docs already navigate well, say that in one line and stop; an empty list is a good result, not a failure.
 
-Write nothing. The user picks what to change and tells you; only then do you edit, only what was picked, and each write is confirmed by them. Keep every heading an approved spec cites unless the user has said to change it knowing what it costs. When a doc is split, the parts keep the headings they had, so the citations still land.
+End the reply that presents your findings with the line \`${EVALUATION_DELIVERED}\`, once the whole list is in it. Never in a reply that only asks the user something.
 
-If a finding needs something only the user can settle, ask with \`${ASK_USER_TOOL}\` rather than guessing. Nothing under \`${PLAN_DIR}/\` is yours to write.`
+Write nothing. The user picks what to change and tells you; only then do you edit, only what was picked, and each write is confirmed by them. Keep every heading an approved spec cites unless the user has said to change it knowing what it costs. When a doc is split, the parts keep the headings they had, so the citations still land. ${EDIT_WRITING}
+
+If a finding needs something only the user can settle, ask with \`${ASK_USER_TOOL}\` rather than guessing. Nothing under \`${SPECS_DIR}/\` is yours to write.`
 }

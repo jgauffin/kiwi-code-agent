@@ -42,5 +42,5 @@ export interface Notify {
 /** The session operations a feature run needs. */
 export type RunSessions = Pick<
   SessionManager,
-  'create' | 'send' | 'close' | 'settle' | 'get' | 'list' | 'latest' | 'isLive' | 'liveChildOf' | 'transcript' | 'takeCutOff'
+  'create' | 'send' | 'close' | 'settle' | 'retryFix' | 'get' | 'list' | 'latest' | 'isLive' | 'liveChildOf' | 'transcript' | 'takeCutOff'
 >

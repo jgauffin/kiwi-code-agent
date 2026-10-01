@@ -2,8 +2,12 @@ import './settings.css'
 import { onHostMessage, postToHost } from '../../chat/webview/vscode-api'
 import type { FromSettingsWebview, SettingsSnapshot, ToSettingsWebview } from '../protocol'
 import { AdvancedTab } from './advanced-tab'
+import { BundlesTab } from './bundles-tab'
 import {
   ApiKeySetEvent,
+  BundleAppliedEvent,
+  BundleOfferDismissedEvent,
+  BundleRemovedEvent,
   MemoryForgottenEvent,
   MemoryOpenedEvent,
   ModelsRefreshRequestedEvent,
@@ -28,6 +32,7 @@ const TABS: { tab: SettingsTab; label: string }[] = [
   { tab: 'permissions', label: 'Permissions' },
   { tab: 'project', label: 'Project' },
   { tab: 'memories', label: 'Memories' },
+  { tab: 'bundles', label: 'Bundles' },
   { tab: 'advanced', label: 'Advanced' },
 ]
 
@@ -44,6 +49,7 @@ export class SettingsApp extends HTMLElement {
     permissions: new PermissionsTab(),
     project: new ProjectTab(),
     memories: new MemoriesTab(),
+    bundles: new BundlesTab(),
     advanced: new AdvancedTab(),
   }
   private tab: SettingsTab = 'models'
@@ -69,6 +75,9 @@ export class SettingsApp extends HTMLElement {
     this.addEventListener(SettingsFileRequestedEvent.type, (e) => post({ type: 'open_settings_file', target: e.scope }))
     this.addEventListener(MemoryOpenedEvent.type, (e) => post({ type: 'open_memory', scope: e.scope, file: e.file }))
     this.addEventListener(MemoryForgottenEvent.type, (e) => post({ type: 'forget_memory', scope: e.scope, title: e.title }))
+    this.addEventListener(BundleAppliedEvent.type, (e) => post({ type: 'apply_bundle', scope: e.scope, bundle: e.bundle }))
+    this.addEventListener(BundleRemovedEvent.type, (e) => post({ type: 'remove_bundle', scope: e.scope, source: e.source, name: e.name }))
+    this.addEventListener(BundleOfferDismissedEvent.type, () => post({ type: 'dismiss_bundle_offer' }))
 
     onHostMessage<ToSettingsWebview>((message) => this.receive(message))
     post({ type: 'ready' })

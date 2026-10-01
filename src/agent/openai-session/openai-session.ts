@@ -14,6 +14,7 @@ import { isAbsolute, resolve } from 'node:path'
 import { COMPACT_AT, compact, DEFAULT_CONTEXT_WINDOW, estimateTokens, isContextTooLong, KEEP_SHARE, pathsReadIn, SUMMARY_MAX_TOKENS, SUMMARY_PROMPT } from './compaction'
 import { FileLedger } from './file-ledger'
 import { compactionPoint } from '../session/compaction-point'
+import { errorMessage } from '../../error-message'
 
 /**
  * Room for a reasoning model to think through a task and then write a whole
@@ -161,7 +162,7 @@ export class OpenAiSession implements CodeSession {
     const host = this.options.mcp!.host
     this.mcpChain = this.mcpChain
       .then(change)
-      .catch((error: unknown) => this.emitError(`MCP servers: ${error instanceof Error ? error.message : String(error)}`))
+      .catch((error: unknown) => this.emitError(`MCP servers: ${errorMessage(error)}`))
       .then(() => {
         this.tools = [...this.options.tools, ...host.tools()]
         this.definitions = this.tools.map(toDefinition)
@@ -237,7 +238,7 @@ export class OpenAiSession implements CodeSession {
       if (error instanceof InterruptedError || signal.aborted) {
         return this.finishTurn(usage, started, true, ['interrupted'])
       }
-      const message = error instanceof Error ? error.message : String(error)
+      const message = errorMessage(error)
       this.emitError(message)
       return this.finishTurn(usage, started, true, [message])
     }
@@ -283,6 +284,7 @@ export class OpenAiSession implements CodeSession {
             addUsage(usage, delta.usage)
             this.promptTokens = delta.usage.promptTokens
             this.reportUsage(this.promptTokens)
+            this.emit({ type: 'reply_usage', messageId, outputTokens: delta.usage.completionTokens })
           }
           finishReason = delta.finishReason
           break
@@ -343,7 +345,7 @@ export class OpenAiSession implements CodeSession {
     try {
       if (!(await this.compactNow(this.turnAbort.signal, usage))) this.emitError('Nothing old enough to fold into a summary yet')
     } catch (error) {
-      if (!this.turnAbort.signal.aborted) this.emitError(`Compaction failed: ${error instanceof Error ? error.message : String(error)}`)
+      if (!this.turnAbort.signal.aborted) this.emitError(`Compaction failed: ${errorMessage(error)}`)
     }
     this.emit({ type: 'status', status: 'idle' })
   }
@@ -385,7 +387,7 @@ export class OpenAiSession implements CodeSession {
     try {
       output = await tool.execute(parsed.data, this.contextFor(call.id, signal))
     } catch (error) {
-      output = { text: `${tool.name} failed: ${error instanceof Error ? error.message : String(error)}`, isError: true }
+      output = { text: `${tool.name} failed: ${errorMessage(error)}`, isError: true }
     }
     const post = await this.options.hooks?.postToolUse?.({ ...use, output: output.text, isError: output.isError })
     const context = [pre?.additionalContext, post?.additionalContext].filter((c): c is string => !!c)

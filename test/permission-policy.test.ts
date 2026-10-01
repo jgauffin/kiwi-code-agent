@@ -235,6 +235,40 @@ describe('PermissionPolicy', () => {
     expect(commandLines('Bash', 'cd $HOME', [])).toEqual([{ text: 'cd $HOME', rule: 'Bash(cd:*)' }])
   })
 
+  it('a_writes_rule_covers_every_write_tool_on_the_paths_its_glob_names_and_nothing_else', async () => {
+    const p = policy({ allow: ['Writes(docs/product.md)', 'Writes(specs/**)'] })
+    for (const tool of ['Write', 'Edit', 'MultiEdit']) expect(await use(p, tool, { file_path: 'docs/product.md' }), tool).toEqual({ allow: true })
+    expect(await use(p, 'RunScript', { files: ['specs/a.spec.md', 'specs/deep/b.md'] })).toEqual({ allow: true })
+    expect(await use(p, 'Edit', { file_path: 'docs/glossary.md' })).toBeUndefined()
+    expect(await use(p, 'RunScript', { files: ['specs/a.spec.md', 'docs/glossary.md'] })).toBeUndefined()
+    // A rule for writes says nothing about reading, and nothing about what a shell command writes.
+    expect(await use(p, 'Bash', { command: 'echo x > docs/product.md' })).toBeUndefined()
+    expect(await use(policy({ deny: ['Writes(docs/**)'] }), 'Write', { file_path: 'docs/a.md' })).toMatchObject({ deny: expect.stringContaining('Writes(docs/**)') })
+  })
+
+  it('a_write_prompt_on_one_project_file_offers_that_file_and_its_folder_as_rules_matching_only_themselves', async () => {
+    const p = policy({})
+    const request = (toolName: string, input: unknown) => ({ type: 'permission_request' as const, requestId: 'r', toolName, input })
+    expect(p.decorate(request('Edit', { file_path: 'docs/product.md' }))).toMatchObject({
+      writeScopes: [
+        { label: 'docs/product.md', rule: 'Writes(docs/product.md)' },
+        { label: 'docs/', rule: 'Writes(docs/**)' },
+      ],
+    })
+    // A file at the root has no folder short of the whole project, which is the Allow writes switch's to give.
+    expect(p.decorate(request('Write', { file_path: 'README.md' }))).toMatchObject({ writeScopes: [{ label: 'README.md', rule: 'Writes(README.md)' }] })
+    // Glob syntax in a path is taken literally, so the rule covers that file and no other.
+    const decorated = p.decorate(request('Edit', { file_path: 'src/app/[id]/page.tsx' }))
+    const [file, folder] = decorated.type === 'permission_request' ? (decorated.writeScopes ?? []) : []
+    expect(await use(policy({ allow: [file!.rule] }), 'Edit', { file_path: 'src/app/[id]/page.tsx' })).toEqual({ allow: true })
+    expect(await use(policy({ allow: [file!.rule] }), 'Edit', { file_path: 'src/app/i/page.tsx' })).toBeUndefined()
+    expect(await use(policy({ allow: [folder!.rule] }), 'Write', { file_path: 'src/app/[id]/layout.tsx' })).toEqual({ allow: true })
+    // Nothing to widen: a write outside the project, a move between two files, a script over several.
+    expect(p.decorate(request('Write', { file_path: '../other/a.md' }))).not.toHaveProperty('writeScopes')
+    expect(p.decorate(request('Move', { source: 'a.md', destination: 'b.md' }))).not.toHaveProperty('writeScopes')
+    expect(p.decorate(request('RunScript', { files: ['a.md', 'b.md'] }))).not.toHaveProperty('writeScopes')
+  })
+
   it('a_shell_prompt_is_decorated_with_its_lines_under_the_rules_in_force_and_nothing_else_is_touched', () => {
     let allow: string[] = []
     const p = new PermissionPolicy(cwd, () => ({ allow, deny: [] }))
@@ -485,7 +519,7 @@ describe('the Allow writes switch', () => {
 })
 
 describe('the scratch folder', () => {
-  const scratch = '.agent/scratch/s1'
+  const scratch = '.kiwi/scratch/s1'
   const use = (h: SessionHooks, toolName: string, input: unknown) => h.preToolUse!({ toolName, input, toolUseId: 't' })
   const policy = (rules: Partial<PermissionRules> = {}) => new PermissionPolicy(cwd, () => ({ allow: [], deny: [], ...rules }), { readOnly, scratch })
 
@@ -499,13 +533,13 @@ describe('the scratch folder', () => {
     expect(await use(p, 'RunScript', { files: [`${scratch}/a.mjs`, 'src/a.ts'] })).toBeUndefined()
     expect(await use(p, 'Move', { source: `${scratch}/a.mjs`, destination: 'src/a.mjs' })).toBeUndefined()
     // Another session's folder is not this one's.
-    expect(await use(p, 'Write', { file_path: '.agent/scratch/s2/a.mjs' })).toBeUndefined()
+    expect(await use(p, 'Write', { file_path: '.kiwi/scratch/s2/a.mjs' })).toBeUndefined()
     expect(await use(p, 'Write', { file_path: `${scratch}/../../runs/s1/events.jsonl` })).toBeUndefined()
   })
 
   it('a_deny_rule_still_blocks_a_write_in_the_scratch_folder', async () => {
-    const p = policy({ deny: ['Write(.agent/**)'] })
-    expect(await use(p, 'Write', { file_path: `${scratch}/probe.mjs` })).toMatchObject({ deny: expect.stringContaining('Write(.agent/**)') })
+    const p = policy({ deny: ['Write(.kiwi/**)'] })
+    expect(await use(p, 'Write', { file_path: `${scratch}/probe.mjs` })).toMatchObject({ deny: expect.stringContaining('Write(.kiwi/**)') })
   })
 
   it('file_changing_commands_in_the_scratch_folder_pass_and_a_cd_out_of_it_makes_them_ask', async () => {
@@ -514,7 +548,7 @@ describe('the scratch folder', () => {
     expect(await use(p, 'Bash', { command: `rm -rf ${scratch}/probe` })).toEqual({ allow: true })
     expect(await use(p, 'Bash', { command: `cd ${scratch} && rm -rf ${scratch}/probe` })).toEqual({ allow: true })
     expect(await use(p, 'Bash', { command: 'rm -rf src/a.ts' })).toBeUndefined()
-    // From `src` the path lands in `src/.agent/...`, which is not the scratch folder.
+    // From `src` the path lands in `src/.kiwi/...`, which is not the scratch folder.
     expect(await use(p, 'Bash', { command: `cd src && rm -rf ${scratch}/probe` })).toBeUndefined()
   })
 

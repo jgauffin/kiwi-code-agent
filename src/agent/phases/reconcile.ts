@@ -1,8 +1,9 @@
-import { DOCS_DIR, PLAN_DIR, SPECS_GLOB, featureSlug } from './blind-plan'
+import { DOCS_DIR, SPECS_DIR, SPECS_GLOB, featureSlug } from './blind-plan'
 import { KEEP_RULING, decisionsFile } from './decisions'
 import { contextFile } from './scenario-context'
 import { MARKDOWN_SEARCH_TOOL } from '../openai-session/tools/markdown-search'
 import { DOC_READING } from '../openai-session/tools/markdown/outline-gate'
+import { EDIT_WRITING } from '../openai-session/tools/edit'
 import { CODE_OUTLINE_TOOL } from '../code-outline/code-outline-tool'
 import { CODE_READING } from '../code-outline/code-outline-gate'
 import { CODE_SEARCH_TOOL } from '../code-outline/code-search'
@@ -44,7 +45,7 @@ export function reconcileKickoff(continued: boolean): string {
  * The spec is the intent for this feature; the docs it came from are not re-read.
  */
 export function reconcilePrompt(feature: string, cwd: string): string {
-  const spec = `${PLAN_DIR}/${featureSlug(feature)}.spec.md`
+  const spec = `${SPECS_DIR}/${featureSlug(feature)}.spec.md`
   const decisions = decisionsFile(feature)
   const context = contextFile(feature)
   return `You are checking the approved spec for the feature "${feature}" against the source code it will be built in.
@@ -53,13 +54,15 @@ The spec at \`${spec}\` under ${cwd} was written blind, from product intent alon
 
 Read the spec first. Every rule has a name, the bold lead-in of its line; that name is how you refer to it everywhere. Then search the code for what the spec touches: the rules it changes, the behaviour it adds to, the places its terms already live. ${CODE_READING}
 
-The spec is the intent for this feature; it was distilled from \`${DOCS_DIR}/**\` and the other features' specs under \`${SPECS_GLOB}\` by a session that read all of them, so do not browse those. A rule may end with a citation of the section it came from, as \`(${DOCS_DIR}/intent/orders.md#Cancellation)\`; open that section only to quote it in a contradiction. ${DOC_READING} A rule without a citation is the planner's own default, the weaker side in a contradiction.
+The spec is the intent for this feature; it was distilled from \`${DOCS_DIR}/**\` and the other features' specs under \`${SPECS_GLOB}\` by a session that read all of them, so do not browse those. A rule may end with a citation of the section it came from, as \`(${DOCS_DIR}/intent/orders.md#Cancellation)\`; open that section only to quote it in a contradiction. ${DOC_READING} A rule without a citation is the planner's own default, the weaker side in a contradiction. ${EDIT_WRITING}
 
 What you look for, each of them a decision the user has to make: a business rule in the code that says otherwise (the human decides which side is right; you present both); existing behaviour the feature would change or break that the spec does not mention; something the spec assumes that the code shows to be wrong.
 
 Only in code the feature will change or build on. Behaviour in code the feature leaves alone is not a finding, even where it disagrees with the spec. When where the feature is built is itself open (the behaviour already lives in code the feature may replace rather than change), that is one decision, and the findings in that code wait for its ruling. A constraint that changes how a rule is built but not what it does is not a decision: the implementer reads the same code.
 
 Authority order, when sources disagree: the docs and the approved specs, then the code. The code is the presumed-wrong party, but it is also where the users' current reality lives, so a contradiction is reported, not resolved.
+
+A spec whose front matter marks \`built: true\` was migrated from a doc about behaviour the code already has, not planned ahead of it: ask the stricter question of each of its rules, not only whether the code accommodates it but whether the code already does it. A rule none of the existing behaviour satisfies is a decision like any other, named in \`on\` the same way; it is not built here. With every rule already satisfied, report no decisions, the same clean result as any other feature.
 
 Your output: the decisions file, \`${decisions}\`, one \`###\` per decision. Structure:
 
@@ -119,6 +122,7 @@ function toolLine(name: string, raw: unknown): string {
   switch (name) {
     case 'Read':
     case 'Edit':
+    case 'MultiEdit':
     case 'Write':
       return clip(`${name} ${text('file_path') ?? ''}`)
     case 'Grep':

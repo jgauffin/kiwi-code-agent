@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ASK_USER_TOOL } from '../src/agent/openai-session/tools/ask-user'
-import { DOCS_EVALUATION_TOOLS, docsEvaluationPrompt, docsEvaluationScope } from '../src/agent/phases/docs-evaluation'
+import { DOCS_EVALUATION_TOOLS, deliversEvaluation, docsEvaluationPrompt, docsEvaluationScope, EVALUATION_DELIVERED } from '../src/agent/phases/docs-evaluation'
 import { ScopeGuard } from '../src/agent/phases/scope-guard'
 
 const cwd = process.platform === 'win32' ? 'D:\\work\\repo' : '/work/repo'
@@ -11,20 +11,20 @@ describe('what a docs evaluation may touch', () => {
   it('docs_the_readme_and_the_specs_are_readable_and_source_is_not', async () => {
     expect(await use('Read', { file_path: 'docs/intent/agent.md' })).toBeUndefined()
     expect(await use('Read', { file_path: 'ReadMe.md' })).toBeUndefined()
-    expect(await use('Read', { file_path: 'plan/order-cancellation.spec.md' })).toBeUndefined()
+    expect(await use('Read', { file_path: 'specs/order-cancellation.spec.md' })).toBeUndefined()
     expect(await use('Read', { file_path: 'src/orders/cancel.ts' })).toMatchObject({ deny: expect.stringContaining('limited to docs/**') })
   })
 
   it('the_mappers_files_are_denied_so_nothing_that_read_the_code_reaches_the_evaluation', async () => {
     // Both were written by a run that read the source; a suggestion drawn from them
     // would put the code's shape back into the one input meant to be free of it.
-    expect(await use('Read', { file_path: 'plan/order-cancellation.tasks.md' })).toMatchObject({ deny: expect.any(String) })
-    expect(await use('Read', { file_path: 'plan/order-cancellation.decisions.md' })).toMatchObject({ deny: expect.any(String) })
+    expect(await use('Read', { file_path: 'specs/order-cancellation.tasks.md' })).toMatchObject({ deny: expect.any(String) })
+    expect(await use('Read', { file_path: 'specs/order-cancellation.decisions.md' })).toMatchObject({ deny: expect.any(String) })
   })
 
   it('searching_is_allowed_only_where_reading_is_so_no_file_names_leak', async () => {
     expect(await use('Glob', { pattern: '**/*.md', path: 'docs' })).toBeUndefined()
-    expect(await use('Glob', { pattern: '*.spec.md', path: 'plan' })).toBeUndefined()
+    expect(await use('Glob', { pattern: '*.spec.md', path: 'specs' })).toBeUndefined()
     expect(await use('Grep', { pattern: 'cancel', path: 'src' })).toMatchObject({ deny: expect.any(String) })
   })
 
@@ -36,7 +36,7 @@ describe('what a docs evaluation may touch', () => {
     // undefined is the ordinary prompt; the user confirms each change to their own docs.
     expect(await use('Edit', { file_path: 'docs/intent/agent.md' })).toBeUndefined()
     expect(await use('Write', { file_path: 'docs/intent/new-area.md' })).toBeUndefined()
-    expect(await use('Write', { file_path: 'plan/order-cancellation.spec.md' })).toMatchObject({ deny: expect.stringContaining('writes nothing') })
+    expect(await use('Write', { file_path: 'specs/order-cancellation.spec.md' })).toMatchObject({ deny: expect.stringContaining('writes nothing') })
     expect(await use('Write', { file_path: 'src/orders/cancel.ts' })).toMatchObject({ deny: expect.stringContaining('writes nothing') })
   })
 
@@ -45,7 +45,7 @@ describe('what a docs evaluation may touch', () => {
   })
 
   it('the_session_gets_the_tools_a_reader_and_an_asked_for_edit_need_and_no_others', () => {
-    expect(DOCS_EVALUATION_TOOLS).toEqual(['Read', 'Glob', 'MarkdownSearch', 'Write', 'Edit', ASK_USER_TOOL])
+    expect(DOCS_EVALUATION_TOOLS).toEqual(['Read', 'Glob', 'MarkdownSearch', 'Write', 'Edit', 'MultiEdit', ASK_USER_TOOL])
   })
 })
 
@@ -68,6 +68,13 @@ describe('what a docs evaluation is told to judge', () => {
     expect(prompt).toContain('Write nothing.')
     expect(prompt).toContain('each write is confirmed by them')
     expect(prompt).toContain('an empty list is a good result')
+  })
+
+  it('the_reply_that_delivers_the_findings_carries_the_marker_and_nothing_else_does', () => {
+    // The marker is what hands the session to the user's changes, so a question asked mid-evaluation must not end it.
+    expect(prompt).toContain(EVALUATION_DELIVERED)
+    expect(deliversEvaluation(`1. docs/a.md#Intro: ...\n\n${EVALUATION_DELIVERED}`)).toBe(true)
+    expect(deliversEvaluation('Which of these two readings is meant?')).toBe(false)
   })
 
   it('the_prompt_names_no_output_file_because_the_findings_are_said_in_chat', () => {

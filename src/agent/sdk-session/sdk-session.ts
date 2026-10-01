@@ -22,6 +22,7 @@ import { ReadTracker } from '../openai-session/tools/read-tracker'
 import { fail, type Tool, type ToolContext } from '../openai-session/tools/tool'
 import { confirmReason, denyReason, gateCall, reviewEdits, type AskPermission, type PermissionShown } from '../permissions/gate'
 import type { QuestionOutcome, UserQuestionRequest } from '../session/user-question'
+import { errorMessage } from '../../error-message'
 
 type QueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>; options?: Options }) => Query
 
@@ -362,7 +363,7 @@ export class SdkSession implements CodeSession {
         try {
           return await tool.execute(parsed.data, this.toolContext)
         } catch (error) {
-          return fail(`${name} failed: ${error instanceof Error ? error.message : String(error)}`)
+          return fail(`${name} failed: ${errorMessage(error)}`)
         }
       },
       authorize: (name, input) => denyReason(this.options.hooks, use(name, input)),
@@ -453,10 +454,6 @@ function toPermissionResult(decision: PermissionDecision, input: Record<string, 
     case 'deny':
       return { behavior: 'deny', message: `Denied by user${decision.message ? `: ${decision.message}` : ''}`, decisionClassification: 'user_reject' }
   }
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
 
 /** One line per engine message: kind, and for stream events the raw event and delta kinds. */

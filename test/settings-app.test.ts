@@ -1,16 +1,22 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import type { Bundle } from '../src/agent/instructions/bundles'
 import type { SettingsSnapshot } from '../src/settings/protocol'
 
 const posted: unknown[] = []
 // The webview talks to the host through this handle, acquired when its modules load.
 ;(globalThis as Record<string, unknown>).acquireVsCodeApi = () => ({ postMessage: (m: unknown) => posted.push(m) })
 
+// Test files share a worker, so the module registry is cleared first: what
+// loads here is this file's own, bound to its stub and its document.
+vi.resetModules()
+
 const { SettingsApp } = await import('../src/settings/webview/settings-app')
 const { PermissionsTab } = await import('../src/settings/webview/permissions-tab')
 const { ProjectTab } = await import('../src/settings/webview/project-tab')
 const { AdvancedTab } = await import('../src/settings/webview/advanced-tab')
 const { MemoriesTab } = await import('../src/settings/webview/memories-tab')
+const { BundlesTab } = await import('../src/settings/webview/bundles-tab')
 const events = await import('../src/settings/webview/events')
 
 export function snapshot(over: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
@@ -22,10 +28,22 @@ export function snapshot(over: Partial<SettingsSnapshot> = {}): SettingsSnapshot
     permissions: { allow: ['Edit'], deny: [], denyGitWrites: false },
     verify: [{ match: 'src/**/*.ts', project: 'package.json', command: 'npm test' }],
     verifyFailureBudget: 3,
-    cleanup: { functionLines: 25, typeLines: 200, fileLines: 400, tests: ['**/*.test.*'], testFunctionLines: 60, testTypeLines: 600, testFileLines: 1200, ignore: [] },
+    cleanup: {
+      functionLines: 60,
+      functionComplexity: 15,
+      typeLines: 200,
+      fileLines: 400,
+      tests: ['**/*.test.*'],
+      testFunctionLines: 120,
+      testFunctionComplexity: 15,
+      testTypeLines: 600,
+      testFileLines: 1200,
+      ignore: [],
+    },
     planIgnore: [],
     cutCoveredDocs: false,
     memories: { project: [], user: [] },
+    bundles: { available: [], applied: [], suggested: [], offerPending: false },
     nodePath: '',
     traceEngine: false,
     compactAtTokens: 400_000,
@@ -188,6 +206,16 @@ describe('ProjectTab', () => {
     const lines = tab.querySelector<HTMLInputElement>('input[name="cleanup.testFileLines"]')!
     expect(saved(tab, () => change(lines, '900'))).toEqual({ key: 'cleanup.testFileLines', value: 900 })
   })
+
+  it('the_complexity_limits_show_what_holds_and_save_under_their_own_keys', () => {
+    const tab = new ProjectTab()
+    tab.update(snapshot())
+    const source = tab.querySelector<HTMLInputElement>('input[name="cleanup.functionComplexity"]')!
+    expect(source.value).toBe('15')
+    expect(saved(tab, () => change(source, '10'))).toEqual({ key: 'cleanup.functionComplexity', value: 10 })
+    const tests = tab.querySelector<HTMLInputElement>('input[name="cleanup.testFunctionComplexity"]')!
+    expect(saved(tab, () => change(tests, '20'))).toEqual({ key: 'cleanup.testFunctionComplexity', value: 20 })
+  })
 })
 
 describe('MemoriesTab', () => {
@@ -242,6 +270,99 @@ describe('MemoriesTab', () => {
     tab('Memories').click()
     app.querySelector<HTMLButtonElement>('.user .memory .remove')!.click()
     expect(posted).toContainEqual({ type: 'forget_memory', scope: 'user', title: 'Likes short replies' })
+    app.remove()
+  })
+})
+
+const pythonStyle: Bundle = { source: 'product', name: 'python-style', version: '1.0.0', target: { kind: 'any' }, text: 'Reproduce a bug before fixing it.' }
+
+describe('BundlesTab', () => {
+  it('available_and_applied_bundles_can_be_seen_and_managed_without_an_offer_pending', () => {
+    const tab = new BundlesTab()
+    tab.update(
+      snapshot({
+        bundles: {
+          available: [pythonStyle],
+          applied: [{ source: 'product', name: 'python-style', version: '1.0.0', scope: 'project' }],
+          suggested: [],
+          offerPending: false,
+        },
+      }),
+    )
+    expect(tab.querySelector('.bundle-offer')).toBeNull()
+    expect(tab.querySelector('.applied .title')!.textContent).toBe('python-style')
+    expect(tab.querySelector('.available .title')!.textContent).toBe('python-style')
+  })
+
+  it('nothing_applied_or_available_yet_says_so_instead_of_an_empty_list', () => {
+    const tab = new BundlesTab()
+    tab.update(snapshot({ bundles: { available: [], applied: [], suggested: [], offerPending: false } }))
+    expect(tab.textContent).toContain('Nothing applied yet.')
+    expect(tab.textContent).toContain('No bundles in the catalog yet.')
+  })
+
+  it('a_bundles_rule_text_is_hidden_until_shown_and_only_then_readable_before_it_is_applied', () => {
+    const tab = new BundlesTab()
+    tab.update(snapshot({ bundles: { available: [pythonStyle], applied: [], suggested: [], offerPending: false } }))
+    expect(tab.textContent).not.toContain(pythonStyle.text)
+    tab.querySelector<HTMLButtonElement>('.available button')!.click()
+    expect(tab.textContent).toContain(pythonStyle.text)
+  })
+
+  it('the_offer_banner_names_what_matches_this_workspace_and_is_gone_once_nothing_is_pending', () => {
+    const tab = new BundlesTab()
+    tab.update(snapshot({ bundles: { available: [pythonStyle], applied: [], suggested: [pythonStyle], offerPending: true } }))
+    expect(tab.querySelector('.bundle-offer')!.textContent).toContain('python-style')
+    tab.update(snapshot({ bundles: { available: [pythonStyle], applied: [], suggested: [], offerPending: false } }))
+    expect(tab.querySelector('.bundle-offer')).toBeNull()
+  })
+
+  it('dismissing_the_offer_posts_to_the_host_without_applying_anything', () => {
+    posted.length = 0
+    const app = new SettingsApp()
+    document.body.appendChild(app)
+    window.dispatchEvent(
+      new MessageEvent('message', { data: { type: 'settings', snapshot: snapshot({ bundles: { available: [pythonStyle], applied: [], suggested: [pythonStyle], offerPending: true } }) } }),
+    )
+    const tab = (label: string) => [...app.querySelectorAll<HTMLButtonElement>('.tabs .tab')].find((t) => t.textContent === label)!
+    tab('Bundles').click()
+    app.querySelector<HTMLButtonElement>('.bundle-offer button')!.click()
+    expect(posted).toContainEqual({ type: 'dismiss_bundle_offer' })
+    app.remove()
+  })
+
+  it('applying_a_bundle_posts_its_chosen_scope_with_the_whole_bundle_to_the_host', () => {
+    posted.length = 0
+    const app = new SettingsApp()
+    document.body.appendChild(app)
+    window.dispatchEvent(
+      new MessageEvent('message', { data: { type: 'settings', snapshot: snapshot({ bundles: { available: [pythonStyle], applied: [], suggested: [], offerPending: false } }) } }),
+    )
+    const tab = (label: string) => [...app.querySelectorAll<HTMLButtonElement>('.tabs .tab')].find((t) => t.textContent === label)!
+    tab('Bundles').click()
+    const scope = app.querySelector<HTMLSelectElement>('.available select[name=scope]')!
+    change(scope, 'user')
+    app.querySelector<HTMLButtonElement>('.available .controls button:last-child')!.click()
+    expect(posted).toContainEqual({ type: 'apply_bundle', scope: 'user', bundle: pythonStyle })
+    app.remove()
+  })
+
+  it('removing_a_bundle_posts_its_scope_source_and_name_to_the_host', () => {
+    posted.length = 0
+    const app = new SettingsApp()
+    document.body.appendChild(app)
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: {
+          type: 'settings',
+          snapshot: snapshot({ bundles: { available: [], applied: [{ source: 'product', name: 'python-style', version: '1.0.0', scope: 'project' }], suggested: [], offerPending: false } }),
+        },
+      }),
+    )
+    const tab = (label: string) => [...app.querySelectorAll<HTMLButtonElement>('.tabs .tab')].find((t) => t.textContent === label)!
+    tab('Bundles').click()
+    app.querySelector<HTMLButtonElement>('.applied .remove')!.click()
+    expect(posted).toContainEqual({ type: 'remove_bundle', scope: 'project', source: 'product', name: 'python-style' })
     app.remove()
   })
 })

@@ -6,7 +6,7 @@ import { KEEP_RULING } from './ruling'
 export { KEEP_RULING }
 
 /**
- * The decisions file, `.agent/plan/<feature>.decisions.md`: what the check of
+ * The decisions file, `.kiwi/specs/<feature>.decisions.md`: what the check of
  * the approved spec found in the code that the spec has to answer for, the planner's change
  * options, and what the user rules. A temporal state beside the spec, so the
  * spec holds rules only and never a path or a symbol. Rulings are written here

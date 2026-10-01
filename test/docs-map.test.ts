@@ -30,8 +30,8 @@ describe('what a docs map run may touch', () => {
     expect(await use('Write', { file_path: entryFile('ReadMe.md') })).toEqual({ allow: true })
     // The run describes the docs; it never changes one, and it never composes the map.
     expect(await use('Write', { file_path: 'docs/intent/orders.md' })).toMatchObject({ deny: expect.any(String) })
-    expect(await use('Write', { file_path: '.agent/docs-map/summary.md' })).toMatchObject({ deny: expect.any(String) })
-    expect(await use('Write', { file_path: '.agent/docs-map/index.json' })).toMatchObject({ deny: expect.any(String) })
+    expect(await use('Write', { file_path: '.kiwi/docs-map/summary.md' })).toMatchObject({ deny: expect.any(String) })
+    expect(await use('Write', { file_path: '.kiwi/docs-map/index.json' })).toMatchObject({ deny: expect.any(String) })
   })
 
   it('the_run_gets_no_tool_it_has_no_use_for', () => {
@@ -42,8 +42,8 @@ describe('what a docs map run may touch', () => {
 describe('what a docs map run is told', () => {
   it('the_kickoff_names_each_doc_and_the_entry_it_goes_in', () => {
     const kickoff = docsMapKickoff(['docs/intent/orders.md', 'ReadMe.md'])
-    expect(kickoff).toContain('`docs/intent/orders.md` → `.agent/docs-map/entries/docs/intent/orders.md`')
-    expect(kickoff).toContain('`ReadMe.md` → `.agent/docs-map/entries/ReadMe.md`')
+    expect(kickoff).toContain('`docs/intent/orders.md` → `.kiwi/docs-map/entries/docs/intent/orders.md`')
+    expect(kickoff).toContain('`ReadMe.md` → `.kiwi/docs-map/entries/ReadMe.md`')
   })
 
   it('the_prompt_says_a_heading_is_an_anchor_and_that_nothing_is_judged', () => {
@@ -60,7 +60,7 @@ describe('the entry contract answers on the write that broke it', () => {
     withWorkspace(
       {
         'docs/intent/orders.md': ORDERS,
-        '.agent/docs-map/entries/docs/intent/orders.md': '---\ndoc: docs/intent/orders.md\n---\nHow orders work.\n\n- `#Refunds`: invented\n',
+        '.kiwi/docs-map/entries/docs/intent/orders.md': '---\ndoc: docs/intent/orders.md\n---\nHow orders work.\n\n- `#Refunds`: invented\n',
       },
       async (dir) => {
         const outcome = await new DocsMapContract(dir).postToolUse({
@@ -80,7 +80,7 @@ describe('the entry contract answers on the write that broke it', () => {
     withWorkspace(
       {
         'docs/intent/orders.md': ORDERS,
-        '.agent/docs-map/entries/docs/intent/orders.md':
+        '.kiwi/docs-map/entries/docs/intent/orders.md':
           '---\ndoc: docs/intent/orders.md\n---\nHow orders work.\n\n- `#Cancellation`: when an order may be cancelled\n',
       },
       async (dir) => {
@@ -96,7 +96,7 @@ describe('the entry contract answers on the write that broke it', () => {
     withWorkspace(
       {
         'docs/intent/orders.md': ORDERS,
-        '.agent/docs-map/entries/docs/intent/orders.md': '---\ndoc: docs/settings.md\n---\nHow orders work.\n\n- `#Cancellation`: when\n',
+        '.kiwi/docs-map/entries/docs/intent/orders.md': '---\ndoc: docs/settings.md\n---\nHow orders work.\n\n- `#Cancellation`: when\n',
       },
       async (dir) => {
         const outcome = await new DocsMapContract(dir).postToolUse({

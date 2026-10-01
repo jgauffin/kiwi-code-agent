@@ -1,8 +1,10 @@
+import type { Bundle, BundleScope } from '../../agent/instructions/bundles'
 import type { MemoryScope } from '../../agent/memory/memories'
 import type { Profile, Provider } from '../../agent/session/model-profile'
+import type { StepGroup } from '../../agent/session/session-manager'
 import type { EditableSettings, SettingKey, SettingsTarget } from '../protocol'
 
-export type SettingsTab = 'models' | 'permissions' | 'project' | 'memories' | 'advanced'
+export type SettingsTab = 'models' | 'permissions' | 'project' | 'memories' | 'bundles' | 'advanced'
 
 export class SettingsTabSelectedEvent extends Event {
   static readonly type = 'settings-tab-selected'
@@ -18,6 +20,14 @@ export class ModelsSubTabSelectedEvent extends Event {
   static readonly type = 'models-subtab-selected'
   constructor(public readonly tab: ModelsSubTab) {
     super(ModelsSubTabSelectedEvent.type, { bubbles: true })
+  }
+}
+
+/** Within a profile being edited: which kind of session's steps are shown. */
+export class ProfileStepGroupSelectedEvent extends Event {
+  static readonly type = 'profile-step-group-selected'
+  constructor(public readonly group: StepGroup) {
+    super(ProfileStepGroupSelectedEvent.type, { bubbles: true })
   }
 }
 
@@ -127,10 +137,42 @@ export class MemoryForgottenEvent extends Event {
   }
 }
 
+/** "Apply" on a catalog bundle's card, the scope it was applied in travelling with it. */
+export class BundleAppliedEvent extends Event {
+  static readonly type = 'bundle-applied'
+  constructor(
+    public readonly scope: BundleScope,
+    public readonly bundle: Bundle,
+  ) {
+    super(BundleAppliedEvent.type, { bubbles: true })
+  }
+}
+
+/** "Remove" on an applied bundle's card. */
+export class BundleRemovedEvent extends Event {
+  static readonly type = 'bundle-removed'
+  constructor(
+    public readonly scope: BundleScope,
+    public readonly source: string,
+    public readonly name: string,
+  ) {
+    super(BundleRemovedEvent.type, { bubbles: true })
+  }
+}
+
+/** "Dismiss" on the one-time suggestion banner. */
+export class BundleOfferDismissedEvent extends Event {
+  static readonly type = 'bundle-offer-dismissed'
+  constructor() {
+    super(BundleOfferDismissedEvent.type, { bubbles: true })
+  }
+}
+
 declare global {
   interface HTMLElementEventMap {
     [SettingsTabSelectedEvent.type]: SettingsTabSelectedEvent
     [ModelsSubTabSelectedEvent.type]: ModelsSubTabSelectedEvent
+    [ProfileStepGroupSelectedEvent.type]: ProfileStepGroupSelectedEvent
     [SettingSavedEvent.type]: SettingSavedEvent
     [ProfileSavedEvent.type]: ProfileSavedEvent
     [ProfileRemovedEvent.type]: ProfileRemovedEvent
@@ -142,5 +184,8 @@ declare global {
     [SettingsFileRequestedEvent.type]: SettingsFileRequestedEvent
     [MemoryOpenedEvent.type]: MemoryOpenedEvent
     [MemoryForgottenEvent.type]: MemoryForgottenEvent
+    [BundleAppliedEvent.type]: BundleAppliedEvent
+    [BundleRemovedEvent.type]: BundleRemovedEvent
+    [BundleOfferDismissedEvent.type]: BundleOfferDismissedEvent
   }
 }

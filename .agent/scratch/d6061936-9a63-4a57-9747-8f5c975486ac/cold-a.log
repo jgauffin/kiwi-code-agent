@@ -1,0 +1,90 @@
+npm notice run kiwipow-agent@0.2.3 test
+npm notice run vitest run
+
+ RUN  v5.0.3 D:/src/coderr/CodingAgent
+
+ ❯ test/permission-card.test.ts (23 tests | 4 failed) 1621ms
+   ❯ a call that is not a shell command (9)
+     ❯ a write the policy offered wider scopes for (4)
+       × starts_on_this_edit_where_only_a_one_off_allow_makes_sense 52ms
+       × a_wider_scope_is_remembered_for_as_long_as_the_button_says_and_never_allowed_just_once 48ms
+       × the_file_can_be_allowed_for_the_project 60ms
+       × two_prompts_on_screen_keep_their_picks_apart 58ms
+ ❯ test/tools.test.ts (29 tests | 1 failed) 8909ms
+   ❯ Bash (3)
+     × times_out_a_command_that_never_ends 2316ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/permission-card.test.ts > a call that is not a shell command > a write the policy offered wider scopes for > starts_on_this_edit_where_only_a_one_off_allow_makes_sense
+AssertionError: expected [] to deeply equal [ Array(3) ]
+
+- Expected
++ Received
+
+- [
+-   "this edit",
+-   "docs/product.md",
+-   "docs/",
+- ]
++ []
+
+ ❯ test/permission-card.test.ts:200:25
+    198|       const { card: c } = card(writeRequest())
+    199|
+    200|       expect(widths(c)).toEqual(['this edit', 'docs/product.md', 'docs…
+       |                         ^
+    201|       expect(labels(c)).toEqual(['Allow', 'Allow for session', 'Allow …
+    202|       expect(enabled(c)).toEqual(['Allow', 'Deny'])
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  test/permission-card.test.ts > a call that is not a shell command > a write the policy offered wider scopes for > a_wider_scope_is_remembered_for_as_long_as_the_button_says_and_never_allowed_just_once
+TypeError: Cannot read properties of undefined (reading 'querySelector')
+ ❯ pick test/permission-card.test.ts:191:124
+    189|     const widths = (c: Card) => [...c.querySelectorAll('.covers label'…
+    190|     const pick = (c: Card, label: string) => {
+    191|       const input = [...c.querySelectorAll<HTMLLabelElement>('.covers …
+       |                                                                                                                            ^
+    192|       input.checked = true
+    193|       input.dispatchEvent(new Event('change'))
+ ❯ test/permission-card.test.ts:208:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  test/permission-card.test.ts > a call that is not a shell command > a write the policy offered wider scopes for > the_file_can_be_allowed_for_the_project
+TypeError: Cannot read properties of undefined (reading 'querySelector')
+ ❯ pick test/permission-card.test.ts:191:124
+    189|     const widths = (c: Card) => [...c.querySelectorAll('.covers label'…
+    190|     const pick = (c: Card, label: string) => {
+    191|       const input = [...c.querySelectorAll<HTMLLabelElement>('.covers …
+       |                                                                                                                            ^
+    192|       input.checked = true
+    193|       input.dispatchEvent(new Event('change'))
+ ❯ test/permission-card.test.ts:220:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  test/permission-card.test.ts > a call that is not a shell command > a write the policy offered wider scopes for > two_prompts_on_screen_keep_their_picks_apart
+TypeError: Cannot read properties of undefined (reading 'querySelector')
+ ❯ pick test/permission-card.test.ts:191:124
+    189|     const widths = (c: Card) => [...c.querySelectorAll('.covers label'…
+    190|     const pick = (c: Card, label: string) => {
+    191|       const input = [...c.querySelectorAll<HTMLLabelElement>('.covers …
+       |                                                                                                                            ^
+    192|       input.checked = true
+    193|       input.dispatchEvent(new Event('change'))
+ ❯ test/permission-card.test.ts:230:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  test/tools.test.ts > Bash > times_out_a_command_that_never_ends
+Error: EBUSY: resource busy or locked, rmdir 'C:\Users\jonas\AppData\Local\Temp\tools-rVaUPq'
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  2 failed | 115 passed | 3 skipped (120)
+      Tests  5 failed | 1543 passed | 6 skipped (1554)
+   Start at  19:20:36
+   Duration  13.98s (tests 39%, environment 29%, import 18%, transform 14%)
+

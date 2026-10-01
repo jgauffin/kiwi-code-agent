@@ -3,9 +3,11 @@ import type { SettingsSnapshot } from '../protocol'
 
 type NumberKey =
   | 'verifyFailureBudget'
+  | 'cleanup.functionComplexity'
   | 'cleanup.functionLines'
   | 'cleanup.typeLines'
   | 'cleanup.fileLines'
+  | 'cleanup.testFunctionComplexity'
   | 'cleanup.testFunctionLines'
   | 'cleanup.testTypeLines'
   | 'cleanup.testFileLines'
@@ -41,12 +43,14 @@ export class ProjectTab extends HTMLElement {
     const cleanup = el('section', 'cleanup')
     cleanup.append(
       el('h3', '', 'Cleanup'),
-      note('Units longer than these are split after the tests pass. 0 turns a limit off.'),
+      note('Units past these are split after the tests pass. Complexity is what a function is held to: each branch and loop costs one plus how deeply it is nested. 0 turns a limit off.'),
+      this.number('Function complexity', 'cleanup.functionComplexity', snapshot.cleanup.functionComplexity, disabled),
       this.number('Function lines', 'cleanup.functionLines', snapshot.cleanup.functionLines, disabled),
       this.number('Type lines', 'cleanup.typeLines', snapshot.cleanup.typeLines, disabled),
       this.number('File lines', 'cleanup.fileLines', snapshot.cleanup.fileLines, disabled),
       this.globs('Test files', 'cleanup.tests', snapshot.cleanup.tests, disabled, '**/*.test.*'),
       note('A test file stays one file per tested file, so tests get larger limits.'),
+      this.number('Test function complexity', 'cleanup.testFunctionComplexity', snapshot.cleanup.testFunctionComplexity, disabled),
       this.number('Test function lines', 'cleanup.testFunctionLines', snapshot.cleanup.testFunctionLines, disabled),
       this.number('Test type lines', 'cleanup.testTypeLines', snapshot.cleanup.testTypeLines, disabled),
       this.number('Test file lines', 'cleanup.testFileLines', snapshot.cleanup.testFileLines, disabled),

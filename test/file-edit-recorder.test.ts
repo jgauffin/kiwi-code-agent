@@ -9,7 +9,7 @@ const lines = (...text: string[]) => text.join('\n') + '\n'
 
 async function workspace(): Promise<{ cwd: string; runDir: string; recorder: FileEditRecorder; clean: () => Promise<void> }> {
   const cwd = await mkdtemp(join(tmpdir(), 'edits-'))
-  const runDir = join(cwd, '.agent', 'runs', 'session-1')
+  const runDir = join(cwd, '.kiwi', 'runs', 'session-1')
   return {
     cwd,
     runDir,

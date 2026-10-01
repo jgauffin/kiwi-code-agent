@@ -1,8 +1,12 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 // The webview talks to the host through this handle, acquired when its modules load.
 ;(globalThis as Record<string, unknown>).acquireVsCodeApi = () => ({ postMessage: () => {} })
+
+// Test files share a worker, so the module registry is cleared first: what
+// loads here is this file's own, bound to its stub and its document.
+vi.resetModules()
 
 const { ChatComposer } = await import('../src/chat/webview/chat-composer')
 const { LinkedFilesRow } = await import('../src/chat/webview/linked-files-row')

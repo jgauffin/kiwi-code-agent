@@ -67,6 +67,14 @@ const OPENER_BEFORE = /[(,=:|&<?![]\s*$/
 /** What ends a header whose body is the indented lines below it. */
 const HEADER_END = /(?::|\bdo\s*(?:\|[^|]*\|)?)\s*$/
 
+/** `for (…;…)`, labelled or not: `OUT: for`, `'outer: for`. */
+const PAREN_LOOP = /^\s*(?:'?[A-Za-z_]\w*\s*:\s*)?for\b/
+
+/** A condition without parentheses: `for i := 0; i < n; i++ {`, `if v, ok := m[k]; ok {`. */
+const BARE_CONDITION = /^\s*(?:for|if|switch)\s+(?!await\b)[^\s(]/
+
+const carriesSemicolons = (text: string, parens: number): boolean => (parens > 0 && PAREN_LOOP.test(text)) || BARE_CONDITION.test(text)
+
 type Modes = { braces: boolean; indent: boolean; objectLiterals: boolean }
 
 type Frame = { block?: CodeBlock; brace: boolean; indent: number; inHeader?: boolean }
@@ -172,8 +180,8 @@ class Reader {
       return
     }
     if (ch === ';' && this.modes.braces) {
-      // A `for` header carries its own semicolons; anywhere else one ends the statement.
-      if (!header || header.parens === 0 || !/^\s*for\b/.test(this.text(header))) {
+      // A `for` header carries its own semicolons, and so does Go's condition with an init statement; anywhere else one ends the statement.
+      if (!header || !carriesSemicolons(this.text(header), header.parens)) {
         this.finishHeader(n)
         return
       }

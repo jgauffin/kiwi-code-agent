@@ -3,10 +3,10 @@ import type { PreToolUseOutcome, SessionHooks, ToolUse } from '../session/hooks'
 import type { SessionEvent } from '../session/code-session'
 import { NO_PROJECT_COMMANDS, projectCommandOf, type ProjectCommands } from './project-commands'
 import { cdRuleDirectory, hidesCommandWord, isGitWrite, isReadOnlyCommand, isReadOnlySegment, type ReadOnlyContext } from './read-only-commands'
-import { bashPatternMatches, commandLines, parseRule, ruleCoversTool, staysWithin, type PermissionRule } from './permission-rules'
+import { bashPatternMatches, commandLines, parseRule, ruleCoversTool, staysWithin, writeScopes, type PermissionRule } from './permission-rules'
 import { projectPaths, type ProjectPaths } from './project-paths'
 import { splitShellCommand, type ShellSegment } from './shell-split'
-import { FILE_TOOLS, isShellTool, readOnlyTools, TRANSFER_TOOLS, WITHIN_PROJECT_TOOLS, type ReadOnlyTools } from './tool-classes'
+import { FILE_TOOLS, isShellTool, readOnlyTools, TRANSFER_TOOLS, WITHIN_PROJECT_TOOLS, WRITE_TOOLS, type ReadOnlyTools } from './tool-classes'
 import { commandWriteTargets, toolWriteTargets, writesWithin, type WritableArea } from './write-targets'
 
 export type PermissionRules = {
@@ -75,11 +75,21 @@ export class PermissionPolicy implements SessionHooks {
     return undefined
   }
 
-  /** A prompt for a shell call is asked line by line: each command with what the rules in force make of it. */
+  /**
+   * A prompt for a shell call is asked line by line: each command with what the
+   * rules in force make of it. A write to one project file is offered the file
+   * and its folder, so the answer can cover later writes there too.
+   */
   decorate(event: SessionEvent): SessionEvent {
-    if (event.type !== 'permission_request' || !isShellTool(event.toolName)) return event
-    const { allow } = this.rules()
-    return { ...event, commands: commandLines(event.toolName, this.command(event), allow, this.enterContext(event.toolName, allow), this.project(), this.writable()) }
+    if (event.type !== 'permission_request') return event
+    if (isShellTool(event.toolName)) {
+      const { allow } = this.rules()
+      return { ...event, commands: commandLines(event.toolName, this.command(event), allow, this.enterContext(event.toolName, allow), this.project(), this.writable()) }
+    }
+    if (!WRITE_TOOLS.has(event.toolName)) return event
+    const paths = this.relativePaths(event)
+    if (paths.length !== 1 || !this.paths.below(paths[0]!)) return event
+    return { ...event, writeScopes: writeScopes(paths[0]!) }
   }
 
   /** Where a write needs no prompt: the whole project while the switch is on, else the scratch folder. The folder lies in the project, so the switch covers it too. */
@@ -169,7 +179,7 @@ export class PermissionPolicy implements SessionHooks {
     return typeof command === 'string' ? command : ''
   }
 
-  private relativePaths(tool: ToolUse): string[] {
+  private relativePaths(tool: Pick<ToolUse, 'toolName' | 'input'>): string[] {
     const input = (tool.input ?? {}) as Record<string, unknown>
     const raw = TRANSFER_TOOLS.has(tool.toolName)
       ? [input['source'], input['destination']]

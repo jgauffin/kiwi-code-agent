@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import type { PostToolUseOutcome, SessionHooks, ToolUse } from '../session/hooks'
+import { WRITES_NAMED_FILE } from '../permissions/tool-classes'
 import { readOptional } from '../workspace-files'
 
 /**
@@ -10,7 +11,7 @@ import { readOptional } from '../workspace-files'
  * again before the filing session has moved each entry into the specs and
  * docs it belongs in. Committed, since it is intent.
  */
-export const UNFILED_FILE = 'plan/unfiled-decisions.md'
+export const UNFILED_FILE = 'specs/unfiled-decisions.md'
 
 /** What an unfiled decision is and how an entry is written; each session adds where its own decisions go. */
 export const UNFILED_DECISIONS = `A decision the user makes in this conversation is worth recording when a planner, reading only the docs and the specs and never the code, could decide it otherwise: what the product does, or a constraint every feature has to respect, such as which identity provider owns sign-in. A build choice the code already shows is not one. Record it in the product's language, with no source path or symbol: it is read by a planner who never sees the code. An entry in \`${UNFILED_FILE}\` is \`### Title\`, then \`- decided: <the decision, one sentence>\` and \`- affects: <the features it reaches by name, and docs when no spec holds it yet, comma separated>\`. Add yours with Edit, or create the file with Write, and leave the other entries alone.`
@@ -81,7 +82,7 @@ export class UnfiledContract implements SessionHooks {
   constructor(private readonly cwd: string) {}
 
   async postToolUse(tool: ToolUse & { output: string; isError: boolean }): Promise<PostToolUseOutcome> {
-    if (tool.isError || (tool.toolName !== 'Write' && tool.toolName !== 'Edit')) return undefined
+    if (tool.isError || !WRITES_NAMED_FILE.has(tool.toolName)) return undefined
     const input = (typeof tool.input === 'object' && tool.input !== null ? tool.input : {}) as Record<string, unknown>
     const raw = input['file_path']
     if (typeof raw !== 'string') return undefined

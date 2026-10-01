@@ -1,7 +1,8 @@
-import { DOCS_DIR, PLAN_DIR, SPEC_READING, featureSlug } from './blind-plan'
+import { DOCS_DIR, SPECS_DIR, SPEC_READING, featureSlug } from './blind-plan'
 import { ASK_USER_TOOL } from '../openai-session/tools/ask-user'
 import { MARKDOWN_SEARCH_TOOL } from '../openai-session/tools/markdown-search'
 import { DOC_READING } from '../openai-session/tools/markdown/outline-gate'
+import { EDIT_WRITING } from '../openai-session/tools/edit'
 import { CODE_OUTLINE_TOOL } from '../code-outline/code-outline-tool'
 import { CODE_READING } from '../code-outline/code-outline-gate'
 import { CODE_SEARCH_TOOL } from '../code-outline/code-search'
@@ -17,7 +18,7 @@ import { verificationHandoffPrompt, type VerificationFailure, type VerifyRule } 
 
 /** AskUser is here so a fork the plan does not settle is ruled on by the user instead of blocking the task. */
 export const IMPLEMENT_TOOLS = [
-  'Read', 'Write', 'Edit', 'Move', 'Copy', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', MARKDOWN_SEARCH_TOOL, CODE_OUTLINE_TOOL, CODE_SEARCH_TOOL, 'Bash', 'RunScript', 'Skill', ASK_USER_TOOL,
+  'Read', 'Write', 'Edit', 'MultiEdit', 'Move', 'Copy', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', MARKDOWN_SEARCH_TOOL, CODE_OUTLINE_TOOL, CODE_SEARCH_TOOL, 'Bash', 'RunScript', 'Skill', ASK_USER_TOOL,
   READ_TASKS_TOOL, UPDATE_TASK_TOOL,
 ]
 
@@ -57,7 +58,7 @@ export function taskKickoff(board: TaskBoard, name: string, spec: Spec, decision
 }
 
 /** A task run that stopped before its task was settled picks it up again. */
-export const TASK_CARRY_ON = `Carry on with your task from where you stopped: ${READ_TASKS_TOOL} with its name shows where it stands.`
+export const TASK_CARRY_ON = `Carry on with your task from where you stopped: ${READ_TASKS_TOOL} with its name shows where it stands. It is unfinished until tested or blocked: if nothing within this task can prove what is left, block it with that as the reason.`
 
 /**
  * The failed sweep for a run of its own: the output, the tasks whose files or
@@ -71,6 +72,21 @@ export function fixKickoff(feature: string, board: TaskBoard, failures: Verifica
   if (named.length > 0) lines.push('', 'The tasks the failure names:', ...named.flatMap((t) => ['', detail(t)]))
   lines.push(...handOff(board, named))
   return lines.join('\n')
+}
+
+/**
+ * The next failed sweep for the fix run that has seen this feature's failures:
+ * it holds the tasks already, so it gets the output and what tells a flaky
+ * failure from a broken one, not everything it already read.
+ */
+export function fixRetry(feature: string, failures: VerificationFailure[], cwd: string): string {
+  return [
+    'The test run failed again.',
+    '',
+    verificationHandoffPrompt(feature, failures, cwd),
+    '',
+    'Compare this output with the failure you fixed before. A test that fails where it passed in your own narrowed run, or fails differently from one run to the next, points at another session changing the same tree or at the test itself: rerun it before changing code that already passed.',
+  ].join('\n')
 }
 
 /** One line per task some run has worked on, besides the ones shown in full. */
@@ -134,7 +150,7 @@ function verifyCommands(rules: VerifyRule[]): string {
  * prefix the engine has cached.
  */
 export function implementPrompt(feature: string, cwd: string, rules: VerifyRule[] = []): string {
-  const spec = `${PLAN_DIR}/${featureSlug(feature)}.spec.md`
+  const spec = `${SPECS_DIR}/${featureSlug(feature)}.spec.md`
   const scripts = projectScriptsInstruction(cwd)
   return `You are implementing one task of the feature "${feature}", from its approved spec at \`${spec}\` under ${cwd}. The first message hands you the task in full from the board, the text of the spec rules it delivers, any finding in the code the user ruled to change so the spec stands, and what earlier tasks left: what each one built, by name and file. Earlier tasks were built by runs of their own and later ones will be; this run does its one task and stops. A run started on a failed test sweep has the failure as its task instead, and the tasks it names.
 
@@ -144,8 +160,8 @@ The board is read with ${READ_TASKS_TOOL} and moved along with ${UPDATE_TASK_TOO
 
 Your task is already in_progress. Record where it ends with ${UPDATE_TASK_TOOL}:
 - tested when every rule the task delivers is proven by a test named in its proves, passing in a run you narrowed to it. In the same call give the proves and built: what this task left that a later task builds on (the types, functions, tables and test helpers it added or changed, by name and file). The next task starts from those lines, not from your conversation;
-- blocked, with the reason, when you cannot finish it for a reason no answer would remove (a failing build, a missing dependency);
-- done only if you must stop before the tests pass: the code is written and the project holding it builds.
+- blocked, with the reason, when you cannot finish it for a reason no answer would remove (a failing build, a missing dependency), or when the user's answer puts a rule's proof out of this task's reach (its tests come with a framework added later). The next task starts on the board's next one;
+- done only if you must stop before the tests pass: the code is written and the project holding it builds. Done is not where a task rests: the run is sent back to it until it is tested or blocked.
 
 The proves are the evidence the user reads on the spec: one entry per delivered rule, the test's name stating the rule it proves.
 
@@ -167,6 +183,7 @@ Rules:
 - Code and comments never refer to the spec, its rule names or the task: those move on and the reference goes stale. Where a business rule is not obvious from the code, explain it in a short comment in the domain's own words.
 - ${DOC_READING}
 - ${CODE_READING} Before writing a test, outline the test file or folder it belongs in: the rule may already be proven, and the neighbouring tests show the pattern to follow.
+- ${EDIT_WRITING}
 - ${SCRIPT_WRITING}${scripts ? `\n- ${scripts}` : ''}
 - Shell commands already run in ${cwd}; do not cd there.
 - Tested means you ran the task's tests and they passed, not that you stopped. A task you marked tested without a run of your own is a false record.

@@ -21,9 +21,13 @@ export function parseRule(rule: string): PermissionRule {
   return match[2] === undefined ? { tool: match[1]! } : { tool: match[1]!, pattern: match[2] }
 }
 
-/** Does the rule's tool name stand for this tool: the same name, or the server wildcard over it? */
+/** The rule name that stands for every tool that writes a file, so one rule covers a file however it is written. */
+export const WRITES_RULE = 'Writes'
+
+/** Does the rule's tool name stand for this tool: the same name, the server wildcard over it, or every write tool? */
 export function ruleCoversTool(ruleTool: string, toolName: string): boolean {
   if (ruleTool === toolName) return true
+  if (ruleTool === WRITES_RULE) return WRITE_TOOLS.has(toolName)
   return ruleTool.endsWith('__*') && toolName.startsWith(ruleTool.slice(0, -1))
 }
 
@@ -49,6 +53,23 @@ export function commandPrefix(tokens: string[]): string[] {
 export function projectRuleFor(toolName: string): string | undefined {
   return WRITE_TOOLS.has(toolName) ? undefined : toolName
 }
+
+/** How far a write prompt can widen its answer beyond the call itself: the rule that would let later writes there through, and how the prompt names it. */
+export type WriteScope = { label: string; rule: string }
+
+/** The file a write names, then its folder when it has one below the project root. */
+export function writeScopes(relPath: string): WriteScope[] {
+  const scopes = [{ label: relPath, rule: formatRule({ tool: WRITES_RULE, pattern: globLiteral(relPath) }) }]
+  const slash = relPath.lastIndexOf('/')
+  if (slash > 0) {
+    const folder = relPath.slice(0, slash)
+    scopes.push({ label: `${folder}/`, rule: formatRule({ tool: WRITES_RULE, pattern: `${globLiteral(folder)}/**` }) })
+  }
+  return scopes
+}
+
+/** A path as a glob that matches only itself: each character a glob reads as syntax goes in a class of its own. */
+const globLiteral = (path: string): string => path.replace(/[*?[{(]/g, (c) => `[${c}]`)
 
 /** One simple command of a shell call, as the permission prompt lists it. */
 export type CommandLine = {

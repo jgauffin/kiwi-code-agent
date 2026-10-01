@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { PlanState } from '../src/chat/protocol'
 import type { Decision } from '../src/agent/phases/decisions'
 import { planState as plan } from './plan-state-fixture'
 
 // The webview talks to the host through this handle, acquired when its modules load.
 ;(globalThis as Record<string, unknown>).acquireVsCodeApi = () => ({ postMessage: () => {} })
+
+// Test files share a worker, so the module registry is cleared first: what
+// loads here is this file's own, bound to its stub and its document.
+vi.resetModules()
 
 const { PlanBar } = await import('../src/chat/webview/plan-bar')
 const { PlanTabs } = await import('../src/chat/webview/plan-tabs')
@@ -130,7 +134,7 @@ describe('PlanBar steps', () => {
 
   it('a_plan_whose_tests_passed_is_complete_whatever_the_cleanup_left', () => {
     const steps = (node: HTMLElement) => [...node.querySelectorAll<HTMLElement>('.step')].map((s) => s.className.replace('step ', ''))
-    const unit = { path: 'src/a.ts', line: 1, name: 'a', kind: 'function' as const, lines: 60, threshold: 25 }
+    const unit = { path: 'src/a.ts', line: 1, name: 'a', kind: 'function' as const, breaches: [{ measure: 'lines' as const, value: 60, limit: 25 }] }
     const offered = bar(plan({ stage: 'verified', status: 'approved', commentable: false, atWork: false, cleanupSweep: { units: [unit] } }))
     expect(steps(offered).every((s) => s === 'done')).toBe(true)
     // The split stays on offer: the dev decides what to do with what is over the limit.

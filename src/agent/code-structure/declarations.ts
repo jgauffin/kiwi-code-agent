@@ -1,3 +1,4 @@
+import type { Language } from './language'
 import { readStructure, type CodeItem, type Doc } from './structure'
 
 /**
@@ -8,24 +9,29 @@ import { readStructure, type CodeItem, type Doc } from './structure'
  */
 export type Declaration = { kind: 'function' | 'type'; name: string; line: number; endLine: number; doc?: Doc; children: Declaration[] }
 
-export type FileDeclarations = { declarations: Declaration[]; code: string[] }
+/** `bodies` holds what each function's block contains, for readers that measure it; kept apart so a declaration stays plain data. */
+export type FileDeclarations = { declarations: Declaration[]; code: string[]; family: Language['family']; bodies: Map<Declaration, CodeItem[]> }
 
 export function readDeclarations(path: string, text: string): FileDeclarations {
   const structure = readStructure(path, text)
-  const declarations = structure.family === 'python' ? pythonDeclarations(structure.items) : braceDeclarations(structure.items)
-  return { declarations, code: structure.code }
+  const bodies = new Map<Declaration, CodeItem[]>()
+  const declarations = structure.family === 'python' ? pythonDeclarations(structure.items, bodies) : braceDeclarations(structure.items, bodies)
+  return { declarations, code: structure.code, family: structure.family, bodies }
 }
 
-function braceDeclarations(items: CodeItem[]): Declaration[] {
+type Bodies = Map<Declaration, CodeItem[]>
+
+function braceDeclarations(items: CodeItem[], bodies: Bodies): Declaration[] {
   const found: Declaration[] = []
   for (const item of items) {
     if (item.kind !== 'block') continue
     const open = classify(item.header)
     if (!open) {
-      found.push(...braceDeclarations(item.children))
+      found.push(...braceDeclarations(item.children, bodies))
       continue
     }
-    found.push(declaration(open.kind, open.name, item.line + open.line, item, open.kind === 'type' ? braceDeclarations(item.children) : []))
+    const children = open.kind === 'type' ? braceDeclarations(item.children, bodies) : []
+    found.push(declaration(open.kind, open.name, item.line + open.line, item, children, bodies))
   }
   return found
 }
@@ -33,23 +39,25 @@ function braceDeclarations(items: CodeItem[]): Declaration[] {
 const PYTHON_DECLARATION = /^\s*(?:async\s+)?(def|class)\s+([A-Za-z_]\w*)/
 
 /** A one-line `def f(): return 1` is a statement, and still a function. */
-function pythonDeclarations(items: CodeItem[]): Declaration[] {
+function pythonDeclarations(items: CodeItem[], bodies: Bodies): Declaration[] {
   const found: Declaration[] = []
   for (const item of items) {
     const m = PYTHON_DECLARATION.exec(item.header)
     const children = item.kind === 'block' ? item.children : []
     if (!m) {
-      found.push(...pythonDeclarations(children))
+      found.push(...pythonDeclarations(children, bodies))
       continue
     }
     const kind = m[1] === 'def' ? 'function' : 'type'
-    found.push(declaration(kind, m[2]!, item.line, item, kind === 'type' ? pythonDeclarations(children) : []))
+    found.push(declaration(kind, m[2]!, item.line, item, kind === 'type' ? pythonDeclarations(children, bodies) : [], bodies))
   }
   return found
 }
 
-function declaration(kind: Declaration['kind'], name: string, line: number, item: CodeItem, children: Declaration[]): Declaration {
-  return { kind, name, line, endLine: item.endLine, ...(item.doc ? { doc: item.doc } : {}), children }
+function declaration(kind: Declaration['kind'], name: string, line: number, item: CodeItem, children: Declaration[], bodies: Bodies): Declaration {
+  const found: Declaration = { kind, name, line, endLine: item.endLine, ...(item.doc ? { doc: item.doc } : {}), children }
+  if (kind === 'function') bodies.set(found, item.kind === 'block' ? item.children : [])
+  return found
 }
 
 type Open = { kind: 'function' | 'type'; name: string; line: number }

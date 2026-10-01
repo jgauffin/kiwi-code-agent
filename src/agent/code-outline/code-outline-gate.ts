@@ -11,7 +11,7 @@ import { renderFiles } from './render'
 export const OUTLINE_THRESHOLD_LINES = 200
 
 /** Said in every prompt, so the outline is the model's first move rather than the gate's correction. */
-export const CODE_READING = `Find before you read code: ${CODE_OUTLINE_TOOL} outlines a file, folder or glob with line ranges (the tests of test files; the types, functions and doc summaries of other source files; its symbol parameter finds a declaration by name), ${CODE_SEARCH_TOOL} finds text and names the declaration each match sits in, and Read of a long source or test file answers with its outline first; then Read only the line ranges you need.`
+export const CODE_READING = `Find before you read code: ${CODE_OUTLINE_TOOL} outlines a file, folder or glob with line ranges (the tests of test files; the types, functions and doc summaries of other source files; its symbol parameter finds a declaration by name), ${CODE_SEARCH_TOOL} finds text and names the declaration each match sits in, and Read of a long source or test file answers with its outline first; then Read only the line ranges you need. Read every file or range you already know you need in one reply, not one per turn.`
 
 const SUITE_HINT = `${CODE_OUTLINE_TOOL} lists the tests of a file, folder or glob without reading them: use it to see what the rest of the suite already covers.`
 

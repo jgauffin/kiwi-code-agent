@@ -1,5 +1,6 @@
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { KIWI_DIR } from '../kiwi-dir'
 import type { SessionMode } from './session-manager'
 
 export type Hand = { sessionId: string; mode: SessionMode; feature?: string }
@@ -10,7 +11,7 @@ export type Snapshot = { mtimeMs: number; text: string }
 type Registry = { id: string; mode: SessionMode; feature?: string; files: Record<string, number>; texts?: Record<string, string> }
 
 /** Where each session's own writes land, on disk so another session — another process, another window — can look them up: nothing here assumes they share memory. */
-const dirFor = (workspaceRoot: string): string => join(workspaceRoot, '.agent', 'sessions')
+const dirFor = (workspaceRoot: string): string => join(workspaceRoot, KIWI_DIR, 'sessions')
 
 /**
  * Attributes a file's content to the Kiwipow Agent session that last wrote it, so

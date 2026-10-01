@@ -9,6 +9,7 @@
  * session works from is fixed for the life of that engine: another build
  * rewriting the files underneath changes nothing it holds.
  */
+import { errorMessage } from '../../error-message'
 
 /** How long a session start waits for a build before going ahead without it. */
 export const CONTEXT_TIME_BOUND_MS = 60_000
@@ -46,7 +47,7 @@ export async function generatedContext(name: string, source: GeneratedSource, op
   // Not stale is the common case: nothing is built and nothing is waited on. The check still scans the workspace, unbounded.
   onProgress(`Checking the ${name}…`)
   const stale = await source.isStale().catch((error: unknown) => {
-    failure = reason(error)
+    failure = errorMessage(error)
     return false
   })
   if (stale) {
@@ -85,15 +86,13 @@ export function sharedBuild<T>(key: string, run: () => Promise<T>): Promise<T> {
   return started
 }
 
-const reason = (error: unknown): string => (error instanceof Error ? error.message : String(error))
-
 /** The reason a call failed, or undefined when it did not; a thrown value never reaches the caller. */
 async function attempt(run: () => Promise<unknown>): Promise<string | undefined> {
   try {
     await run()
     return undefined
   } catch (error) {
-    return reason(error)
+    return errorMessage(error)
   }
 }
 

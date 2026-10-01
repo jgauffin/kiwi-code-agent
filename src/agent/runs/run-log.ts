@@ -1,12 +1,13 @@
 import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { KIWI_DIR } from '../kiwi-dir'
 import type { SessionEvent } from '../session/code-session'
 
 export type RunLogEntry = { at: string; event: SessionEvent }
 
 /**
  * Append-only JSONL of every event a session produced, one file per session
- * under `.agent/runs/<session id>/events.jsonl`. The transcript view is
+ * under `.kiwi/runs/<session id>/events.jsonl`. The transcript view is
  * rebuilt from it after a reload, and later phases read it for observability.
  *
  * Writes are chained so entries land in emission order even when the caller
@@ -19,7 +20,7 @@ export class RunLog {
   constructor(readonly dir: string) {}
 
   static forSession(workspaceRoot: string, sessionId: string): RunLog {
-    return new RunLog(join(workspaceRoot, '.agent', 'runs', sessionId))
+    return new RunLog(join(workspaceRoot, KIWI_DIR, 'runs', sessionId))
   }
 
   get path(): string {

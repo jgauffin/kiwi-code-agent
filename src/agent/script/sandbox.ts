@@ -1,5 +1,6 @@
 import variant from '@jitl/quickjs-singlefile-cjs-release-sync'
 import { newQuickJSWASMModule, type QuickJSContext, type QuickJSDeferredPromise, type QuickJSHandle, type QuickJSWASMModule } from 'quickjs-emscripten'
+import { errorMessage } from '../../error-message'
 
 // The single-file build carries its WASM inside the JavaScript, so the bundle needs no asset next to it.
 let engine: Promise<QuickJSWASMModule> | undefined
@@ -86,7 +87,7 @@ export async function runSandboxed(
     open.add(deferred)
     const work = host(name, args).then(
       (value) => settle(deferred, () => context.newString(JSON.stringify(value === undefined ? null : value)), 'resolve'),
-      (error: unknown) => settle(deferred, () => context.newError(error instanceof Error ? error.message : String(error)), 'reject'),
+      (error: unknown) => settle(deferred, () => context.newError(errorMessage(error)), 'reject'),
     )
     const tracked = work.then(() => {
       inFlight.delete(tracked)

@@ -101,9 +101,9 @@ describe('the docs map entry contract', () => {
 
 describe('where an entry belongs', () => {
   it('the_doc_an_entry_describes_is_read_off_the_path_it_sits_at', () => {
-    expect(docOfEntry('.agent/docs-map/entries/docs/intent/orders.md')).toBe('docs/intent/orders.md')
-    expect(docOfEntry('.agent/docs-map/entries/ReadMe.md')).toBe('ReadMe.md')
-    expect(docOfEntry('.agent/docs-map/summary.md')).toBeUndefined()
+    expect(docOfEntry('.kiwi/docs-map/entries/docs/intent/orders.md')).toBe('docs/intent/orders.md')
+    expect(docOfEntry('.kiwi/docs-map/entries/ReadMe.md')).toBe('ReadMe.md')
+    expect(docOfEntry('.kiwi/docs-map/summary.md')).toBeUndefined()
     expect(docOfEntry('docs/intent/orders.md')).toBeUndefined()
   })
 })

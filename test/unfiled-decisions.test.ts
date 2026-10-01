@@ -42,8 +42,8 @@ describe('unfiled decisions', () => {
     const dir = await mkdtemp(join(tmpdir(), 'unfiled-'))
     try {
       expect(await readUnfiled(dir)).toEqual([])
-      await mkdir(join(dir, 'plan'))
-      await writeFile(join(dir, 'plan', 'unfiled-decisions.md'), file)
+      await mkdir(join(dir, 'specs'))
+      await writeFile(join(dir, 'specs', 'unfiled-decisions.md'), file)
       expect((await readUnfiled(dir)).map((e) => e.title)).toEqual(['Identity provider', 'Invitation expiry'])
     } finally {
       await rm(dir, { recursive: true, force: true })
@@ -55,16 +55,16 @@ describe('UnfiledContract hook', () => {
   it('hands_the_problems_back_on_a_write_of_the_unfiled_file_and_ignores_other_files', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'unfiled-contract-'))
     try {
-      await mkdir(join(dir, 'plan'))
+      await mkdir(join(dir, 'specs'))
       const hook = new UnfiledContract(dir)
       const write = (path: string) => hook.postToolUse({ toolName: 'Edit', input: { file_path: path }, toolUseId: 't', output: 'ok', isError: false })
-      await writeFile(join(dir, 'plan', 'unfiled-decisions.md'), file)
-      expect(await write('plan/unfiled-decisions.md')).toBeUndefined()
-      await writeFile(join(dir, 'plan', 'unfiled-decisions.md'), '### Roles\n- affects: Tenants\n')
-      const outcome = await write(join(dir, 'plan', 'unfiled-decisions.md'))
-      expect(outcome?.additionalContext).toContain('`plan/unfiled-decisions.md` is off shape')
-      await writeFile(join(dir, 'plan', 'notes.md'), 'anything\n')
-      expect(await write('plan/notes.md')).toBeUndefined()
+      await writeFile(join(dir, 'specs', 'unfiled-decisions.md'), file)
+      expect(await write('specs/unfiled-decisions.md')).toBeUndefined()
+      await writeFile(join(dir, 'specs', 'unfiled-decisions.md'), '### Roles\n- affects: Tenants\n')
+      const outcome = await write(join(dir, 'specs', 'unfiled-decisions.md'))
+      expect(outcome?.additionalContext).toContain('`specs/unfiled-decisions.md` is off shape')
+      await writeFile(join(dir, 'specs', 'notes.md'), 'anything\n')
+      expect(await write('specs/notes.md')).toBeUndefined()
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

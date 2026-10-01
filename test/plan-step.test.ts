@@ -16,7 +16,7 @@ function task(state: Task['state'], group?: string): Task {
 
 const round = (over: Partial<ReviewRound>): ReviewRound => ({ number: 1, comments: [], strikes: [], ...over })
 
-const unit = (): CleanupUnit => ({ path: 'src/orders/cancel.ts', line: 12, name: 'cancel', kind: 'function', lines: 61, threshold: 25 })
+const unit = (): CleanupUnit => ({ path: 'src/orders/cancel.ts', line: 12, name: 'cancel', kind: 'function', breaches: [{ measure: 'lines', value: 61, limit: 25 }] })
 
 describe('planStep', () => {
   it('a_spec_not_yet_written_waits_on_the_planner', () => {
@@ -122,9 +122,16 @@ describe('planStep', () => {
   })
 
   it('verification_offers_verify_again_once_a_run_is_recorded', () => {
-    const base = { stage: 'verification' as const, status: 'approved' as const, commentable: false, verifiable: true }
+    const base = { stage: 'verification' as const, status: 'approved' as const, commentable: false, verifiable: true, atWork: false }
     expect(planStep(plan(base)).next).toMatchObject({ action: 'verify', label: 'Verify' })
     expect(planStep(plan({ ...base, lastVerification: { at: 't', ok: false, text: 'failed' } })).next).toMatchObject({ label: 'Verify again' })
+  })
+
+  it('failed_tests_handed_to_the_implementer_wait_on_the_fix_instead_of_offering_verify_again', () => {
+    const fixing = plan({ stage: 'verification', status: 'approved', commentable: false, verifiable: true, atWork: true, lastVerification: { at: 't', ok: false, text: 'failed' } })
+    const step = planStep(fixing)
+    expect(step.next).toEqual({ kind: 'waiting', text: 'the implementer is fixing the failed tests' })
+    expect(step.yours).toBe(false)
   })
 
   it('a_verified_feature_stands_at_the_cleanup_step', () => {

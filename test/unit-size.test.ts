@@ -7,7 +7,7 @@ const FIXTURES = resolve(import.meta.dirname, 'fixtures-units')
 
 const measure = (name: string): Unit[] => measureUnits(join(FIXTURES, name), readFileSync(join(FIXTURES, name), 'utf8'))
 
-const fn = (name: string, line: number, lines: number): Unit => ({ kind: 'function', name, line, lines })
+const fn = (name: string, line: number, lines: number, complexity = 0): Unit => ({ kind: 'function', name, line, lines, complexity })
 const type = (name: string, line: number, lines: number): Unit => ({ kind: 'type', name, line, lines })
 const file = (name: string, lines: number): Unit => ({ kind: 'file', name, line: 1, lines })
 
@@ -18,10 +18,10 @@ describe('measureUnits over the fixtures', () => {
       type('Options', 7, 3),
       type('Shape', 11, 3),
       type('Box', 15, 17),
-      fn('handle', 17, 5),
+      fn('handle', 17, 5, 1),
       fn('size', 23, 3),
       fn('method', 27, 6),
-      fn('plain', 35, 6),
+      fn('plain', 35, 6, 1),
       fn('arrow', 42, 3),
       fn('helper', 50, 3),
     ])
@@ -32,7 +32,7 @@ describe('measureUnits over the fixtures', () => {
       file('sample.cs', 43),
       type('Widget', 6, 29),
       fn('Widget', 18, 6),
-      fn('RunAsync', 26, 12),
+      fn('RunAsync', 26, 12, 2),
       type('Point', 40, 4),
       type('Kind', 45, 1),
       type('Pair', 47, 4),
@@ -44,8 +44,8 @@ describe('measureUnits over the fixtures', () => {
       file('sample.go', 26),
       type('Server', 5, 3),
       type('Handler', 9, 3),
-      fn('Serve', 13, 8),
-      fn('main', 22, 10),
+      fn('Serve', 13, 8, 1),
+      fn('main', 22, 10, 1),
     ])
   })
 
@@ -55,7 +55,7 @@ describe('measureUnits over the fixtures', () => {
       type('Point', 5, 3),
       type('fmt::Display', 9, 7),
       fn('fmt', 10, 5),
-      fn('run', 17, 12),
+      fn('run', 17, 12, 1),
       fn('it_works', 33, 3),
     ])
   })
@@ -65,7 +65,7 @@ describe('measureUnits over the fixtures', () => {
       file('sample.py', 23),
       type('Greeter', 4, 10),
       fn('__init__', 7, 2),
-      fn('greet', 10, 6),
+      fn('greet', 10, 6, 1),
       fn('helper', 18, 3),
       fn('fetch', 23, 7),
     ])
@@ -88,7 +88,7 @@ describe('measureUnits over the fixtures', () => {
       type('Registry', 7, 8),
       fn('register', 8, 3),
       fn('shout', 12, 3),
-      fn('main', 17, 8),
+      fn('main', 17, 8, 2),
     ])
   })
 
@@ -98,7 +98,7 @@ describe('measureUnits over the fixtures', () => {
       type('Point', 3, 7),
       type('Greeter', 11, 11),
       fn('greet', 12, 4),
-      fn('init', 17, 5),
+      fn('init', 17, 5, 1),
       type('Greeter', 24, 3),
       fn('bye', 25, 1),
     ])
@@ -110,7 +110,7 @@ describe('measureUnits over the fixtures', () => {
       type('point', 5, 3),
       type('(anonymous)', 9, 3),
       fn('add', 13, 5),
-      fn('make', 19, 5),
+      fn('make', 19, 5, 1),
       fn('main', 25, 4),
     ])
   })
@@ -119,8 +119,8 @@ describe('measureUnits over the fixtures', () => {
     expect(measure('sample.php')).toEqual([
       file('sample.php', 22),
       type('Greeter', 5, 11),
-      fn('greet', 6, 9),
-      fn('helper', 17, 6),
+      fn('greet', 6, 9, 1),
+      fn('helper', 17, 6, 1),
       fn('$g', 24, 3),
     ])
   })

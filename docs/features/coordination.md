@@ -4,7 +4,7 @@ Several sessions work in one workspace without writing over each other, and can 
 
 ## Claims
 
-- Registry `.agent/sessions/<session id>.json`: session id, mode, `plan_item_id`, claimed files, `deadline` (set by the session from the item's scope), last heartbeat.
+- Registry `.kiwi/sessions/<session id>.json`: session id, mode, `plan_item_id`, claimed files, `deadline` (set by the session from the item's scope), last heartbeat.
 - A PreToolUse hook on Edit and Write claims the file on first touch. If another live session holds it, the edit is denied and the message names that session and its plan item.
 - A session reports an item done through the task-state tool, which releases its claims.
 - Silence past `deadline` flags the claim as stale in the Sessions view and on the tab (status `needs_human`). Nothing is released automatically.
@@ -13,7 +13,7 @@ Several sessions work in one workspace without writing over each other, and can 
 ## Checkpoints
 
 - Tools `checkpoint(reason)` and `revert(checkpoint)` in implement sessions, opt-in per call.
-- A checkpoint copies the current content of the files the session holds claims on into `.agent/runs/<id>/checkpoints/<n>/`, with the reason.
+- A checkpoint copies the current content of the files the session holds claims on into `.kiwi/runs/<id>/checkpoints/<n>/`, with the reason.
 - `revert` compares each file's hash with the one recorded at checkpoint time and refuses files that changed underneath; the rest are restored. No git involvement.
 - Checkpoint reasons are listed in the transcript; more than three on one plan item marks the item for review in the plan bar.
 

@@ -1,0 +1,356 @@
+{
+  "spec": "78ca9149",
+  "tasks": [
+    {
+      "name": "Rules that became optional",
+      "text": "What the agent guarantees about itself and what the person chooses are no longer the same list.",
+      "delivers": [
+        "Core behaviour stays in the prompt",
+        "Optional mechanics ship as bundles",
+        "The agent's own style stays core",
+        "Not pre-applied on upgrade",
+        "Bundle rules reach a session as the person's own instructions do",
+        "Person-scope bundle on either engine",
+        "Clash with a core rule",
+        "No bundles for the blind planner"
+      ],
+      "files": [
+        "src/agent/instructions/instruction-files.ts",
+        "src/agent/openai-session/system-prompt.ts",
+        "src/agent/memory/session-context.ts",
+        "src/agent/session/mode-setup.ts",
+        "src/session-engines.ts",
+        "plan/agents-md-rule-bundles.spec.md",
+        "test/mode-setup.test.ts",
+        "test/system-prompt.test.ts",
+        "test/memory-session-context.test.ts",
+        "test/instruction-files-session.test.ts",
+        "vitest.config.mts"
+      ],
+      "newFiles": [],
+      "foreignFiles": [
+        "src/agent/openai-session/system-prompt.ts",
+        "src/agent/session/mode-setup.ts",
+        "src/session-engines.ts",
+        "test/mode-setup.test.ts"
+      ],
+      "context": [
+        "src/agent/session/mode-setup.ts",
+        "src/session-engines.ts",
+        "src/agent/instructions/instruction-files.ts",
+        "src/agent/openai-session/system-prompt.ts",
+        "src/agent/sdk-session/sdk-session.ts",
+        "src/agent/phases/implement.ts"
+      ],
+      "how": "",
+      "proves": [
+        {
+          "item": "Core behaviour stays in the prompt",
+          "file": "test/instruction-files-session.test.ts",
+          "test": "core behaviour stays in the prompt > joining the instruction files never drops or rewrites the phase's own prompt"
+        },
+        {
+          "item": "Optional mechanics ship as bundles",
+          "file": "test/instruction-files-session.test.ts",
+          "test": "optional mechanics ship as bundles > a rule from an instruction file reaches the session only as the appended text of that file, never folded into the phase prompt itself"
+        },
+        {
+          "item": "The agent's own style stays core",
+          "file": "test/system-prompt.test.ts",
+          "test": "buildSystemPrompt > the agent's own style stays core: an instruction file cannot remove the chat's own rule for how it writes code"
+        },
+        {
+          "item": "Not pre-applied on upgrade",
+          "file": "test/instruction-files-session.test.ts",
+          "test": "not pre-applied on upgrade > a workspace with ordinary instructions and no bundle block carries exactly what is on disk, nothing extra"
+        },
+        {
+          "item": "Bundle rules reach a session as the person's own instructions do",
+          "file": "test/mode-setup.test.ts",
+          "test": "modeSetup > bundle rules reach a session as the person's own instructions do: %s"
+        },
+        {
+          "item": "Person-scope bundle on either engine",
+          "file": "test/instruction-files-session.test.ts",
+          "test": "person-scope bundle on either engine > the person's own instruction file joins a session the same way regardless of which engine reads the resulting text"
+        },
+        {
+          "item": "Clash with a core rule",
+          "file": "test/instruction-files-session.test.ts",
+          "test": "clash with a core rule > the session is told that a rule already given always wins over one an instruction file adds, and to say which it set aside"
+        },
+        {
+          "item": "No bundles for the blind planner",
+          "file": "test/mode-setup.test.ts",
+          "test": "modeSetup > no bundles for the blind planner"
+        }
+      ],
+      "note": "The context named only implement.ts among the phase files; inspecting every phase prompt (blind-plan, reconcile, cleanup, docs-evaluation, file-decisions, code-plan, docs-map) found no hardcoded judgment/practice rule to extract into a bundle — \"Optional mechanics ship as bundles\" is delivered by there being no built-in judgment rule left standing and by instruction files (where a later task's applied bundles will live) being the only way such a rule can now reach a session. Asked the user whether system-prompt.ts's \"Make the smallest change...\" line (the one practice-sounding candidate in the named context) should be stripped as optional; they said it is this agent's own style, not a team's practice, so it stays core — recorded as the edge case \"The agent's own style stays core\" under that rule in the spec. Claude's own engine auto-reads only the workspace's CLAUDE.md (not AGENTS.md, not the person's), so joining instruction files explicitly for the Claude chat prompt means that one file's text can now appear twice (once via Claude's own preset, once via the explicit join); left as is rather than special-casing one path, since the spec does not ask for deduplication and the duplication is harmless. Second sweep fix: vitest.config.mts pins `pool: 'threads'` (per-file isolation, thread workers) — the suite is unstable with forks at this file count, so leave that pin in place. Third sweep: the only failure was `test/claude-md-offers.test.ts` reported as \"Cannot find module\" with 0 tests — the file was being renamed (claude-md-offers → agents-md-offers, along with its source, the ClaudeMd* protocol types, overlay and events) while the sweep globbed it, so vitest collected a path that no longer existed. No code of this feature was at fault and nothing needed changing: with the rename finished, `npx tsc --noEmit -p tsconfig.json` is clean, `test/agents-md-offers.test.ts` and `test/agents-md-overlay.test.ts` pass (21 tests), and the whole suite is green (122 files, 1630 tests).",
+      "built": "`withInstructionFiles(mode, systemPrompt, cwd, home)`, `instructionsText(files)`, `CLASH_WITH_CORE` and `wantsInstructions(mode)` in src/agent/instructions/instruction-files.ts: the one join point where the workspace's and the person's instruction files (and applied bundles) reach a session's prompt, for every mode but the blind planner, with a note telling the model a rule already given always wins and to say which instruction-file rule it set aside. `ModeContext.withInstructions` (src/agent/session/mode-setup.ts) wires it into every non-chat, non-plan mode, wrapped outermost in session-engines.ts's `modeContext()`. The chat prompt on both engines (buildSystemPrompt and session-engines.ts's startClaude) also joins instruction files through the same `instructionsText`/`CLASH_WITH_CORE`. `MemorySources`/`memorySection`/`withMemories`/`chatMemorySection` in src/agent/memory/session-context.ts carry the project's index only; the person's own notes ride the instruction files. Test harness: vitest.config.mts pins `pool: 'threads'` (per-file isolation, thread workers) — the suite is unstable with forks at this file count, so leave that pin in place.",
+      "state": "tested",
+      "removed": false,
+      "group": "Rules that became optional"
+    },
+    {
+      "name": "Picking up bundles for a workspace",
+      "text": "The person has a workspace with no bundles applied, and the agent offers what fits it.",
+      "delivers": [
+        "Suggested once per workspace",
+        "Matched by what the workspace holds",
+        "Text seen before it is applied",
+        "Project or person scope",
+        "One marked block per bundle",
+        "Managed at any time"
+      ],
+      "files": [
+        "src/agent/instructions/bundles.ts",
+        "src/settings/protocol.ts",
+        "src/settings/settings-store.ts",
+        "src/settings/settings-panel.ts",
+        "src/settings/webview/bundles-tab.ts",
+        "src/settings/webview/events.ts",
+        "src/settings/webview/settings-app.ts",
+        "src/extension.ts",
+        "test/bundles.test.ts",
+        "test/settings-store.test.ts",
+        "test/settings-app.test.ts",
+        "test/models-section.test.ts",
+        "test/profiles-tab.test.ts",
+        "test/providers-tab.test.ts"
+      ],
+      "newFiles": [],
+      "foreignFiles": [],
+      "context": [
+        "src/settings/settings-store.ts",
+        "src/settings/protocol.ts",
+        "src/settings/webview/profiles-tab.ts",
+        "src/settings/webview/providers-tab.ts",
+        "src/settings/webview/memories-tab.ts",
+        "src/agent/instructions/instruction-files.ts",
+        "src/agent/memory/memories.ts"
+      ],
+      "how": "",
+      "proves": [
+        {
+          "item": "Suggested once per workspace",
+          "file": "test/settings-store.test.ts",
+          "test": "the_offer_is_pending_for_a_workspace_with_nothing_applied_and_a_matching_bundle_not_yet_dismissed / the_offer_is_not_pending_once_dismissed"
+        },
+        {
+          "item": "Matched by what the workspace holds",
+          "file": "test/bundles.test.ts",
+          "test": "matching_the_catalog_always_keeps_the_ones_that_apply_to_nothing_in_particular"
+        },
+        {
+          "item": "Text seen before it is applied",
+          "file": "test/settings-app.test.ts",
+          "test": "a_bundles_rule_text_is_hidden_until_shown_and_only_then_readable_before_it_is_applied"
+        },
+        {
+          "item": "Project or person scope",
+          "file": "test/bundles.test.ts",
+          "test": "a_bundle_applied_for_the_project_lands_in_the_workspaces_agents_md"
+        },
+        {
+          "item": "One marked block per bundle",
+          "file": "test/bundles.test.ts",
+          "test": "removing_a_bundle_drops_only_its_own_block_and_leaves_the_rest_of_the_file"
+        },
+        {
+          "item": "Managed at any time",
+          "file": "test/settings-app.test.ts",
+          "test": "available_and_applied_bundles_can_be_seen_and_managed_without_an_offer_pending"
+        }
+      ],
+      "note": "The spec is silent on the catalog's own transport (that's \"Where bundles come from\"), on the block's on-file markup, and on which language/framework names a bundle target may use, so this task's choices: (1) `BundleCatalogPort.available()` as the seam the next task fills with real git sources — wired in extension.ts returning an empty catalog for now; `matching()` already composes it with `workspaceSignals()` correctly. (2) A bundle's block is marked by HTML comments naming source/name/version (`<!-- bundle source=\"...\" name=\"...\" version=\"...\" -->` ... `<!-- /bundle -->`), chosen because AGENTS.md is read as plain text by both engines and a comment reads as ordinary text to a model, same as it would to a person. (3) A language tag is 'csharp', 'typescript' or 'javascript' (the extensions the repo map already recognises); a framework tag is exactly a package.json dependency name or a .csproj PackageReference Include name, so a bundle author names a framework the same way the workspace's own manifest does, with nothing hardcoded in between. (4) The suggestion banner and the full catalog/applied lists live together in one new Settings \"Bundles\" tab rather than a separate proactive notification, consistent with \"Managed at any time\" putting both in the same place.",
+      "built": "src/agent/instructions/bundles.ts: `Bundle`, `BundleScope`, `BundleTarget`, `AppliedBundle`, `BundleCatalogPort`, `WorkspaceSignals`; `bundleFilePath(scope, cwd, home)` (project → `<cwd>/AGENTS.md`, user → `<home>/AGENTS.md`, never CLAUDE.md); the marked-block mechanics `applyBundleText`, `removeBundleText`, `parseAppliedBundles`; the file-backed `appliedBundles`, `applyBundle`, `removeBundle`; the workspace probe `workspaceSignals` (languages from source/project file extensions the repo map already walks, frameworks from package.json dependencies and .csproj PackageReferences) and `bundleMatches`/`matchingBundles`. src/settings/settings-store.ts: `BundlePort` (available/matching/applied/apply/remove, closed over a workspace the same way `MemoryPort` is), `SettingsStore.applyBundle/removeBundle/dismissBundleOffer`, `SettingsSnapshot.bundles` (available, applied, suggested, offerPending) computed from `bundleOfferDismissed` plus the port. src/settings/webview/bundles-tab.ts: `BundlesTab` custom element, the 'bundles' SettingsTab, and events `BundleAppliedEvent`/`BundleRemovedEvent`/`BundleOfferDismissedEvent` in events.ts, wired in settings-app.ts and settings-panel.ts. The `BundlePort` wired in extension.ts has `available()` stubbed to an empty catalog; `matching()`, `applied()`, `apply()`, `remove()` are already real, so the next feature only has to replace `available()` with real git sources.",
+      "state": "tested",
+      "removed": false,
+      "group": "Picking up bundles for a workspace"
+    },
+    {
+      "name": "Where bundles come from",
+      "text": "A bundle is fetched from a git repository, the product's own or a company's.",
+      "delivers": [
+        "The product's catalog is a source without being configured",
+        "Further sources are git repositories named in settings",
+        "Fetched with the git access the person already has",
+        "A source is accepted before it is fetched",
+        "Source that arrived with the workspace",
+        "Unreachable source falls back to the last fetch",
+        "Rule text only",
+        "A source may require bundles",
+        "A required bundle comes back",
+        "Updates are never silent",
+        "Block changed by hand"
+      ],
+      "files": [
+        "src/agent/instructions/bundle-sources.ts",
+        "src/agent/instructions/bundles.ts",
+        "src/extension.ts",
+        "test/bundle-sources.test.ts",
+        "test/bundles.test.ts"
+      ],
+      "newFiles": [],
+      "foreignFiles": [],
+      "context": [
+        "src/agent/mcp/mcp-config.ts",
+        "src/settings/settings-store.ts"
+      ],
+      "how": "",
+      "proves": [
+        {
+          "item": "The product's catalog is a source without being configured",
+          "file": "test/bundle-sources.test.ts",
+          "test": "the product's catalog is a source without being configured > is always among the sources with nothing named in settings"
+        },
+        {
+          "item": "Further sources are git repositories named in settings",
+          "file": "test/bundle-sources.test.ts",
+          "test": "further sources are git repositories named in settings > a source named in the workspaces settings is added to the persons rather than replacing them"
+        },
+        {
+          "item": "Fetched with the git access the person already has",
+          "file": "test/bundle-sources.test.ts",
+          "test": "fetched with the git access the person already has > fetching a source clones it with the git already on this machine and no credentials of its own"
+        },
+        {
+          "item": "A source is accepted before it is fetched",
+          "file": "test/bundle-sources.test.ts",
+          "test": "a source is accepted before it is fetched > a source the person has not accepted is not among the ones fetched, named by its repository"
+        },
+        {
+          "item": "Source that arrived with the workspace",
+          "file": "test/bundle-sources.test.ts",
+          "test": "source that arrived with the workspace > a source named only by the workspace is pending acceptance the same as one the person named themselves"
+        },
+        {
+          "item": "Unreachable source falls back to the last fetch",
+          "file": "test/bundle-sources.test.ts",
+          "test": "unreachable source falls back to the last fetch > a source fetched once and then unreachable offers the bundles last fetched, dated to that fetch; and > a source never fetched offers nothing"
+        },
+        {
+          "item": "Rule text only",
+          "file": "test/bundle-sources.test.ts",
+          "test": "rule text only > a bundle entry carrying a command, a tool, a permission or a setting contributes only its rule text"
+        },
+        {
+          "item": "A source may require bundles",
+          "file": "test/bundle-sources.test.ts",
+          "test": "a source may require bundles > a required bundle is applied for the project the first time its source is used in a workspace"
+        },
+        {
+          "item": "A required bundle comes back",
+          "file": "test/bundle-sources.test.ts",
+          "test": "a required bundle comes back > a required bundle whose block was removed is applied again, with a line naming the source that requires it"
+        },
+        {
+          "item": "Updates are never silent",
+          "file": "test/bundle-sources.test.ts",
+          "test": "updates are never silent > a newer version a source holds for an applied bundle is surfaced as an update; and > keeping a version silences it, but a later version past it still raises its own notice"
+        },
+        {
+          "item": "Block changed by hand",
+          "file": "test/bundle-sources.test.ts",
+          "test": "block changed by hand > a block edited by hand since it was written is said before an update would replace it"
+        }
+      ],
+      "note": "The spec leaves the source repository's own layout open; a source names its catalog in a `bundles.json` at its root (`{bundles:[{name,version,target,text,...ignored}], required:[...]}`) — a technical contract for whoever sets up a company's repository, not a product decision, so it isn't amended into the spec. The product's own catalog repository is https://github.com/jgauffin/kiwipow-agent-bundles, confirmed with the user (AskUser) since only they could name it; this is a literal value the spec's wording already covers generically, so it is recorded here rather than as a spec amendment or an unfiled decision. \"The person's settings\" and \"the workspace's\" are necessarily two distinct keys (`kiwiAgent.bundleSources`, `kiwiAgent.projectBundleSources`): VS Code resolves one key to a single effective array per scope rather than merging, so one key could not hold both without the workspace replacing the person's. Source acceptance is person-level (`kiwiAgent.bundleSources.accepted`, global) since the spec frames it as the person's own choice; it is offered once per activation via a plain notification rather than a settings-tab list, since none of the three scenarios already built for this feature gave bundle sources a tab of their own. A written block's hash (for telling a hand edit from an update) is kept per workspace, so a person-scope bundle's hand-edit check only works from the workspace that last wrote it — a stated simplification, not a gap in the rule itself, since the block's own marker (source, name, version) is still always correct wherever `AGENTS.md` travels.",
+      "built": "src/agent/instructions/bundle-sources.ts: PRODUCT_CATALOG_SOURCE, bundleSources/pendingSources/fetchableSources (person+workspace source lists, acceptance gate), parseCatalogSource + CATALOG_FILE ('bundles.json', rule text only — any command/tool/permissions/settings field is read off an entry but never kept), GitPort + the real gitPort (plain `git clone --depth 1`, no credentials of its own) and SourceCachePort + fileSourceCache (last-fetch fallback under `<home>/.kiwi/bundle-sources/`), FetchedSource/fetchSource (fetch-or-fall-back-to-cache), RequiredBundle/requiredBundles/missingRequiredBundles/requiredBundleText/applyRequiredBundles (auto-applies a source's required bundles for the project, first time and again if removed), isNewerVersion, HandEditCheck/BundleUpdate/bundleUpdates/hashBundleText (update detection remembering a declined version per bundle, and hand-edit detection by comparing a block's current text to the hash of what was last written). src/agent/instructions/bundles.ts: new `appliedBundleText` reads one applied block's current body, and `Bundle` gained an optional `asOf`. src/extension.ts wires `BundlePort.available()` to real fetched sources (`kiwiAgent.bundleSources` for the person, `kiwiAgent.projectBundleSources` for the workspace, `kiwiAgent.bundleSources.accepted` for acceptance) and runs a once-per-activation check — with a real project open only — that offers each pending source, applies missing required bundles, and offers each available update (remembering hand-edit hashes in `kiwiAgent.bundleHashes` and declined versions in `kiwiAgent.bundleUpdatesDismissed`, both workspace-scoped) through native VS Code notifications, since this scenario carries no dedicated settings-page surface of its own.",
+      "state": "tested",
+      "removed": false,
+      "group": "Where bundles come from"
+    },
+    {
+      "name": "Moving from CLAUDE.md to AGENTS.md",
+      "text": "A workspace or a person whose rules still sit in `CLAUDE.md`.",
+      "delivers": [
+        "Offered once per file",
+        "Content moves whole",
+        "Confirmed before the file goes",
+        "Both files already there",
+        "Same rules on both engines after the move"
+      ],
+      "files": [
+        "src/agent/instructions/claude-md-move.ts",
+        "src/agent/memory/memories.ts",
+        "src/extension.ts",
+        "test/claude-md-move.test.ts",
+        "test/memories.test.ts"
+      ],
+      "newFiles": [],
+      "foreignFiles": [],
+      "context": [
+        "src/agent/instructions/instruction-files.ts",
+        "src/agent/memory/memories.ts",
+        "src/agent/memory/session-context.ts"
+      ],
+      "how": "",
+      "proves": [
+        {
+          "item": "Offered once per file",
+          "file": "test/claude-md-move.test.ts",
+          "test": "offered once per file > a_scope_with_nothing_to_move_is_never_due, a_scope_with_something_to_move_and_no_prior_decline_is_due, a_declined_offer_is_not_raised_again, the_workspaces_file_and_the_persons_own_are_offered_independently_of_each_other"
+        },
+        {
+          "item": "Content moves whole",
+          "file": "test/claude-md-move.test.ts, test/memories.test.ts",
+          "test": "content moves whole > an_empty_agents_md_gets_claude_mds_text_exactly; confirmed before the file goes > applying_a_move_writes_the_merged_text_to_agents_md_and_removes_claude_md; userMemoryFile > once_claude_md_is_gone_from_then_on_notes_are_read_and_written_in_agents_md"
+        },
+        {
+          "item": "Confirmed before the file goes",
+          "file": "test/claude-md-move.test.ts",
+          "test": "confirmed before the file goes > applying_a_move_writes_the_merged_text_to_agents_md_and_removes_claude_md"
+        },
+        {
+          "item": "Both files already there",
+          "file": "test/claude-md-move.test.ts",
+          "test": "both files already there > an_agents_md_that_already_holds_text_keeps_it_and_gets_claude_mds_text_appended_under_a_heading_naming_where_it_came_from"
+        },
+        {
+          "item": "Same rules on both engines after the move",
+          "file": "test/claude-md-move.test.ts, test/memories.test.ts",
+          "test": "same rules on both engines after the move > the_moved_text_sits_in_agents_md_the_one_file_both_engines_already_read; userMemoryFile > once_claude_md_is_gone_from_then_on_notes_are_read_and_written_in_agents_md (the destination, <cwd>/AGENTS.md and <home>/AGENTS.md, is already one of the files instruction-files.ts's instructionFilePaths reads for every mode on both engines, proven by the earlier task's test/instruction-files-session.test.ts)"
+        }
+      ],
+      "note": "No dedicated settings-page surface was built for this offer (none was in the hand-off and the spec names no such surface for this scenario); it follows the \"Where bundles come from\" task's precedent of a native VS Code notification, shown as a modal whose detail previews the merged AGENTS.md text before the person confirms, satisfying \"shown as a change the person confirms before it is made\" without new webview work. A fresh home with neither CLAUDE.md nor AGENTS.md now defaults new person-scope memories straight to AGENTS.md, the direction the spec says rules are moving to, rather than keeping the old CLAUDE.md default for a case the spec does not mention.",
+      "built": "src/agent/instructions/claude-md-move.ts: claudeMdPath(scope, cwd, home) (BundleScope reused: 'project' → <cwd>/CLAUDE.md, 'user' → <home>/.claude/CLAUDE.md), mergedAgentsText(claudeText, existingAgentsText) (whole text when AGENTS.md was empty, appended under a \"## Moved from CLAUDE.md\" heading otherwise), PendingMove and pendingMove(scope, cwd, home) (what a move would write, using bundles.ts's bundleFilePath as the AGENTS.md destination so it is the same file a bundle writes into), moveOfferDue(move, alreadyDeclined), applyMove(move) (writes AGENTS.md, removes CLAUDE.md). src/agent/memory/memories.ts: userMemoryFile(home) now resolves to <home>/.claude/CLAUDE.md while it still exists, falling back to <home>/AGENTS.md once it is gone (by the move or because the person never had one), so a person-scope memory follows the same file the move carries their instructions into. src/extension.ts wires a once-per-activation offer (native VS Code modal, 'claudeMdMoveDismissed' workspace-scoped for the project, 'claudeMdMoveDismissedUser' global for the person) that shows the merged text and, on confirmation, calls applyMove; not narrowly testable (no vitest harness for extension.ts in this repo, matching the earlier bundle-sources offer wiring).",
+      "state": "tested",
+      "removed": false,
+      "group": "Moving from CLAUDE.md to AGENTS.md"
+    }
+  ],
+  "verification": [
+    {
+      "at": "2026-10-01T18:50:51.995Z",
+      "ok": true,
+      "text": "`npm test` in ."
+    },
+    {
+      "at": "2026-10-01T18:46:38.681Z",
+      "ok": false,
+      "text": "`npm test` in ."
+    },
+    {
+      "at": "2026-10-01T17:52:47.822Z",
+      "ok": false,
+      "text": "`npm test` in ."
+    },
+    {
+      "at": "2026-10-01T17:49:55.460Z",
+      "ok": false,
+      "text": "`npm test` in ."
+    },
+    {
+      "at": "2026-10-01T17:47:54.955Z",
+      "ok": false,
+      "text": "`npm test` in ."
+    },
+    {
+      "at": "2026-10-01T17:46:25.536Z",
+      "ok": false,
+      "text": "`npm test` in ."
+    }
+  ],
+  "cleanup": "skipped"
+}

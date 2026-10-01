@@ -1,6 +1,6 @@
 import type { ModelProfile } from './model-profile'
 import type { FileEditChange } from '../edits/file-edit-diff'
-import type { CommandLine } from '../permissions/permission-rules'
+import type { CommandLine, WriteScope } from '../permissions/permission-rules'
 import type { QuestionOutcome, UserQuestionRequest } from './user-question'
 import type { McpServers } from '../mcp/mcp-config'
 
@@ -53,6 +53,8 @@ export type SessionEvent =
   | { type: 'assistant_thinking'; messageId: string; delta: string; parentToolUseId?: string }
   /** Final text of an assistant message, replaces whatever was streamed under the same id. */
   | { type: 'assistant_message'; messageId: string; text: string; parentToolUseId?: string }
+  /** What one model reply produced, thinking included; with the run log's timestamps it tells a long think from a slow provider. */
+  | { type: 'reply_usage'; messageId: string; outputTokens: number; parentToolUseId?: string }
   /** `malformed` is set when the model's arguments were not JSON: `input` is then their text as written. */
   | { type: 'tool_call'; toolUseId: string; name: string; input: unknown; malformed?: true; parentToolUseId?: string }
   /** `edit` is set on a file edit that changed something: the diff the step made, as the chat shows it. */
@@ -74,6 +76,8 @@ export type SessionEvent =
       edits?: FileEditChange[]
       /** A shell call as its commands, each with what already lets it through or the rule that would; shown in place of the raw arguments. */
       commands?: CommandLine[]
+      /** A write to one project file: how far, beyond this call, the answer may reach. Narrowest first. */
+      writeScopes?: WriteScope[]
     }
   | { type: 'permission_resolved'; requestId: string; decision: PermissionDecision['kind']; message?: string }
   /** The model asks the user; the session makes no further progress until the request is resolved. */

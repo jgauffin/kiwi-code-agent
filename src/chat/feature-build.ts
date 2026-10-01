@@ -1,11 +1,11 @@
 import type { SessionRecord } from '../agent/session/session-manager'
 import type { SessionEvent } from '../agent/session/code-session'
 import type { ModelProfile, Step } from '../agent/session/model-profile'
-import type { SessionStatus } from '../agent/session/session-status'
+import { underWay, type SessionStatus } from '../agent/session/session-status'
 import { specPath } from '../agent/phases/blind-plan'
 import { decisionsPath, readDecisions } from '../agent/phases/decisions'
 import { contextPath, readScenarioContext } from '../agent/phases/scenario-context'
-import { TASK_CARRY_ON, fixKickoff, implementationStarts, taskKickoff, taskSettled } from '../agent/phases/implement'
+import { TASK_CARRY_ON, fixKickoff, fixRetry, implementationStarts, taskKickoff, taskSettled } from '../agent/phases/implement'
 import { tasksStale } from '../agent/phases/plan-stage'
 import { readSpecState } from '../agent/phases/spec-file'
 import { parseSpec } from '../agent/phases/spec-model'
@@ -21,6 +21,7 @@ import {
 } from '../agent/phases/verification'
 import type { ChatRefresh, Notify, RunSessions, SessionSwitch, Verifier } from './feature-runs'
 import type { RunState } from './protocol'
+import { errorMessage } from '../error-message'
 
 /** What the build tells the step after it: a test run is about to start, and one has passed. */
 export interface BuildListener {
@@ -107,7 +108,7 @@ export class FeatureBuild {
         else text += ` (${failures} in a row; fix it and verify again)`
       }
     } catch (error) {
-      text = `Test run failed: ${error instanceof Error ? error.message : String(error)}`
+      text = `Test run failed: ${errorMessage(error)}`
     }
     this.verifications.set(feature, { live: false, text })
     await refresh.sendState()
@@ -153,7 +154,7 @@ export class FeatureBuild {
       if (!implementationStarts(spec, tasks, this.implementerLive(feature))) return
       await this.startImplementing(record)
     } catch (error) {
-      this.deps.notify.error(`cannot start the implementation: ${error instanceof Error ? error.message : String(error)}`)
+      this.deps.notify.error(`cannot start the implementation: ${errorMessage(error)}`)
     }
   }
 
@@ -172,7 +173,7 @@ export class FeatureBuild {
       if (run.task !== undefined && plan) await this.implementAfterApproval(plan)
       else if (run.task === undefined) {
         await this.followBoard(run.feature).catch((error: unknown) => {
-          this.deps.notify.error(`cannot resume the test run: ${error instanceof Error ? error.message : String(error)}`)
+          this.deps.notify.error(`cannot resume the test run: ${errorMessage(error)}`)
         })
       }
     }
@@ -245,16 +246,31 @@ export class FeatureBuild {
   }
 
   /**
-   * A failed sweep goes to a run of its own under the plan's tab, started on
-   * the failure and the tasks it names rather than on whichever task ran last.
-   * `attempt` is how many sweeps in a row have failed: each one tries harder.
+   * A failed sweep goes to the feature's fix run under the plan's tab. The
+   * first is started on the failure and the tasks it names rather than on
+   * whichever task ran last; every failure after it goes back to that run,
+   * which knows what it tried and what already passed, so a flaky test is not
+   * a reason to read the feature again. `attempt` is how many sweeps in a row
+   * have failed: each one tries harder.
    */
   private async handToImplementer(feature: string, failures: VerificationFailure[], attempt: number): Promise<void> {
     const { workspaceRoot, sessions } = this.deps
+    const profile = this.deps.profileFor('fix', attempt)
+    const previous = sessions.list().find((r) => r.mode === 'implement' && r.feature === feature && r.fixAttempt !== undefined)
+    if (previous) {
+      // Its turn ending runs the sweep again: nothing to hand it mid-turn.
+      if (underWay(this.deps.statusOf(previous.id))) return
+      await sessions.retryFix(previous.id, attempt, profile)
+      // The switch does not outlive the window.
+      this.deps.allowWrites.setEnabled(previous.id, true)
+      await this.deps.refresh.sendState()
+      await sessions.send(previous.id, fixRetry(feature, failures, workspaceRoot))
+      return
+    }
     const board = await readBoard(tasksPath(workspaceRoot, feature))
     if (!board) return
     const plan = sessions.latest('plan', feature)
-    const run = await sessions.create(this.deps.profileFor('fix', attempt), 'implement', feature, { ...(plan ? { parentId: plan.id } : {}), fixAttempt: attempt })
+    const run = await sessions.create(profile, 'implement', feature, { ...(plan ? { parentId: plan.id } : {}), fixAttempt: attempt })
     this.deps.allowWrites.setEnabled(run.id, true)
     await this.deps.refresh.sendState()
     await sessions.send(run.id, fixKickoff(feature, board, failures, workspaceRoot))

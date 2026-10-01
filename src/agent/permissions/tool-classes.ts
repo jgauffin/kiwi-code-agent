@@ -11,6 +11,9 @@ export const TRANSFER_TOOLS: ReadonlySet<string> = new Set(['Move', 'Copy'])
 /** Tools that write a file. A write is answered per call or per session, never remembered for the project. */
 export const WRITE_TOOLS: ReadonlySet<string> = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'RunScript', ...TRANSFER_TOOLS])
 
+/** Tools that write the one file their `file_path` names: what a contract on a file's content checks after the call. */
+export const WRITES_NAMED_FILE: ReadonlySet<string> = new Set(['Write', 'Edit', 'MultiEdit'])
+
 /**
  * Tools that run a command line. Both are judged, prompted and remembered
  * command by command, each under its own tool name: a rule for one shell says

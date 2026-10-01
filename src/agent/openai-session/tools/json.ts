@@ -9,6 +9,7 @@ import { detectFormat, scanTokens, selectItems, type DataFile } from './json/loa
 import { byteLength, clipStrings, describeTruncation, fitRows } from './json/output'
 import { JsonSyntaxError, formatPath } from './json/scanner'
 import { ShapeBuilder } from './json/shape'
+import { errorMessage } from '../../../error-message'
 
 /**
  * Streaming JSON tools, copied from the Docs MCP server's data module. They
@@ -142,6 +143,6 @@ async function guard(work: () => Promise<unknown>): Promise<ToolOutput> {
     if (error instanceof DataError || error instanceof ExpressionError || error instanceof JsonSyntaxError) {
       return fail(error.message)
     }
-    return fail(error instanceof Error ? error.message : String(error))
+    return fail(errorMessage(error))
   }
 }

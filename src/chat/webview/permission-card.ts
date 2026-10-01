@@ -60,10 +60,16 @@ export class PermissionCard extends HTMLElement {
       </div>
       <div class="whole" unless="isShell">
         <div class="body"></div>
+        <fieldset class="covers" if="hasScopes">
+          <legend>Covers</legend>
+          <label loop="s in scopes"><input type="radio" name="{{coversName}}" checked="{{s.picked}}" r-change="pickScope(s)"> {{s.label}}</label>
+        </fieldset>
         <div class="actions" if="pending">
           <button type="button" class="allow-session" if="wholeRule" title="{{sessionTitle}}" r-click="allowWhole('session')">Allow {{wholeLabel}} for session</button>
           <button type="button" class="allow-project" if="wholeRule" title="{{projectTitle}}" r-click="allowWhole('project')">Allow {{wholeLabel}} for project</button>
-          <button type="button" class="allow" unless="wholeRule" r-click="allowWhole('once')">Allow</button>
+          <button type="button" class="allow" unless="wholeRule" disabled="{{widened}}" r-click="allowWhole('once')">Allow</button>
+          <button type="button" class="allow-session" if="hasScopes" disabled="{{onlyThisCall}}" title="{{scopeSessionTitle}}" r-click="allowScope('session')">Allow for session</button>
+          <button type="button" class="allow-project" if="hasScopes" disabled="{{onlyThisCall}}" title="{{scopeProjectTitle}}" r-click="allowScope('project')">Allow for project</button>
           <button type="button" class="deny" r-click="denyWhole()">Deny</button>
         </div>
       </div>
@@ -76,6 +82,8 @@ export class PermissionCard extends HTMLElement {
   private answers: (LineAnswer | undefined)[] = []
   private decision: PermissionDecision['kind'] | undefined
   private remembered: RememberedRules = { session: [], project: [] }
+  /** How far a write's answer reaches: 0 is this call alone, then each of the request's write scopes. */
+  private scope = 0
   /** Only ever what the host reports back, since the field itself is gone by then. */
   private reason = ''
   private filled = false
@@ -113,6 +121,9 @@ export class PermissionCard extends HTMLElement {
     const wholeRule = isShell ? undefined : projectRuleFor(r.toolName)
     // The engine may ask on its own account about a call every rule lets through; no line is left to answer, so the call is.
     const askedAnyway = isShell && this.decision === undefined && this.lines.every((line) => line.passes)
+    // A write to one project file can be answered for the file or its folder; only a wider scope is worth remembering.
+    const writeScopes = isShell ? [] : (r.writeScopes ?? [])
+    const picked = writeScopes[this.scope - 1]
     this.classList.toggle('allowed', settled)
     this.template.render(
       {
@@ -127,8 +138,15 @@ export class PermissionCard extends HTMLElement {
         lines: this.lines.map((line, index) => this.lineRow(line, index)),
         wholeRule: wholeRule ?? '',
         wholeLabel: wholeRule ? ruleLabel(wholeRule) : '',
-        sessionTitle: `Later calls of ${wholeRule} pass without asking, until this session's host is restarted.`,
+        sessionTitle: `Later calls of ${wholeRule} pass without asking, for as long as this session lasts.`,
         projectTitle: `Writes ${wholeRule} to kiwiAgent.permissions.allow in this workspace.`,
+        hasScopes: writeScopes.length > 0 && this.decision === undefined,
+        coversName: `covers-${r.requestId}`,
+        scopes: [{ index: 0, label: 'this edit' }, ...writeScopes.map((s, i) => ({ index: i + 1, label: s.label }))].map((s) => ({ ...s, picked: s.index === this.scope })),
+        widened: picked !== undefined,
+        onlyThisCall: picked === undefined,
+        scopeSessionTitle: picked ? `Later writes to ${picked.label} pass without asking, for as long as this session lasts.` : '',
+        scopeProjectTitle: picked ? `Writes ${picked.rule} to kiwiAgent.permissions.allow in this workspace.` : '',
         pending: this.decision === undefined,
         outcome: this.outcomeText(),
       },
@@ -136,6 +154,15 @@ export class PermissionCard extends HTMLElement {
         answerLine: (l: LineRow, answer: LineAnswer) => this.answer(l.index, answer),
         allowWhole: (scope: 'session' | 'project') => {
           if (wholeRule) this.remembered[scope].push(wholeRule)
+          this.decide({ kind: 'allow' })
+        },
+        pickScope: (s: { index: number }) => {
+          this.scope = s.index
+          this.render()
+        },
+        allowScope: (scope: 'session' | 'project') => {
+          if (!picked) return
+          this.remembered[scope].push(picked.rule)
           this.decide({ kind: 'allow' })
         },
         denyWhole: () => this.decide({ kind: 'deny' }),
@@ -184,7 +211,7 @@ export class PermissionCard extends HTMLElement {
       settled: settled !== undefined || this.decision !== undefined,
       status: settled ?? '',
       statusClass: answer === 'deny' ? 'denied' : 'allowed',
-      sessionTitle: `Later calls covered by ${line.rule} pass without asking, until this session's host is restarted.`,
+      sessionTitle: `Later calls covered by ${line.rule} pass without asking, for as long as this session lasts.`,
       projectTitle: `Writes ${line.rule} to kiwiAgent.permissions.allow in this workspace.`,
       allowTitle: 'Runs a command the line does not show, so it can only be allowed for this call.',
     }
@@ -221,10 +248,15 @@ export class PermissionCard extends HTMLElement {
     if (this.decision === undefined) return ''
     if (this.decision === 'deny') return this.reason ? `Denied: ${this.reason}` : 'Denied'
     const kept = [
-      ...this.remembered.session.map((rule) => `${ruleLabel(rule)} for session`),
-      ...this.remembered.project.map((rule) => `${ruleLabel(rule)} for project`),
+      ...this.remembered.session.map((rule) => `${this.rememberedLabel(rule)} for session`),
+      ...this.remembered.project.map((rule) => `${this.rememberedLabel(rule)} for project`),
     ]
     return kept.length ? `Allowed (${kept.join(', ')})` : 'Allowed'
+  }
+
+  /** A write scope is named as the prompt offered it, `docs/` rather than its glob. */
+  private rememberedLabel(rule: string): string {
+    return this.request?.writeScopes?.find((s) => s.rule === rule)?.label ?? ruleLabel(rule)
   }
 }
 

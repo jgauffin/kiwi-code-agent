@@ -1,4 +1,4 @@
-import { PLAN_DIR, featureSlug, specPath } from './blind-plan'
+import { SPECS_DIR, featureSlug, specPath } from './blind-plan'
 import {
   PLAN_TARGET,
   findItem,
@@ -74,7 +74,7 @@ export function reviewPrompt(options: {
   struck: string[]
 }): string {
   const { feature, round, body, struck } = options
-  const spec = `${PLAN_DIR}/${featureSlug(feature)}.spec.md`
+  const spec = `${SPECS_DIR}/${featureSlug(feature)}.spec.md`
   const review = reviewFile(feature)
   const comments = carry(round, body)
   const lines = [
@@ -140,7 +140,7 @@ export async function submitReview(options: {
   const path = reviewPath(cwd, feature)
   const review = await readReview(path)
   const round = submitRound(review, options.now ?? new Date().toISOString())
-  await writeReview(path, review, `${PLAN_DIR}/${featureSlug(feature)}.spec.md`)
+  await writeReview(path, review, `${SPECS_DIR}/${featureSlug(feature)}.spec.md`)
 
   const prompt = reviewPrompt({ feature, round, body: state.body, struck: struckItems(review) })
   if (courier.isLive(owner.sessionId)) await courier.send(owner.sessionId, prompt)

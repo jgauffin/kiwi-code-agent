@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { PlanState, RunControls, ToWebview } from '../src/chat/protocol'
 import type { SessionEvent } from '../src/agent/session/code-session'
 import { planState } from './plan-state-fixture'
 
 const sent: unknown[] = []
 ;(globalThis as Record<string, unknown>).acquireVsCodeApi = () => ({ postMessage: (m: unknown) => sent.push(m), setState: () => {} })
+
+// Test files share a worker, so the module registry is cleared first: what
+// loads here is this file's own, bound to its stub and its document.
+vi.resetModules()
 
 const { ChatApp } = await import('../src/chat/webview/chat-app')
 

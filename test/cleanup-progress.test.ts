@@ -6,7 +6,7 @@ import type { SessionEvent } from '../src/agent/session/code-session'
 const ROOT = '/w'
 const relativeTo = (path: string) => (path.startsWith(`${ROOT}/`) ? path.slice(ROOT.length + 1) : path)
 
-const unit = (path: string, name: string, kind: CleanupUnit['kind'] = 'function'): CleanupUnit => ({ path, line: 10, name, kind, lines: 90, threshold: 60 })
+const unit = (path: string, name: string, kind: CleanupUnit['kind'] = 'function'): CleanupUnit => ({ path, line: 10, name, kind, breaches: [{ measure: 'lines', value: 90, limit: 60 }] })
 const run = unit('src/run.ts', 'run')
 const parse = unit('src/run.ts', 'parse')
 const report = unit('src/report.ts', 'report')
@@ -39,9 +39,9 @@ describe('the cleanup split, unit by unit', () => {
   })
 
   it('an_edit_on_the_moves_file_records_moves_and_is_no_split', () => {
-    const progress = advance(startProgress([run]), edited('/w/plan/unfiled-moves.md'), relativeTo)
+    const progress = advance(startProgress([run]), edited('/w/specs/unfiled-moves.md'), relativeTo)
     expect(progress.newFiles).toEqual([])
-    expect(progress.movesFile).toBe('plan/unfiled-moves.md')
+    expect(progress.movesFile).toBe('specs/unfiled-moves.md')
   })
 
   it('an_edit_on_a_flagged_file_asks_for_that_file_to_be_measured_again', () => {

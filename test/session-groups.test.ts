@@ -14,7 +14,7 @@ const record = (id: string, mode: SessionMode, extra: Partial<SessionRecord> = {
   ...extra,
 })
 
-const spec = (feature: string, status: PlanSummary['status'] = 'draft'): PlanSummary => ({ feature, path: join('/ws', 'plan', `${featureSlug(feature)}.spec.md`), status })
+const spec = (feature: string, status: PlanSummary['status'] = 'draft'): PlanSummary => ({ feature, path: join('/ws', 'specs', `${featureSlug(feature)}.spec.md`), status })
 
 describe('sessionGroups', () => {
   it('lists_chats_and_plans_but_none_of_the_runs_that_serve_a_plan', () => {

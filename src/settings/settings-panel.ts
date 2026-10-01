@@ -3,6 +3,7 @@ import type { MemoryScope } from '../agent/memory/memories'
 import { webviewHtml } from '../chat/webview-html'
 import type { FromSettingsWebview, SettingsTarget, ToSettingsWebview } from './protocol'
 import type { SettingsStore } from './settings-store'
+import { errorMessage } from '../error-message'
 
 export const SETTINGS_PANEL_TYPE = 'kiwiAgent.settingsPanel'
 
@@ -43,7 +44,7 @@ export class SettingsPanel {
     panel.webview.html = webviewHtml(panel.webview, this.extensionUri, 'settings-app')
     panel.webview.onDidReceiveMessage((message: FromSettingsWebview) => {
       this.handle(message).catch((error: unknown) => {
-        const text = error instanceof Error ? error.message : String(error)
+        const text = errorMessage(error)
         void vscode.window.showErrorMessage(`Kiwipow Agent: ${text}`)
       })
     })
@@ -91,6 +92,15 @@ export class SettingsPanel {
           return
         case 'forget_memory':
           await this.store.forgetMemory(message.scope, message.title)
+          return
+        case 'apply_bundle':
+          await this.store.applyBundle(message.scope, message.bundle)
+          return
+        case 'remove_bundle':
+          await this.store.removeBundle(message.scope, message.source, message.name)
+          return
+        case 'dismiss_bundle_offer':
+          await this.store.dismissBundleOffer()
           return
       }
     } finally {

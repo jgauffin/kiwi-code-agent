@@ -1,12 +1,13 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { readInstructionFiles } from '../instructions/instruction-files'
+import { instructionsText, readInstructionFiles } from '../instructions/instruction-files'
 import { readOptional } from '../workspace-files'
 import { DOC_READING } from './tools/markdown/outline-gate'
 import { CODE_READING } from '../code-outline/code-outline-gate'
 import { CHAT_DECISIONS } from '../phases/unfiled-decisions'
 import { SPEC_READING } from '../phases/blind-plan'
 import { SCRIPT_WRITING } from '../script/script-gate'
+import { EDIT_WRITING } from './tools/edit'
 import { memoryWritingInstructions } from '../memory/memories'
 import { memorySection, readMemorySources } from '../memory/session-context'
 import { projectScriptsInstruction } from '../permissions/package-scripts'
@@ -26,6 +27,7 @@ export async function buildSystemPrompt(cwd: string, profilePromptFile?: string,
     DOC_READING,
     CODE_READING,
     SCRIPT_WRITING,
+    EDIT_WRITING,
     projectScriptsInstruction(cwd),
     'Make the smallest change that does the job. Do not add abstractions, options or comments the task did not ask for.',
     'When a tool reports an error, read it and adjust; do not repeat the same call.',
@@ -33,9 +35,10 @@ export async function buildSystemPrompt(cwd: string, profilePromptFile?: string,
     SPEC_READING,
     CHAT_DECISIONS,
     memoryWritingInstructions(cwd, home),
-    memorySection({ project: (await readMemorySources(cwd, home)).project, user: undefined }) ?? '',
+    memorySection(await readMemorySources(cwd, home)) ?? '',
   ]
-  for (const file of await readInstructionFiles(cwd, home)) parts.push(`\n# Instructions from ${file.path}\n\n${file.text}`)
+  const instructionFiles = await readInstructionFiles(cwd, home)
+  if (instructionFiles.length > 0) parts.push(instructionsText(instructionFiles))
   if (profilePromptFile) {
     const extra = await readOptional(join(cwd, profilePromptFile))
     if (extra) parts.push('\n' + extra)

@@ -1,7 +1,7 @@
 node_modules/
 dist/
 *.vsix
-.agent/
+.kiwi/
 .env
 .articles
 PROMPTS.md

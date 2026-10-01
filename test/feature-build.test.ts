@@ -45,7 +45,7 @@ const fixRuns = () => sessions.records.filter((r) => r.fixAttempt !== undefined)
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'feature-build-'))
-  await mkdir(join(dir, '.agent', 'plan'), { recursive: true })
+  await mkdir(join(dir, '.kiwi', 'specs'), { recursive: true })
   await writeBoard(tasksPath(dir, FEATURE), board(task('Cancel', { state: 'tested', files: ['src/order.ts'] })))
   sessions = new FakeSessions()
   notify = new FakeNotify()
@@ -77,6 +77,18 @@ describe('FeatureBuild.verify', () => {
     await feature.verify(FEATURE, false)
     expect(fixRuns()).toHaveLength(1)
     expect(feature.lineOf(FEATURE)?.text).toContain('2 in a row')
+  })
+
+  it('a_failure_after_the_first_goes_back_to_the_same_fix_run_with_the_attempt_counted', async () => {
+    budget = 2
+    const feature = build()
+    await feature.verify(FEATURE, false)
+    await feature.verify(FEATURE, false)
+    expect(fixRuns()).toHaveLength(1)
+    const [run] = fixRuns()
+    expect(run!.fixAttempt).toBe(2)
+    expect(sessions.sent.map((s) => s.id)).toEqual([run!.id, run!.id])
+    expect(sessions.sent[1]!.text).toContain('failed again')
   })
 
   it('a_passing_run_hands_the_feature_to_the_step_after_it', async () => {

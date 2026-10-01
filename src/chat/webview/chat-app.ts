@@ -10,10 +10,12 @@ import { PlanView } from './plan-view'
 import { SingleRunChat, TaskRunChat, type PhaseChat } from './phase-chat'
 import { planStep, shownSteps, tabFor, type Step, type Tab } from './plan-step'
 import { LinkedFilesRow } from './linked-files-row'
+import { AgentsMdOverlay } from './agents-md-overlay'
 import type { ContextUsage } from './context-meter'
 import {
   AllowWritesToggledEvent,
   ChatTargetChangedEvent,
+  AgentsMdAnsweredEvent,
   CleanupDecidedEvent,
   CleanupStoppedEvent,
   CompactRequestedEvent,
@@ -67,6 +69,7 @@ export class ChatApp extends HTMLElement {
   ])
   private readonly chatsHost = document.createElement('div')
   private readonly composer = new ChatComposer()
+  private readonly agentsMd = new AgentsMdOverlay()
   /** The session the view shows, absent while it shows the new-session screen. */
   private tabId: string | undefined
   private tab: SessionTab | undefined
@@ -105,7 +108,7 @@ export class ChatApp extends HTMLElement {
     this.chatsHost.className = 'chats'
     this.chatsHost.append(...this.chats.values())
     this.composer.className = 'composer'
-    this.append(this.planBar, this.planTabs, this.newSession, this.planView, this.chatsHost, this.composer)
+    this.append(this.planBar, this.planTabs, this.newSession, this.planView, this.chatsHost, this.composer, this.agentsMd)
 
     this.addEventListener(SpecApprovedEvent.type, () => post({ type: 'approve_spec' }))
     this.addEventListener(RulingsSentEvent.type, () => post({ type: 'send_rulings' }))
@@ -150,6 +153,7 @@ export class ChatApp extends HTMLElement {
     this.addEventListener(SessionSelectedEvent.type, (e) => post({ type: 'switch_session', sessionId: e.sessionId }))
     this.addEventListener(PlanResumeRequestedEvent.type, (e) => post({ type: 'resume_plan', feature: e.feature }))
     this.addEventListener(DefaultProfileChangedEvent.type, (e) => post({ type: 'set_default_profile', name: e.name }))
+    this.addEventListener(AgentsMdAnsweredEvent.type, (e) => post({ type: 'agents_md_answer', scope: e.scope, answer: e.answer }))
     this.addEventListener(NewSessionRequestedEvent.type, (e) =>
       post({
         type: 'new_session',
@@ -179,6 +183,7 @@ export class ChatApp extends HTMLElement {
         this.models = message.models.map((m) => m.name)
         this.runs = message.runs
         this.plan = message.plan
+        this.agentsMd.show(message.agentsMd)
         for (const [phase, chat] of this.chats) chat.update(this.runs.filter((r) => phaseOfRun(r) === phase))
         this.followStep()
         this.showTarget()

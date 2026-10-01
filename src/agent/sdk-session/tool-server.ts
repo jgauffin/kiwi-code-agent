@@ -17,6 +17,12 @@ export function bareToolName(engineName: string): string {
   return engineName.startsWith(PREFIX) ? engineName.slice(PREFIX.length) : engineName
 }
 
+/** The prompts name the own tools bare; Claude offers them under the prefix and refuses a call by the bare name. */
+export function toolNamingLine(tools: readonly Tool[]): string {
+  if (tools.length === 0) return ''
+  return `\nThe tools this prompt names bare are called with the prefix ${PREFIX}: ${tools.map((t) => `${t.name} is ${PREFIX}${t.name}`).join(', ')}.`
+}
+
 export function toolServer(tools: Tool[], ctx: ToolContext): McpSdkServerConfigWithInstance {
   return createSdkMcpServer({ name: TOOL_SERVER_NAME, tools: tools.map((t) => toMcpTool(t, ctx)) })
 }

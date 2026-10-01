@@ -1,6 +1,6 @@
 ---
 name: spec-writing
-description: Writing feature specs (`plan/<feature>.spec.md`) from the product's docs, one or many at once. Use when the user asks to create, draft or bootstrap specs from the docs, including in a project that has no `plan/` folder yet.
+description: Writing feature specs (`specs/<feature>.spec.md`) from the product's docs, one or many at once. Use when the user asks to create, draft or bootstrap specs from the docs, including in a project that has no `specs/` folder yet.
 ---
 
 # Writing specs from the docs
@@ -12,8 +12,8 @@ result, fix it before you stop.
 
 ## Where intent comes from
 
-A later planner reads `docs/**`, the root README, every `plan/*.spec.md` and
-`plan/unfiled-decisions.md`, never the code. Write the rules from those alone, even though you can
+A later planner reads `docs/**`, the root README, every `specs/*.spec.md` and
+`specs/unfiled-decisions.md`, never the code. Write the rules from those alone, even though you can
 read the code: approval compares the spec with the code and reports each disagreement for the
 user to rule on, and a rule copied from the code hides the disagreement it would have found.
 
@@ -30,7 +30,7 @@ existing spec already covers. Wait for the user to confirm or adjust the list.
 
 ## The file
 
-`plan/<slug>.spec.md`, where `<slug>` is the name lower-cased, accents dropped and every run of
+`specs/<slug>.spec.md`, where `<slug>` is the name lower-cased, accents dropped and every run of
 other characters turned into `-`. The folder is created by the write.
 
 Read `contract.md` in this skill's folder before writing: it is the contract the feature planner

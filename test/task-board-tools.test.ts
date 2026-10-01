@@ -17,12 +17,12 @@ let ctx: ToolContext
 
 const tool = (name: string): Tool => taskBoardTools(FEATURE).find((t) => t.name === name)!
 const call = (name: string, input: unknown) => tool(name).execute(input as never, ctx)
-const boardPath = () => join(dir, '.agent', 'plan', 'order-cancellation.tasks.json')
+const boardPath = () => join(dir, '.kiwi', 'specs', 'order-cancellation.tasks.json')
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'task-board-'))
-  await mkdir(join(dir, '.agent', 'plan'), { recursive: true })
-  await mkdir(join(dir, 'plan'))
+  await mkdir(join(dir, '.kiwi', 'specs'), { recursive: true })
+  await mkdir(join(dir, 'specs'))
   await mkdir(join(dir, 'src'))
   await writeFile(join(dir, 'src', 'order.ts'), '')
   ctx = { cwd: dir, signal: new AbortController().signal, files: new ReadTracker() }
@@ -147,10 +147,10 @@ describe('the board tools run without a prompt and the file itself is off limits
 
   it('an_edit_of_the_board_file_is_denied_and_points_at_the_tool', async () => {
     const guard = new TaskBoardGuard(dir, FEATURE)
-    expect(await guard.preToolUse({ toolName: 'Edit', input: { file_path: '.agent/plan/order-cancellation.tasks.json' }, toolUseId: 't' })).toMatchObject({
+    expect(await guard.preToolUse({ toolName: 'Edit', input: { file_path: '.kiwi/specs/order-cancellation.tasks.json' }, toolUseId: 't' })).toMatchObject({
       deny: expect.stringContaining('UpdateTask'),
     })
-    expect(await guard.preToolUse({ toolName: 'Write', input: { file_path: join(dir, '.agent', 'plan', 'order-cancellation.tasks.json') }, toolUseId: 't' })).toMatchObject({
+    expect(await guard.preToolUse({ toolName: 'Write', input: { file_path: join(dir, '.kiwi', 'specs', 'order-cancellation.tasks.json') }, toolUseId: 't' })).toMatchObject({
       deny: expect.any(String),
     })
     expect(await guard.preToolUse({ toolName: 'Edit', input: { file_path: 'src/order.ts' }, toolUseId: 't' })).toBeUndefined()

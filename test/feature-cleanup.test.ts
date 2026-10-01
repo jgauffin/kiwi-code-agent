@@ -9,7 +9,7 @@ import { board, task } from './task-board-fixture'
 import { FakeNotify, FakeRefresh, FakeSessions, profile } from './feature-runs-fixture'
 
 const FEATURE = 'Order cancellation'
-const none: Thresholds = { functionLines: 0, typeLines: 0, fileLines: 0 }
+const none: Thresholds = { functionLines: 0, functionComplexity: 0, typeLines: 0, fileLines: 0 }
 
 let dir: string
 let sessions: FakeSessions
@@ -37,7 +37,7 @@ const cleanupOf = () => {
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'feature-cleanup-'))
-  await mkdir(join(dir, '.agent', 'plan'), { recursive: true })
+  await mkdir(join(dir, '.kiwi', 'specs'), { recursive: true })
   await writeBoard(tasksPath(dir, FEATURE), board(task('Cancel', { state: 'tested' })))
   sessions = new FakeSessions()
   refresh = new FakeRefresh()
@@ -56,7 +56,7 @@ describe('FeatureCleanup', () => {
     await done
     expect(testRuns).toBe(1)
     const state = cleanup.stateOf(FEATURE)
-    expect(state.cleanup).toEqual({ live: false, text: 'Cleaned: every unit is within its limit; Tests passed' })
+    expect(state.cleanup).toEqual({ live: false, text: 'Cleaned: every unit is within its limits; Tests passed' })
     expect(state.cleanupSweep).toBeUndefined()
   })
 

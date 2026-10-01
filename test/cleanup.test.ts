@@ -20,7 +20,7 @@ describe('ScopeGuard for a cleanup run', () => {
   it('files_further_away_the_spec_and_the_docs_are_read_only', async () => {
     expect(await use('Edit', { file_path: 'src/orders/sub/deep.ts' })).toMatchObject({ deny: expect.any(String) })
     expect(await use('Edit', { file_path: 'src/billing/invoice.ts' })).toMatchObject({ deny: expect.any(String) })
-    expect(await use('Edit', { file_path: 'plan/orders.spec.md' })).toMatchObject({ deny: expect.any(String) })
+    expect(await use('Edit', { file_path: 'specs/orders.spec.md' })).toMatchObject({ deny: expect.any(String) })
     expect(await use('Edit', { file_path: 'docs/intent/orders.md' })).toMatchObject({ deny: expect.any(String) })
     expect(await use('Read', { file_path: 'src/billing/invoice.ts' })).toBeUndefined()
     expect(await use('Grep', { pattern: 'cancel', path: 'src' })).toBeUndefined()
@@ -48,9 +48,10 @@ describe('ScopeGuard for a cleanup run', () => {
 
 describe('cleanup prompt', () => {
   it('names_the_limits_the_scope_and_that_behaviour_stays', () => {
-    const off = { functionLines: 0, typeLines: 0, fileLines: 0 }
-    const prompt = cleanupPrompt('Order cancellation', cwd, { source: { functionLines: 25, typeLines: 200, fileLines: 0 }, tests: off, testGlobs: [] })
+    const off = { functionLines: 0, functionComplexity: 0, typeLines: 0, fileLines: 0 }
+    const prompt = cleanupPrompt('Order cancellation', cwd, { source: { ...off, functionLines: 25, typeLines: 200 }, tests: off, testGlobs: [] })
     expect(prompt).not.toContain('a file 0')
+    expect(prompt).not.toContain('complexity of 0')
     expect(prompt).toContain('(a function 25 code lines, a type 200)')
     expect(prompt).toContain('Edit only the files listed, new files in their folders')
     expect(prompt).toContain('Keep behaviour')
@@ -61,25 +62,32 @@ describe('cleanup prompt', () => {
 
   it('tests_get_their_own_limits_and_stay_one_file_per_tested_file', () => {
     const prompt = cleanupPrompt('Order cancellation', cwd, {
-      source: { functionLines: 25, typeLines: 0, fileLines: 400 },
-      tests: { functionLines: 60, typeLines: 0, fileLines: 1200 },
+      source: { functionLines: 25, functionComplexity: 0, typeLines: 0, fileLines: 400 },
+      tests: { functionLines: 60, functionComplexity: 0, typeLines: 0, fileLines: 1200 },
       testGlobs: ['**/*.test.*'],
     })
     expect(prompt).toContain('(a function 25 code lines, a file 400; in tests a function 60 code lines, a file 1200)')
     expect(prompt).toContain('A test file stays one file per tested file')
   })
 
+  it('a_complexity_limit_is_named_with_how_a_function_comes_back_under_it', () => {
+    const off = { functionLines: 0, functionComplexity: 0, typeLines: 0, fileLines: 0 }
+    const prompt = cleanupPrompt('Order cancellation', cwd, { source: { ...off, functionComplexity: 15, functionLines: 60 }, tests: off, testGlobs: [] })
+    expect(prompt).toContain('(a function a cognitive complexity of 15, a function 60 code lines)')
+    expect(prompt).toContain('a nested condition becomes an early return')
+  })
+
   it('the_split_is_planned_from_the_outline_not_from_reading_files_whole', () => {
-    const off = { functionLines: 0, typeLines: 0, fileLines: 0 }
-    const prompt = cleanupPrompt('Order cancellation', cwd, { source: { functionLines: 25, typeLines: 0, fileLines: 400 }, tests: off, testGlobs: [] })
+    const off = { functionLines: 0, functionComplexity: 0, typeLines: 0, fileLines: 0 }
+    const prompt = cleanupPrompt('Order cancellation', cwd, { source: { ...off, functionLines: 25, fileLines: 400 }, tests: off, testGlobs: [] })
     expect(prompt).toContain(CODE_READING)
     expect(prompt).toContain(`Plan the split from ${CODE_OUTLINE_TOOL}`)
     expect(prompt).not.toContain('Read a file whole')
   })
 
   it('small_files_are_split_together_so_one_reply_covers_several', () => {
-    const off = { functionLines: 0, typeLines: 0, fileLines: 0 }
-    const prompt = cleanupPrompt('Order cancellation', cwd, { source: { functionLines: 25, typeLines: 0, fileLines: 400 }, tests: off, testGlobs: [] })
+    const off = { functionLines: 0, functionComplexity: 0, typeLines: 0, fileLines: 0 }
+    const prompt = cleanupPrompt('Order cancellation', cwd, { source: { ...off, functionLines: 25, fileLines: 400 }, tests: off, testGlobs: [] })
     expect(prompt).toContain('Outline every listed file in one reply')
     expect(prompt).toContain('the splits of several small files in one reply')
   })

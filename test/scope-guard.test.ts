@@ -49,18 +49,18 @@ describe('ScopeGuard for blind planning', () => {
     const readable = readableIn(blindPlanScope('Order cancellation', ['docs/api/**']))
     expect(readable('docs/intent/orders.md')).toBe(true)
     expect(readable('docs/api/orders.md')).toBe(false)
-    expect(readable('.agent/plan/order-cancellation.tasks.json')).toBe(false)
+    expect(readable('.kiwi/specs/order-cancellation.tasks.json')).toBe(false)
   })
 
   it('only_the_spec_file_its_review_and_its_decisions_are_writable_and_writing_them_needs_no_permission_prompt', async () => {
-    expect(await use('Write', { file_path: 'plan/order-cancellation.spec.md' })).toEqual({ allow: true })
-    expect(await use('Edit', { file_path: '.agent/plan/order-cancellation.review.md' })).toEqual({ allow: true })
-    expect(await use('Read', { file_path: '.agent/plan/order-cancellation.review.md' })).toBeUndefined()
-    expect(await use('Write', { file_path: 'plan/other.spec.md' })).toMatchObject({ deny: expect.any(String) })
+    expect(await use('Write', { file_path: 'specs/order-cancellation.spec.md' })).toEqual({ allow: true })
+    expect(await use('Edit', { file_path: '.kiwi/specs/order-cancellation.review.md' })).toEqual({ allow: true })
+    expect(await use('Read', { file_path: '.kiwi/specs/order-cancellation.review.md' })).toBeUndefined()
+    expect(await use('Write', { file_path: 'specs/other.spec.md' })).toMatchObject({ deny: expect.any(String) })
     // The planner proposes on the decisions in their own file; the mapper's other file, the tasks, is not its to read.
-    expect(await use('Edit', { file_path: '.agent/plan/order-cancellation.decisions.md' })).toEqual({ allow: true })
-    expect(await use('Read', { file_path: '.agent/plan/order-cancellation.decisions.md' })).toBeUndefined()
-    expect(await use('Read', { file_path: '.agent/plan/order-cancellation.tasks.json' })).toMatchObject({ deny: expect.any(String) })
+    expect(await use('Edit', { file_path: '.kiwi/specs/order-cancellation.decisions.md' })).toEqual({ allow: true })
+    expect(await use('Read', { file_path: '.kiwi/specs/order-cancellation.decisions.md' })).toBeUndefined()
+    expect(await use('Read', { file_path: '.kiwi/specs/order-cancellation.tasks.json' })).toMatchObject({ deny: expect.any(String) })
   })
 
   it('the_docs_are_the_users_so_a_write_there_is_neither_allowed_outright_nor_denied_but_asked', async () => {
@@ -71,11 +71,11 @@ describe('ScopeGuard for blind planning', () => {
   })
 
   it('every_specs_is_readable_as_intent_but_no_other_features_review_tasks_or_decisions', async () => {
-    expect(await use('Read', { file_path: 'plan/refunds.spec.md' })).toBeUndefined()
-    expect(await use('Glob', { pattern: '*.spec.md', path: 'plan' })).toBeUndefined()
-    expect(await use('Read', { file_path: '.agent/plan/refunds.review.md' })).toMatchObject({ deny: expect.any(String) })
-    expect(await use('Read', { file_path: '.agent/plan/refunds.tasks.json' })).toMatchObject({ deny: expect.any(String) })
-    expect(await use('Read', { file_path: '.agent/plan/refunds.decisions.md' })).toMatchObject({ deny: expect.any(String) })
+    expect(await use('Read', { file_path: 'specs/refunds.spec.md' })).toBeUndefined()
+    expect(await use('Glob', { pattern: '*.spec.md', path: 'specs' })).toBeUndefined()
+    expect(await use('Read', { file_path: '.kiwi/specs/refunds.review.md' })).toMatchObject({ deny: expect.any(String) })
+    expect(await use('Read', { file_path: '.kiwi/specs/refunds.tasks.json' })).toMatchObject({ deny: expect.any(String) })
+    expect(await use('Read', { file_path: '.kiwi/specs/refunds.decisions.md' })).toMatchObject({ deny: expect.any(String) })
   })
 
   it('paths_outside_the_workspace_and_bash_are_denied', async () => {
@@ -84,7 +84,7 @@ describe('ScopeGuard for blind planning', () => {
   })
 
   it('the_spec_itself_can_be_read_back_for_revision', async () => {
-    expect(await use('Read', { file_path: 'plan/order-cancellation.spec.md' })).toBeUndefined()
+    expect(await use('Read', { file_path: 'specs/order-cancellation.spec.md' })).toBeUndefined()
   })
 
   it('the_root_readme_counts_as_intent_whatever_its_casing', async () => {
@@ -94,8 +94,8 @@ describe('ScopeGuard for blind planning', () => {
   })
 
   it('the_unfiled_decisions_are_read_as_intent_and_a_decision_reaching_beyond_the_feature_is_added_without_a_prompt', async () => {
-    expect(await use('Read', { file_path: 'plan/unfiled-decisions.md' })).toBeUndefined()
-    expect(await use('Edit', { file_path: 'plan/unfiled-decisions.md' })).toEqual({ allow: true })
+    expect(await use('Read', { file_path: 'specs/unfiled-decisions.md' })).toBeUndefined()
+    expect(await use('Edit', { file_path: 'specs/unfiled-decisions.md' })).toEqual({ allow: true })
   })
 })
 
@@ -104,19 +104,19 @@ describe('ScopeGuard for filing decisions', () => {
   const file = (toolName: string, input: unknown) => filing.preToolUse({ toolName, input, toolUseId: 't' })
 
   it('reads_what_a_planner_reads_and_never_the_code', async () => {
-    expect(await file('Read', { file_path: 'plan/unfiled-decisions.md' })).toBeUndefined()
-    expect(await file('Read', { file_path: 'plan/tenants.spec.md' })).toBeUndefined()
+    expect(await file('Read', { file_path: 'specs/unfiled-decisions.md' })).toBeUndefined()
+    expect(await file('Read', { file_path: 'specs/tenants.spec.md' })).toBeUndefined()
     expect(await file('Read', { file_path: 'docs/intent/identity.md' })).toBeUndefined()
     expect(await file('Read', { file_path: 'src/Tenants/Invite.cs' })).toMatchObject({ deny: expect.any(String) })
-    expect(await file('Read', { file_path: '.agent/plan/tenants.decisions.md' })).toMatchObject({ deny: expect.any(String) })
+    expect(await file('Read', { file_path: '.kiwi/specs/tenants.decisions.md' })).toMatchObject({ deny: expect.any(String) })
     expect(await file('Read', { file_path: 'docs/api/tenants.md' })).toMatchObject({ deny: expect.any(String) })
   })
 
   it('removing_a_filed_entry_needs_no_prompt_but_every_spec_or_doc_write_is_asked', async () => {
-    expect(await file('Edit', { file_path: 'plan/unfiled-decisions.md' })).toEqual({ allow: true })
-    expect(await file('Edit', { file_path: 'plan/tenants.spec.md' })).toBeUndefined()
+    expect(await file('Edit', { file_path: 'specs/unfiled-decisions.md' })).toEqual({ allow: true })
+    expect(await file('Edit', { file_path: 'specs/tenants.spec.md' })).toBeUndefined()
     expect(await file('Write', { file_path: 'docs/intent/identity.md' })).toBeUndefined()
-    expect(await file('Write', { file_path: '.agent/plan/tenants.tasks.json' })).toMatchObject({ deny: expect.any(String) })
+    expect(await file('Write', { file_path: '.kiwi/specs/tenants.tasks.json' })).toMatchObject({ deny: expect.any(String) })
     expect(await file('Bash', { command: 'ls' })).toMatchObject({ deny: expect.any(String) })
   })
 })
@@ -132,19 +132,19 @@ describe('blind plan helpers', () => {
     expect(featureSlug('Ändra ÅÄÖ')).toBe('andra-aao')
   })
 
-  it('spec_lives_under_plan_in_the_workspace', () => {
-    expect(specPath(cwd, 'Order cancellation')).toBe(`${cwd}${process.platform === 'win32' ? '\\' : '/'}plan${process.platform === 'win32' ? '\\' : '/'}order-cancellation.spec.md`)
+  it('spec_lives_under_specs_in_the_workspace', () => {
+    expect(specPath(cwd, 'Order cancellation')).toBe(`${cwd}${process.platform === 'win32' ? '\\' : '/'}specs${process.platform === 'win32' ? '\\' : '/'}order-cancellation.spec.md`)
   })
 
   it('prompt_names_the_feature_the_spec_file_and_the_stable_names', () => {
     const prompt = blindPlanPrompt('Order cancellation', cwd)
-    expect(prompt).toContain('plan/order-cancellation.spec.md')
-    expect(prompt).toContain('.agent/plan/order-cancellation.decisions.md')
+    expect(prompt).toContain('specs/order-cancellation.spec.md')
+    expect(prompt).toContain('.kiwi/specs/order-cancellation.decisions.md')
     expect(prompt).toContain('status: draft')
     expect(prompt).toContain('it never changes once written')
     expect(prompt).toContain('(was Old name)')
     expect(flowed(prompt)).toContain('Write nothing until the user says go')
-    expect(BLIND_PLAN_TOOLS).toEqual(['Read', 'Glob', 'MarkdownSearch', 'JsonSchema', 'JsonQuery', 'Write', 'Edit', 'AskUser'])
+    expect(BLIND_PLAN_TOOLS).toEqual(['Read', 'Glob', 'MarkdownSearch', 'JsonSchema', 'JsonQuery', 'Write', 'Edit', 'MultiEdit', 'AskUser'])
   })
 
   it('prompt_states_the_contract_scenarios_with_nested_edges_and_no_restating_sections', () => {
@@ -157,7 +157,7 @@ describe('blind plan helpers', () => {
 
   it('prompt_reads_the_other_specs_as_intent_and_asks_when_a_doc_and_a_spec_disagree', () => {
     const prompt = blindPlanPrompt('Order cancellation', cwd)
-    expect(prompt).toContain('plan/*.spec.md')
+    expect(prompt).toContain('specs/*.spec.md')
     expect(flowed(prompt)).toContain("an approved or implemented spec is that feature's definition")
     expect(flowed(prompt)).toContain('Where a doc and an approved spec disagree, ask')
     expect(prompt).toContain('or of another feature\'s spec ends with its citation')
@@ -169,7 +169,7 @@ describe('blind plan helpers', () => {
 
   it('prompt_reads_the_unfiled_decisions_as_the_users_latest_word_and_records_what_reaches_beyond_the_feature', () => {
     const prompt = blindPlanPrompt('Order cancellation', cwd)
-    expect(prompt).toContain('plan/unfiled-decisions.md')
+    expect(prompt).toContain('specs/unfiled-decisions.md')
     expect(prompt).toContain(UNFILED_DECISIONS)
   })
 })

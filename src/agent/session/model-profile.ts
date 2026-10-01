@@ -31,9 +31,10 @@ export type Provider = {
 
 /**
  * The step a session runs as: what it is for decides which model it gets. A
- * fix of a failed test run is an implement session, but a step of its own.
+ * fix of a failed test run is an implement session, but a step of its own, as
+ * is the build of an approved plan, which carries on in the plan's session.
  */
-export type Step = SessionMode | 'fix'
+export type Step = SessionMode | 'fix' | 'code-build'
 
 /** One model to run a step on, named by its provider. */
 export type ModelChoice = {

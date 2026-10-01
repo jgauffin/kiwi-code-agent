@@ -1,9 +1,14 @@
 import { readFile, stat } from 'node:fs/promises'
 import { matchesGlob, relative } from 'node:path'
-import { measureUnits, type Unit, type UnitKind } from './unit-size'
+import { describeBreaches, type Breach } from './breach'
+import { measureUnits, type Unit } from './unit-size'
 
-/** Code lines a unit of each kind may have; 0 turns the limit off. */
-export type Thresholds = { functionLines: number; typeLines: number; fileLines: number }
+/**
+ * Code lines a unit of each kind may have, and the cognitive complexity a
+ * function may have; 0 turns that limit off. Complexity is what a function
+ * is held to; its line limit only catches the long one that never branches.
+ */
+export type Thresholds = { functionLines: number; functionComplexity: number; typeLines: number; fileLines: number }
 
 /**
  * What a file is measured against. A test file gets its own, larger limits:
@@ -23,24 +28,36 @@ export const DEFAULT_TEST_GLOBS = ['**/*.test.*', '**/*test.*', '**/*tests.*', '
 const isTest = (rel: string, globs: string[]): boolean =>
   globs.some((glob) => matchesGlob(rel.toLowerCase(), glob.toLowerCase()))
 
-export type Oversized = Unit & { path: string; threshold: number }
+/** A unit over one or more of its limits, flagged once with each limit it passed. */
+export type Oversized = Unit & { path: string; breaches: Breach[] }
 
 /** Beyond this a file is not measured: it is generated or data, not a unit anyone splits. */
 const MAX_BYTES = 1_000_000
 
-const limitFor = (kind: UnitKind, thresholds: Thresholds): number =>
-  kind === 'function' ? thresholds.functionLines : kind === 'type' ? thresholds.typeLines : thresholds.fileLines
+const lineLimit = (unit: Unit, thresholds: Thresholds): number =>
+  unit.kind === 'function' ? thresholds.functionLines : unit.kind === 'type' ? thresholds.typeLines : thresholds.fileLines
 
 const anyOf = (thresholds: Thresholds): boolean =>
-  thresholds.functionLines > 0 || thresholds.typeLines > 0 || thresholds.fileLines > 0
+  thresholds.functionLines > 0 || thresholds.functionComplexity > 0 || thresholds.typeLines > 0 || thresholds.fileLines > 0
 
 export const anyLimit = (limits: Limits): boolean => anyOf(limits.source) || anyOf(limits.tests)
 
-/** The units strictly over their kind's limit; a limit of 0 flags nothing. */
+/** Complexity first: it is what the split is meant to bring down. */
+function breaches(unit: Unit, thresholds: Thresholds): Breach[] {
+  const found: Breach[] = []
+  const over = (measure: Breach['measure'], value: number | undefined, limit: number): void => {
+    if (value !== undefined && limit > 0 && value > limit) found.push({ measure, value, limit })
+  }
+  if (unit.kind === 'function') over('complexity', unit.complexity, thresholds.functionComplexity)
+  over('lines', unit.lines, lineLimit(unit, thresholds))
+  return found
+}
+
+/** The units strictly over a limit of their kind; a limit of 0 flags nothing. */
 export function oversized(path: string, units: Unit[], thresholds: Thresholds): Oversized[] {
   return units.flatMap((unit) => {
-    const threshold = limitFor(unit.kind, thresholds)
-    return threshold > 0 && unit.lines > threshold ? [{ ...unit, path, threshold }] : []
+    const found = breaches(unit, thresholds)
+    return found.length > 0 ? [{ ...unit, path, breaches: found }] : []
   })
 }
 
@@ -73,9 +90,7 @@ async function readText(path: string): Promise<string | undefined> {
   }
 }
 
-/** One line per unit, as the cleanup run reads it: `src/a.ts:12 name (function, 61 lines, limit 25)`. */
+/** One line per unit, as the cleanup run reads it: `src/a.ts:12 name (function, complexity 22, limit 15; 70 lines, limit 60)`. */
 export function sizeReport(cwd: string, items: Oversized[]): string {
-  return items
-    .map((u) => `${relative(cwd, u.path).split('\\').join('/')}:${u.line} ${u.name} (${u.kind}, ${u.lines} lines, limit ${u.threshold})`)
-    .join('\n')
+  return items.map((u) => `${relative(cwd, u.path).split('\\').join('/')}:${u.line} ${u.name} (${u.kind}, ${describeBreaches(u.breaches)})`).join('\n')
 }

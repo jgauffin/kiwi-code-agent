@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { SessionEvent } from '../src/agent/session/code-session'
 import type { QuestionOutcome } from '../src/agent/session/user-question'
 
 // The webview talks to the host through this handle, acquired when its modules load.
 ;(globalThis as Record<string, unknown>).acquireVsCodeApi = () => ({ postMessage: () => {} })
+
+// Test files share a worker, so the module registry is cleared first: what
+// loads here is this file's own, bound to its stub and its document.
+vi.resetModules()
 
 const { ChatTranscript } = await import('../src/chat/webview/chat-transcript')
 const { QuestionCard } = await import('../src/chat/webview/question-card')

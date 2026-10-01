@@ -1,6 +1,7 @@
 import { ASK_USER_TOOL } from '../openai-session/tools/ask-user'
 import { MARKDOWN_SEARCH_TOOL } from '../openai-session/tools/markdown-search'
 import { DOC_READING } from '../openai-session/tools/markdown/outline-gate'
+import { EDIT_WRITING } from '../openai-session/tools/edit'
 import { DOCS_DIR, README_GLOB, SPECS_GLOB } from './blind-plan'
 import type { Scope } from './scope-guard'
 import { UNFILED_FILE } from './unfiled-decisions'
@@ -23,7 +24,7 @@ export function fileDecisionsScope(ignored: string[] = []): Scope {
   }
 }
 
-export const FILE_DECISIONS_TOOLS = ['Read', 'Glob', MARKDOWN_SEARCH_TOOL, 'Write', 'Edit', ASK_USER_TOOL]
+export const FILE_DECISIONS_TOOLS = ['Read', 'Glob', MARKDOWN_SEARCH_TOOL, 'Write', 'Edit', 'MultiEdit', ASK_USER_TOOL]
 
 /** The first message: the file is the whole assignment. */
 export function fileDecisionsKickoff(): string {
@@ -37,7 +38,7 @@ export function fileDecisionsPrompt(cwd: string): string {
 
 Each entry is \`### Title\` with a \`decided\` line and an \`affects\` line naming the features it reaches, and \`docs\` for what no spec holds yet.
 
-What you may read: \`${DOCS_DIR}/**\`, the README, the specs and the unfiled file. The docs map above gives you every doc and every section. ${DOC_READING} Nothing else exists for you; do not try.
+What you may read: \`${DOCS_DIR}/**\`, the README, the specs and the unfiled file. The docs map above gives you every doc and every section. ${DOC_READING} Nothing else exists for you; do not try. ${EDIT_WRITING}
 
 First, in chat, one line per entry: where it goes, as the rule or section it changes or adds, and nothing else. Then stop and wait: the user picks what is filed.
 

@@ -67,8 +67,8 @@ Summarise a log in every run directory that has one:
 
 ```js
 const rows = []
-for (const dir of await readdir('.agent/runs')) {
-  const file = `.agent/runs/${dir}events.jsonl`
+for (const dir of await readdir('.kiwi/runs')) {
+  const file = `.kiwi/runs/${dir}events.jsonl`
   if (!(await exists(file))) continue
   const events = (await read(file)).split('\n').filter(Boolean).map((l) => JSON.parse(l))
   rows.push(`${dir} ${events.length} events`)

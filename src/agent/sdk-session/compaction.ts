@@ -1,6 +1,7 @@
 import type { Query, SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { SessionEvent } from '../session/code-session'
 import { compactionPoint } from '../session/compaction-point'
+import { errorMessage } from '../../error-message'
 
 /**
  * The share of the engine's window at which a turn is stopped to compact.
@@ -65,7 +66,7 @@ export class SdkCompaction {
     if (this.busy === 0) return this.startCompacting()
     this.stage = 'stopping'
     this.owesTurn = true
-    this.engine.query.interrupt().catch((error: unknown) => this.engine.emit({ type: 'error', message: `Stopping the turn to compact: ${messageOf(error)}`, fatal: false }))
+    this.engine.query.interrupt().catch((error: unknown) => this.engine.emit({ type: 'error', message: `Stopping the turn to compact: ${errorMessage(error)}`, fatal: false }))
   }
 
   /** The user pressed Stop: whatever compaction is under way finishes, but the turn does not carry on. */
@@ -175,7 +176,7 @@ export class SdkCompaction {
       this.window = usage.maxTokens
       if (report) this.report(usage.totalTokens, usage.maxTokens)
     } catch (error) {
-      this.engine.emit({ type: 'error', message: `Context usage: ${messageOf(error)}`, fatal: false })
+      this.engine.emit({ type: 'error', message: `Context usage: ${errorMessage(error)}`, fatal: false })
     }
   }
 }
@@ -195,8 +196,4 @@ function errorNotice(message: SDKMessage): string | undefined {
   const text = message.message.content.map((block) => (block.type === 'text' ? block.text : '')).join('')
   const match = /^Error: (?:Error during compaction: )?([\s\S]*)$/.exec(text)
   return match?.[1]
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }

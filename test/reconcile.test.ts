@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { ScopeGuard } from '../src/agent/phases/scope-guard'
 import { RECONCILE_TOOLS, progressLine, reconcileKickoff, reconcilePrompt, reconcileScope } from '../src/agent/phases/reconcile'
 import { blindPlanPrompt, decisionsHandoffPrompt, docsAfterApprovalPrompt, docsCutPrompt, docsReviewPrompt, rulingsHandoffPrompt } from '../src/agent/phases/blind-plan'
+import { UNFILED_DECISIONS } from '../src/agent/phases/unfiled-decisions'
 
 const cwd = process.platform === 'win32' ? 'D:\\work\\repo' : '/work/repo'
 const guard = new ScopeGuard(cwd, reconcileScope('Order cancellation'))
@@ -16,14 +17,14 @@ describe('ScopeGuard for reconciling', () => {
   })
 
   it('only_the_decisions_and_the_scenario_context_are_writable_so_the_spec_stays_the_planners_the_board_goes_through_its_tool_and_nothing_leaks_into_code_or_docs', async () => {
-    expect(await use('Write', { file_path: '.agent/plan/order-cancellation.decisions.md' })).toEqual({ allow: true })
-    expect(await use('Edit', { file_path: '.agent/plan/order-cancellation.decisions.md' })).toEqual({ allow: true })
-    expect(await use('Write', { file_path: '.agent/plan/order-cancellation.context.md' })).toEqual({ allow: true })
-    expect(await use('Write', { file_path: '.agent/plan/order-cancellation.tasks.json' })).toMatchObject({ deny: expect.any(String) })
+    expect(await use('Write', { file_path: '.kiwi/specs/order-cancellation.decisions.md' })).toEqual({ allow: true })
+    expect(await use('Edit', { file_path: '.kiwi/specs/order-cancellation.decisions.md' })).toEqual({ allow: true })
+    expect(await use('Write', { file_path: '.kiwi/specs/order-cancellation.context.md' })).toEqual({ allow: true })
+    expect(await use('Write', { file_path: '.kiwi/specs/order-cancellation.tasks.json' })).toMatchObject({ deny: expect.any(String) })
     expect(await use('Edit', { file_path: 'src/Orders/OrderService.cs' })).toMatchObject({ deny: expect.any(String) })
-    expect(await use('Edit', { file_path: 'plan/order-cancellation.spec.md' })).toMatchObject({ deny: expect.any(String) })
+    expect(await use('Edit', { file_path: 'specs/order-cancellation.spec.md' })).toMatchObject({ deny: expect.any(String) })
     expect(await use('Edit', { file_path: 'docs/intent/orders.md' })).toMatchObject({ deny: expect.any(String) })
-    expect(await use('Edit', { file_path: '.agent/plan/order-cancellation.review.md' })).toMatchObject({ deny: expect.any(String) })
+    expect(await use('Edit', { file_path: '.kiwi/specs/order-cancellation.review.md' })).toMatchObject({ deny: expect.any(String) })
   })
 
   it('bash_and_paths_outside_the_workspace_are_denied', async () => {
@@ -36,8 +37,8 @@ describe('reconcile prompt', () => {
   const prompt = reconcilePrompt('Order cancellation', cwd)
 
   it('names_the_spec_the_decisions_file_and_what_to_look_for', () => {
-    expect(prompt).toContain('plan/order-cancellation.spec.md')
-    expect(prompt).toContain('.agent/plan/order-cancellation.decisions.md')
+    expect(prompt).toContain('specs/order-cancellation.spec.md')
+    expect(prompt).toContain('.kiwi/specs/order-cancellation.decisions.md')
     expect(prompt).not.toContain('## Decisions')
     expect(prompt).toContain('- on: Cancel command, Shipped order')
     expect(prompt).toContain('- finding:')
@@ -65,7 +66,7 @@ describe('reconcile prompt', () => {
   })
 
   it('the_spec_stands_in_for_the_docs_and_the_other_specs_so_the_check_does_not_read_them_again', () => {
-    expect(prompt).toContain('plan/*.spec.md')
+    expect(prompt).toContain('specs/*.spec.md')
     expect(prompt).toContain('do not browse those')
     expect(prompt).toContain('docs/intent/orders.md#Cancellation')
     expect(blindPlanPrompt('Order cancellation', cwd)).toContain('ends with its citation in parentheses')
@@ -91,7 +92,7 @@ describe('reconcile prompt', () => {
   })
 
   it('every_run_writes_where_each_scenario_is_built_so_the_implementer_starts_there', () => {
-    expect(prompt).toContain('.agent/plan/order-cancellation.context.md')
+    expect(prompt).toContain('.kiwi/specs/order-cancellation.context.md')
     expect(prompt).toContain('## Cancelling an order')
     expect(prompt).toContain('every run')
     expect(reconcileKickoff(true)).toContain('context')
@@ -114,13 +115,26 @@ describe('reconcile prompt', () => {
   it('a_how_question_is_the_implementers_not_a_decision', () => {
     expect(prompt).toContain('changes how a rule is built but not what it does is not a decision')
   })
+
+  it('approving_a_migrated_spec_checks_it_through_the_same_decisions_file_as_any_spec', () => {
+    expect(prompt).toContain('built: true')
+    expect(prompt).toContain('a decision like any other, named in `on` the same way')
+    // One decisions file for every spec, migrated or not: no second one opens for the built case.
+    expect(prompt.match(/\.kiwi\/specs\/order-cancellation\.decisions\.md/g)).toHaveLength(1)
+  })
+
+  it('a_spec_marked_built_is_asked_whether_the_code_already_does_each_rule_not_only_whether_it_stands_in_the_way', () => {
+    expect(prompt).toContain('not only whether the code accommodates it but whether the code already does it')
+    expect(prompt).toContain('it is not built here')
+    expect(prompt).toContain('report no decisions, the same clean result as any other feature')
+  })
 })
 
 describe('the handoffs to the planner', () => {
   it('names_the_decisions_to_propose_on_and_forbids_ruling', () => {
     const prompt = decisionsHandoffPrompt('Order cancellation', ['Shipped orders cannot be cancelled', 'Refunds are asynchronous'])
     expect(prompt).toContain('- Shipped orders cannot be cancelled\n- Refunds are asynchronous')
-    expect(prompt).toContain('.agent/plan/order-cancellation.decisions.md')
+    expect(prompt).toContain('.kiwi/specs/order-cancellation.decisions.md')
     expect(prompt).toContain('one to three `- proposed: ...` lines')
     // A proposal is the rule's replacement text, so picking it is verbatim and the rule stays one sentence.
     expect(prompt).toContain("the rule's new text as it would stand in the spec, one sentence")
@@ -143,7 +157,7 @@ describe('the handoffs to the planner', () => {
       { title: 'Refunds are asynchronous', ruling: 'keep' },
     ])
     expect(prompt).toContain('- Shipped orders cannot be cancelled: a shipped order is refused\n- Refunds are asynchronous: keep')
-    expect(prompt).toContain('.agent/plan/order-cancellation.decisions.md')
+    expect(prompt).toContain('.kiwi/specs/order-cancellation.decisions.md')
     expect(prompt).toContain('`keep` keeps the rule as it stands')
     expect(prompt).toContain('the text of a proposal replaces the rule verbatim')
     expect(prompt).toContain('[applied]')
@@ -155,7 +169,7 @@ describe('the handoffs to the planner', () => {
 
   it('on_approval_the_planner_lists_what_the_docs_should_now_say_and_edits_only_when_asked', () => {
     const prompt = docsReviewPrompt('Order cancellation')
-    expect(prompt).toContain('plan/order-cancellation.spec.md')
+    expect(prompt).toContain('specs/order-cancellation.spec.md')
     expect(prompt).toContain('is approved')
     expect(prompt).toContain('one line per doc section')
     expect(prompt).toContain('Edit nothing')
@@ -169,9 +183,23 @@ describe('the handoffs to the planner', () => {
 
   it('cutting_covered_docs_leaves_the_approved_spec_alone_since_a_changed_spec_is_checked_against_the_code_again', () => {
     const prompt = docsCutPrompt('Order cancellation')
-    expect(prompt).toContain('plan/order-cancellation.spec.md')
-    expect(prompt).toContain('covers or contradicts')
+    expect(prompt).toContain('specs/order-cancellation.spec.md')
+    expect(prompt).toContain('now covers down to what no spec holds')
     expect(prompt).toContain('Leave the spec as it is')
+  })
+
+  it('a_covered_section_can_go_but_a_contradicting_one_is_only_reported_on_either_doc_review_or_doc_cut', () => {
+    for (const prompt of [docsReviewPrompt('Order cancellation'), docsCutPrompt('Order cancellation')]) {
+      expect(prompt).toContain('otherwise than the spec')
+      expect(prompt).toContain("which side is current is the user's to say")
+    }
+  })
+
+  it('a_contradiction_the_user_rules_on_is_recorded_as_an_unfiled_decision_naming_the_feature', () => {
+    for (const prompt of [docsReviewPrompt('Order cancellation'), docsCutPrompt('Order cancellation')]) {
+      expect(prompt).toContain('record the ruling as an unfiled decision naming "Order cancellation"')
+      expect(prompt).toContain(UNFILED_DECISIONS)
+    }
   })
 })
 

@@ -9,13 +9,13 @@ import { board, task } from './task-board-fixture'
 const allTested = (name: string): TaskBoard => board(task(name, { state: 'tested' }))
 const passed = (b: TaskBoard): TaskBoard => withRecord(b, { at: '2026-09-14T10:00:00Z', ok: true, text: '' })
 
-/** Specs go under `plan/`, every other plan file among the working files. */
+/** Specs go under `specs/`, every other plan file among the working files. */
 async function workspace(files: Record<string, string>): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'plans-'))
-  await mkdir(join(dir, 'plan'))
-  await mkdir(join(dir, '.agent', 'plan'), { recursive: true })
+  await mkdir(join(dir, 'specs'))
+  await mkdir(join(dir, '.kiwi', 'specs'), { recursive: true })
   for (const [name, text] of Object.entries(files)) {
-    await writeFile(name.endsWith('.spec.md') ? join(dir, 'plan', name) : join(dir, '.agent', 'plan', name), text)
+    await writeFile(name.endsWith('.spec.md') ? join(dir, 'specs', name) : join(dir, '.kiwi', 'specs', name), text)
   }
   return dir
 }
@@ -32,10 +32,10 @@ describe('plan list', () => {
     })
     try {
       expect(await listPlans(dir)).toEqual([
-        { feature: 'Audit', path: join(dir, 'plan', 'audit.spec.md'), status: 'verified' },
+        { feature: 'Audit', path: join(dir, 'specs', 'audit.spec.md'), status: 'verified' },
         // All tested but not yet passed the test run: still in play.
-        { feature: 'Billing', path: join(dir, 'plan', 'billing.spec.md'), status: 'approved' },
-        { feature: 'Orders', path: join(dir, 'plan', 'orders.spec.md'), status: 'draft' },
+        { feature: 'Billing', path: join(dir, 'specs', 'billing.spec.md'), status: 'approved' },
+        { feature: 'Orders', path: join(dir, 'specs', 'orders.spec.md'), status: 'draft' },
       ])
       expect(await listDraftPlans(dir)).toMatchObject([{ feature: 'Orders' }])
     } finally {

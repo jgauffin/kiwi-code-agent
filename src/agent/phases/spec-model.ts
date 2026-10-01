@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { isAbsolute, relative, resolve } from 'node:path'
 import type { PostToolUseOutcome, SessionHooks, ToolUse } from '../session/hooks'
-import { PLAN_DIR } from './blind-plan'
+import { WRITES_NAMED_FILE } from '../permissions/tool-classes'
+import { SPECS_DIR } from './blind-plan'
 import type { PlanItem } from './plan-review'
 import { bodyOf } from './spec-file'
 
@@ -235,13 +236,13 @@ export class SpecContract implements SessionHooks {
   constructor(private readonly cwd: string) {}
 
   async postToolUse(tool: ToolUse & { output: string; isError: boolean }): Promise<PostToolUseOutcome> {
-    if (tool.isError || (tool.toolName !== 'Write' && tool.toolName !== 'Edit')) return undefined
+    if (tool.isError || !WRITES_NAMED_FILE.has(tool.toolName)) return undefined
     const input = (typeof tool.input === 'object' && tool.input !== null ? tool.input : {}) as Record<string, unknown>
     const raw = input['file_path']
     if (typeof raw !== 'string') return undefined
     const path = isAbsolute(raw) ? raw : resolve(this.cwd, raw)
     const rel = relative(this.cwd, path).split('\\').join('/')
-    if (!rel.startsWith(`${PLAN_DIR}/`) || !rel.endsWith('.spec.md')) return undefined
+    if (!rel.startsWith(`${SPECS_DIR}/`) || !rel.endsWith('.spec.md')) return undefined
     const spec = parseSpecText(await readFile(path, 'utf8'))
     if (spec.problems.length === 0) return undefined
     return { additionalContext: contractProblems(rel, spec.problems) }

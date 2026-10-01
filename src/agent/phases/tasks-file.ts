@@ -4,10 +4,11 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import { readOptional, replaceFile } from '../workspace-files'
 import { WORK_DIR, featureSlug } from './blind-plan'
+import type { Decision } from './decisions'
 import { specFingerprint, type Scenario, type Spec } from './spec-model'
 
 /**
- * The feature's task board, `.agent/plan/<slug>.tasks.json`: derived from the
+ * The feature's task board, `.kiwi/specs/<slug>.tasks.json`: derived from the
  * spec once the check against the code is clean, and moved along by the
  * implementer through its tool. The file is the only state: it survives a
  * fresh session and the plan view reads it as it is.
@@ -36,7 +37,7 @@ export type Task = {
   foreignFiles: string[]
   /** Paths the task starts from: where the spec check found its scenario is built, or what a mapping run read on an older board. */
   context: string[]
-  /** A mapping run's note to the implementer, markdown; empty on a derived board. */
+  /** A mapping run's note to the implementer, markdown; empty on a derived board, unless the spec is migrated behaviour the check found this scenario already built, in which case it says to add tests only. */
   how: string
   /** What the implementer proved, item by item. */
   proves: Proof[]
@@ -282,6 +283,16 @@ export function updateTask(board: TaskBoard, name: string, change: TaskProgress)
 }
 
 /**
+ * The behaviour the migration marked built this spec already has: the code
+ * already does it, so a brand-new task for it only adds the tests that prove
+ * it. A rule the check found a decision on disagreed with that at some point,
+ * so it builds like any other rule instead, whatever the ruling settled on;
+ * a withdrawn decision no longer counts, since it no longer disagrees.
+ */
+export const TESTS_ONLY_HOW =
+  'The behaviour already exists in the code: nothing here stood in its way, so do not change it. Read the files above, then add the test or tests that prove each rule, and move the task to tested once they pass.'
+
+/**
  * The board as the spec defines it: one task per scenario, named and grouped
  * by its title, delivering its live rules and edge cases, so every rule is
  * delivered by construction. Deriving again keeps each task's progress and
@@ -290,9 +301,21 @@ export function updateTask(board: TaskBoard, name: string, change: TaskProgress)
  * it has started, and gives way while it is still open. `context` is where the
  * spec check found each scenario is built, by scenario title: the newest check
  * replaces a task's, and a scenario it left out keeps what the task had.
+ *
+ * `built` and `decisions` carry what the check found for a spec migrated from
+ * a doc about behaviour the code already has: a brand-new task whose rules the
+ * check raised no decision on is told to add tests only, since nothing
+ * disagreed with it; a task that shares a scenario with a decision builds as
+ * any other, so only what disagreed gets built.
  */
-export function deriveBoard(spec: Spec, board: TaskBoard = emptyBoard(), context: Map<string, string[]> = new Map()): TaskBoard {
+export function deriveBoard(spec: Spec, board: TaskBoard = emptyBoard(), context: Map<string, string[]> = new Map(), built = false, decisions: Decision[] = []): TaskBoard {
   const found = new Map([...context].map(([title, paths]) => [title.trim().toLowerCase(), paths]))
+  const drift = new Set(
+    decisions
+      .filter((d) => d.state !== 'withdrawn')
+      .flatMap((d) => d.on)
+      .map((name) => name.trim().toLowerCase()),
+  )
   const scenarioTask = (t: Task) => sameName(t.group ?? '', t.name) || spec.scenarios.some((s) => sameName(s.title, t.name))
   const kept = board.tasks.filter((t) => !t.removed && !scenarioTask(t) && t.state !== 'open')
   const derived = new Map<string, { scenario: Scenario; delivers: string[] }>()
@@ -309,7 +332,20 @@ export function deriveBoard(spec: Spec, board: TaskBoard = emptyBoard(), context
     return { ...t, ...fromScenario(entry.scenario, entry.delivers), context: found.get(t.name.trim().toLowerCase()) ?? t.context, removed: false }
   })
   for (const [key, { scenario, delivers }] of derived) {
-    tasks.push({ ...fromScenario(scenario, delivers), files: [], newFiles: [], foreignFiles: [], context: found.get(key) ?? [], how: '', proves: [], note: '', built: '', state: 'open', removed: false })
+    const testsOnly = built && delivers.every((name) => !drift.has(name.trim().toLowerCase()))
+    tasks.push({
+      ...fromScenario(scenario, delivers),
+      files: [],
+      newFiles: [],
+      foreignFiles: [],
+      context: found.get(key) ?? [],
+      how: testsOnly ? TESTS_ONLY_HOW : '',
+      proves: [],
+      note: '',
+      built: '',
+      state: 'open',
+      removed: false,
+    })
   }
   return { ...board, tasks, spec: specFingerprint(spec) }
 }

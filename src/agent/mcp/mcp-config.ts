@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import { readOptional } from '../workspace-files'
 import { TOOL_SERVER_NAME } from '../sdk-session/tool-server'
+import { errorMessage } from '../../error-message'
 
 /**
  * One server of the workspace's `.mcp.json`, in the shape the Agent SDK takes
@@ -71,7 +72,7 @@ export function parseMcpConfig(text: string, env: Env): McpServers {
   try {
     json = JSON.parse(text)
   } catch (error) {
-    throw new Error(`not valid JSON: ${error instanceof Error ? error.message : String(error)}`)
+    throw new Error(`not valid JSON: ${errorMessage(error)}`)
   }
   const parsed = fileSchema.safeParse(json)
   if (!parsed.success) {
@@ -83,7 +84,7 @@ export function parseMcpConfig(text: string, env: Env): McpServers {
     try {
       servers[name] = normalise(config, env)
     } catch (error) {
-      throw new Error(`mcpServers.${name}: ${error instanceof Error ? error.message : String(error)}`)
+      throw new Error(`mcpServers.${name}: ${errorMessage(error)}`)
     }
   }
   return servers
@@ -125,6 +126,6 @@ async function readServerFile(path: string, env: Env): Promise<McpServers> {
   try {
     return parseMcpConfig(text, env)
   } catch (error) {
-    throw new Error(`${path}: ${error instanceof Error ? error.message : String(error)}`)
+    throw new Error(`${path}: ${errorMessage(error)}`)
   }
 }

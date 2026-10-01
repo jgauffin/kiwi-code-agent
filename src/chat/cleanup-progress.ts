@@ -28,7 +28,7 @@ export type CleanupProgress = {
   outcome?: string
 }
 
-const FILE_TOOLS = new Set(['Read', 'Edit', 'Write'])
+const FILE_TOOLS = new Set(['Read', 'Edit', 'MultiEdit', 'Write'])
 
 export function startProgress(units: CleanupUnit[]): CleanupProgress {
   return { units: units.map((u) => ({ ...u, state: 'waiting' })), newFiles: [], stage: 'splitting' }

@@ -43,115 +43,115 @@ describe('plan housekeeping', () => {
   it('finished_feature_idle_a_week_is_marked_implemented_and_loses_its_working_files', async () => {
     await workspace(
       {
-        'plan/audit.spec.md': approvedSpec,
-        '.agent/plan/audit.tasks.json': finishedBoard,
-        '.agent/plan/audit.review.md': '# Review\n',
-        '.agent/plan/audit.decisions.md': '# Decisions\n',
+        'specs/audit.spec.md': approvedSpec,
+        '.kiwi/specs/audit.tasks.json': finishedBoard,
+        '.kiwi/specs/audit.review.md': '# Review\n',
+        '.kiwi/specs/audit.decisions.md': '# Decisions\n',
       },
       8,
     )
     const report = await sweepPlans(dir, NOW)
-    expect(await readFile(join(dir, 'plan/audit.spec.md'), 'utf8')).toContain('status: implemented')
-    expect(await exists('.agent/plan/audit.tasks.json')).toBe(false)
-    expect(await exists('.agent/plan/audit.review.md')).toBe(false)
-    expect(await exists('.agent/plan/audit.decisions.md')).toBe(false)
-    expect(report.implemented).toEqual(['plan/audit.spec.md'])
+    expect(await readFile(join(dir, 'specs/audit.spec.md'), 'utf8')).toContain('status: implemented')
+    expect(await exists('.kiwi/specs/audit.tasks.json')).toBe(false)
+    expect(await exists('.kiwi/specs/audit.review.md')).toBe(false)
+    expect(await exists('.kiwi/specs/audit.decisions.md')).toBe(false)
+    expect(report.implemented).toEqual(['specs/audit.spec.md'])
   })
 
   it('finished_feature_touched_this_week_keeps_its_working_files', async () => {
-    await workspace({ 'plan/audit.spec.md': approvedSpec, '.agent/plan/audit.tasks.json': finishedBoard }, 6)
+    await workspace({ 'specs/audit.spec.md': approvedSpec, '.kiwi/specs/audit.tasks.json': finishedBoard }, 6)
     await sweepPlans(dir, NOW)
-    expect(await readFile(join(dir, 'plan/audit.spec.md'), 'utf8')).toContain('status: approved')
-    expect(await exists('.agent/plan/audit.tasks.json')).toBe(true)
+    expect(await readFile(join(dir, 'specs/audit.spec.md'), 'utf8')).toContain('status: approved')
+    expect(await exists('.kiwi/specs/audit.tasks.json')).toBe(true)
   })
 
   it('feature_under_development_keeps_its_working_files_however_old', async () => {
-    await workspace({ 'plan/audit.spec.md': approvedSpec, '.agent/plan/audit.tasks.json': renderBoard(board(task('Log', { state: 'in_progress' }))) }, 90)
+    await workspace({ 'specs/audit.spec.md': approvedSpec, '.kiwi/specs/audit.tasks.json': renderBoard(board(task('Log', { state: 'in_progress' }))) }, 90)
     await sweepPlans(dir, NOW)
-    expect(await exists('.agent/plan/audit.tasks.json')).toBe(true)
+    expect(await exists('.kiwi/specs/audit.tasks.json')).toBe(true)
   })
 
   it('a_markdown_board_is_converted_and_keeps_its_age', async () => {
-    await workspace({ 'plan/audit.spec.md': approvedSpec, '.agent/plan/audit.tasks.md': legacyFinishedBoard }, 8)
+    await workspace({ 'specs/audit.spec.md': approvedSpec, '.kiwi/specs/audit.tasks.md': legacyFinishedBoard }, 8)
     const report = await sweepPlans(dir, NOW)
-    expect(report.converted).toEqual(['.agent/plan/audit.tasks.md'])
+    expect(report.converted).toEqual(['.kiwi/specs/audit.tasks.md'])
     // Converted, it is still a finished board untouched for a week: the sweep takes it in the same run.
-    expect(report.implemented).toEqual(['plan/audit.spec.md'])
-    expect(await exists('.agent/plan/audit.tasks.json')).toBe(false)
+    expect(report.implemented).toEqual(['specs/audit.spec.md'])
+    expect(await exists('.kiwi/specs/audit.tasks.json')).toBe(false)
   })
 
   it('a_draft_under_review_keeps_its_working_files_however_old', async () => {
-    await workspace({ 'plan/audit.spec.md': '---\nstatus: draft\n---\n# Audit\n', '.agent/plan/audit.review.md': '# Review\n' }, 90)
+    await workspace({ 'specs/audit.spec.md': '---\nstatus: draft\n---\n# Audit\n', '.kiwi/specs/audit.review.md': '# Review\n' }, 90)
     await sweepPlans(dir, NOW)
-    expect(await exists('.agent/plan/audit.review.md')).toBe(true)
+    expect(await exists('.kiwi/specs/audit.review.md')).toBe(true)
   })
 
   it('postponed_cleanup_keeps_the_working_files_however_old', async () => {
     await workspace(
-      { 'plan/audit.spec.md': approvedSpec, '.agent/plan/audit.tasks.json': renderBoard(withCleanupDecision(finished, 'postponed')) },
+      { 'specs/audit.spec.md': approvedSpec, '.kiwi/specs/audit.tasks.json': renderBoard(withCleanupDecision(finished, 'postponed')) },
       90,
     )
     await sweepPlans(dir, NOW)
-    expect(await exists('.agent/plan/audit.tasks.json')).toBe(true)
-    expect(await readFile(join(dir, 'plan/audit.spec.md'), 'utf8')).toContain('status: approved')
+    expect(await exists('.kiwi/specs/audit.tasks.json')).toBe(true)
+    expect(await readFile(join(dir, 'specs/audit.spec.md'), 'utf8')).toContain('status: approved')
   })
 
   it('working_files_without_a_spec_are_removed_after_a_week', async () => {
-    await workspace({ '.agent/plan/gone.tasks.json': renderBoard(board()), '.agent/plan/gone.review.md': '# Review\n' }, 8)
+    await workspace({ '.kiwi/specs/gone.tasks.json': renderBoard(board()), '.kiwi/specs/gone.review.md': '# Review\n' }, 8)
     const report = await sweepPlans(dir, NOW)
-    expect(await exists('.agent/plan/gone.tasks.json')).toBe(false)
-    expect(await exists('.agent/plan/gone.review.md')).toBe(false)
+    expect(await exists('.kiwi/specs/gone.tasks.json')).toBe(false)
+    expect(await exists('.kiwi/specs/gone.review.md')).toBe(false)
     expect(report.removed).toHaveLength(2)
   })
 
   it('working_files_without_a_spec_survive_the_first_week_since_a_branch_switch_can_hide_the_spec', async () => {
-    await workspace({ '.agent/plan/gone.tasks.json': renderBoard(board()) }, 6)
+    await workspace({ '.kiwi/specs/gone.tasks.json': renderBoard(board()) }, 6)
     await sweepPlans(dir, NOW)
-    expect(await exists('.agent/plan/gone.tasks.json')).toBe(true)
+    expect(await exists('.kiwi/specs/gone.tasks.json')).toBe(true)
   })
 
   it('legacy_working_files_under_plan_move_to_the_work_dir_and_the_spec_stays', async () => {
     await workspace(
       {
-        'plan/audit.spec.md': '---\nstatus: draft\n---\n# Audit\n',
-        'plan/audit.review.md': '# Review\n',
-        'plan/audit.decisions.md': '# Decisions\n',
-        'plan/audit.tasks.md': '# Tasks\n',
+        'specs/audit.spec.md': '---\nstatus: draft\n---\n# Audit\n',
+        'specs/audit.review.md': '# Review\n',
+        'specs/audit.decisions.md': '# Decisions\n',
+        'specs/audit.tasks.md': '# Tasks\n',
       },
       0,
     )
     const report = await sweepPlans(dir, NOW)
-    expect(await exists('plan/audit.spec.md')).toBe(true)
-    for (const kind of ['review', 'decisions', 'tasks']) expect(await exists(`plan/audit.${kind}.md`)).toBe(false)
-    for (const file of ['review.md', 'decisions.md', 'tasks.json']) expect(await exists(`.agent/plan/audit.${file}`)).toBe(true)
+    expect(await exists('specs/audit.spec.md')).toBe(true)
+    for (const kind of ['review', 'decisions', 'tasks']) expect(await exists(`specs/audit.${kind}.md`)).toBe(false)
+    for (const file of ['review.md', 'decisions.md', 'tasks.json']) expect(await exists(`.kiwi/specs/audit.${file}`)).toBe(true)
     expect(report.moved).toHaveLength(3)
   })
 
   it('a_legacy_file_is_left_in_place_when_the_work_dir_already_holds_one', async () => {
     await workspace(
-      { 'plan/audit.spec.md': '---\nstatus: draft\n---\n# Audit\n', 'plan/audit.tasks.md': '# old\n', '.agent/plan/audit.tasks.md': '- **New**: n\n' },
+      { 'specs/audit.spec.md': '---\nstatus: draft\n---\n# Audit\n', 'specs/audit.tasks.md': '# old\n', '.kiwi/specs/audit.tasks.md': '- **New**: n\n' },
       0,
     )
     const report = await sweepPlans(dir, NOW)
-    expect(await readFile(join(dir, 'plan/audit.tasks.md'), 'utf8')).toBe('# old\n')
-    expect(await readFile(join(dir, '.agent/plan/audit.tasks.json'), 'utf8')).toContain('"New"')
-    expect(report.blocked).toEqual(['plan/audit.tasks.md'])
+    expect(await readFile(join(dir, 'specs/audit.tasks.md'), 'utf8')).toBe('# old\n')
+    expect(await readFile(join(dir, '.kiwi/specs/audit.tasks.json'), 'utf8')).toContain('"New"')
+    expect(report.blocked).toEqual(['specs/audit.tasks.md'])
   })
 
   it('a_finished_feature_whose_week_old_working_files_are_still_under_plan_is_swept_in_the_same_run', async () => {
-    await workspace({ 'plan/audit.spec.md': approvedSpec, 'plan/audit.tasks.md': legacyFinishedBoard, 'plan/audit.review.md': '# Review\n' }, 8)
+    await workspace({ 'specs/audit.spec.md': approvedSpec, 'specs/audit.tasks.md': legacyFinishedBoard, 'specs/audit.review.md': '# Review\n' }, 8)
     await sweepPlans(dir, NOW)
-    expect(await readFile(join(dir, 'plan/audit.spec.md'), 'utf8')).toContain('status: implemented')
-    for (const path of ['plan/audit.tasks.md', 'plan/audit.review.md', '.agent/plan/audit.tasks.json', '.agent/plan/audit.review.md']) {
+    expect(await readFile(join(dir, 'specs/audit.spec.md'), 'utf8')).toContain('status: implemented')
+    for (const path of ['specs/audit.tasks.md', 'specs/audit.review.md', '.kiwi/specs/audit.tasks.json', '.kiwi/specs/audit.review.md']) {
       expect(await exists(path)).toBe(false)
     }
   })
 
   it('a_copy_left_under_plan_beside_its_working_file_goes_when_the_feature_is_swept', async () => {
-    await workspace({ 'plan/audit.spec.md': approvedSpec, 'plan/audit.tasks.md': '# old\n', '.agent/plan/audit.tasks.json': finishedBoard }, 8)
+    await workspace({ 'specs/audit.spec.md': approvedSpec, 'specs/audit.tasks.md': '# old\n', '.kiwi/specs/audit.tasks.json': finishedBoard }, 8)
     await sweepPlans(dir, NOW)
-    expect(await exists('plan/audit.tasks.md')).toBe(false)
-    expect(await exists('.agent/plan/audit.tasks.json')).toBe(false)
+    expect(await exists('specs/audit.tasks.md')).toBe(false)
+    expect(await exists('.kiwi/specs/audit.tasks.json')).toBe(false)
   })
 
   it('a_workspace_without_plans_sweeps_nothing', async () => {

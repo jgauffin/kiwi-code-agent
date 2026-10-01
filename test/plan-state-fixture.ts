@@ -3,9 +3,9 @@ import type { PlanState } from '../src/chat/protocol'
 /** A fresh draft plan with nothing in it; a test names only what its rule is about. */
 export function planState(over: Partial<PlanState> = {}): PlanState {
   return {
-    specPath: 'plan/orders.spec.md',
-    tasksPath: 'plan/orders.tasks.md',
-    decisionsPath: 'plan/orders.decisions.md',
+    specPath: 'specs/orders.spec.md',
+    tasksPath: 'specs/orders.tasks.md',
+    decisionsPath: 'specs/orders.decisions.md',
     stage: 'created',
     status: 'draft',
     body: '# Orders',

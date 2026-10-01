@@ -1,6 +1,7 @@
 import type { SessionMode } from '../../agent/session/session-manager'
 import type { QuestionOutcome } from '../../agent/session/user-question'
-import type { ReviewAction, UserPermissionDecision } from '../protocol'
+import type { BundleScope } from '../../agent/instructions/bundles'
+import type { AgentsMdAnswer, ReviewAction, UserPermissionDecision } from '../protocol'
 import type { Step, ViewTab } from './plan-step'
 
 export class PromptSubmittedEvent extends Event {
@@ -278,6 +279,17 @@ export class SessionRemovedEvent extends Event {
   }
 }
 
+/** The person's answer to the `AGENTS.md` offer shown over the chat. */
+export class AgentsMdAnsweredEvent extends Event {
+  static readonly type = 'agents-md-answered'
+  constructor(
+    public readonly scope: BundleScope,
+    public readonly answer: AgentsMdAnswer,
+  ) {
+    super(AgentsMdAnsweredEvent.type, { bubbles: true })
+  }
+}
+
 declare global {
   interface HTMLElementEventMap {
     [PromptSubmittedEvent.type]: PromptSubmittedEvent
@@ -312,5 +324,6 @@ declare global {
     [PlanApprovedEvent.type]: PlanApprovedEvent
     [McpReconnectRequestedEvent.type]: McpReconnectRequestedEvent
     [DefaultProfileChangedEvent.type]: DefaultProfileChangedEvent
+    [AgentsMdAnsweredEvent.type]: AgentsMdAnsweredEvent
   }
 }

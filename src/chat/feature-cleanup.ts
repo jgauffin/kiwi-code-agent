@@ -11,6 +11,7 @@ import { advance, editedUnitFile, finished, measured, resumed, settled, startPro
 import type { BuildListener } from './feature-build'
 import type { ChatRefresh, Notify, RunSessions, SizeLimits } from './feature-runs'
 import type { CleanupSweep, CleanupUnit, RunState } from './protocol'
+import { errorMessage } from '../error-message'
 
 /** A test run as the cleanup waits on it: whether it passed, and its line. */
 export type TestRun = { passed: boolean; text: string }
@@ -190,7 +191,7 @@ export class FeatureCleanup implements BuildListener {
     const file = editedUnitFile(next, event, toRelative)
     if (file) {
       this.remeasure(feature, file).catch((error: unknown) => {
-        this.deps.notify.warn(`cannot measure ${file} again: ${error instanceof Error ? error.message : String(error)}`)
+        this.deps.notify.warn(`cannot measure ${file} again: ${errorMessage(error)}`)
       })
     }
     return next !== progress
@@ -228,7 +229,7 @@ export class FeatureCleanup implements BuildListener {
     }
     const files = (child.files ?? []).map((f) => join(workspaceRoot, f))
     const left = await oversizedFiles(workspaceRoot, files, this.deps.sizeLimits.limits(), [])
-    const split = left.length === 0 ? 'Cleaned: every unit is within its limit' : `Cleanup left ${left.length} unit${left.length === 1 ? '' : 's'} over the limit`
+    const split = left.length === 0 ? 'Cleaned: every unit is within its limits' : `Cleanup left ${left.length} unit${left.length === 1 ? '' : 's'} over a limit`
     // Written before the test run, whose pass sweeps again: the offer was answered, and what the split left is not a new one.
     await recordCleanupDecision(tasksPath(workspaceRoot, feature), 'done')
     this.sweeps.delete(feature)
@@ -251,8 +252,7 @@ export class FeatureCleanup implements BuildListener {
       line: unit.line,
       name: unit.name,
       kind: unit.kind,
-      lines: unit.lines,
-      threshold: unit.threshold,
+      breaches: unit.breaches,
     }
   }
 

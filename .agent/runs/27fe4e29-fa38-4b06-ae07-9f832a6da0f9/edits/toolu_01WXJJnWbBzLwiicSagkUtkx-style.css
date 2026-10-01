@@ -1,0 +1,1113 @@
+:root {
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  color: var(--vscode-foreground);
+}
+
+body {
+  margin: 0;
+  height: 100vh;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+chat-app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+
+  & > .transcript,
+  & > .new-session {
+    flex: 1;
+    min-height: 0;
+  }
+
+  & > .plan-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.3rem 0.6rem;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    font-size: 0.9em;
+
+    & .view {
+      background: none;
+      color: inherit;
+      opacity: 0.7;
+      border-bottom: 2px solid transparent;
+      border-radius: 0;
+      padding: 0.2rem 0.5rem;
+
+      &:hover {
+        opacity: 1;
+        background: var(--vscode-list-hoverBackground);
+      }
+
+      &.active {
+        opacity: 1;
+        border-bottom-color: var(--vscode-focusBorder);
+      }
+    }
+
+    & .status {
+      opacity: 0.75;
+      margin-right: auto;
+      margin-left: 0.3rem;
+
+      &.verified {
+        color: var(--vscode-testing-iconPassed);
+        opacity: 1;
+      }
+
+      &.verification {
+        color: var(--vscode-editorWarning-foreground);
+        opacity: 1;
+      }
+
+      &.running {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-family: var(--vscode-editor-font-family);
+        animation: pulse 1.2s ease-in-out infinite;
+      }
+    }
+
+    & .ran {
+      opacity: 0.75;
+      white-space: nowrap;
+    }
+
+    & .stop,
+    & .map,
+    & .verify,
+    & .intent {
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+    }
+
+    & .repair {
+      background: var(--vscode-inputValidation-warningBackground);
+      color: inherit;
+      border: 1px solid var(--vscode-inputValidation-warningBorder);
+    }
+
+    & .approve,
+    & .implement {
+      background: var(--vscode-testing-iconPassed);
+      color: var(--vscode-button-foreground);
+    }
+  }
+
+  & > .plan-view {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0.8rem 1.2rem 1.6rem;
+    line-height: 1.5;
+    max-width: 62rem;
+
+    & h1 {
+      font-size: 1.3em;
+      margin: 0 0 0.6rem;
+    }
+
+    & h2 {
+      font-size: 1.05em;
+      margin: 1rem 0 0.3rem;
+      border-bottom: 1px solid var(--vscode-panel-border);
+    }
+
+    & p,
+    & ul,
+    & ol {
+      margin: 0.4rem 0;
+    }
+
+    & ul,
+    & ol {
+      list-style-position: outside;
+      padding-left: 1.6em;
+    }
+
+    & li {
+      margin: 0.45rem 0;
+    }
+
+    & .heading {
+      font-size: 1.05em;
+      margin: 0 0 0.5rem;
+      padding-bottom: 0.2rem;
+      border-bottom: 1px solid var(--vscode-panel-border);
+    }
+
+    & .goal {
+      margin-top: 1rem;
+    }
+
+    & .note {
+      opacity: 0.75;
+      margin: 0.3rem 0;
+    }
+
+    & .pending {
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 4px;
+      padding: 0.4rem 0.6rem;
+
+      & .heading {
+        margin-top: 0;
+      }
+
+      & .submit {
+        margin-top: 0.4rem;
+      }
+    }
+
+    & .title {
+      font-size: 1.3em;
+      margin: 0 0 0.6rem;
+    }
+
+    & .problems {
+      border: 1px solid var(--vscode-inputValidation-warningBorder);
+      background: var(--vscode-inputValidation-warningBackground);
+      border-radius: 4px;
+      padding: 0.4rem 0.6rem;
+      margin-bottom: 0.6rem;
+
+      & .heading {
+        margin-top: 0;
+        border: none;
+      }
+
+      & .list {
+        margin: 0.2rem 0;
+        padding-left: 1.2em;
+      }
+
+      & .problem {
+        margin: 0.15rem 0;
+        font-family: var(--vscode-editor-font-family);
+        font-size: 0.9em;
+      }
+    }
+
+    & .whole {
+      padding: 0.25rem 0;
+      border-bottom: 1px solid var(--vscode-panel-border);
+    }
+
+    & .prose p {
+      margin: 0.3rem 0;
+    }
+
+    /* One scenario after another, set apart by space and a heading, not by boxes. */
+    & .scenario,
+    & .questions,
+    & .findings {
+      margin: 1.6rem 0 0;
+
+      & .intro {
+        opacity: 0.75;
+        margin-bottom: 0.4rem;
+      }
+    }
+
+    & .rules,
+    & .edges {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    /* Edges sit under their rule, indented and a shade quieter; the indent is the relation. */
+    & .edges {
+      margin: 0.35rem 0 0 2.6em;
+    }
+
+    & .item {
+      margin: 0 0 0.9rem;
+      line-height: 1.55;
+
+      &.edge {
+        margin: 0 0 0.45rem;
+        font-size: 0.95em;
+        opacity: 0.9;
+      }
+
+      & > .line > .id {
+        opacity: 0.6;
+        font-size: 0.8em;
+        padding-top: 0.2em;
+      }
+
+      /* Only the item's own text is struck; its comments and controls stay legible. */
+      &.struck > .line > .text {
+        text-decoration: line-through;
+        opacity: 0.6;
+      }
+
+      &.resolved > .line > .text {
+        opacity: 0.7;
+      }
+
+      /* id | text | what the reader needs at a glance, aligned right. */
+      & > .line {
+        display: grid;
+        grid-template-columns: 2.6em minmax(0, 1fr) auto;
+        align-items: start;
+        gap: 0 0.5rem;
+
+        & > .text {
+          min-width: 0;
+        }
+      }
+    }
+
+    & .aside {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding-top: 0.15em;
+      white-space: nowrap;
+    }
+
+    & .citation {
+      font-size: 0.8em;
+      opacity: 0.6;
+    }
+
+    /* What is in order is a small mark; only a gap wears a badge. */
+    & .chip {
+      font-size: 0.78em;
+      opacity: 0.55;
+      font-family: var(--vscode-editor-font-family);
+
+      &.proof {
+        color: var(--vscode-testing-iconPassed);
+        opacity: 0.9;
+      }
+    }
+
+    & button.chip {
+      background: none;
+      border: none;
+      padding: 0;
+      cursor: pointer;
+    }
+
+    & .proposal {
+      display: flex;
+      gap: 0.4rem;
+      margin: 0.15rem 0 0.15rem 2.6em;
+      opacity: 0.9;
+
+      & .kind {
+        font-size: 0.8em;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        opacity: 0.8;
+      }
+    }
+
+    & .controls {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      /* Out of sight until the pointer rests on the line, so the spec reads as prose. */
+      opacity: 0;
+    }
+
+    & .line:hover .controls,
+    & .controls:focus-within {
+      opacity: 1;
+    }
+
+    /* Lines outside the spec's items (the plan as a whole, comments) flow. */
+    & .whole > .line,
+    & .comment > .line {
+      display: flex;
+      align-items: baseline;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+
+      & > .text {
+        flex: 1;
+        min-width: 12em;
+      }
+    }
+
+    & .line button {
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+      font-size: 0.85em;
+      padding: 0.1rem 0.4rem;
+    }
+
+    /* Review controls read as quiet links, not as buttons competing with the text. */
+    & .controls button {
+      background: none;
+      color: var(--vscode-textLink-foreground);
+      font-size: 0.8em;
+      padding: 0 0.2rem;
+
+      &:hover {
+        text-decoration: underline;
+      }
+    }
+
+    & tr.attachments > td {
+      border: none;
+      padding-top: 0;
+    }
+
+    & .badge {
+      font-size: 0.8em;
+      opacity: 0.8;
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 3px;
+      padding: 0 0.3rem;
+      white-space: nowrap;
+
+      /* A gap in coverage is the one thing that wears colour on a row. */
+      &.gap {
+        color: var(--vscode-editorWarning-foreground);
+        border-color: var(--vscode-editorWarning-foreground);
+      }
+
+      &.state.resolved {
+        color: var(--vscode-testing-iconPassed);
+        border-color: var(--vscode-testing-iconPassed);
+      }
+
+      &.state.open {
+        color: var(--vscode-editorWarning-foreground);
+        border-color: var(--vscode-editorWarning-foreground);
+      }
+    }
+
+    & .link.file {
+      background: none;
+      border: none;
+      padding: 0;
+      font: inherit;
+      color: var(--vscode-textLink-foreground);
+      cursor: pointer;
+
+      &:hover {
+        text-decoration: underline;
+      }
+    }
+
+    & .comments {
+      list-style: none;
+      margin: 0.2rem 0 0.2rem 1rem;
+      padding: 0;
+    }
+
+    & .comment {
+      margin: 0.25rem 0;
+      border-left: 2px solid var(--vscode-focusBorder);
+      padding-left: 0.5rem;
+
+      &.closed {
+        border-left-color: var(--vscode-testing-iconPassed);
+        opacity: 0.8;
+      }
+
+      & .id {
+        opacity: 0.7;
+        font-size: 0.85em;
+      }
+    }
+
+    & .resolution {
+      display: flex;
+      align-items: baseline;
+      gap: 0.4rem;
+      margin-top: 0.15rem;
+      opacity: 0.9;
+
+      & .kind {
+        font-size: 0.8em;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+      }
+
+      &.disagreed .kind {
+        color: var(--vscode-editorWarning-foreground);
+      }
+
+      &.addressed .kind {
+        color: var(--vscode-testing-iconPassed);
+      }
+
+      & .text {
+        flex: 1;
+      }
+    }
+
+    & .awaiting {
+      font-size: 0.85em;
+      opacity: 0.65;
+    }
+
+    & .strikes {
+      opacity: 0.85;
+    }
+
+    & .editor {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.3rem;
+      margin: 0.3rem 0 0.3rem 1rem;
+
+      & textarea {
+        width: 100%;
+        background: var(--vscode-input-background);
+        color: var(--vscode-input-foreground);
+        border: 1px solid var(--vscode-input-border, transparent);
+        border-radius: 3px;
+        padding: 0.3rem;
+        font: inherit;
+        resize: vertical;
+      }
+    }
+
+    & .tasks {
+      & .group > .heading {
+        font-size: 0.95em;
+        border: none;
+        margin: 0.6rem 0 0.1rem;
+        opacity: 0.85;
+      }
+
+      & .board {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+
+      & .task {
+        padding: 0.25rem 0;
+        border-bottom: 1px solid var(--vscode-panel-border);
+
+        & .id {
+          opacity: 0.7;
+          font-size: 0.85em;
+        }
+
+        & .delivers {
+          opacity: 0.7;
+          font-size: 0.85em;
+        }
+
+        &.removed .line > .text {
+          text-decoration: line-through;
+          opacity: 0.6;
+        }
+
+        &.tested .line > .text {
+          opacity: 0.7;
+        }
+      }
+
+      & .badge.state {
+        &.in_progress {
+          color: var(--vscode-charts-blue);
+          border-color: var(--vscode-charts-blue);
+        }
+
+        &.done,
+        &.tested {
+          color: var(--vscode-testing-iconPassed);
+          border-color: var(--vscode-testing-iconPassed);
+        }
+
+        &.blocked {
+          color: var(--vscode-editorWarning-foreground);
+          border-color: var(--vscode-editorWarning-foreground);
+        }
+      }
+
+      & .files {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.2rem 0.8rem;
+        margin-left: 1rem;
+        font-size: 0.85em;
+        font-family: var(--vscode-editor-font-family);
+
+        /* What was read, not what is touched: there for the implementer, quiet for the reader. */
+        &.context {
+          opacity: 0.55;
+
+          & .label {
+            font-family: inherit;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            font-size: 0.85em;
+          }
+        }
+      }
+
+      & .verification {
+        display: flex;
+        gap: 0.4rem;
+        font-size: 0.9em;
+
+        & .kind {
+          text-transform: uppercase;
+          letter-spacing: 0.03em;
+          font-size: 0.85em;
+        }
+
+        &.ok .kind {
+          color: var(--vscode-testing-iconPassed);
+        }
+
+        &.failed .kind {
+          color: var(--vscode-errorForeground);
+        }
+      }
+    }
+  }
+
+  & > .tabs {
+    border-bottom: 1px solid var(--vscode-panel-border);
+
+    & .tabs {
+      list-style: none;
+      margin: 0;
+      padding: 0 0.3rem;
+      display: flex;
+      gap: 0.2rem;
+      overflow-x: auto;
+    }
+
+    & .tab {
+      display: flex;
+      align-items: center;
+      gap: 0.3rem;
+      padding: 0.35rem 0.5rem;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      white-space: nowrap;
+      max-width: 14rem;
+      opacity: 0.75;
+
+      &:hover {
+        opacity: 1;
+        background: var(--vscode-list-hoverBackground);
+      }
+
+      &.active {
+        opacity: 1;
+        border-bottom-color: var(--vscode-focusBorder);
+      }
+
+      &.needs_human .status {
+        animation: pulse 1.2s ease-in-out infinite;
+      }
+
+      &.error .status {
+        color: var(--vscode-errorForeground);
+      }
+
+      & .title {
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      & .close {
+        background: none;
+        border: none;
+        color: inherit;
+        cursor: pointer;
+        opacity: 0.5;
+        padding: 0 0.2rem;
+
+        &:hover {
+          opacity: 1;
+        }
+      }
+
+      &.new {
+        font-size: 1.2em;
+        padding-block: 0.15rem;
+      }
+    }
+  }
+
+  & > .new-session {
+    overflow-y: auto;
+    padding: 0.8rem;
+
+    & h2 {
+      margin: 0 0 0.6rem;
+      font-size: 1.1em;
+    }
+
+    & .types {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+      gap: 0.5rem;
+      margin-bottom: 0.8rem;
+    }
+
+    & .type {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.2rem;
+      text-align: left;
+      padding: 0.6rem;
+      background: var(--vscode-input-background);
+      color: var(--vscode-foreground);
+      border: 1px solid var(--vscode-input-border, transparent);
+      border-radius: 6px;
+
+      &.selected {
+        border-color: var(--vscode-focusBorder);
+      }
+
+      & .icon {
+        font-size: 1.4em;
+      }
+
+      & .hint {
+        opacity: 0.7;
+        font-size: 0.85em;
+      }
+    }
+
+    & form {
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+
+      & label {
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+        font-size: 0.9em;
+      }
+
+      & input,
+      & textarea {
+        font-family: inherit;
+        background: var(--vscode-input-background);
+        color: var(--vscode-input-foreground);
+        border: 1px solid var(--vscode-input-border, transparent);
+        border-radius: 3px;
+        padding: 0.4rem;
+      }
+
+      & .hint {
+        margin: 0;
+        opacity: 0.7;
+        font-size: 0.85em;
+      }
+
+      & button[type='submit'] {
+        align-self: flex-start;
+      }
+    }
+
+    & .resume {
+      & > .hint {
+        margin: 0;
+        opacity: 0.7;
+        font-size: 0.85em;
+      }
+
+      & .plans {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+      }
+
+      & .plan {
+        width: 100%;
+        display: flex;
+        align-items: baseline;
+        gap: 0.5rem;
+        text-align: left;
+        padding: 0.4rem 0.6rem;
+        background: var(--vscode-input-background);
+        color: var(--vscode-foreground);
+        border: 1px solid var(--vscode-input-border, transparent);
+        border-radius: 6px;
+
+        &:hover {
+          background: var(--vscode-list-hoverBackground);
+        }
+
+        & .hint {
+          opacity: 0.7;
+          font-size: 0.85em;
+        }
+
+        &.approved .hint {
+          color: var(--vscode-testing-iconPassed);
+          opacity: 1;
+        }
+      }
+    }
+  }
+
+  & > .transcript {
+    overflow-y: auto;
+    padding: 0.6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+
+    & .status {
+      margin: 0;
+      opacity: 0.6;
+      font-size: 0.85em;
+    }
+
+    & .user {
+      align-self: flex-end;
+      max-width: 90%;
+      background: var(--vscode-input-background);
+      border: 1px solid var(--vscode-input-border, transparent);
+      border-radius: 6px;
+      padding: 0.4rem 0.6rem;
+      white-space: pre-wrap;
+    }
+
+    & .assistant {
+      & .thinking {
+        opacity: 0.5;
+        font-size: 0.85em;
+        white-space: pre-wrap;
+        max-height: 8rem;
+        overflow-y: auto;
+        margin: 0 0 0.3rem;
+      }
+
+      & .text {
+        line-height: 1.45;
+
+        & > :first-child {
+          margin-top: 0;
+        }
+
+        & > :last-child {
+          margin-bottom: 0;
+        }
+
+        & p,
+        & ul,
+        & ol {
+          margin: 0.4rem 0;
+        }
+
+        & ul,
+        & ol {
+          list-style-position: outside;
+          padding-left: 1.6em;
+        }
+
+        & li {
+          margin: 0.45rem 0;
+        }
+
+        & code {
+          font-family: var(--vscode-editor-font-family);
+          font-size: 0.9em;
+          background: var(--vscode-textCodeBlock-background);
+          padding: 0 0.2em;
+          border-radius: 3px;
+        }
+
+        & pre {
+          background: var(--vscode-textCodeBlock-background);
+          padding: 0.5rem;
+          border-radius: 4px;
+          overflow-x: auto;
+
+          & code {
+            background: none;
+            padding: 0;
+          }
+        }
+
+        & pre.mermaid {
+          background: none;
+          text-align: center;
+
+          & svg {
+            max-width: 100%;
+            height: auto;
+          }
+
+          &.failed {
+            border-left: 2px solid var(--vscode-errorForeground);
+            text-align: left;
+            font-family: var(--vscode-editor-font-family);
+            white-space: pre-wrap;
+          }
+        }
+
+        & table {
+          border-collapse: collapse;
+          margin: 0.4rem 0;
+
+          & th,
+          & td {
+            border: 1px solid var(--vscode-panel-border);
+            padding: 0.2rem 0.5rem;
+          }
+        }
+
+        & blockquote {
+          margin: 0.4rem 0;
+          padding-left: 0.6rem;
+          border-left: 2px solid var(--vscode-panel-border);
+          opacity: 0.85;
+        }
+
+        & a {
+          color: var(--vscode-textLink-foreground);
+        }
+      }
+    }
+
+    & .tool {
+      border-left: 2px solid var(--vscode-panel-border);
+      padding-left: 0.5rem;
+      font-size: 0.9em;
+
+      &.failed {
+        border-left-color: var(--vscode-errorForeground);
+      }
+
+      & summary {
+        cursor: pointer;
+        font-family: var(--vscode-editor-font-family);
+        opacity: 0.85;
+      }
+
+      & .input,
+      & .result {
+        margin: 0.3rem 0;
+        font-family: var(--vscode-editor-font-family);
+        font-size: 0.9em;
+        white-space: pre-wrap;
+        max-height: 20rem;
+        overflow: auto;
+      }
+
+      & .result.error {
+        color: var(--vscode-errorForeground);
+      }
+
+      &.edit-step {
+        border-left-color: var(--vscode-gitDecoration-modifiedResourceForeground, var(--vscode-panel-border));
+
+        & summary .stats {
+          opacity: 0.7;
+        }
+      }
+    }
+
+    /* A file edit: the change it made, and the way to the rest of it. */
+    & .edit {
+      margin: 0.3rem 0;
+
+      & .diff {
+        margin: 0.3rem 0;
+        font-family: var(--vscode-editor-font-family);
+        font-size: 0.9em;
+        overflow-x: auto;
+      }
+
+      & .diff-line {
+        display: block;
+        white-space: pre;
+      }
+
+      & .diff-line.add {
+        color: var(--vscode-gitDecoration-addedResourceForeground, var(--vscode-charts-green));
+        background: var(--vscode-diffEditor-insertedTextBackground, transparent);
+      }
+
+      & .diff-line.del {
+        color: var(--vscode-gitDecoration-deletedResourceForeground, var(--vscode-charts-red));
+        background: var(--vscode-diffEditor-removedTextBackground, transparent);
+      }
+
+      & .diff-line.hunk {
+        opacity: 0.6;
+      }
+
+      & .edit-summary,
+      & .omitted {
+        margin: 0.2rem 0;
+        opacity: 0.8;
+      }
+    }
+
+    & .link {
+      background: none;
+      border: none;
+      padding: 0;
+      font: inherit;
+      color: var(--vscode-textLink-foreground);
+      cursor: pointer;
+      text-align: left;
+
+      &:hover {
+        text-decoration: underline;
+      }
+    }
+
+    & .permission {
+      display: block;
+      border: 1px solid var(--vscode-inputValidation-warningBorder);
+      background: var(--vscode-inputValidation-warningBackground);
+      border-radius: 6px;
+      padding: 0.5rem 0.6rem;
+
+      & .input {
+        font-family: var(--vscode-editor-font-family);
+        font-size: 0.85em;
+        white-space: pre-wrap;
+        max-height: 10rem;
+        overflow: auto;
+        margin: 0.3rem 0;
+      }
+
+      & .actions {
+        display: flex;
+        gap: 0.4rem;
+      }
+
+      & .decision {
+        margin: 0.3rem 0 0;
+        opacity: 0.8;
+      }
+    }
+
+    & .turn {
+      margin: 0;
+      opacity: 0.6;
+      font-size: 0.8em;
+      text-align: right;
+
+      &.error {
+        color: var(--vscode-errorForeground);
+        opacity: 1;
+      }
+    }
+
+    & .error {
+      color: var(--vscode-errorForeground);
+      white-space: pre-wrap;
+    }
+
+    & .ended {
+      opacity: 0.6;
+      font-size: 0.85em;
+      font-style: italic;
+    }
+
+    & .working {
+      margin: 0;
+      opacity: 0.7;
+      font-size: 0.9em;
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+  }
+
+  & > .composer {
+    border-top: 1px solid var(--vscode-panel-border);
+    padding: 0.4rem;
+
+    & form {
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+    }
+
+    & textarea {
+      width: 100%;
+      box-sizing: border-box;
+      resize: vertical;
+      font-family: inherit;
+      background: var(--vscode-input-background);
+      color: var(--vscode-input-foreground);
+      border: 1px solid var(--vscode-input-border, transparent);
+      border-radius: 3px;
+      padding: 0.4rem;
+    }
+
+    & .actions {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 0.4rem;
+
+      & .switches {
+        margin-right: auto;
+        display: flex;
+        gap: 0.8rem;
+        font-size: 0.85em;
+        opacity: 0.85;
+
+        & label {
+          cursor: pointer;
+        }
+      }
+    }
+  }
+}
+
+button {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border: none;
+  border-radius: 3px;
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--vscode-button-hoverBackground);
+  }
+
+  &.stop,
+  &.deny {
+    background: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+  }
+}
+
+select {
+  background: var(--vscode-dropdown-background);
+  color: var(--vscode-dropdown-foreground);
+  border: 1px solid var(--vscode-dropdown-border);
+  border-radius: 3px;
+  padding: 0.2rem;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}

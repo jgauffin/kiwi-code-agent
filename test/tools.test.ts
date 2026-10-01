@@ -7,6 +7,7 @@ import { ReadTracker } from '../src/agent/openai-session/tools/read-tracker'
 import { readTool } from '../src/agent/openai-session/tools/read'
 import { writeTool } from '../src/agent/openai-session/tools/write'
 import { editTool } from '../src/agent/openai-session/tools/edit'
+import { multiEditTool } from '../src/agent/openai-session/tools/multi-edit'
 import { copyTool, moveTool } from '../src/agent/openai-session/tools/move-copy'
 import { globTool } from '../src/agent/openai-session/tools/glob'
 import { grepTool } from '../src/agent/openai-session/tools/grep'
@@ -25,7 +26,9 @@ beforeEach(async () => {
   ctx = { cwd: dir, signal: new AbortController().signal, files: new ReadTracker(), ledger }
 })
 
-afterEach(() => rm(dir, { recursive: true, force: true }))
+// Windows keeps a folder a child process ran in locked for a while after it
+// exits, so removal is retried and a folder left behind never fails the test.
+afterEach(() => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => {}))
 
 describe('Read', () => {
   it('numbers_lines_and_honours_offset_and_limit', async () => {
@@ -101,6 +104,52 @@ describe('Edit', () => {
     await editTool.execute({ file_path: 'a.txt', old_string: 'one', new_string: 'two' }, ctx)
     const again = await editTool.execute({ file_path: 'a.txt', old_string: 'two', new_string: 'three' }, ctx)
     expect(again.isError).toBe(false)
+  })
+})
+
+describe('MultiEdit', () => {
+  const read = (name: string) => readTool.execute({ file_path: name }, ctx)
+
+  it('applies_the_edits_in_order_each_to_the_result_of_the_one_before', async () => {
+    const path = join(dir, 'a.txt')
+    await writeFile(path, 'one\ntwo\nthree')
+    await read('a.txt')
+    const result = await multiEditTool.execute(
+      { file_path: 'a.txt', edits: [{ old_string: 'one', new_string: 'ONE' }, { old_string: 'ONE\ntwo', new_string: 'ONE\nTWO' }, { old_string: 'three', new_string: 'THREE' }] },
+      ctx,
+    )
+    expect(result).toMatchObject({ isError: false, text: expect.stringContaining('3 edits') })
+    expect(await readFile(path, 'utf8')).toBe('ONE\nTWO\nTHREE')
+  })
+
+  it('one_edit_that_cannot_apply_leaves_the_file_as_it_was_and_names_the_edit', async () => {
+    const path = join(dir, 'a.txt')
+    await writeFile(path, 'a b a')
+    await read('a.txt')
+    const missing = await multiEditTool.execute({ file_path: 'a.txt', edits: [{ old_string: 'b', new_string: 'y' }, { old_string: 'zzz', new_string: 'q' }] }, ctx)
+    expect(missing).toMatchObject({ isError: true, text: expect.stringContaining('Edit 2') })
+    const ambiguous = await multiEditTool.execute({ file_path: 'a.txt', edits: [{ old_string: 'a', new_string: 'x' }] }, ctx)
+    expect(ambiguous).toMatchObject({ isError: true, text: expect.stringContaining('2 times') })
+    expect(await readFile(path, 'utf8')).toBe('a b a')
+    const all = await multiEditTool.execute({ file_path: 'a.txt', edits: [{ old_string: 'a', new_string: 'x', replace_all: true }] }, ctx)
+    expect(all.isError).toBe(false)
+    expect(await readFile(path, 'utf8')).toBe('x b x')
+  })
+
+  it('is_held_to_the_same_read_first_rule_as_edit_and_counts_as_a_read_after', async () => {
+    const path = join(dir, 'a.txt')
+    await writeFile(path, 'one')
+    expect(await multiEditTool.execute({ file_path: 'a.txt', edits: [{ old_string: 'one', new_string: 'two' }] }, ctx)).toMatchObject({ isError: true, text: expect.stringContaining('not been read') })
+    await read('a.txt')
+    await multiEditTool.execute({ file_path: 'a.txt', edits: [{ old_string: 'one', new_string: 'two' }] }, ctx)
+    expect((await editTool.execute({ file_path: 'a.txt', old_string: 'two', new_string: 'three' }, ctx)).isError).toBe(false)
+  })
+
+  it('tells_the_ledger_each_range_it_changed', async () => {
+    await writeFile(join(dir, 'a.txt'), 'one\ntwo\nthree\nfour\nfive')
+    await read('a.txt')
+    await multiEditTool.execute({ file_path: 'a.txt', edits: [{ old_string: 'two', new_string: 'TWO' }, { old_string: 'five', new_string: 'FIVE' }] }, ctx)
+    expect(ledger.render(dir)).toContain('edited 2, 5')
   })
 })
 
@@ -217,7 +266,9 @@ describe('Glob and Grep', () => {
   })
 })
 
-describe('Bash', () => {
+// These three run a real shell, so they wait on process startup rather than on
+// anything in this code: a loaded machine needs far longer than the default.
+describe('Bash', { timeout: 60_000 }, () => {
   it('returns_output_and_marks_non_zero_exit_as_error', async () => {
     const tool = bashTool()
     const ok = await tool.execute({ command: 'echo hi && echo err 1>&2' }, ctx)

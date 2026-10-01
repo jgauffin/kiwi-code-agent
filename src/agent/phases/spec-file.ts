@@ -3,8 +3,8 @@ import { readFile, writeFile } from 'node:fs/promises'
 /** `implemented` is written by the extension once the feature is verified, so the stage outlives the working files. */
 export type SpecStatus = 'draft' | 'approved' | 'implemented'
 
-/** `body` is the markdown after the front matter, what a reader should see. */
-export type SpecState = { exists: false } | { exists: true; status: SpecStatus; body: string }
+/** `body` is the markdown after the front matter, what a reader should see. `built` is `true` for a spec migrated from a doc about behaviour the code already has, deciding what a clean check against the code means for it. */
+export type SpecState = { exists: false } | { exists: true; status: SpecStatus; body: string; built: boolean }
 
 export const FRONT_MATTER = /^---\r?\n([\s\S]*?)\r?\n---(\r?\n|$)/
 
@@ -40,7 +40,7 @@ export async function readSpecState(path: string): Promise<SpecState> {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { exists: false }
     throw error
   }
-  return { exists: true, status: statusOf(text), body: bodyOf(text) }
+  return { exists: true, status: statusOf(text), body: bodyOf(text), built: builtOf(text) }
 }
 
 export function bodyOf(text: string): string {
@@ -50,6 +50,11 @@ export function bodyOf(text: string): string {
 export function statusOf(text: string): SpecStatus {
   const value = frontMatterValue(text, 'status')
   return value === 'approved' || value === 'implemented' ? value : 'draft'
+}
+
+/** Whether the migration that wrote this spec marked it as behaviour the code already has, `built: true` in the front matter. */
+export function builtOf(text: string): boolean {
+  return frontMatterValue(text, 'built') === 'true'
 }
 
 export async function setSpecStatus(path: string, status: SpecStatus): Promise<void> {

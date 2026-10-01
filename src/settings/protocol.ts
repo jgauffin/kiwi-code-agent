@@ -1,3 +1,4 @@
+import type { AppliedBundle, Bundle, BundleScope } from '../agent/instructions/bundles'
 import type { MemoryEntry, MemoryScope } from '../agent/memory/memories'
 import type { Profile, Provider } from '../agent/session/model-profile'
 import type { VerifyRule } from '../agent/phases/verification'
@@ -16,10 +17,12 @@ export type SettingsSnapshot = {
   verifyFailureBudget: number
   cleanup: {
     functionLines: number
+    functionComplexity: number
     typeLines: number
     fileLines: number
     tests: string[]
     testFunctionLines: number
+    testFunctionComplexity: number
     testTypeLines: number
     testFileLines: number
     ignore: string[]
@@ -28,6 +31,16 @@ export type SettingsSnapshot = {
   cutCoveredDocs: boolean
   /** Every memory kept, for this project and for the person, each already named by its own scope. */
   memories: { project: MemoryEntry[]; user: MemoryEntry[] }
+  bundles: {
+    /** Every bundle in the catalog, for browsing and applying at any time. */
+    available: Bundle[]
+    /** Every bundle applied, project scope and the person's own both. */
+    applied: AppliedBundle[]
+    /** The catalog narrowed to what this workspace holds, for the one-time offer. */
+    suggested: Bundle[]
+    /** Whether the suggestion is still due: no bundle applied yet, something to suggest, and not dismissed. */
+    offerPending: boolean
+  }
   nodePath: string
   traceEngine: boolean
   /** The conversation size at which a session compacts, when that comes before the window runs short; 0 for none. */
@@ -47,10 +60,12 @@ export type EditableSettings = {
   'permissions.denyGitWrites': boolean
   verify: VerifyRule[]
   verifyFailureBudget: number
+  'cleanup.functionComplexity': number
   'cleanup.functionLines': number
   'cleanup.typeLines': number
   'cleanup.fileLines': number
   'cleanup.tests': string[]
+  'cleanup.testFunctionComplexity': number
   'cleanup.testFunctionLines': number
   'cleanup.testTypeLines': number
   'cleanup.testFileLines': number
@@ -96,3 +111,8 @@ export type FromSettingsWebview =
   | { type: 'open_memory'; scope: MemoryScope; file: string }
   /** The note and its index line go for a project memory; the matching bullet goes for a user one. */
   | { type: 'forget_memory'; scope: MemoryScope; title: string }
+  /** Applies a catalog bundle in the chosen scope; the bundle travels with the message rather than naming it by an index into a catalog the host might answer differently by the time this arrives. */
+  | { type: 'apply_bundle'; scope: BundleScope; bundle: Bundle }
+  | { type: 'remove_bundle'; scope: BundleScope; source: string; name: string }
+  /** Ends the one-time suggestion for this workspace without applying anything. */
+  | { type: 'dismiss_bundle_offer' }

@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import type { Profile, Provider } from '../src/agent/session/model-profile'
 import type { SettingsTarget } from '../src/settings/protocol'
 import type { MemoryEntry, MemoryScope } from '../src/agent/memory/memories'
-import { SettingsStore, type ConfigPort, type MemoryPort, type SecretPort } from '../src/settings/settings-store'
+import type { AppliedBundle, Bundle, BundleScope } from '../src/agent/instructions/bundles'
+import { SettingsStore, type BundlePort, type ConfigPort, type MemoryPort, type SecretPort } from '../src/settings/settings-store'
 
 type Written = { key: string; value: unknown; target: SettingsTarget }
 
@@ -53,11 +54,26 @@ function fakeMemory(project: MemoryEntry[] = [], user: MemoryEntry[] = []) {
   return { port, forgotten }
 }
 
-function store(config: Record<string, unknown>, options: { hasWorkspace?: boolean; secrets?: string[] } = {}) {
+/** Remembers what it was asked to apply or remove, rather than touching any real files. */
+function fakeBundles(available: Bundle[] = [], applied: AppliedBundle[] = [], matching: Bundle[] = []) {
+  const applies: { scope: BundleScope; bundle: Bundle }[] = []
+  const removes: { scope: BundleScope; source: string; name: string }[] = []
+  const port: BundlePort = {
+    available: async () => available,
+    matching: async () => matching,
+    applied: async () => applied,
+    apply: async (scope, bundle) => void applies.push({ scope, bundle }),
+    remove: async (scope, source, name) => void removes.push({ scope, source, name }),
+  }
+  return { port, applies, removes }
+}
+
+function store(config: Record<string, unknown>, options: { hasWorkspace?: boolean; secrets?: string[]; bundles?: ReturnType<typeof fakeBundles> } = {}) {
   const cfg = fakeConfig(config, options.hasWorkspace ?? true)
   const sec = fakeSecrets(options.secrets)
   const mem = fakeMemory()
-  return { store: new SettingsStore(cfg.port, sec.port, mem.port), ...cfg, secrets: sec.keys, memory: mem }
+  const bun = options.bundles ?? fakeBundles()
+  return { store: new SettingsStore(cfg.port, sec.port, mem.port, bun.port), ...cfg, secrets: sec.keys, memory: mem, bundles: bun }
 }
 
 const withModels = (providers: Provider[], profiles: Profile[], activeProfile: string) => ({ providers, profiles, activeProfile })
@@ -101,6 +117,13 @@ describe('SettingsStore profiles', () => {
     const steps = { implement: { effort: 'low' as const }, plan: { provider: 'Claude', model: 'claude-opus-5', effort: 'max' as const } }
     await s.saveProfile(0, { name: 'Balanced', default: { provider: 'Claude', model: 'claude-opus-5' }, steps })
     expect((values.get('profiles') as Profile[])[0]!.steps).toEqual({ implement: { effort: 'low' }, plan: { effort: 'max' } })
+  })
+
+  it('a_plan_build_on_another_engine_than_its_planning_is_refused', async () => {
+    const { store: s } = store(withModels([claudeProvider, bergetProvider], [], ''))
+    const steps = { 'code-build': { provider: 'berget', model: 'moonshotai/Kimi-K3' } }
+    await expect(s.saveProfile(0, { name: 'Split', default: { provider: 'Claude', model: 'claude-opus-5' }, steps })).rejects.toThrow(/Plan · Build.*Plan · Planning/)
+    await expect(s.saveProfile(0, { name: 'Same', default: { provider: 'Claude', model: 'claude-opus-5' }, steps: { 'code-build': { provider: 'Claude', model: 'claude-sonnet-5' } } })).resolves.toBeUndefined()
   })
 
   it('a_step_naming_a_provider_without_a_model_is_refused', async () => {
@@ -281,7 +304,7 @@ describe('SettingsStore memories', () => {
     const project = [{ title: 'Blue means clickable', file: 'blue.md', summary: 'say so' }]
     const user = [{ title: 'Likes short replies', file: 'CLAUDE.md', summary: 'say less' }]
     const mem = fakeMemory(project, user)
-    const s = new SettingsStore(cfg.port, sec.port, mem.port)
+    const s = new SettingsStore(cfg.port, sec.port, mem.port, fakeBundles().port)
     expect((await s.snapshot()).memories).toEqual({ project, user })
   })
 
@@ -289,6 +312,64 @@ describe('SettingsStore memories', () => {
     const { store: s, memory } = store({})
     await s.forgetMemory('project', 'Blue means clickable')
     expect(memory.forgotten).toEqual([{ scope: 'project', title: 'Blue means clickable' }])
+  })
+})
+
+const pythonStyle: Bundle = { source: 'product', name: 'python-style', version: '1.0.0', target: { kind: 'language', name: 'python' }, text: 'Reproduce a bug before fixing it.' }
+const anyBundle: Bundle = { source: 'product', name: 'core-practice', version: '2.0.0', target: { kind: 'any' }, text: 'Refactor towards SOLID.' }
+const appliedCore: AppliedBundle = { source: 'product', name: 'core-practice', version: '2.0.0', scope: 'project' }
+
+describe('SettingsStore bundles', () => {
+  it('the_snapshot_lists_the_catalog_and_what_is_applied_from_the_bundle_port', async () => {
+    const bun = fakeBundles([pythonStyle, anyBundle], [appliedCore], [anyBundle])
+    const { store: s } = store({}, { bundles: bun })
+    const snapshot = await s.snapshot()
+    expect(snapshot.bundles.available).toEqual([pythonStyle, anyBundle])
+    expect(snapshot.bundles.applied).toEqual([appliedCore])
+  })
+
+  it('applying_a_bundle_passes_its_scope_and_the_whole_bundle_straight_to_the_bundle_port', async () => {
+    const bun = fakeBundles()
+    const { store: s } = store({}, { bundles: bun })
+    await s.applyBundle('user', pythonStyle)
+    expect(bun.applies).toEqual([{ scope: 'user', bundle: pythonStyle }])
+  })
+
+  it('removing_a_bundle_passes_its_scope_source_and_name_straight_to_the_bundle_port', async () => {
+    const bun = fakeBundles()
+    const { store: s } = store({}, { bundles: bun })
+    await s.removeBundle('project', 'product', 'core-practice')
+    expect(bun.removes).toEqual([{ scope: 'project', source: 'product', name: 'core-practice' }])
+  })
+
+  it('the_offer_is_pending_for_a_workspace_with_nothing_applied_and_a_matching_bundle_not_yet_dismissed', async () => {
+    const bun = fakeBundles([anyBundle], [], [anyBundle])
+    const { store: s } = store({}, { bundles: bun })
+    expect((await s.snapshot()).bundles.offerPending).toBe(true)
+  })
+
+  it('the_offer_is_not_pending_once_a_bundle_is_applied', async () => {
+    const bun = fakeBundles([anyBundle], [appliedCore], [anyBundle])
+    const { store: s } = store({}, { bundles: bun })
+    expect((await s.snapshot()).bundles.offerPending).toBe(false)
+  })
+
+  it('the_offer_is_not_pending_once_dismissed', async () => {
+    const bun = fakeBundles([anyBundle], [], [anyBundle])
+    const { store: s } = store({ bundleOfferDismissed: true }, { bundles: bun })
+    expect((await s.snapshot()).bundles.offerPending).toBe(false)
+  })
+
+  it('the_offer_is_not_pending_when_nothing_in_the_catalog_matches_this_workspace', async () => {
+    const bun = fakeBundles([pythonStyle], [], [])
+    const { store: s } = store({}, { bundles: bun })
+    expect((await s.snapshot()).bundles.offerPending).toBe(false)
+  })
+
+  it('dismissing_the_offer_writes_a_workspace_setting_so_it_is_remembered_for_this_workspace', async () => {
+    const { store: s, values } = store({}, { bundles: fakeBundles() })
+    await s.dismissBundleOffer()
+    expect(values.get('bundleOfferDismissed')).toBe(true)
   })
 })
 

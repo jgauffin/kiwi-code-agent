@@ -95,7 +95,7 @@ export async function compact(
 }
 
 /** Tools whose call names a file the model has then seen the contents of. */
-const FILE_TOOLS = new Set(['Read', 'Write', 'Edit'])
+const FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit'])
 
 /**
  * The files these messages show being read, as the model wrote the paths. What

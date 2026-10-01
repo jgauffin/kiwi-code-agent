@@ -4,9 +4,10 @@ import { WORK_DIR, featureSlug, specPath } from './blind-plan'
 import { readSpecState } from './spec-file'
 import { parseSpec } from './spec-model'
 import type { PostToolUseOutcome, SessionHooks, ToolUse } from '../session/hooks'
+import { WRITES_NAMED_FILE } from '../permissions/tool-classes'
 
 /**
- * The context file, `.agent/plan/<feature>.context.md`: the files each
+ * The context file, `.kiwi/specs/<feature>.context.md`: the files each
  * scenario builds on, as the spec check found them while it read the code.
  * The board hands them to the scenario's task, so its implementer starts
  * there instead of searching. Its own file, since the decisions file holds
@@ -68,7 +69,7 @@ export class ScenarioContextContract implements SessionHooks {
   ) {}
 
   async postToolUse(tool: ToolUse & { output: string; isError: boolean }): Promise<PostToolUseOutcome> {
-    if (tool.isError || (tool.toolName !== 'Write' && tool.toolName !== 'Edit')) return undefined
+    if (tool.isError || !WRITES_NAMED_FILE.has(tool.toolName)) return undefined
     const input = (typeof tool.input === 'object' && tool.input !== null ? tool.input : {}) as Record<string, unknown>
     const raw = input['file_path']
     if (typeof raw !== 'string') return undefined

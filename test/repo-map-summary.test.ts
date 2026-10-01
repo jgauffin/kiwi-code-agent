@@ -17,8 +17,8 @@ describe('repo map summary', () => {
   it('the_summary_names_each_project_its_kind_its_index_path_and_its_public_type_count', () => {
     const text = renderSummary({ projects: [project('Api', 42), project('Core', 7)], conventions })
     expect(text).toContain('2 projects:')
-    expect(text).toContain('- Api (dotnet) `src/Api/Api.csproj` — 42 public types, index `.agent/repo-map/types/Api.md`')
-    expect(text).toContain('- Core (dotnet) `src/Core/Core.csproj` — 7 public types, index `.agent/repo-map/types/Core.md`')
+    expect(text).toContain('- Api (dotnet) `src/Api/Api.csproj` — 42 public types, index `.kiwi/repo-map/types/Api.md`')
+    expect(text).toContain('- Core (dotnet) `src/Core/Core.csproj` — 7 public types, index `.kiwi/repo-map/types/Core.md`')
     expect(text).toContain('- `Endpoint.cs` lives in `src/<Feature>/` — 14 of 15')
     expect(text).not.toContain('left out')
   })
@@ -47,6 +47,6 @@ describe('repo map summary', () => {
     expect(indexText).toContain('public class Type399')
     expect(indexText.length).toBeGreaterThan(SUMMARY_BUDGET)
     expect(summary.length).toBeLessThanOrEqual(SUMMARY_BUDGET)
-    expect(summary).toContain('index `.agent/repo-map/types/Api.md`')
+    expect(summary).toContain('index `.kiwi/repo-map/types/Api.md`')
   })
 })

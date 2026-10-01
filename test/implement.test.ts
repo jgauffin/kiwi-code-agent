@@ -13,7 +13,7 @@ import { board as boardOf, task, tasksState as board } from './task-board-fixtur
 
 const cwd = process.platform === 'win32' ? 'D:\\work\\repo' : '/work/repo'
 
-const approved: SpecState = { exists: true, status: 'approved', body: '# Order cancellation\n\n## Behaviour\n- B1: a\n' }
+const approved: SpecState = { exists: true, status: 'approved', body: '# Order cancellation\n\n## Behaviour\n- B1: a\n', built: false }
 const open = task('T1')
 const tested = (name: string) => task(name, { state: 'tested' })
 
@@ -50,7 +50,7 @@ describe('implement phase', () => {
 
   it('prompt_names_the_spec_and_the_board_tools_that_carry_progress', () => {
     const prompt = implementPrompt('Order cancellation', cwd)
-    expect(prompt).toContain('plan/order-cancellation.spec.md')
+    expect(prompt).toContain('specs/order-cancellation.spec.md')
     expect(prompt).toContain('ReadTasks')
     expect(prompt).toContain('UpdateTask')
     // The run starts with its task in progress; what it records is the finish.
@@ -62,7 +62,7 @@ describe('implement phase', () => {
     expect(prompt).toContain('search only for what they do not answer')
     expect(prompt).toContain('docs/')
     expect(IMPLEMENT_TOOLS).toEqual([
-      'Read', 'Write', 'Edit', 'Move', 'Copy', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'MarkdownSearch', 'CodeOutline', 'CodeSearch', 'Bash', 'RunScript', 'Skill', 'AskUser',
+      'Read', 'Write', 'Edit', 'MultiEdit', 'Move', 'Copy', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'MarkdownSearch', 'CodeOutline', 'CodeSearch', 'Bash', 'RunScript', 'Skill', 'AskUser',
       'ReadTasks', 'UpdateTask',
     ])
   })

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { bodyOf, readSpecState, setSpecStatus, statusOf, withStatus } from '../src/agent/phases/spec-file'
+import { bodyOf, builtOf, readSpecState, setSpecStatus, statusOf, withStatus } from '../src/agent/phases/spec-file'
 
 const spec = '---\nfeature: Orders\nstatus: draft\n---\n\n# Orders\n\n- B1: rule\n'
 
@@ -35,10 +35,30 @@ describe('spec front-matter status', () => {
       const path = join(dir, 'orders.spec.md')
       expect(await readSpecState(path)).toEqual({ exists: false })
       await writeFile(path, spec)
-      expect(await readSpecState(path)).toEqual({ exists: true, status: 'draft', body: '# Orders\n\n- B1: rule\n' })
+      expect(await readSpecState(path)).toEqual({ exists: true, status: 'draft', body: '# Orders\n\n- B1: rule\n', built: false })
       await setSpecStatus(path, 'approved')
       expect(await readSpecState(path)).toMatchObject({ exists: true, status: 'approved' })
       expect(await readFile(path, 'utf8')).toContain('# Orders')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('spec front-matter built', () => {
+  it('a_spec_is_built_only_when_its_front_matter_says_so', () => {
+    expect(builtOf(spec)).toBe(false)
+    expect(builtOf('# no front matter')).toBe(false)
+    expect(builtOf('---\nbuilt: false\n---\n')).toBe(false)
+    expect(builtOf('---\nbuilt: true\n---\n')).toBe(true)
+  })
+
+  it('reading_the_file_carries_the_built_mark', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'spec-'))
+    try {
+      const path = join(dir, 'orders.spec.md')
+      await writeFile(path, '---\nfeature: Orders\nstatus: draft\nbuilt: true\n---\n\n# Orders\n\n- B1: rule\n')
+      expect(await readSpecState(path)).toMatchObject({ built: true })
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

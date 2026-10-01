@@ -20,11 +20,11 @@ function fixedSource(summary: string | undefined): RepoMapSource {
 
 describe('repo map at session start', () => {
   it('a_reconcile_run_an_implement_session_and_a_code_plan_get_the_summary_while_a_chat_or_feature_plan_session_does_not', async () => {
-    const source = fixedSource('- Core (dotnet) `src/Core/Core.csproj` — 7 public types, index `.agent/repo-map/types/Core.md`')
+    const source = fixedSource('- Core (dotnet) `src/Core/Core.csproj` — 7 public types, index `.kiwi/repo-map/types/Core.md`')
     for (const mode of ['reconcile', 'implement', 'code-plan']) {
       const prompt = await withRepoMap(mode, BASE, source)
       expect(prompt.startsWith(BASE), mode).toBe(true)
-      expect(prompt, mode).toContain('index `.agent/repo-map/types/Core.md`')
+      expect(prompt, mode).toContain('index `.kiwi/repo-map/types/Core.md`')
     }
     for (const mode of ['chat', 'plan', 'cleanup']) {
       expect(await withRepoMap(mode, BASE, source), mode).toBe(BASE)
@@ -65,7 +65,7 @@ describe('repo map at session start', () => {
   })
 
   it('a_build_that_fails_or_passes_its_time_bound_still_starts_the_session_saying_which_map_it_has', async () => {
-    const previous = '- Core (dotnet) `src/Core/Core.csproj` — 7 public types, index `.agent/repo-map/types/Core.md`'
+    const previous = '- Core (dotnet) `src/Core/Core.csproj` — 7 public types, index `.kiwi/repo-map/types/Core.md`'
     const broken: RepoMapSource = {
       isStale: async () => true,
       build: async () => {
@@ -92,7 +92,7 @@ describe('repo map at session start', () => {
   })
 
   it('the_summary_a_session_starts_with_is_held_for_its_life_and_a_fresh_start_takes_a_new_one', async () => {
-    let onDisk = '- Core (dotnet) `src/Core/Core.csproj` — 7 public types, index `.agent/repo-map/types/Core.md`'
+    let onDisk = '- Core (dotnet) `src/Core/Core.csproj` — 7 public types, index `.kiwi/repo-map/types/Core.md`'
     const source: RepoMapSource = {
       isStale: async () => false,
       build: async () => undefined,
@@ -101,7 +101,7 @@ describe('repo map at session start', () => {
     const started = await withRepoMap('implement', BASE, source)
     expect(started).toContain('7 public types')
     // Another session's build, or the command, rewrites the map underneath.
-    onDisk = '- Core (dotnet) `src/Core/Core.csproj` — 99 public types, index `.agent/repo-map/types/Core.md`'
+    onDisk = '- Core (dotnet) `src/Core/Core.csproj` — 99 public types, index `.kiwi/repo-map/types/Core.md`'
     expect(started).toContain('7 public types')
     expect(started).not.toContain('99 public types')
     // A session set up afresh after its engine stopped is a start: it takes the map as it then stands.

@@ -17,6 +17,7 @@ import {
   rulingsHandoffPrompt,
 } from '../src/agent/phases/blind-plan'
 import { CLEANUP_TOOLS, cleanupKickoff, cleanupPrompt } from '../src/agent/phases/cleanup'
+import { agentsMdTidyKickoff } from '../src/agent/instructions/agents-md-tidy'
 import { DOCS_EVALUATION_TOOLS, docsEvaluationKickoff, docsEvaluationPrompt } from '../src/agent/phases/docs-evaluation'
 import { FILE_DECISIONS_TOOLS, fileDecisionsKickoff, fileDecisionsPrompt } from '../src/agent/phases/file-decisions'
 import { DOCS_MAP_TOOLS, docsMapKickoff, docsMapPrompt } from '../src/agent/phases/docs-map'
@@ -119,7 +120,7 @@ async function main(): Promise<void> {
     { title: 'fileDecisionsPrompt', source: at(`${phases}/file-decisions.ts`, 'export function fileDecisionsPrompt'), text: fileDecisionsPrompt(CWD) },
     { title: 'reconcilePrompt', source: at(`${phases}/reconcile.ts`, 'export function reconcilePrompt'), text: reconcilePrompt(F, CWD) },
     { title: 'implementPrompt', source: at(`${phases}/implement.ts`, 'export function implementPrompt'), note: 'Rendered with one example verify rule', text: implementPrompt(F, CWD, [verifyRule]) },
-    { title: 'cleanupPrompt', source: at(`${phases}/cleanup.ts`, 'export function cleanupPrompt'), text: cleanupPrompt(F, CWD, { source: { functionLines: 25, typeLines: 200, fileLines: 400 }, tests: { functionLines: 60, typeLines: 600, fileLines: 1200 }, testGlobs: [] }) },
+    { title: 'cleanupPrompt', source: at(`${phases}/cleanup.ts`, 'export function cleanupPrompt'), text: cleanupPrompt(F, CWD, { source: { functionLines: 60, functionComplexity: 15, typeLines: 200, fileLines: 400 }, tests: { functionLines: 120, functionComplexity: 15, typeLines: 600, fileLines: 1200 }, testGlobs: [] }) },
   ]
 
   const contexts: Entry[] = [
@@ -130,6 +131,8 @@ async function main(): Promise<void> {
   const messages: Entry[] = [
     { title: 'docsEvaluationKickoff', source: at(`${phases}/docs-evaluation.ts`, 'export function docsEvaluationKickoff'), text: docsEvaluationKickoff() },
     { title: 'fileDecisionsKickoff', source: at(`${phases}/file-decisions.ts`, 'export function fileDecisionsKickoff'), text: fileDecisionsKickoff() },
+    { title: 'agentsMdTidyKickoff (workspace)', source: at('src/agent/instructions/agents-md-tidy.ts', 'export function agentsMdTidyKickoff'), text: agentsMdTidyKickoff('project', `${CWD}/AGENTS.md`, ['<bundle name>']) },
+    { title: 'agentsMdTidyKickoff (person)', source: at('src/agent/instructions/agents-md-tidy.ts', 'export function agentsMdTidyKickoff'), text: agentsMdTidyKickoff('user', '<home>/AGENTS.md', []) },
     { title: 'docsMapKickoff', source: at(`${phases}/docs-map.ts`, 'export function docsMapKickoff'), text: docsMapKickoff(['docs/<doc>.md']) },
     { title: 'resumePlanPrompt', source: at(`${phases}/blind-plan.ts`, 'export function resumePlanPrompt'), text: resumePlanPrompt(F) },
     { title: 'migrateSpecPrompt', source: at(`${phases}/blind-plan.ts`, 'export function migrateSpecPrompt'), text: migrateSpecPrompt(F, ['<problem>']) },

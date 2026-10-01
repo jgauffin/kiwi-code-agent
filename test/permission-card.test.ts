@@ -1,9 +1,13 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { SessionEvent } from '../src/agent/session/code-session'
 
 // The webview talks to the host through this handle, acquired when its modules load.
 ;(globalThis as Record<string, unknown>).acquireVsCodeApi = () => ({ postMessage: () => {} })
+
+// Test files share a worker, so the module registry is cleared first: what
+// loads here is this file's own, bound to its stub and its document.
+vi.resetModules()
 
 const { PermissionCard } = await import('../src/chat/webview/permission-card')
 const { ChatTranscript } = await import('../src/chat/webview/chat-transcript')
@@ -173,6 +177,65 @@ describe('a call that is not a shell command', () => {
     const { card: c } = card({ type: 'permission_request', requestId: 'e1', toolName: 'Edit', input: { file_path: 'a.ts' } })
 
     expect(labels(c)).toEqual(['Allow', 'Deny'])
+  })
+
+  describe('a write the policy offered wider scopes for', () => {
+    const writeRequest = (): Request => ({
+      type: 'permission_request',
+      requestId: 'w1',
+      toolName: 'Edit',
+      input: { file_path: 'docs/product.md' },
+      writeScopes: [
+        { label: 'docs/product.md', rule: 'Writes(docs/product.md)' },
+        { label: 'docs/', rule: 'Writes(docs/**)' },
+      ],
+    })
+    const widths = (c: Card) => [...c.querySelectorAll('.covers label')].map((l) => l.textContent?.trim())
+    const pick = (c: Card, label: string) => {
+      const input = [...c.querySelectorAll<HTMLLabelElement>('.covers label')].find((l) => l.textContent?.trim() === label)!.querySelector('input')!
+      input.checked = true
+      input.dispatchEvent(new Event('change'))
+    }
+    const enabled = (c: Card) => [...c.querySelectorAll('button')].filter((b) => !b.disabled).map((b) => b.textContent)
+
+    it('starts_on_this_edit_where_only_a_one_off_allow_makes_sense', () => {
+      const { card: c } = card(writeRequest())
+
+      expect(widths(c)).toEqual(['this edit', 'docs/product.md', 'docs/'])
+      expect(labels(c)).toEqual(['Allow', 'Allow for session', 'Allow for project', 'Deny'])
+      expect(enabled(c)).toEqual(['Allow', 'Deny'])
+    })
+
+    it('a_wider_scope_is_remembered_for_as_long_as_the_button_says_and_never_allowed_just_once', () => {
+      const { card: c, decisions } = card(writeRequest())
+
+      pick(c, 'docs/')
+      expect(enabled(c)).toEqual(['Allow for session', 'Allow for project', 'Deny'])
+      press(c, 'Allow for session')
+
+      expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'allow', remember: { session: ['Writes(docs/**)'], project: [] } }])
+      c.resolve('allow')
+      expect(c.querySelector('.decision')?.textContent).toBe('Allowed (docs/ for session)')
+    })
+
+    it('the_file_can_be_allowed_for_the_project', () => {
+      const { card: c, decisions } = card(writeRequest())
+
+      pick(c, 'docs/product.md')
+      press(c, 'Allow for project')
+
+      expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'allow', remember: { session: [], project: ['Writes(docs/product.md)'] } }])
+    })
+
+    it('two_prompts_on_screen_keep_their_picks_apart', () => {
+      const { card: first } = card(writeRequest())
+      const { card: second } = card({ ...writeRequest(), requestId: 'w2' })
+
+      pick(first, 'docs/')
+
+      expect(enabled(second)).toEqual(['Allow', 'Deny'])
+      expect(enabled(first)).toEqual(['Allow for session', 'Allow for project', 'Deny'])
+    })
   })
 
   it('an_answered_edit_keeps_showing_the_change_it_asked_about_never_its_raw_arguments', () => {

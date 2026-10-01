@@ -20,7 +20,7 @@ const spec = [
 
 describe('scenario context file', () => {
   it('names_the_file_by_the_feature_slug_beside_the_decisions', () => {
-    expect(contextFile('Order cancellation')).toBe('.agent/plan/order-cancellation.context.md')
+    expect(contextFile('Order cancellation')).toBe('.kiwi/specs/order-cancellation.context.md')
   })
 
   it('reads_each_scenarios_files_in_the_order_written', () => {
@@ -48,7 +48,7 @@ describe('scenario context file', () => {
 
 describe('ScenarioContextContract hook', () => {
   it('reports_a_heading_that_is_no_scenario_and_a_path_that_does_not_exist_and_stays_quiet_otherwise', async () => {
-    await withWorkspace({ 'plan/order-cancellation.spec.md': spec, 'src/orders/order.ts': '', 'src/refund.ts': '' }, async (dir) => {
+    await withWorkspace({ 'specs/order-cancellation.spec.md': spec, 'src/orders/order.ts': '', 'src/refund.ts': '' }, async (dir) => {
       const hook = new ScenarioContextContract(dir, 'Order cancellation')
       const write = (file: string) => hook.postToolUse({ toolName: 'Write', input: { file_path: file }, toolUseId: 't', output: 'ok', isError: false })
       const file = contextFile('Order cancellation')
@@ -63,8 +63,8 @@ describe('ScenarioContextContract hook', () => {
       expect(outcome?.additionalContext).toContain('src/refunds.ts')
 
       // Other files are none of the contract's business.
-      await writeFiles(dir, { '.agent/plan/order-cancellation.decisions.md': '## Not a scenario\n' })
-      expect(await write('.agent/plan/order-cancellation.decisions.md')).toBeUndefined()
+      await writeFiles(dir, { '.kiwi/specs/order-cancellation.decisions.md': '## Not a scenario\n' })
+      expect(await write('.kiwi/specs/order-cancellation.decisions.md')).toBeUndefined()
     })
   })
 })

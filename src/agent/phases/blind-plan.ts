@@ -1,17 +1,19 @@
 import { join } from 'node:path'
+import { KIWI_DIR } from '../kiwi-dir'
 import { ASK_USER_TOOL } from '../openai-session/tools/ask-user'
 import { MARKDOWN_SEARCH_TOOL } from '../openai-session/tools/markdown-search'
 import { DOC_READING } from '../openai-session/tools/markdown/outline-gate'
+import { EDIT_WRITING } from '../openai-session/tools/edit'
 import SPEC_CONTRACT from '../../../assets/plugin/skills/spec-writing/contract.md'
 import { KEEP_RULING } from './ruling'
 import type { Scope } from './scope-guard'
 import { UNFILED_DECISIONS, UNFILED_FILE } from './unfiled-decisions'
 
 export const DOCS_DIR = 'docs'
-export const PLAN_DIR = 'plan'
+export const SPECS_DIR = 'specs'
 
 /** A feature's working files (review, decisions, tasks): the extension's own, beside its run logs, never committed. */
-export const WORK_DIR = '.agent/plan'
+export const WORK_DIR = `${KIWI_DIR}/${SPECS_DIR}`
 
 export function featureSlug(feature: string): string {
   return (
@@ -26,14 +28,14 @@ export function featureSlug(feature: string): string {
 }
 
 export function specPath(cwd: string, feature: string): string {
-  return join(cwd, PLAN_DIR, `${featureSlug(feature)}.spec.md`)
+  return join(cwd, SPECS_DIR, `${featureSlug(feature)}.spec.md`)
 }
 
 /** The product's front door counts as intent: what it says it is, not how it is built. */
 export const README_GLOB = '{README,ReadMe,Readme,readme}.md'
 
 /** Every feature's spec: an approved one is that feature's definition, so a later planner reads it as it reads the docs. */
-export const SPECS_GLOB = `${PLAN_DIR}/*.spec.md`
+export const SPECS_GLOB = `${SPECS_DIR}/*.spec.md`
 
 /** Said to every session that changes code, so a rule the user approved is not broken by one that never knew it was there. */
 export const SPEC_READING = `The approved specs under \`${SPECS_GLOB}\` define what the product does, one named rule per line; a draft is still a proposal. Before you change how something behaves, find the specs that cover it and keep to their rules. Breaking a rule is the user's call: ask first, and once they agree, amend the rule in its spec, or record the decision as unfiled when it reaches further.`
@@ -43,7 +45,7 @@ export function blindPlanScope(feature: string, ignored: string[] = []): Scope {
   const slug = featureSlug(feature)
   // The review file holds the human's comments and the planner's resolutions to them.
   // The decisions file holds what the mapping found; the planner proposes on it and reads the rulings from it.
-  const own = [`${PLAN_DIR}/${slug}.spec.md`, `${WORK_DIR}/${slug}.review.md`, `${WORK_DIR}/${slug}.decisions.md`]
+  const own = [`${SPECS_DIR}/${slug}.spec.md`, `${WORK_DIR}/${slug}.review.md`, `${WORK_DIR}/${slug}.decisions.md`]
   return {
     readable: [`${DOCS_DIR}/**`, README_GLOB, SPECS_GLOB, UNFILED_FILE, ...own],
     // An answer that reaches beyond this feature is recorded for the features it reaches.
@@ -59,7 +61,7 @@ export function blindPlanScope(feature: string, ignored: string[] = []): Scope {
  * a comment in place; AskUser is how a gap in intent is settled by the user
  * mid-session instead of being written down and waited on.
  */
-export const BLIND_PLAN_TOOLS = ['Read', 'Glob', MARKDOWN_SEARCH_TOOL, 'JsonSchema', 'JsonQuery', 'Write', 'Edit', ASK_USER_TOOL]
+export const BLIND_PLAN_TOOLS = ['Read', 'Glob', MARKDOWN_SEARCH_TOOL, 'JsonSchema', 'JsonQuery', 'Write', 'Edit', 'MultiEdit', ASK_USER_TOOL]
 
 /**
  * Phase 1 system prompt. Short on purpose: it states the job and the output
@@ -79,8 +81,8 @@ workspace root (what the product is, in its own words), every feature's spec und
 feature's definition, as settled as a doc; a draft is a proposal still being planned), \`${UNFILED_FILE}\` (decisions the user made while building
 or in chat, not yet filed into the specs and docs they reach: the user's latest word, so an entry outweighs a doc or a spec that says otherwise)
 and your own plan files. Nothing else exists for you; do not try.
-Use Glob with path \`${DOCS_DIR}\` and with path \`${PLAN_DIR}\` to see what is there, then search them with \`${MARKDOWN_SEARCH_TOOL}\` for the 
-feature's terms rather than reading doc after doc. ${DOC_READING} A rule in another spec is what the product does; its Decisions, if any, are history 
+Use Glob with path \`${DOCS_DIR}\` and with path \`${SPECS_DIR}\` to see what is there, then search them with \`${MARKDOWN_SEARCH_TOOL}\` for the 
+feature's terms rather than reading doc after doc. ${DOC_READING} ${EDIT_WRITING}A rule in another spec is what the product does; its Decisions, if any, are history 
 and say nothing you need. Where a doc and an approved spec disagree, ask: the user knows which is current, you do not.
 
 Your input: the user's first message describes the feature or user story. Later messages steer, answer your questions or ask for changes.
@@ -89,7 +91,7 @@ First, direction. In chat, not in a file: the few decisions that shape the featu
 you propose, with the reason) and the questions whose answer would change that. A short message, then stop and wait. Write nothing until the user says go: 
 a full plan in the wrong direction is wasted, so the user steers first.
 
-Then, the spec. When the user accepts or adjusts the direction, write one file, \`${PLAN_DIR}/${slug}.spec.md\` under ${cwd}, with Write. ${SPEC_CONTRACT.trim().replaceAll('<feature>', feature)}
+Then, the spec. When the user accepts or adjusts the direction, write one file, \`${SPECS_DIR}/${slug}.spec.md\` under ${cwd}, with Write. ${SPEC_CONTRACT.trim().replaceAll('<feature>', feature)}
 - Settle what you can. Where intent is silent but a sensible default exists, take it and say so in the direction; a question is for what only the user can answer, and you put it with the \`${ASK_USER_TOOL}\` tool and carry on with the answer rather than writing it down and stopping.
 - The user's answers become rules in this spec. The part of an answer that reaches features other than this one is recorded for them: ${UNFILED_DECISIONS}
 - Decisions live apart from the spec in \`${WORK_DIR}/${slug}.decisions.md\`, written by a separate check of the approved spec against the code: one \`###\` per decision, with an \`on\` line naming the rules it concerns and a \`finding\` line saying what the code does and what the spec says. Each is something the user rules on. When asked, add one to three \`- proposed: ...\` lines under each decision that has none, with Edit: each a distinct way to settle it, written as the rule's new text as it would stand in the spec (one sentence, no argument, no reference to the decision; observable behaviour, not how it is built). Keeping the rule as it stands is always offered to the user, so do not propose it. With them goes your own pick: \`- recommended: <n>\` naming a \`proposed\` line by its number, or \`${KEEP_RULING}\`, and \`- because: <one sentence>\` saying why. A proposal is not a ruling: change no rule until the user has ruled. The \`- ruling: ...\` line is the user's, written for you: \`${KEEP_RULING}\` means the rule stands and the code will change, so nothing in the spec moves; the text of a proposal means it replaces the rule verbatim; anything else is the user's own decision, which you work into the rules as it says (revise the rule, or add an edge case). When rulings are handed to you, revise the rules each decision names per its ruling, append \` [applied]\` to that decision's heading in the decisions file, and touch nothing else there.
@@ -107,7 +109,7 @@ Then, the spec. When the user accepts or adjusts the direction, write one file, 
 export function resumePlanPrompt(feature: string): string {
   const slug = featureSlug(feature)
   return [
-    `The spec for "${feature}" already exists at \`${PLAN_DIR}/${slug}.spec.md\`, written in an earlier session that is gone. Do not start over.`,
+    `The spec for "${feature}" already exists at \`${SPECS_DIR}/${slug}.spec.md\`, written in an earlier session that is gone. Do not start over.`,
     '',
     `Read it from disk, and \`${WORK_DIR}/${slug}.review.md\` and \`${WORK_DIR}/${slug}.decisions.md\` where they exist. Then, in chat, where the plan stands in a few sentences: its status, open questions, decisions without a ruling or with one not yet applied, comments not yet answered. An approved or implemented spec is settled: change nothing in it unless the user asks.`,
     '',
@@ -121,7 +123,7 @@ export function resumePlanPrompt(feature: string): string {
  * so it says where invariants, acceptance criteria and flat edge cases go.
  */
 export function migrateSpecPrompt(feature: string, problems: string[]): string {
-  const spec = `${PLAN_DIR}/${featureSlug(feature)}.spec.md`
+  const spec = `${SPECS_DIR}/${featureSlug(feature)}.spec.md`
   return [
     `The spec for "${feature}" at \`${spec}\` is off contract:`,
     ...problems.map((p) => `- ${p}`),
@@ -158,7 +160,7 @@ export function decisionsHandoffPrompt(feature: string, titles: string[]): strin
 /** The message the planner gets once the user has ruled: apply, mark applied, stop. */
 export function rulingsHandoffPrompt(feature: string, rulings: { title: string; ruling: string }[]): string {
   const slug = featureSlug(feature)
-  const spec = `${PLAN_DIR}/${slug}.spec.md`
+  const spec = `${SPECS_DIR}/${slug}.spec.md`
   const decisions = `${WORK_DIR}/${slug}.decisions.md`
   return [
     `The user ruled on the decisions in \`${decisions}\`:`,
@@ -175,16 +177,19 @@ export function rulingsHandoffPrompt(feature: string, rulings: { title: string; 
 /**
  * The message the planner gets when the spec is approved: the docs it was
  * planned from may now say less, or otherwise, than the spec. Listed in chat
- * so the user updates them, or asks the planner to.
+ * so the user updates them, or asks the planner to. A section the spec
+ * covers and a section it contradicts are not the same finding: only the
+ * first can go on the user's word, since a contradiction means one of the
+ * two records is wrong and only the user knows which.
  */
 export function docsReviewPrompt(feature: string): string {
-  const spec = `${PLAN_DIR}/${featureSlug(feature)}.spec.md`
+  const spec = `${SPECS_DIR}/${featureSlug(feature)}.spec.md`
   return [
     `The spec at \`${spec}\` is approved and is now the definition of "${feature}".`,
     '',
-    `Read again the docs under \`${DOCS_DIR}/\` you cited or built on, and list in chat, one line per doc section, what now reads differently from the spec or is covered by it and can go. Edit nothing. If nothing needs to change, say so in one line.`,
+    `Read again the docs under \`${DOCS_DIR}/\` you cited or built on, and list in chat, one line per doc section: what the spec now covers, naming the rules, and can go; and, separately, what now reads otherwise than the spec, reported but never offered to go, since which side is current is the user's to say. Edit nothing. If nothing needs to change, say so in one line.`,
     '',
-    'The user updates the docs, or asks you to: then edit only what you listed, and each write is confirmed by them.',
+    `The user updates the docs, or asks you to: then edit only what you listed, and each write is confirmed by them. If they say a section that reads otherwise is current, record the ruling as an unfiled decision naming "${feature}" with Edit on \`${UNFILED_FILE}\`: ${UNFILED_DECISIONS}`,
   ].join('\n')
 }
 
@@ -192,14 +197,18 @@ export function docsReviewPrompt(feature: string): string {
  * The message the planner gets on approval when the user chose to cut the
  * docs a spec covers: two records of one rule drift apart, and the spec is
  * the one the build keeps honest. The spec itself is not touched: any change
- * to it, citations included, sends it back to the check against the code.
+ * to it, citations included, sends it back to the check against the code. A
+ * section that contradicts the spec is never cut outright, since a
+ * contradiction is not settled until the user says which side is current.
  */
 export function docsCutPrompt(feature: string): string {
-  const spec = `${PLAN_DIR}/${featureSlug(feature)}.spec.md`
+  const spec = `${SPECS_DIR}/${featureSlug(feature)}.spec.md`
   return [
     `The spec at \`${spec}\` is approved and is now the definition of "${feature}".`,
     '',
-    `Read again the docs under \`${DOCS_DIR}/\` you cited or built on, and cut each section the spec now covers or contradicts down to what no spec holds: the domain brief, constraints every feature has to respect, features not yet planned. Delete a section left with nothing. Leave the spec as it is: a citation into a cut section stays as the record of where the rule came from.`,
+    `Read again the docs under \`${DOCS_DIR}/\` you cited or built on, and cut each section the spec now covers down to what no spec holds: the domain brief, constraints every feature has to respect, features not yet planned. Delete a section left with nothing. Leave the spec as it is: a citation into a cut section stays as the record of where the rule came from.`,
+    '',
+    `A section that now reads otherwise than the spec is never cut: report it in chat instead, since which side is current is the user's to say. If they say the doc is current, record the ruling as an unfiled decision naming "${feature}" with Edit on \`${UNFILED_FILE}\`: ${UNFILED_DECISIONS}`,
     '',
     'Each edit is confirmed by the user. Then, in chat, one line per doc section you cut, and stop.',
   ].join('\n')

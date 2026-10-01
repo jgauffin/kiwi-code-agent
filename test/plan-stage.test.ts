@@ -9,8 +9,8 @@ import { board, task, tasksState } from './task-board-fixture'
 
 const body =
   '# Order cancellation\n\n## Goal\nOrders can be cancelled.\n\n## Cancelling\n- **Cancel command**: an order can be cancelled\n- **Gone**: a cancelled order is gone [removed]\n'
-const draft: SpecState = { exists: true, status: 'draft', body }
-const approved: SpecState = { exists: true, status: 'approved', body }
+const draft: SpecState = { exists: true, status: 'draft', body, built: false }
+const approved: SpecState = { exists: true, status: 'approved', body, built: false }
 
 const review = (text: string) => parseReview(`# Review\n\n${text}`)
 const noReview = review('')
@@ -77,7 +77,7 @@ describe('plan stage', () => {
   })
 
   it('an_implemented_spec_is_verified_without_a_board_or_a_review', () => {
-    const implemented: SpecState = { exists: true, status: 'implemented', body }
+    const implemented: SpecState = { exists: true, status: 'implemented', body, built: false }
     expect(planStage(implemented, noReview, noTasks)).toBe('verified')
   })
 

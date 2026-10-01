@@ -1,0 +1,221 @@
+{
+  "spec": "fc9370d0",
+  "tasks": [
+    {
+      "name": "Writing a file another hand changed",
+      "text": "Every session that writes — plan, implement, cleanup, chat — is held to the same check, which the extension performs rather than the prompt asking for it.",
+      "delivers": [
+        "Stale write refused",
+        "Own writes are seeing",
+        "Folded read is not seeing",
+        "Unread file refused",
+        "A new file needs no read",
+        "No read-before-edit instruction",
+        "Who changed it"
+      ],
+      "files": [
+        "src/extension.ts",
+        "src/agent/phases/implement.ts",
+        "src/agent/session/file-hands.ts",
+        "src/agent/session/stale-write-guard.ts",
+        "test/stale-write-guard.test.ts",
+        "test/implement.test.ts"
+      ],
+      "newFiles": [],
+      "context": [],
+      "how": "",
+      "proves": [
+        {
+          "item": "Stale write refused",
+          "file": "test/stale-write-guard.test.ts",
+          "test": "StaleWriteGuard > stale_write_refused_when_the_file_changed_on_disk_since_it_was_read"
+        },
+        {
+          "item": "Own writes are seeing",
+          "file": "test/stale-write-guard.test.ts",
+          "test": "StaleWriteGuard > own_writes_are_seeing_so_two_edits_in_a_row_are_never_refused"
+        },
+        {
+          "item": "Folded read is not seeing",
+          "file": "test/tools.test.ts",
+          "test": "ReadTracker > forgetting_all_but_the_named_files_sends_the_rest_back_to_be_read"
+        },
+        {
+          "item": "Unread file refused",
+          "file": "test/stale-write-guard.test.ts",
+          "test": "StaleWriteGuard > unread_file_refused"
+        },
+        {
+          "item": "A new file needs no read",
+          "file": "test/stale-write-guard.test.ts",
+          "test": "StaleWriteGuard > a_new_file_needs_no_read"
+        },
+        {
+          "item": "No read-before-edit instruction",
+          "file": "test/implement.test.ts",
+          "test": "implement phase > no_read_before_edit_instruction_since_the_stale_write_guard_enforces_it"
+        },
+        {
+          "item": "Who changed it",
+          "file": "test/stale-write-guard.test.ts",
+          "test": "StaleWriteGuard > who_changed_it_names_the_other_kiwiagent_session_and_its_feature"
+        }
+      ],
+      "note": "Re-verified during a sweep-failure run: the failure (\"Cannot read properties of undefined (reading 'config')\" / \"Vitest failed to find the runner\" across ~10 unrelated files) is the worker-starvation flake vitest.config.mts documents. A narrowed rerun (test/stale-write-guard.test.ts, test/tools.test.ts, test/implement.test.ts) and a full npm test both passed clean; no code change needed.",
+      "built": "StaleWriteGuard (src/agent/session/stale-write-guard.ts) implements SessionHooks with its own ReadTracker; added once, unconditionally, in setupFor()'s composeHooks(...) in src/extension.ts, so it holds every session — every mode, both the openai-compatible loop and the Claude SDK's native Edit/Write/MultiEdit/NotebookEdit — to the same read-before-write/stale-write check via the shared preToolUse/postToolUse hook pair. FileHands (src/agent/session/file-hands.ts) exports recordWrite(path, mtimeMs), whoWrote(path, mtimeMs): Promise<Hand | undefined>, and describeHand(hand): string; it persists one JSON registry per session under .agent/sessions/<sessionId>.json (path -> mtimeMs, plus the session's mode and feature), so any session — any process, any window — can attribute a file's current mtime to the KiwiAgent session that wrote it, or learn no session did. Later tasks needing hand attribution (\"Being told while the work is in play\", \"A verification failure that is not ours\") can read the same .agent/sessions/*.json registries FileHands already writes, via a new FileHands instance or by reading the files directly, rather than building attribution again.",
+      "state": "tested",
+      "removed": false,
+      "group": "Writing a file another hand changed"
+    },
+    {
+      "name": "Being told while the work is in play",
+      "text": "Being told while the work is in play",
+      "delivers": [
+        "Notice of another hand",
+        "One notice per file",
+        "The task's work is its own"
+      ],
+      "files": [
+        "src/agent/session/notice-of-another-hand.ts",
+        "src/agent/session/file-hands.ts",
+        "src/agent/phases/tasks-file.ts",
+        "src/agent/phases/legacy-tasks.ts",
+        "src/agent/openai-session/tools/task-board.ts",
+        "src/extension.ts",
+        "test/notice-of-another-hand.test.ts",
+        "test/task-board-tools.test.ts",
+        "test/task-board-fixture.ts",
+        "test/plan-step.test.ts",
+        "test/plan-view.test.ts"
+      ],
+      "newFiles": [],
+      "context": [],
+      "how": "",
+      "proves": [
+        {
+          "item": "Notice of another hand",
+          "file": "test/notice-of-another-hand.test.ts",
+          "test": "notice_of_another_hand_is_a_one_line_tail_on_the_next_tool_result"
+        },
+        {
+          "item": "One notice per file",
+          "file": "test/notice-of-another-hand.test.ts",
+          "test": "one_notice_per_file_is_reported_once_until_the_session_sees_it_again / a_change_sweeping_many_files_at_once_is_reported_as_a_single_line_naming_the_count"
+        },
+        {
+          "item": "The task's work is its own",
+          "file": "test/task-board-tools.test.ts",
+          "test": "a_foreign_change_to_a_named_file_is_recorded_on_the_task_instead_of_counted_as_the_task_s_work / a_file_written_by_the_task_s_own_session_is_not_recorded_as_foreign"
+        }
+      ],
+      "note": "",
+      "built": "NoticeOfAnotherHand (src/agent/session/notice-of-another-hand.ts) implements SessionHooks.postToolUse: tracks, per session, the mtime it last saw of every file it read or wrote (WRITE_TOOLS ∪ Read), and on every tool call reports any tracked file whose mtime moved since — one line naming the file and (via FileHands.handFor/describeHand) who, or \"Notice: N files changed since you last saw them.\" when several moved at once — then suppresses that file until the session sees it again (a read, or its own write, clears the flag). Added unconditionally alongside StaleWriteGuard in setupFor()'s composeHooks(...) in src/extension.ts, so every mode and both engines get it. FileHands (src/agent/session/file-hands.ts) gained handFor(path, mtimeMs): Promise<Hand | undefined>, like whoWrote but including this session's own registry, factored through a shared private find(); it's what both NoticeOfAnotherHand and the task board use to attribute a file's current mtime. Task (src/agent/phases/tasks-file.ts) gained a `foreignFiles: string[]` field (schema default [], carried through parseBoard/deriveBoard/updateTask, filtered to stay a subset of `files`); TaskProgress gained a matching optional `foreignFiles?: string[]`, replaced wholesale whenever the caller supplies it. taskBoardTools(feature, hands?: FileHands) (src/agent/openai-session/tools/task-board.ts) takes an optional FileHands now; UpdateTask, whenever `files` is given, computes foreignFiles by checking handFor on each file — no hand, or a hand whose `feature` differs from this one, is foreign — and detail() shows a `foreign changes:` line when the list is non-empty. extension.ts constructs a FileHands per session for both the new hook and for taskBoardTools's call site at ownTools.",
+      "state": "tested",
+      "removed": false,
+      "group": "Being told while the work is in play"
+    },
+    {
+      "name": "A verification failure that is not ours",
+      "text": "Verification is mechanical and runs over the files the tasks name; with a second hand in the workspace, some of what fails there was never this feature's doing.",
+      "delivers": [
+        "Foreign failure",
+        "Narrowed to the function",
+        "No other hand no excuse",
+        "Retry before asking",
+        "Ours on the second run",
+        "Held rather than verified",
+        "Budget spared"
+      ],
+      "files": [
+        "src/agent/session/file-hands.ts",
+        "src/agent/session/stale-write-guard.ts",
+        "src/agent/phases/verification-attribution.ts",
+        "src/agent/phases/verification.ts",
+        "src/agent/phases/tasks-file.ts",
+        "src/chat/chat-view-provider.ts",
+        "src/extension.ts",
+        "package.json",
+        "test/verification-attribution.test.ts",
+        "test/verification.test.ts",
+        "test/legacy-tasks.test.ts"
+      ],
+      "newFiles": [],
+      "context": [],
+      "how": "",
+      "proves": [
+        {
+          "item": "Foreign failure",
+          "file": "test/verification-attribution.test.ts",
+          "test": "classifyFailure > foreign_failure_a_file_no_session_of_this_feature_wrote_and_another_hand_changed_since_is_foreign"
+        },
+        {
+          "item": "Narrowed to the function",
+          "file": "test/verification-attribution.test.ts",
+          "test": "classifyFailure > narrowed_to_the_function_a_failing_test_whose_own_function_another_hand_changed_is_foreign_even_though_this_feature_wrote_the_rest"
+        },
+        {
+          "item": "No other hand no excuse",
+          "file": "test/verification-attribution.test.ts",
+          "test": "classifyFailure > no_other_hand_no_excuse_nothing_changed_since_this_features_own_write_so_the_failure_is_the_features"
+        },
+        {
+          "item": "Retry before asking",
+          "file": "test/verification.test.ts",
+          "test": "runVerification > retry_before_asking_an_all_foreign_run_waits_and_runs_the_same_suites_again_before_being_reported"
+        },
+        {
+          "item": "Ours on the second run",
+          "file": "test/verification.test.ts",
+          "test": "runVerification > ours_on_the_second_run_a_failure_thats_foreign_first_but_the_features_own_on_the_retry_is_handed_to_the_implementer"
+        },
+        {
+          "item": "Held rather than verified",
+          "file": "test/verification.test.ts",
+          "test": "runVerification > held_rather_than_verified_an_all_foreign_run_without_a_retry_is_held_and_recorded_on_the_board_naming_the_files_and_the_hand"
+        },
+        {
+          "item": "Budget spared",
+          "file": "test/verification.test.ts",
+          "test": "countsAgainstBudget > budget_spared_an_all_foreign_held_outcome_does_not_count_against_the_budget"
+        }
+      ],
+      "note": "Re-verified again during a second sweep-failure run: same worker-starvation flake vitest.config.mts documents, reproduced on unrelated files with no fault in this task's code. Narrowed rerun of this task's tests plus test/legacy-tasks.test.ts passed, and a full npm test immediately after passed clean (101 passed | 2 skipped, 1239 tests).",
+      "built": "FileHands.ownSnapshot(feature, path) and recordWrite(path, mtimeMs, text?) (src/agent/session/file-hands.ts) — the feature's own last-known content of a file, by mtime, across its sessions' registries. StaleWriteGuard now snapshots write content alongside mtime (src/agent/session/stale-write-guard.ts). New src/agent/phases/verification-attribution.ts: failureFiles(output, baseDir), classifyFailure(failure, hands, feature, cwd): Classification, narrowToFunction(path, currentText, ownText, line) using code-structure's readStructure for function-level diffing. src/agent/phases/verification.ts: runVerification now takes optional attribute: Attribute and retry: RetryOptions, returns VerificationOutcome { record, failures, held: HeldFailure[] }; attributeWith(hands, feature, cwd): Attribute wires classifyFailure in; countsAgainstBudget(outcome): boolean. VerificationRecord (tasks-file.ts) gained an optional foreign field naming files/hand. chat-view-provider.ts's verify() wires attribution+retry and calls askAboutForeignFailures(feature, held) on a held outcome (Run again / Hand to implementer anyway / Accept via vscode.window.showWarningMessage, untested UI glue per this codebase's convention). New kiwiAgent.verifyRetrySeconds setting (package.json), read by Verifier.retrySeconds() and wired in src/extension.ts.",
+      "state": "tested",
+      "removed": false,
+      "group": "A verification failure that is not ours"
+    }
+  ],
+  "verification": [
+    {
+      "at": "2026-09-30T05:15:15.042Z",
+      "ok": false,
+      "text": "`npm test` in ."
+    },
+    {
+      "at": "2026-09-30T05:14:39.472Z",
+      "ok": false,
+      "text": "`npm test` in ."
+    },
+    {
+      "at": "2026-09-30T05:13:01.377Z",
+      "ok": false,
+      "text": "`npm test` in ."
+    },
+    {
+      "at": "2026-09-30T05:11:44.607Z",
+      "ok": false,
+      "text": "`npm test` in ."
+    },
+    {
+      "at": "2026-09-30T05:10:36.287Z",
+      "ok": false,
+      "text": "`npm test` in ."
+    },
+    {
+      "at": "2026-09-29T21:45:46.271Z",
+      "ok": false,
+      "text": "`npm test` in ."
+    }
+  ]
+}

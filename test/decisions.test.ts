@@ -82,7 +82,7 @@ describe('decisions', () => {
   it('a_file_without_decisions_or_a_missing_one_has_none', () => {
     expect(decisions('# Decisions for Orders\n')).toEqual([])
     expect(decisions('')).toEqual([])
-    expect(decisionsFile('Order cancellation')).toBe('.agent/plan/order-cancellation.decisions.md')
+    expect(decisionsFile('Order cancellation')).toBe('.kiwi/specs/order-cancellation.decisions.md')
   })
 
   it('a_ruling_lands_under_the_proposals_and_a_second_one_replaces_it_until_applied', () => {

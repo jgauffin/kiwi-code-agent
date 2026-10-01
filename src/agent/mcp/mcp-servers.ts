@@ -1,5 +1,6 @@
 import type { McpServers } from './mcp-config'
 import type { CodeSession } from '../session/code-session'
+import { errorMessage } from '../../error-message'
 
 /**
  * The workspace's MCP servers as one set: what a new session starts with, and
@@ -35,7 +36,7 @@ export class McpServerSet {
     try {
       return await this.read()
     } catch (error) {
-      this.report(error instanceof Error ? error.message : String(error))
+      this.report(errorMessage(error))
       return fallback
     }
   }

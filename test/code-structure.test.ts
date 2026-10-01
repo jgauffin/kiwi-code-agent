@@ -46,6 +46,18 @@ describe('reading the structure of brace languages', () => {
     expect(read('a.ts', 'switch (x) {', '  case 1:', '    go()', '}')).toEqual(['block switch (x) 1-4', '  stmt case 1: go() 2-3'])
   })
 
+  it('the_semicolons_of_a_labelled_for_and_of_a_go_init_statement_stay_in_the_header', () => {
+    expect(read('a.java', 'OUT: for (int i = 0; i < n; i++) {', '  go();', '}')).toEqual(['block OUT: for (int i = 0; i < n; i++) 1-3', '  stmt go() 2-2'])
+    expect(read('a.go', 'for i := 0; i < n; i++ {', '\tif v, ok := m[k]; ok {', '\t}', '}')).toEqual([
+      'block for i := 0; i < n; i++ 1-4',
+      '  block if v, ok := m[k]; ok 2-3',
+    ])
+  })
+
+  it('a_semicolon_after_a_braceless_if_still_ends_it', () => {
+    expect(read('a.c', 'if (a) go();', 'stop();')).toEqual(['stmt if (a) go() 1-1', 'stmt stop() 2-2'])
+  })
+
   it('unbalanced_braces_close_at_the_end_of_the_file_without_failing', () => {
     expect(read('a.ts', 'function f() {', '  }', '}', 'function g() {', '  a()')).toEqual(['block function f() 1-2', 'block function g() 4-5', '  stmt a() 5-5'])
   })

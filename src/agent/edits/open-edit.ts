@@ -1,4 +1,5 @@
 import { isAbsolute, join, relative, resolve } from 'node:path'
+import { KIWI_DIR } from '../kiwi-dir'
 
 /**
  * What the chat asks the editor for when an edit is opened: where the snapshot
@@ -8,7 +9,7 @@ import { isAbsolute, join, relative, resolve } from 'node:path'
 
 /** The run directory tree; the only place a snapshot the chat links to may lie. */
 export function runsRoot(workspaceRoot: string): string {
-  return join(workspaceRoot, '.agent', 'runs')
+  return join(workspaceRoot, KIWI_DIR, 'runs')
 }
 
 /**

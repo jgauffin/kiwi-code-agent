@@ -1,11 +1,15 @@
 import { basename } from 'node:path'
 import { readDeclarations, type Declaration } from '../code-structure/declarations'
 import { languageOf } from '../code-structure/language'
+import { cognitiveComplexity } from './unit-complexity'
 
 export type UnitKind = 'function' | 'type' | 'file'
 
-/** One measurable thing in a file: the file itself, a function, or a type. `lines` counts code lines only. */
-export type Unit = { kind: UnitKind; name: string; line: number; lines: number }
+/**
+ * One measurable thing in a file: the file itself, a function, or a type.
+ * `lines` counts code lines only; a function also has its cognitive complexity.
+ */
+export type Unit = { kind: UnitKind; name: string; line: number; lines: number; complexity?: number }
 
 /**
  * The units of a source file and their sizes, read off its declarations.
@@ -16,12 +20,14 @@ export type Unit = { kind: UnitKind; name: string; line: number; lines: number }
 export function measureUnits(path: string, text: string): Unit[] {
   const file = { kind: 'file' as const, name: basename(path), line: 1 }
   if (!languageOf(path)) return [{ ...file, lines: countCode(text.split(/\r?\n/)) }]
-  const { declarations, code } = readDeclarations(path, text)
+  const { declarations, code, family, bodies } = readDeclarations(path, text)
   const lines = new CodeLines(code)
   const units: Unit[] = []
   const measure = (found: Declaration[]): void => {
     for (const d of found) {
-      units.push({ kind: d.kind, name: d.name, line: d.line, lines: lines.between(d.line, d.endLine) })
+      const unit: Unit = { kind: d.kind, name: d.name, line: d.line, lines: lines.between(d.line, d.endLine) }
+      if (d.kind === 'function') unit.complexity = cognitiveComplexity(d.name, bodies.get(d) ?? [], family)
+      units.push(unit)
       measure(d.children)
     }
   }

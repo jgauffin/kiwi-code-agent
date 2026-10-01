@@ -14,6 +14,7 @@ const MODE_LABEL: Record<SessionMode, string> = {
   docs: 'Evaluate docs',
   'docs-map': 'Docs map',
   'file-decisions': 'File decisions',
+  'doc-migration': 'Doc migration',
 }
 
 const STATUS_ICON: Record<SessionStatus, { icon: string; color?: string }> = {

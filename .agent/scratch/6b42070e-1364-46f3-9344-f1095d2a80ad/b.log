@@ -1,0 +1,50 @@
+npm notice run kiwipow-agent@0.2.3 test
+npm notice run vitest run
+
+ RUN  v5.0.0 D:/src/coderr/CodingAgent
+
+ ❯ test/tools.test.ts (29 tests | 1 failed) 8565ms
+   ❯ Bash (3)
+     × returns_output_and_marks_non_zero_exit_as_error 5097ms
+ ❯ test/tasks-file.test.ts (26 tests | 1 failed) 5081ms
+   ❯ the board on disk under parallel sessions (2)
+     × changes_made_at_the_same_time_are_all_kept 5033ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/tasks-file.test.ts > the board on disk under parallel sessions > changes_made_at_the_same_time_are_all_kept
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ test/tasks-file.test.ts:277:3
+    275|   }
+    276|
+    277|   it('changes_made_at_the_same_time_are_all_kept', () =>
+       |   ^
+    278|     withDir(async (path) => {
+    279|       await writeBoard(path, board(task('A')))
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  test/tools.test.ts > Bash > returns_output_and_marks_non_zero_exit_as_error
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ test/tools.test.ts:221:3
+    219|
+    220| describe('Bash', () => {
+    221|   it('returns_output_and_marks_non_zero_exit_as_error', async () => {
+       |   ^
+    222|     const tool = bashTool()
+    223|     const ok = await tool.execute({ command: 'echo hi && echo err 1>&2…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  test/tools.test.ts > Bash > returns_output_and_marks_non_zero_exit_as_error
+Error: EBUSY: resource busy or locked, rmdir 'C:\Users\jonas\AppData\Local\Temp\tools-r91RYb'
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  2 failed | 111 passed | 3 skipped (116)
+      Tests  2 failed | 1413 passed | 6 skipped (1421)
+   Start at  12:32:11
+   Duration  15.11s (tests 43%, environment 32%, import 16%, transform 9%)
+

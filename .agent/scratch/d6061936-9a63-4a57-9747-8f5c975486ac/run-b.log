@@ -1,0 +1,11 @@
+npm notice run kiwipow-agent@0.2.3 test
+npm notice run vitest run
+
+ RUN  v5.0.3 D:/src/coderr/CodingAgent
+
+
+ Test Files  117 passed | 3 skipped (120)
+      Tests  1542 passed | 6 skipped (1548)
+   Start at  19:16:09
+   Duration  10.67s (tests 43%, environment 31%, import 18%, transform 8%)
+

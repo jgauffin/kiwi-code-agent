@@ -9,9 +9,9 @@ The keys, for settings.json:
   ```json
   { "name": "berget", "engine": "openai-compatible", "baseUrl": "https://api.berget.ai/v1", "models": ["moonshotai/Kimi-K3"] }
   ```
-- `kiwiAgent.profiles`: a named way to work: `name`, `default` (a `{provider, model}` naming an entry in `kiwiAgent.providers`, plus optional `effort` and `systemPromptFile`), and optional `steps`, one entry per step (`chat`, `plan` (feature planning), `reconcile`, `implement`, `fix`, `cleanup`, `code-plan` (Plan), `docs`, `docs-map`, `file-decisions`) with a model or an effort of its own. A step not named in `steps` still runs, on the default, so a step added later needs no profile changed. `fix` is the run that mends a failed test sweep; it runs on the profile chosen for implement.
+- `kiwiAgent.profiles`: a named way to work: `name`, `default` (a `{provider, model}` naming an entry in `kiwiAgent.providers`, plus optional `effort` and `systemPromptFile`), and optional `steps`, one entry per step (`chat`, `code-plan` and `code-build` (Plan: planning and building the approved plan), `plan` (feature planning's spec), `reconcile`, `implement`, `fix`, `cleanup`, `docs`, `docs-map`, `file-decisions`, `doc-migration`) with a model or an effort of its own. The Profiles sub-tab shows them in a tab per kind of session. A step not named in `steps` still runs, on the default, so a step added later needs no profile changed. `fix` is the run that mends a failed test sweep. `code-build` must run on the same engine as `code-plan`: the approved plan exists only in its conversation, which carries over only within one engine.
 
-  Effort: a step's own, else the one suggested for the step (plan, reconcile and code-plan high, implement, fix, docs and file-decisions medium, cleanup and docs-map low), else the default's. A fix goes one level higher for each sweep in a row that failed. Example, the strongest reasoner for planning and mapping, throughput for the rest:
+  Effort: a step's own, else the one suggested for the step (plan, reconcile and code-plan high, implement, fix, code-build, docs, file-decisions and doc-migration medium, cleanup and docs-map low), else the default's. A fix goes one level higher for each sweep in a row that failed. Example, the strongest reasoner for planning and mapping, throughput for the rest:
 
   ```json
   { "name": "Balanced", "default": { "provider": "Claude", "model": "claude-sonnet-5[1m]" }, "steps": { "plan": { "provider": "Claude", "model": "claude-opus-5[1m]" }, "reconcile": { "provider": "Claude", "model": "claude-opus-5[1m]" } } }
@@ -32,7 +32,7 @@ The keys, for settings.json:
 
 ## Instruction files and skills
 
-Claude Code's layout, at the user level and in the workspace. On the own-loop engine `CLAUDE.md` and `AGENTS.md` under `~/.claude/`, `~/.codex/AGENTS.md`, `~/AGENTS.md`, then the workspace's `CLAUDE.md` and `AGENTS.md` join the system prompt, global first. Skills (`<folder>/SKILL.md`) under `~/.claude/skills`, `~/.agent/skills` and the same two folders in the workspace load through the `Skill` tool; the workspace wins on a shared name. The Claude engine reads the workspace's `CLAUDE.md` and skills itself. Details in [features/instructions-and-skills.md](features/instructions-and-skills.md).
+Claude Code's layout, at the user level and in the workspace. On the own-loop engine `CLAUDE.md` and `AGENTS.md` under `~/.claude/`, `~/.codex/AGENTS.md`, `~/AGENTS.md`, then the workspace's `CLAUDE.md` and `AGENTS.md` join the system prompt, global first. Skills (`<folder>/SKILL.md`) under `~/.claude/skills`, `~/.kiwi/skills` and the same two folders in the workspace load through the `Skill` tool; the workspace wins on a shared name. The Claude engine reads the workspace's `CLAUDE.md` and skills itself. Details in [features/instructions-and-skills.md](features/instructions-and-skills.md).
 
 ## MCP servers
 
@@ -44,4 +44,4 @@ Claude Code itself keeps the user's servers in `~/.claude.json` instead, under `
 
 ## Logs
 
-Session events are logged to `.agent/runs/<session id>/events.jsonl` in the workspace, and a session's system prompt, when its mode composes one, to `system-prompt.md` beside it; add `.agent/` to the workspace's `.gitignore`. Generated context lives beside the logs: the repo map under `.agent/repo-map/` and the docs map under `.agent/docs-map/`, both rebuilt from the workspace and safe to delete. A feature's review, decisions and tasks live under `.agent/plan/` until the feature is finished (see [plan-sessions.md](plan-sessions.md)).
+Session events are logged to `.kiwi/runs/<session id>/events.jsonl` in the workspace, and a session's system prompt, when its mode composes one, to `system-prompt.md` beside it; add `.kiwi/` to the workspace's `.gitignore`. Generated context lives beside the logs: the repo map under `.kiwi/repo-map/` and the docs map under `.kiwi/docs-map/`, both rebuilt from the workspace and safe to delete. A feature's review, decisions and tasks live under `.kiwi/specs/` until the feature is finished (see [plan-sessions.md](plan-sessions.md)).

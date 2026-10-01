@@ -1,4 +1,5 @@
 import { compileTemplate } from '@relax.js/core/html'
+import { describeBreaches } from '../../agent/cleanup/breach'
 import type { CleanupUnit, PlanState } from '../protocol'
 import type { CleanupProgress, UnitProgress, UnitState } from '../cleanup-progress'
 import { CleanupDecidedEvent, PlanFocusRequestedEvent } from './events'
@@ -12,6 +13,8 @@ type ProgressUnitRow = { name: string; measure: string; state: UnitState; stateL
 type ProgressFileRow = { path: string; openTitle: string; units: ProgressUnitRow[] }
 
 const STATE_LABEL: Record<UnitState, string> = { waiting: 'waiting', working: 'working', within: 'within limit', over: 'still over' }
+
+const measureOf = (unit: CleanupUnit): string => `: ${unit.kind}, ${describeBreaches(unit.breaches)}`
 
 /** Where the split stands, in one line: how far it got, or how the test run after it ended. */
 function headline(progress: CleanupProgress): string {
@@ -139,7 +142,7 @@ export class PlanCleanupTab extends PlanTab {
       openTitle: `Open ${path}`,
       units: units
         .filter((u) => u.path === path)
-        .map((u) => ({ name: u.name, measure: `: ${u.kind}, ${u.lines} lines, limit ${u.threshold}`, state: u.state, stateLabel: STATE_LABEL[u.state] })),
+        .map((u) => ({ name: u.name, measure: measureOf(u), state: u.state, stateLabel: STATE_LABEL[u.state] })),
     }))
   }
 
@@ -151,7 +154,7 @@ export class PlanCleanupTab extends PlanTab {
       picked: !this.unpicked.has(path),
       units: units
         .filter((u) => u.path === path)
-        .map((u) => ({ name: u.name, measure: `: ${u.kind}, ${u.lines} lines, limit ${u.threshold}`, at: path, line: `:${u.line}` })),
+        .map((u) => ({ name: u.name, measure: measureOf(u), at: path, line: `:${u.line}` })),
     }))
   }
 

@@ -1,0 +1,34 @@
+npm notice run kiwipow-agent@0.2.3 test
+npm notice run vitest run
+
+ RUN  v5.0.3 D:/src/coderr/CodingAgent
+
+ ❯ test/tools.test.ts (29 tests | 1 failed) 8488ms
+   ❯ Bash (3)
+     × returns_output_and_marks_non_zero_exit_as_error 5175ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/tools.test.ts > Bash > returns_output_and_marks_non_zero_exit_as_error
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ test/tools.test.ts:221:3
+    219|
+    220| describe('Bash', () => {
+    221|   it('returns_output_and_marks_non_zero_exit_as_error', async () => {
+       |   ^
+    222|     const tool = bashTool()
+    223|     const ok = await tool.execute({ command: 'echo hi && echo err 1>&2…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  test/tools.test.ts > Bash > returns_output_and_marks_non_zero_exit_as_error
+Error: EBUSY: resource busy or locked, rmdir 'C:\Users\jonas\AppData\Local\Temp\tools-JIABAf'
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 116 passed | 3 skipped (120)
+      Tests  1 failed | 1541 passed | 6 skipped (1548)
+   Start at  19:10:00
+   Duration  16.84s (tests 42%, environment 29%, import 15%, transform 13%)
+

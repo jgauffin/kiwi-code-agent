@@ -3,6 +3,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { readOptional } from '../workspace-files'
 import { isUsableServerName, userMcpConfigPath } from './mcp-config'
+import { errorMessage } from '../../error-message'
 
 const CLAUDE_CONFIG_FILE = '.claude.json'
 
@@ -35,7 +36,7 @@ function claudeServers(text: string): Record<string, unknown> {
   try {
     json = JSON.parse(text)
   } catch (error) {
-    throw new Error(`${CLAUDE_CONFIG_FILE}: not valid JSON: ${error instanceof Error ? error.message : String(error)}`)
+    throw new Error(`${CLAUDE_CONFIG_FILE}: not valid JSON: ${errorMessage(error)}`)
   }
   const servers = (json as { mcpServers?: unknown } | null)?.mcpServers
   if (typeof servers !== 'object' || servers === null) return {}

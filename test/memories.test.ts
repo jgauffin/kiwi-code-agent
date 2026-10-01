@@ -35,6 +35,26 @@ describe('project memory paths', () => {
   })
 })
 
+describe('userMemoryFile', () => {
+  it('with_no_claude_md_and_no_agents_md_yet_notes_go_to_agents_md', () => {
+    expect(userMemoryFile(home)).toBe(join(home, 'AGENTS.md'))
+  })
+
+  it('with_a_claude_md_still_in_place_notes_keep_going_there_until_the_move_is_made', async () => {
+    await mkdir(join(home, '.claude'), { recursive: true })
+    await writeFile(join(home, '.claude', 'CLAUDE.md'), '## Memories\n\n- **Likes short PRs**: note\n', 'utf8')
+    expect(userMemoryFile(home)).toBe(join(home, '.claude', 'CLAUDE.md'))
+  })
+
+  it('once_claude_md_is_gone_from_then_on_notes_are_read_and_written_in_agents_md', async () => {
+    await mkdir(join(home, '.claude'), { recursive: true })
+    await writeFile(join(home, '.claude', 'CLAUDE.md'), '## Memories\n\n- **Likes short PRs**: note\n', 'utf8')
+    expect(userMemoryFile(home)).toBe(join(home, '.claude', 'CLAUDE.md'))
+    await rm(join(home, '.claude', 'CLAUDE.md'))
+    expect(userMemoryFile(home)).toBe(join(home, 'AGENTS.md'))
+  })
+})
+
 describe('rebuildProjectIndex', () => {
   it('a_notes_title_and_summary_come_from_the_note_itself_and_the_index_lists_them_oldest_first', async () => {
     const dir = join(cwd, 'memory')
@@ -132,7 +152,7 @@ describe('listMemories', () => {
     await writeFile(userMemoryFile(home), '## Memories\n\n- **Likes short replies**: say less, not more.\n')
     const { project, user } = await listMemories(cwd, home)
     expect(project).toEqual([{ title: 'Blue means clickable', file: 'blue.md', summary: 'Non-interactive UI never uses button/badge/focus blue.' }])
-    expect(user).toEqual([{ title: 'Likes short replies', file: 'CLAUDE.md', summary: 'say less, not more.' }])
+    expect(user).toEqual([{ title: 'Likes short replies', file: 'AGENTS.md', summary: 'say less, not more.' }])
   })
 
   it('a_note_added_or_deleted_by_hand_since_the_index_was_last_written_is_already_reflected_the_index_is_rebuilt_from_the_notes', async () => {

@@ -20,15 +20,15 @@ const run = async (command: string, cwd: string) => {
   return outcome
 }
 
-const boardPath = () => join(dir, '.agent', 'plan', 'order-cancellation.tasks.json')
+const boardPath = () => join(dir, '.kiwi', 'specs', 'order-cancellation.tasks.json')
 const board = (...tasks: Task[]) => writeBoard(boardPath(), boardOf(...tasks))
 const tested = (name: string, ...files: string[]) => task(name, { state: 'tested', files })
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'verify-'))
   await mkdir(join(dir, 'src', 'Api', 'Orders'), { recursive: true })
-  await mkdir(join(dir, 'plan'))
-  await mkdir(join(dir, '.agent', 'plan'), { recursive: true })
+  await mkdir(join(dir, 'specs'))
+  await mkdir(join(dir, '.kiwi', 'specs'), { recursive: true })
   await writeFile(join(dir, 'src', 'Api', 'Api.csproj'), '<Project/>')
   await writeFile(join(dir, 'src', 'Api', 'Orders', 'Order.cs'), 'class Order {}')
   await writeFile(join(dir, 'package.json'), '{}')

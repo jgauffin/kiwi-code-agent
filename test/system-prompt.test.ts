@@ -7,6 +7,7 @@ import { CHAT_DECISIONS } from '../src/agent/phases/unfiled-decisions'
 import { SPEC_READING } from '../src/agent/phases/blind-plan'
 import { memoryWritingInstructions } from '../src/agent/memory/memories'
 import { projectScriptsInstruction } from '../src/agent/permissions/package-scripts'
+import { CLASH_WITH_CORE } from '../src/agent/instructions/instruction-files'
 
 let cwd: string
 let home: string
@@ -83,5 +84,20 @@ describe('buildSystemPrompt', () => {
 
   it('a_project_without_package_json_is_not_told_about_scripts', async () => {
     expect(projectScriptsInstruction(cwd)).toBe('')
+  })
+
+  it("the agent's own style stays core: an instruction file cannot remove the chat's own rule for how it writes code", async () => {
+    await file(join(cwd, 'AGENTS.md'), 'Always add configuration options for anything that might change later.')
+    const prompt = await buildSystemPrompt(cwd, undefined, home)
+    expect(prompt).toContain('Make the smallest change that does the job. Do not add abstractions, options or comments the task did not ask for.')
+    const coreAt = prompt.indexOf('Make the smallest change')
+    const fileAt = prompt.indexOf('Always add configuration options')
+    expect(coreAt).toBeGreaterThan(-1)
+    expect(coreAt).toBeLessThan(fileAt)
+  })
+
+  it('clash with a core rule: a chat is told a rule already given wins over one an instruction file adds', async () => {
+    await file(join(cwd, 'AGENTS.md'), 'a rule of its own')
+    expect(await buildSystemPrompt(cwd, undefined, home)).toContain(CLASH_WITH_CORE)
   })
 })

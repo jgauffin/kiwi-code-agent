@@ -1,10 +1,11 @@
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { KIWI_DIR } from '../kiwi-dir'
 import { readOptional, replaceFile } from '../workspace-files'
 
 /**
  * Where the docs map lives and how it is put on disk. Everything under
- * `.agent/docs-map/` is build output: it describes the docs, it never holds
+ * `.kiwi/docs-map/` is build output: it describes the docs, it never holds
  * anything the docs do not already say, so a lost file costs a re-read and
  * nothing else.
  *
@@ -14,7 +15,7 @@ import { readOptional, replaceFile } from '../workspace-files'
  */
 
 /** Workspace-relative root of the map; the form paths take wherever the map is named. */
-export const DOCS_MAP_ROOT = '.agent/docs-map'
+export const DOCS_MAP_ROOT = `${KIWI_DIR}/docs-map`
 
 /** One entry per doc, under the doc's own path so two docs can never collide. */
 export const ENTRY_DIR = 'entries'

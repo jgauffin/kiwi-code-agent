@@ -1,9 +1,9 @@
 .vscode/**
 .claude/**
-.agent/**
+.kiwi/**
 src/**
 test/**
-plan/**
+specs/**
 scripts/**
 assets/**
 docs/**

@@ -69,6 +69,7 @@ const RUN_NOUN: Record<SessionMode, string> = {
   docs: 'the docs session',
   'docs-map': 'the docs map',
   'file-decisions': 'the filing session',
+  'doc-migration': 'the migration session',
 }
 
 /** Who a step waits on while it is not the person's. */
@@ -214,6 +215,8 @@ function derive(plan: PlanState): Derived {
 
   if (plan.stage === 'verification') {
     if (plan.verification?.live) return { current: 'verify', next: { kind: 'waiting', text: plan.verification.text } }
+    // A failed run goes to a fix run, which starts the tests again when its turn ends: running them under it would test half-made fixes.
+    if (plan.atWork) return { current: 'verify', next: { kind: 'waiting', text: 'the implementer is fixing the failed tests' } }
     return {
       current: 'verify',
       next: { kind: 'action', action: 'verify', label: plan.lastVerification ? 'Verify again' : 'Verify', hint: 'Run the test commands over the files the tasks name.' },

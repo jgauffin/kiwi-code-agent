@@ -10,6 +10,10 @@ import { planState } from './plan-state-fixture'
 // The webview talks to the host through this handle, acquired when its modules load.
 ;(globalThis as Record<string, unknown>).acquireVsCodeApi = () => ({ postMessage: () => {} })
 
+// Test files share a worker, so the module registry is cleared first: what
+// loads here is this file's own, bound to its stub and its document.
+vi.resetModules()
+
 const { PlanView } = await import('../src/chat/webview/plan-view')
 const { CleanupDecidedEvent, PlanFocusRequestedEvent, ReviewActionEvent } = await import('../src/chat/webview/events')
 type Tab = Parameters<InstanceType<typeof PlanView>['update']>[1]
@@ -95,8 +99,17 @@ describe('PlanView', () => {
 
   const verified = () => ({ stage: 'verified' as const, status: 'approved' as const, commentable: false, tasks: [task({ state: 'tested' })] })
   const sweepUnits = [
-    { path: 'src/orders/cancel.ts', line: 12, name: 'cancel', kind: 'function' as const, lines: 61, threshold: 25 },
-    { path: 'src/orders/order.ts', line: 3, name: 'Order', kind: 'type' as const, lines: 240, threshold: 200 },
+    {
+      path: 'src/orders/cancel.ts',
+      line: 12,
+      name: 'cancel',
+      kind: 'function' as const,
+      breaches: [
+        { measure: 'complexity' as const, value: 22, limit: 15 },
+        { measure: 'lines' as const, value: 61, limit: 60 },
+      ],
+    },
+    { path: 'src/orders/order.ts', line: 3, name: 'Order', kind: 'type' as const, breaches: [{ measure: 'lines' as const, value: 240, limit: 200 }] },
   ]
 
   it('the_units_the_sweep_found_are_offered_on_the_cleanup_tab_by_file_and_not_on_the_tasks_tab', () => {
@@ -106,7 +119,8 @@ describe('PlanView', () => {
     const node = view(state, 'cleanup')
     const rows = [...node.querySelectorAll<HTMLElement>('.cleanup .unit')]
     expect(rows.map((r) => r.querySelector('.name')?.textContent)).toEqual(['cancel', 'Order'])
-    expect(rows[0]!.textContent).toContain('function, 61 lines, limit 25')
+    expect(rows[0]!.textContent).toContain('function, complexity 22, limit 15; 61 lines, limit 60')
+    expect(rows[1]!.textContent).toContain('type, 240 lines, limit 200')
     expect(rows[1]!.querySelector('.link.file')?.textContent).toBe(':3')
     expect([...node.querySelectorAll('.cleanup .pick .link.file')].map((l) => l.textContent)).toEqual(['src/orders/cancel.ts', 'src/orders/order.ts'])
 
@@ -160,7 +174,7 @@ describe('PlanView', () => {
       { ...sweepUnits[1]!, state: 'working' },
     ],
     newFiles: ['src/orders/cancel-refund.ts'],
-    movesFile: 'plan/unfiled-moves.md',
+    movesFile: 'specs/unfiled-moves.md',
     activity: 'Edit src/orders/order.ts',
     stage: 'splitting',
     ...over,
@@ -178,7 +192,7 @@ describe('PlanView', () => {
       ['Order', 'working'],
     ])
     expect([...node.querySelectorAll('.cleanup .split-into .link.file')].map((l) => l.textContent)).toEqual(['src/orders/cancel-refund.ts'])
-    expect(node.querySelector('.cleanup .moves .link.file')?.textContent).toBe('plan/unfiled-moves.md')
+    expect(node.querySelector('.cleanup .moves .link.file')?.textContent).toBe('specs/unfiled-moves.md')
     expect(node.querySelector('.cleanup .running')).toBeNull()
   })
 

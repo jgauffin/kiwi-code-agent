@@ -30,6 +30,20 @@ describe('SdkEventMapper', () => {
     expect(events).toEqual([{ type: 'assistant_thinking', messageId: 'msg_1', delta: 'hmm' }])
   })
 
+  it('a_reply_reports_its_output_tokens_when_it_ends', () => {
+    const mapper = new SdkEventMapper()
+    mapper.map(streamEvent({ type: 'message_start', message: { id: 'msg_1' } }))
+    const events = mapper.map(streamEvent({ type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 812 } }))
+    expect(events).toEqual([{ type: 'reply_usage', messageId: 'msg_1', outputTokens: 812 }])
+  })
+
+  it('a_subagent_reply_reports_its_output_tokens_under_its_parent', () => {
+    const mapper = new SdkEventMapper()
+    mapper.map(streamEvent({ type: 'message_start', message: { id: 'msg_2' } }, 'tu_agent'))
+    const events = mapper.map(streamEvent({ type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 40 } }, 'tu_agent'))
+    expect(events).toEqual([{ type: 'reply_usage', messageId: 'msg_2', outputTokens: 40, parentToolUseId: 'tu_agent' }])
+  })
+
   it('assistant_message_yields_tool_calls_and_final_text', () => {
     const msg = {
       type: 'assistant',

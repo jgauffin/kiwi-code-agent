@@ -9,8 +9,8 @@ export type PlanEntry = { feature: string; status: Exclude<PlanStatus, 'verified
 /** What the Sessions view offers to open again: the chats, and one entry per unfinished planned feature. */
 export type SessionGroups = { chats: SessionRecord[]; plans: PlanEntry[] }
 
-/** Conversations the person talks to that belong to no feature: a code plan ends in a chat, and the docs evaluation and the filing go on once they have reported. */
-const CONVERSATIONS: ReadonlySet<SessionRecord['mode']> = new Set(['chat', 'code-plan', 'docs', 'file-decisions'])
+/** Conversations the person talks to that belong to no feature: a code plan ends in a chat, and the docs evaluation, the filing and the doc migration go on once they have reported. */
+const CONVERSATIONS: ReadonlySet<SessionRecord['mode']> = new Set(['chat', 'code-plan', 'docs', 'file-decisions', 'doc-migration'])
 
 /**
  * The runs a plan starts (checks, implementers, cleanups) and the docs map

@@ -70,8 +70,11 @@ export class SdkEventMapper {
       this.currentMessageId = event.message.id
       return []
     }
-    if (event.type !== 'content_block_delta') return []
     const messageId = this.currentMessageId
+    if (event.type === 'message_delta') {
+      return [{ type: 'reply_usage', messageId, outputTokens: event.usage.output_tokens, ...parent }]
+    }
+    if (event.type !== 'content_block_delta') return []
     if (event.delta.type === 'text_delta') {
       return [{ type: 'assistant_text', messageId, delta: event.delta.text, ...parent }]
     }

@@ -1,7 +1,8 @@
 import { DEFAULT_TEST_GLOBS, type Limits } from '../agent/cleanup/oversized'
+import type { AppliedBundle, Bundle, BundleScope } from '../agent/instructions/bundles'
 import type { MemoryEntry, MemoryScope } from '../agent/memory/memories'
-import { type ModelChoice, type Profile, type Provider, type StepChoice } from '../agent/session/model-profile'
-import { STEPS } from '../agent/session/session-manager'
+import { choiceFor, type ModelChoice, type Profile, type Provider, type StepChoice } from '../agent/session/model-profile'
+import { STEPS, stepTitle } from '../agent/session/session-manager'
 import type { VerifyRule } from '../agent/phases/verification'
 import { DEFAULT_COMPACT_AT_TOKENS } from '../agent/session/compaction-point'
 import { migrateModelSettings, needsMigration, type LegacyProfile, type ModelSettings } from './model-settings'
@@ -37,6 +38,18 @@ export type MemoryPort = {
   forget(scope: MemoryScope, title: string): Promise<void>
 }
 
+/** Bundles, read off the catalog and off the `AGENTS.md` files they are applied into, closed over this workspace. */
+export type BundlePort = {
+  /** Every bundle in the catalog, from every accepted source, for browsing. */
+  available(): Promise<Bundle[]>
+  /** The catalog narrowed to what this workspace holds, for the one-time offer. */
+  matching(): Promise<Bundle[]>
+  /** Every bundle applied, project scope and the person's own both. */
+  applied(): Promise<AppliedBundle[]>
+  apply(scope: BundleScope, bundle: Bundle): Promise<void>
+  remove(scope: BundleScope, source: string, name: string): Promise<void>
+}
+
 /**
  * Where each setting is written: what the model runs on and how the host runs
  * it belong to the person; what the agent may do and how a project is checked
@@ -54,10 +67,12 @@ const TARGETS: Record<SettingKey | 'profiles' | 'providers', SettingsTarget> = {
   'permissions.denyGitWrites': 'workspace',
   verify: 'workspace',
   verifyFailureBudget: 'workspace',
+  'cleanup.functionComplexity': 'workspace',
   'cleanup.functionLines': 'workspace',
   'cleanup.typeLines': 'workspace',
   'cleanup.fileLines': 'workspace',
   'cleanup.tests': 'workspace',
+  'cleanup.testFunctionComplexity': 'workspace',
   'cleanup.testFunctionLines': 'workspace',
   'cleanup.testTypeLines': 'workspace',
   'cleanup.testFileLines': 'workspace',
@@ -83,12 +98,14 @@ export function readModelSettings(config: ConfigPort): ModelSettings {
 export function readCleanupLimits(config: ConfigPort): Limits {
   return {
     source: {
-      functionLines: config.get('cleanup.functionLines', 25),
+      functionLines: config.get('cleanup.functionLines', 60),
+      functionComplexity: config.get('cleanup.functionComplexity', 15),
       typeLines: config.get('cleanup.typeLines', 200),
       fileLines: config.get('cleanup.fileLines', 400),
     },
     tests: {
-      functionLines: config.get('cleanup.testFunctionLines', 60),
+      functionLines: config.get('cleanup.testFunctionLines', 120),
+      functionComplexity: config.get('cleanup.testFunctionComplexity', 15),
       typeLines: config.get('cleanup.testTypeLines', 600),
       fileLines: config.get('cleanup.testFileLines', 1200),
     },
@@ -101,6 +118,7 @@ export class SettingsStore {
     private readonly config: ConfigPort,
     private readonly secrets: SecretPort,
     private readonly memory: MemoryPort,
+    private readonly bundles: BundlePort,
   ) {}
 
   async snapshot(): Promise<SettingsSnapshot> {
@@ -122,6 +140,7 @@ export class SettingsStore {
       planIgnore: this.config.get<string[]>('planIgnore', []),
       cutCoveredDocs: this.config.get('cutCoveredDocs', false),
       memories: await this.memory.list(),
+      bundles: await this.bundleSnapshot(),
       nodePath: this.config.get('nodePath', ''),
       traceEngine: this.config.get('traceEngine', false),
       compactAtTokens: this.config.get('compactAtTokens', DEFAULT_COMPACT_AT_TOKENS),
@@ -195,6 +214,32 @@ export class SettingsStore {
     await this.memory.forget(scope, title)
   }
 
+  async applyBundle(scope: BundleScope, bundle: Bundle): Promise<void> {
+    await this.bundles.apply(scope, bundle)
+  }
+
+  async removeBundle(scope: BundleScope, source: string, name: string): Promise<void> {
+    await this.bundles.remove(scope, source, name)
+  }
+
+  /** Ends the one-time suggestion for this workspace; a workspace setting so it is remembered per workspace, not per person. */
+  async dismissBundleOffer(): Promise<void> {
+    if (!this.config.hasWorkspace()) throw new Error('Dismissing the bundle offer needs a workspace open.')
+    await this.config.update('bundleOfferDismissed', true, 'workspace')
+  }
+
+  /**
+   * No bundle applied yet, something in the catalog actually fits this
+   * workspace, and the offer has not already been turned down: only then is
+   * the suggestion still due.
+   */
+  private async bundleSnapshot(): Promise<SettingsSnapshot['bundles']> {
+    const [available, applied, suggested] = await Promise.all([this.bundles.available(), this.bundles.applied(), this.bundles.matching()])
+    const dismissed = this.config.get('bundleOfferDismissed', false)
+    const offerPending = applied.length === 0 && suggested.length > 0 && !dismissed
+    return { available, applied, suggested, offerPending }
+  }
+
   private models(): ModelSettings {
     return readModelSettings(this.config)
   }
@@ -205,6 +250,7 @@ export class SettingsStore {
       ...source,
       tests: testGlobs,
       testFunctionLines: tests.functionLines,
+      testFunctionComplexity: tests.functionComplexity,
       testTypeLines: tests.typeLines,
       testFileLines: tests.fileLines,
       ignore: this.config.get<string[]>('cleanup.ignore', []),
@@ -270,9 +316,18 @@ function validProfile(profile: Profile, providers: Provider[]): Profile {
   const fallback = validChoice(profile.name, 'every step', profile.default, providers)
   const overrides = STEPS.map(({ step }) => [step, profile.steps?.[step]] as const)
     .filter(([, choice]) => choice !== undefined)
-    .map(([step, choice]) => [step, validStepChoice(profile.name, stepLabel(step), choice!, fallback, providers)] as const)
+    .map(([step, choice]) => [step, validStepChoice(profile.name, stepTitle(step), choice!, fallback, providers)] as const)
     .filter(([, choice]) => Object.keys(choice).length > 0)
-  return { name, default: fallback, ...(overrides.length > 0 ? { steps: Object.fromEntries(overrides) } : {}) }
+  const valid: Profile = { name, default: fallback, ...(overrides.length > 0 ? { steps: Object.fromEntries(overrides) } : {}) }
+  sameEngineForPlanBuild(valid, providers)
+  return valid
+}
+
+/** A plan agreed in chat exists only in its conversation, which carries over only within one engine. */
+function sameEngineForPlanBuild(profile: Profile, providers: Provider[]): void {
+  const engineOf = (choice: ModelChoice) => providers.find((p) => p.name === choice.provider)?.engine
+  if (engineOf(choiceFor(profile, 'code-build')) === engineOf(choiceFor(profile, 'code-plan'))) return
+  throw new Error(`Profile "${profile.name}": ${stepTitle('code-build')} must run on the same engine as ${stepTitle('code-plan')}, since it carries on the plan's conversation.`)
 }
 
 /**
@@ -287,8 +342,6 @@ function validStepChoice(profile: string, where: string, choice: StepChoice, fal
   const sameModel = own.provider === fallback.provider && own.model === fallback.model && own.systemPromptFile === fallback.systemPromptFile
   return sameModel ? effort : { ...own, ...effort }
 }
-
-const stepLabel = (step: string): string => STEPS.find((s) => s.step === step)?.label ?? step
 
 function validChoice(profile: string, where: string, choice: ModelChoice, providers: Provider[]): ModelChoice {
   const provider = choice.provider.trim()

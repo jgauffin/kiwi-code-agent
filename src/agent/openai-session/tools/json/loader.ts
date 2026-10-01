@@ -10,6 +10,7 @@ import { JsonTokenizer, JsonSyntaxError, LongString } from "./scanner.js";
 import type { PathSegment, Token } from "./scanner.js";
 import type { PathStep } from "./expr.js";
 import { DataError } from "./errors.js";
+import { errorMessage } from "../../../../error-message";
 
 /** Nodes a single selected item may contain before the selection is refused. */
 export const MAX_CAPTURE_NODES = 200_000;
@@ -83,7 +84,7 @@ async function scanJsonLines(file: DataFile, handler: TokenHandler): Promise<voi
     } catch (err) {
       throw new DataError(
         file.relativePath,
-        `line ${lineNumber} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+        `line ${lineNumber} is not valid JSON: ${errorMessage(err)}`,
       );
     }
     path[path.length - 1] = index;

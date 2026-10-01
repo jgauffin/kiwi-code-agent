@@ -1,0 +1,527 @@
+{
+  "name": "kiwi-agent",
+  "displayName": "KiwiAgent",
+  "description": "Coding sessions in VS Code with a choice of model engine per session.",
+  "version": "0.2.1",
+  "publisher": "CoderrAB",
+  "icon": "docs/logos/logo-square-transparent-500px.png",
+  "galleryBanner": {
+    "color": "#1e1e1e",
+    "theme": "dark"
+  },
+  "license": "GPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jgauffin/kiwi-code-agent.git"
+  },
+  "homepage": "https://github.com/jgauffin/kiwi-code-agent#readme",
+  "bugs": {
+    "url": "https://github.com/jgauffin/kiwi-code-agent/issues"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "claude",
+    "openai",
+    "coding",
+    "planning"
+  ],
+  "engines": {
+    "vscode": "^1.100.0",
+    "node": ">=22.0.0"
+  },
+  "categories": [
+    "AI",
+    "Chat"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onWebviewPanel:kiwiAgent.chatPanel",
+    "onWebviewPanel:kiwiAgent.settingsPanel"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "kiwiAgent",
+          "title": "KiwiAgent",
+          "icon": "$(hubot)"
+        }
+      ]
+    },
+    "views": {
+      "kiwiAgent": [
+        {
+          "id": "kiwiAgent.sessions",
+          "name": "Sessions"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "kiwiAgent.newSession",
+        "title": "New Session",
+        "icon": "docs/logos/logo-square-transparent.svg"
+      },
+      {
+        "command": "kiwiAgent.openChat",
+        "title": "KiwiAgent: Open Chat in Editor",
+        "icon": "media/kiwi.svg"
+      },
+      {
+        "command": "kiwiAgent.removeSession",
+        "title": "Remove Session",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "kiwiAgent.openSession",
+        "title": "Open Session"
+      },
+      {
+        "command": "kiwiAgent.resumePlan",
+        "title": "Open Plan"
+      },
+      {
+        "command": "kiwiAgent.openDraftPlan",
+        "title": "Open Draft Plan",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "kiwiAgent.stopSession",
+        "title": "Stop Session",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "kiwiAgent.openSettings",
+        "title": "KiwiAgent: Settings",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "kiwiAgent.migratePlans",
+        "title": "KiwiAgent: Migrate plans to the spec contract"
+      },
+      {
+        "command": "kiwiAgent.buildRepoMap",
+        "title": "KiwiAgent: Build Repo Map"
+      },
+      {
+        "command": "kiwiAgent.buildDocsMap",
+        "title": "KiwiAgent: Build Docs Map"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "kiwiAgent.newSession",
+          "group": "navigation@100"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "kiwiAgent.newSession",
+          "when": "view == kiwiAgent.sessions",
+          "group": "navigation@1"
+        },
+        {
+          "command": "kiwiAgent.openDraftPlan",
+          "when": "view == kiwiAgent.sessions && kiwiAgent.hasDraftPlans",
+          "group": "navigation@2"
+        },
+        {
+          "command": "kiwiAgent.openSettings",
+          "when": "view == kiwiAgent.sessions",
+          "group": "navigation@9"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "kiwiAgent.stopSession",
+          "when": "view == kiwiAgent.sessions && viewItem == session",
+          "group": "inline@1"
+        },
+        {
+          "command": "kiwiAgent.removeSession",
+          "when": "view == kiwiAgent.sessions && viewItem == session",
+          "group": "inline@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "kiwiAgent.removeSession",
+          "when": "false"
+        },
+        {
+          "command": "kiwiAgent.stopSession",
+          "when": "false"
+        },
+        {
+          "command": "kiwiAgent.openSession",
+          "when": "false"
+        },
+        {
+          "command": "kiwiAgent.resumePlan",
+          "when": "false"
+        },
+        {
+          "command": "kiwiAgent.openDraftPlan",
+          "when": "false"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "KiwiAgent",
+      "properties": {
+        "kiwiAgent.activeProfile": {
+          "type": "string",
+          "default": "Claude",
+          "description": "Name of the profile in kiwiAgent.profiles used for new sessions."
+        },
+        "kiwiAgent.fontSize": {
+          "type": "number",
+          "default": 0,
+          "description": "Font size in pixels for the chat and settings views. 0 follows editor.fontSize, a step above it. A value outside 8-40 is ignored. Takes effect when the view is reopened."
+        },
+        "kiwiAgent.planIgnore": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Workspace-relative globs a Plan session must not read, carved out of docs/**, the root README and plan/*.spec.md. Example: docs/api/**."
+        },
+        "kiwiAgent.docsMap.style": {
+          "type": "string",
+          "enum": [
+            "described",
+            "outline"
+          ],
+          "enumDescriptions": [
+            "A model run writes one line per section; rebuilt when a doc changes.",
+            "Headings with line ranges and each doc's opening paragraph, read at session start at no model cost."
+          ],
+          "default": "described",
+          "description": "The docs map Plan and Docs sessions start with. Each session's prompt is kept in its run folder as system-prompt.md, so the two can be compared."
+        },
+        "kiwiAgent.permissions.allow": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "resource",
+          "description": "Tool calls that run without a prompt, on every engine. A rule is a tool name (Edit), a tool with a glob on the workspace-relative path (Edit(src/**)), or Bash or PowerShell with a command: Bash(npm test) for that exact command, PowerShell(npm run:*) for any command starting with those words; a rule for one shell says nothing about the other. Every segment of a chained command must be covered or read-only. \"Allow for project\" on a prompt writes here; \"Allow for session\" keeps the rule in memory for that session instead. No rule is needed for read-only tools and commands (Read, Grep, ls, git status, ...), for a script the root package.json defines, or for a command kiwiAgent.verify names: a deny rule still blocks those."
+        },
+        "kiwiAgent.permissions.deny": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "resource",
+          "description": "Tool calls blocked outright, same rule shape as permissions.allow. Wins over allow rules and over read-only calls: Read(**/.env), Bash(curl:*)."
+        },
+        "kiwiAgent.permissions.denyGitWrites": {
+          "type": "boolean",
+          "default": false,
+          "scope": "resource",
+          "description": "Blocks every git command that changes the repository or its config (commit, push, checkout, stash, reset, ...), in Bash and PowerShell alike, whatever the allow rules say. Read-only git (status, log, diff, show, blame) still runs."
+        },
+        "kiwiAgent.contextWindows": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": {
+            "type": "number"
+          },
+          "description": "Context window in tokens per model id, for OpenAI-compatible providers. The agent loop folds the older turns into a summary once the prompt reaches 90% of this. A model not listed here is treated as 128000. The Claude engine reports its own window and ignores this."
+        },
+        "kiwiAgent.compactAtTokens": {
+          "type": "number",
+          "default": 700000,
+          "minimum": 0,
+          "description": "For models without a limit of their own (a provider's compactAtTokens): compact a conversation once it is this many tokens, even when the model's window holds more, since every request re-sends the whole conversation. 0 compacts only when the window runs short (75% of it on Claude, 90% on OpenAI-compatible models). Applies to sessions started after the change."
+        },
+        "kiwiAgent.traceEngine": {
+          "type": "boolean",
+          "default": false,
+          "description": "Log every message from the Claude engine (one line each) to the KiwiAgent output channel. Applies to sessions started after the change."
+        },
+        "kiwiAgent.nodePath": {
+          "type": "string",
+          "default": "",
+          "description": "Node executable used to run the Claude engine. Empty: VS Code's own executable in Node mode."
+        },
+        "kiwiAgent.verify": {
+          "type": "array",
+          "description": "Test commands run once every task of a feature is marked tested, over the files its tasks name: a matching file runs its rule's command once per project. {project} is the nearest file matching 'project' above the file, {projectDir} its directory, {file} the file itself. A failure is handed to the implement session, up to the failure budget. The implement session is told these commands, so it narrows the same ones while it works, and may run them without a prompt.",
+          "default": [
+            {
+              "match": "**/*.cs",
+              "project": "*.csproj",
+              "command": "dotnet test \"{project}\" --nologo"
+            },
+            {
+              "match": "src/**/*.{ts,tsx,js}",
+              "project": "package.json",
+              "command": "npm test"
+            }
+          ],
+          "items": {
+            "type": "object",
+            "required": [
+              "match",
+              "command"
+            ],
+            "properties": {
+              "match": {
+                "type": "string",
+                "description": "Glob on the workspace-relative path of a file a task touches."
+              },
+              "project": {
+                "type": "string",
+                "description": "Glob for the project file to look for upwards from the file, e.g. *.csproj."
+              },
+              "command": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "kiwiAgent.verifyFailureBudget": {
+          "type": "integer",
+          "default": 3,
+          "description": "Consecutive failed test runs handed to the implement session before the failed record is left for you."
+        },
+        "kiwiAgent.cleanup.functionLines": {
+          "type": "integer",
+          "default": 25,
+          "description": "Code lines a function may have before the cleanup run after a feature's tests pass splits it; 0 turns the limit off."
+        },
+        "kiwiAgent.cleanup.typeLines": {
+          "type": "integer",
+          "default": 200,
+          "description": "Code lines a class, struct or other type may have before the cleanup run splits it; 0 turns the limit off."
+        },
+        "kiwiAgent.cleanup.fileLines": {
+          "type": "integer",
+          "default": 400,
+          "description": "Code lines a file may have before the cleanup run splits it; 0 turns the limit off."
+        },
+        "kiwiAgent.cleanup.tests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "**/*.test.*",
+            "**/*.spec.*",
+            "**/__tests__/**"
+          ],
+          "description": "Workspace-relative globs of test files, measured against the test limits: a test file stays one file per tested file, so it may grow larger."
+        },
+        "kiwiAgent.cleanup.testFunctionLines": {
+          "type": "integer",
+          "default": 60,
+          "description": "Code lines a function in a test file may have before the cleanup run splits it; 0 turns the limit off."
+        },
+        "kiwiAgent.cleanup.testTypeLines": {
+          "type": "integer",
+          "default": 600,
+          "description": "Code lines a type in a test file may have before the cleanup run splits it; 0 turns the limit off."
+        },
+        "kiwiAgent.cleanup.testFileLines": {
+          "type": "integer",
+          "default": 1200,
+          "description": "Code lines a test file may have before the cleanup run shortens it; 0 turns the limit off."
+        },
+        "kiwiAgent.cleanup.ignore": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Workspace-relative globs of edited files the cleanup never measures: generated code."
+        },
+        "kiwiAgent.providers": {
+          "type": "array",
+          "description": "Where models come from: an engine, its endpoint for an OpenAI-compatible one, and the models it serves. The API key itself is stored in VS Code secret storage under the provider's own name, never here.",
+          "default": [
+            {
+              "name": "Claude",
+              "engine": "claude-sdk",
+              "models": [
+                "claude-opus-5[1m]",
+                "claude-sonnet-5[1m]"
+              ]
+            }
+          ],
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "engine",
+              "models"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "engine": {
+                "type": "string",
+                "enum": [
+                  "claude-sdk",
+                  "openai-compatible"
+                ]
+              },
+              "baseUrl": {
+                "type": "string"
+              },
+              "models": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "compactAtTokens": {
+                "type": "object",
+                "description": "Per model id, the conversation size in tokens at which a session on it compacts; a model not listed follows kiwiAgent.compactAtTokens.",
+                "additionalProperties": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        },
+        "kiwiAgent.profiles": {
+          "type": "array",
+          "description": "A named way to work: a model for every step, and the steps that earn a different one.",
+          "default": [
+            {
+              "name": "Claude",
+              "default": {
+                "provider": "Claude",
+                "model": "claude-opus-5[1m]"
+              }
+            },
+            {
+              "name": "Claude Sonnet",
+              "default": {
+                "provider": "Claude",
+                "model": "claude-sonnet-5[1m]"
+              }
+            }
+          ],
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "default"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "default": {
+                "type": "object",
+                "required": [
+                  "provider",
+                  "model"
+                ],
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "description": "The name of an entry in kiwiAgent.providers."
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "effort": {
+                    "type": "string",
+                    "enum": [
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh",
+                      "max"
+                    ]
+                  },
+                  "systemPromptFile": {
+                    "type": "string"
+                  }
+                }
+              },
+              "steps": {
+                "type": "object",
+                "description": "One entry per step that runs on something other than the default: chat, plan, reconcile, implement, cleanup, docs, docs-map.",
+                "additionalProperties": {
+                  "type": "object",
+                  "required": [
+                    "provider",
+                    "model"
+                  ],
+                  "properties": {
+                    "provider": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "effort": {
+                      "type": "string",
+                      "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max"
+                      ]
+                    },
+                    "systemPromptFile": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "prompts": "esbuild scripts/prompts.ts --bundle --platform=node --format=cjs --target=node22 --external:vscode --log-level=warning --outfile=dist/prompts.cjs && node dist/prompts.cjs",
+    "package": "npm run typecheck && node esbuild.mjs --target=win32-x64 && vsce package --no-dependencies --target win32-x64 && node esbuild.mjs --target=win32-arm64 && vsce package --no-dependencies --target win32-arm64",
+    "link-dev": "node scripts/link-dev.mjs",
+    "unlink-dev": "node scripts/link-dev.mjs --unlink",
+    "publish": "npm run typecheck && node esbuild.mjs --target=win32-x64 && vsce publish --no-dependencies --target win32-x64 && node esbuild.mjs --target=win32-arm64 && vsce publish --no-dependencies --target win32-arm64"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.2.112",
+    "@jitl/quickjs-singlefile-cjs-release-sync": "^0.32.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@relax.js/core": "^1.8.0",
+    "dompurify": "^3.4.15",
+    "highlight.js": "^11.12.0",
+    "marked": "^18.0.13",
+    "mermaid": "^12.0.0",
+    "quickjs-emscripten": "^0.32.0",
+    "zod": "^4.0.0"
+  },
+  "overrides": {
+    "@anthropic-ai/sdk": "^0.92.0",
+    "lodash-es": "^4.18.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "~1.100.0",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.28.2",
+    "jsdom": "^30.0.1",
+    "typescript": "^5.9.0",
+    "vitest": "^5.0.0"
+  }
+}

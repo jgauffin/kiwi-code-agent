@@ -35,7 +35,7 @@ describe('repo map build', () => {
         'types/shop-web.md',
       ])
       expect(await readSummary(dir)).toBe(result.summary + '\n')
-      expect(result.summary).toContain('- Api (dotnet) `src/Api/Api.csproj` — 1 public types, index `.agent/repo-map/types/Api.md`')
+      expect(result.summary).toContain('- Api (dotnet) `src/Api/Api.csproj` — 1 public types, index `.kiwi/repo-map/types/Api.md`')
       expect(await readMapFile(dir, 'types/Api.md')).toContain('public class Endpoint')
       expect(await readMapFile(dir, 'types/Api.md')).toContain('  public int Handle() => 1')
       expect(await readMapFile(dir, 'types/shop-web.md')).toContain('export class App')

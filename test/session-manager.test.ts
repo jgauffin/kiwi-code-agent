@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { SessionManager, stepOf, type SessionRecord, type SessionStore } from '../src/agent/session/session-manager'
+import { offersAllowWrites, SessionManager, stepOf, type SessionRecord, type SessionStore } from '../src/agent/session/session-manager'
 import type { QuestionOutcome, UserQuestionRequest } from '../src/agent/session/user-question'
 import type { CodeSession, PermissionDecision, SessionEvent } from '../src/agent/session/code-session'
 import { AsyncQueue } from '../src/agent/session/async-queue'
@@ -115,6 +115,34 @@ describe('SessionManager', () => {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+
+  it('what_the_person_allowed_for_a_session_is_kept_with_it_and_outlives_its_engine_and_the_host', async () => {
+    const store = memoryStore()
+    const noEngine = async (): Promise<CodeSession> => {
+      throw new Error('not started')
+    }
+    const manager = new SessionManager(store, noEngine, () => {
+      throw new Error('no log')
+    }, () => {})
+    const record = await manager.create(profile, 'file-decisions')
+
+    await manager.allowForSession(record.id, ['Writes(docs/**)'])
+    await manager.allowForSession(record.id, ['Writes(docs/**)', 'Bash(npm test)'])
+    await manager.setAllowWrites(record.id, true)
+
+    const reopened = new SessionManager(store, noEngine, () => {
+      throw new Error('no log')
+    }, () => {})
+    expect(reopened.get(record.id)).toMatchObject({ allowed: ['Writes(docs/**)', 'Bash(npm test)'], allowWrites: true })
+    await reopened.setAllowWrites(record.id, false)
+    expect(store.saved.at(-1)?.find((r) => r.id === record.id)).not.toHaveProperty('allowWrites')
+  })
+
+  it('allow_writes_is_offered_where_editing_docs_is_the_job_and_not_to_a_planner_writing_blind', () => {
+    for (const mode of ['chat', 'implement', 'file-decisions', 'doc-migration'] as const) expect(offersAllowWrites(mode), mode).toBe(true)
+    // A docs evaluation gets it with full access, once its findings are delivered and it acts as a chat.
+    for (const mode of ['plan', 'reconcile', 'code-plan', 'docs'] as const) expect(offersAllowWrites(mode), mode).toBe(false)
   })
 
   it('engine_starts_on_first_prompt_not_on_creation', async () => {
@@ -771,6 +799,41 @@ describe('SessionManager', () => {
           'build it',
         ])
         await manager.disposeAll()
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
+
+    it('approving_a_code_plan_builds_on_the_profile_s_build_model_and_resumes_the_plan_s_thread', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+      try {
+        const { manager, engines } = setup(dir)
+        const planning = await manager.create(profile, 'code-plan')
+        await manager.send(planning.id, 'plan the filter')
+        engines[0]!.out.push({ type: 'session_started', engineSessionId: 'eng-plan', model: 'opus' })
+        await tick()
+
+        const build: ModelProfile = { ...profile, model: 'sonnet', effort: 'medium' }
+        await manager.grantFullAccess(planning.id, build)
+        expect(manager.get(planning.id)).toMatchObject({ access: 'full', profile: build, engineSessionId: 'eng-plan' })
+        await manager.send(planning.id, 'build it')
+        await tick()
+        expect(engines[1]!.profile).toEqual(build)
+        expect(engines[1]!.resumedFrom).toBe('eng-plan')
+        await manager.disposeAll()
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
+
+    it('a_build_model_on_another_engine_is_refused_since_the_agreed_plan_lives_only_in_the_thread', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+      try {
+        const { manager } = setup(dir)
+        const planning = await manager.create(profile, 'code-plan')
+        await expect(manager.grantFullAccess(planning.id, berget)).rejects.toThrow(/engine/)
+        expect(manager.get(planning.id)).toMatchObject({ profile })
+        expect(manager.get(planning.id)!.access).toBeUndefined()
       } finally {
         await rm(dir, { recursive: true, force: true })
       }

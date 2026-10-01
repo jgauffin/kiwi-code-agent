@@ -13,6 +13,7 @@ import { NoticeOfAnotherHand } from './agent/session/notice-of-another-hand'
 import { FileHands } from './agent/session/file-hands'
 import { compactAtFor, DEFAULT_COMPACT_AT_TOKENS } from './agent/session/compaction-point'
 import { SdkSession } from './agent/sdk-session/sdk-session'
+import { toolNamingLine } from './agent/sdk-session/tool-server'
 import { hostExecutableAsNode, type NodeRuntime } from './agent/sdk-session/node-runtime'
 import { RunLog } from './agent/runs/run-log'
 import { OpenAiSession } from './agent/openai-session/openai-session'
@@ -21,7 +22,8 @@ import { messagesFromEvents } from './agent/openai-session/history'
 import { buildSystemPrompt } from './agent/openai-session/system-prompt'
 import { readTool } from './agent/openai-session/tools/read'
 import { writeTool } from './agent/openai-session/tools/write'
-import { editTool } from './agent/openai-session/tools/edit'
+import { EDIT_WRITING, editTool } from './agent/openai-session/tools/edit'
+import { multiEditTool } from './agent/openai-session/tools/multi-edit'
 import { runScriptTool } from './agent/openai-session/tools/run-script'
 import { globTool } from './agent/openai-session/tools/glob'
 import { grepTool } from './agent/openai-session/tools/grep'
@@ -46,10 +48,11 @@ import { McpToolHost } from './agent/mcp/mcp-tool-host'
 import { FileEditRecorder } from './agent/edits/file-edit-recorder'
 import type { PermissionPolicy } from './agent/permissions/permission-policy'
 import { projectScriptsInstruction } from './agent/permissions/package-scripts'
-import { PLAN_DIR, SPEC_READING } from './agent/phases/blind-plan'
+import { SPECS_DIR, SPEC_READING } from './agent/phases/blind-plan'
 import { CHAT_DECISIONS, UnfiledContract } from './agent/phases/unfiled-decisions'
 import { MemoryContract, memoryWritingInstructions } from './agent/memory/memories'
 import { chatMemorySection, withMemories } from './agent/memory/session-context'
+import { instructionsText, readInstructionFiles, withInstructionFiles } from './agent/instructions/instruction-files'
 import { scratchDir, scratchInstruction } from './agent/scratch/scratch-folder'
 import { withRepoMap, workspaceRepoMap } from './agent/repo-map/session-context'
 import { outlineDocsMap, withDocsMap, workspaceDocsMap, type DocsMapStyle } from './agent/docs-map/session-context'
@@ -57,6 +60,7 @@ import { renderOutlineMap } from './agent/docs-map/outline-map'
 import type { DocsMapResult } from './agent/docs-map/build'
 import type { Verifier } from './chat/feature-runs'
 import { readCleanupLimits, readModelSettings, secretKey, type ConfigPort } from './settings/settings-store'
+import { errorMessage } from './error-message'
 
 /**
  * Tools the extension provides to every engine, beside the engine's own file
@@ -138,7 +142,7 @@ export class SessionEngines {
     const scratch = !setup.toolNames || setup.toolNames.includes('Bash') ? scratchDir(record.id) : undefined
     if (scratch)
       await mkdir(join(workspaceRoot, scratch), { recursive: true }).catch((error: unknown) =>
-        output.appendLine(`could not create the scratch folder: ${error instanceof Error ? error.message : String(error)}`),
+        output.appendLine(`could not create the scratch folder: ${errorMessage(error)}`),
       )
     const start: EngineStart = { record, setup, ownTools, mcpServers, scratchLine: scratch ? `\n${scratchInstruction(scratch)}` : '', onProgress }
     switch (record.profile.engine) {
@@ -157,12 +161,16 @@ export class SessionEngines {
     // A key stored on the provider is the user's choice over the editor's Claude login; none leaves that login in charge.
     const anthropicKey = profile.apiKeySecret ? await context.secrets.get(secretKey(profile.apiKeySecret)) : undefined
     this.traceStart(record, anthropicKey ? `using the API key "${profile.apiKeySecret}"` : 'no API key stored, using the editor login')
-    // A mode with a prompt of its own already carries its memories from `modeSetup`; the chat
-    // prompt is built here, so both scopes are added for it the same way.
+    // A mode with a prompt of its own already carries its memories and instruction files from
+    // `modeSetup`; the chat prompt is built here, so the same pieces are added for it here instead.
+    // Claude's own preset already reads the workspace's CLAUDE.md, but not AGENTS.md nor anything
+    // of the person's, so the instruction files are read again rather than left to it.
     const chatMemories = setup.systemPrompt === undefined ? await chatMemorySection(workspaceRoot) : undefined
+    const chatInstructionFiles = setup.systemPrompt === undefined ? await readInstructionFiles(workspaceRoot) : undefined
     const scriptTools = [globTool, grepTool]
     const offered = allowed(setup, ownTools)
     this.sessionTools.set(record.id, [...offered, ...scriptTools])
+    const toolNaming = toolNamingLine(offered)
     return new SdkSession({
       ownTools: offered,
       scriptTools,
@@ -183,9 +191,9 @@ export class SessionEngines {
       },
       ...(setup.hooks ? { hooks: setup.hooks } : {}),
       ...(setup.systemPrompt !== undefined
-        ? { systemPrompt: setup.systemPrompt + scratchLine }
+        ? { systemPrompt: setup.systemPrompt + scratchLine + toolNaming }
         : {
-            appendSystemPrompt: `${DOC_READING}\n${CODE_READING}\n${SCRIPT_WRITING}\n${projectScriptsInstruction(workspaceRoot)}\n${SPEC_READING}\n${CHAT_DECISIONS}\n${memoryWritingInstructions(workspaceRoot)}${chatMemories ? `\n\n${chatMemories}` : ''}${scratchLine}`,
+            appendSystemPrompt: `${DOC_READING}\n${CODE_READING}\n${SCRIPT_WRITING}\n${EDIT_WRITING}\n${projectScriptsInstruction(workspaceRoot)}\n${SPEC_READING}\n${CHAT_DECISIONS}\n${memoryWritingInstructions(workspaceRoot)}${chatMemories ? `\n\n${chatMemories}` : ''}${chatInstructionFiles?.length ? `\n\n${instructionsText(chatInstructionFiles)}` : ''}${scratchLine}${toolNaming}`,
           }),
       ...(setup.toolNames ? { tools: setup.toolNames } : {}),
       compactAtTokens: this.compactAtTokens(profile),
@@ -209,7 +217,7 @@ export class SessionEngines {
     // Indexed per session so a skill added to the workspace or the user profile shows up on the next one.
     const skills = await indexSkills(workspaceRoot, undefined, join(this.pluginPath, 'skills'))
     this.traceStart(record, `${skills.length} skills indexed`)
-    const allTools = [readTool, writeTool, editTool, globTool, grepTool, ...ownTools, bashTool(), ...(skills.length ? [skillTool(skills)] : [])]
+    const allTools = [readTool, writeTool, editTool, multiEditTool, globTool, grepTool, ...ownTools, bashTool(), ...(skills.length ? [skillTool(skills)] : [])]
     // A session that ran before, or continues one that did, picks its conversation up from the run log.
     const resume = record.engineSessionId
       ? { engineSessionId: record.engineSessionId, history: messagesFromEvents(await this.deps.conversation(record.id)) }
@@ -246,14 +254,14 @@ export class SessionEngines {
     if (setup.systemPrompt !== undefined) {
       await mkdir(runDir, { recursive: true })
         .then(() => writeFile(join(runDir, 'system-prompt.md'), setup.systemPrompt!, 'utf8'))
-        .catch((error: unknown) => output.appendLine(`could not record the system prompt: ${error instanceof Error ? error.message : String(error)}`))
+        .catch((error: unknown) => output.appendLine(`could not record the system prompt: ${errorMessage(error)}`))
     }
     // Last in line, so a call another hook denies is never captured: nothing changed.
     const recorder = new FileEditRecorder({ cwd: workspaceRoot, runDir })
     this.editRecorders.set(record.id, recorder)
     // After the mode's scope, so a doc the session may not read is never outlined. The docs map
     // describes every section, so it reads docs whole; plan files are the work and are read whole too.
-    const gate: SessionHooks[] = record.mode === 'docs-map' ? [] : [new OutlineGate(workspaceRoot, [`${PLAN_DIR}/**`]), new CodeOutlineGate(workspaceRoot)]
+    const gate: SessionHooks[] = record.mode === 'docs-map' ? [] : [new OutlineGate(workspaceRoot, [`${SPECS_DIR}/**`]), new CodeOutlineGate(workspaceRoot)]
     if (!setup.toolNames || setup.toolNames.includes('RunScript')) gate.push(new ScriptGate(), new RepeatedEdit())
     // Every session that writes is held to the same check, whatever it writes and whichever engine runs it.
     const staleWrites = new StaleWriteGuard(workspaceRoot, new FileHands(workspaceRoot, record.id, record.mode, record.feature))
@@ -284,6 +292,7 @@ export class SessionEngines {
       withMap: (record, systemPrompt) => this.withMap(record, systemPrompt, onProgress),
       withDocs: (record, systemPrompt) => this.withDocs(record, systemPrompt, onProgress),
       withMemories: (record, systemPrompt) => withMemories(record.mode, systemPrompt, this.deps.workspaceRoot),
+      withInstructions: (record, systemPrompt) => withInstructionFiles(record.mode, systemPrompt, this.deps.workspaceRoot),
     }
   }
 
@@ -344,7 +353,7 @@ export class SessionEngines {
         this.traceStart(record, `${response.status} ${response.statusText} after ${Date.now() - started} ms`)
         return response
       } catch (error) {
-        this.traceStart(record, `request failed after ${Date.now() - started} ms: ${error instanceof Error ? error.message : String(error)}`)
+        this.traceStart(record, `request failed after ${Date.now() - started} ms: ${errorMessage(error)}`)
         throw error
       }
     }

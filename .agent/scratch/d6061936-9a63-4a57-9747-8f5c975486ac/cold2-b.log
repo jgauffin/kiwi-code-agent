@@ -1,0 +1,15 @@
+npm notice run kiwipow-agent@0.2.3 test
+npm notice run node scripts/run-tests.mjs
+
+ RUN  v5.0.3 D:/src/coderr/CodingAgent
+
+
+ Test Files  122 passed | 3 skipped (125)
+      Tests  1630 passed | 6 skipped (1636)
+   Start at  20:55:21
+   Duration  16.38s (transform 33%, tests 29%, environment 20%, import 17%, worker 1%)
+
+  Transform  transforming modules took 58.40s · 33% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
+

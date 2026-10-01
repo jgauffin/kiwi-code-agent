@@ -1,14 +1,15 @@
 import * as vscode from 'vscode'
 import { listDraftPlans, type PlanSummary } from '../agent/phases/plan-list'
-import { PLAN_DIR, specPath } from '../agent/phases/blind-plan'
+import { SPECS_DIR, specPath } from '../agent/phases/blind-plan'
 import type { SessionManager } from '../agent/session/session-manager'
 import type { ChatViewProvider } from './chat-view-provider'
+import { errorMessage } from '../error-message'
 
 const HAS_DRAFTS = 'kiwiAgent.hasDraftPlans'
 
 /**
  * The Sessions view's "open draft plan" action: shown while a spec under
- * `plan/` is still a draft, it opens the plan session behind the spec, or
+ * `specs/` is still a draft, it opens the plan session behind the spec, or
  * the spec itself when no session for it remains.
  */
 export function openDraftPlanAction(
@@ -19,10 +20,10 @@ export function openDraftPlanAction(
 ): vscode.Disposable {
   const refresh = async (): Promise<void> => {
     const drafts = await listDraftPlans(workspaceRoot)
-    output.appendLine(`draft plans under ${workspaceRoot}/${PLAN_DIR}: ${drafts.map((d) => d.feature).join(', ') || 'none'}`)
+    output.appendLine(`draft plans under ${workspaceRoot}/${SPECS_DIR}: ${drafts.map((d) => d.feature).join(', ') || 'none'}`)
     await vscode.commands.executeCommand('setContext', HAS_DRAFTS, drafts.length > 0)
   }
-  const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(workspaceRoot, `${PLAN_DIR}/*.spec.md`))
+  const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(workspaceRoot, `${SPECS_DIR}/*.spec.md`))
   const onChange = () => void refresh().catch(report)
   void refresh().catch(report)
 
@@ -54,6 +55,6 @@ async function pick(drafts: PlanSummary[]): Promise<PlanSummary | undefined> {
 }
 
 function report(error: unknown): void {
-  const text = error instanceof Error ? error.message : String(error)
+  const text = errorMessage(error)
   void vscode.window.showErrorMessage(`Kiwipow Agent: ${text}`)
 }

@@ -1,0 +1,50 @@
+npm notice run kiwipow-agent@0.2.3 test
+npm notice run vitest run
+
+ RUN  v5.0.3 D:/src/coderr/CodingAgent
+
+ ❯ test/docs-map-index.test.ts (13 tests | 1 failed) 5836ms
+   ❯ what a docs map build has to do (13)
+     × only_the_docs_whose_content_changed_are_handed_to_the_next_run 5022ms
+ ❯ test/tools.test.ts (29 tests | 1 failed) 8597ms
+   ❯ Bash (3)
+     × returns_output_and_marks_non_zero_exit_as_error 5091ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/docs-map-index.test.ts > what a docs map build has to do > only_the_docs_whose_content_changed_are_handed_to_the_next_run
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ test/docs-map-index.test.ts:32:3
+     30|     }))
+     31|
+     32|   it('only_the_docs_whose_content_changed_are_handed_to_the_next_run',…
+       |   ^
+     33|     withWorkspace(FILES, async (dir) => {
+     34|       await buildWith(dir, { 'docs/intent/orders.md': ORDERS_ENTRY, 'R…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  test/tools.test.ts > Bash > returns_output_and_marks_non_zero_exit_as_error
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ test/tools.test.ts:221:3
+    219|
+    220| describe('Bash', () => {
+    221|   it('returns_output_and_marks_non_zero_exit_as_error', async () => {
+       |   ^
+    222|     const tool = bashTool()
+    223|     const ok = await tool.execute({ command: 'echo hi && echo err 1>&2…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  test/tools.test.ts > Bash > returns_output_and_marks_non_zero_exit_as_error
+Error: EBUSY: resource busy or locked, rmdir 'C:\Users\jonas\AppData\Local\Temp\tools-zejZ8K'
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  2 failed | 115 passed | 3 skipped (120)
+      Tests  2 failed | 1540 passed | 6 skipped (1548)
+   Start at  19:10:00
+   Duration  16.41s (tests 38%, environment 30%, import 18%, transform 13%)
+

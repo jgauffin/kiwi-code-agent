@@ -1,8 +1,12 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { PickUp } from '../src/chat/webview/new-session-view'
 
 ;(globalThis as Record<string, unknown>).acquireVsCodeApi = () => ({ postMessage: () => {} })
+
+// Test files share a worker, so the module registry is cleared first: what
+// loads here is this file's own, bound to its stub and its document.
+vi.resetModules()
 
 const { NewSessionView } = await import('../src/chat/webview/new-session-view')
 // The card's row is only ever reached through the DOM, so the element has to be defined here too.
@@ -24,10 +28,10 @@ const tab = (node: HTMLElement, name: 'code' | 'maintenance') =>
   [...node.querySelectorAll<HTMLButtonElement>('.screens .tab')][name === 'code' ? 0 : 1]!
 
 /** The maintenance cards are on the other tab, so reaching one opens it first. */
-function card(node: HTMLElement, name: 'chat' | 'code-plan' | 'plan' | 'docs' | 'file-decisions'): HTMLButtonElement {
-  const maintenance = name === 'docs' || name === 'file-decisions'
+function card(node: HTMLElement, name: 'chat' | 'code-plan' | 'plan' | 'docs' | 'file-decisions' | 'doc-migration'): HTMLButtonElement {
+  const maintenance = name === 'docs' || name === 'file-decisions' || name === 'doc-migration'
   tab(node, maintenance ? 'maintenance' : 'code').click()
-  const at = maintenance ? { docs: 0, 'file-decisions': 1 }[name] : { chat: 0, 'code-plan': 1, plan: 2 }[name]
+  const at = maintenance ? { docs: 0, 'file-decisions': 1, 'doc-migration': 2 }[name] : { chat: 0, 'code-plan': 1, plan: 2 }[name]
   return [...node.querySelectorAll<HTMLButtonElement>('.types button')][at]!
 }
 
@@ -231,7 +235,28 @@ describe('NewSessionView tabs', () => {
   it('the_maintenance_tab_offers_the_jobs_that_keep_the_intent_in_order', () => {
     const node = view()
     tab(node, 'maintenance').click()
-    expect(cards(node)).toEqual(['Evaluate docs', 'File decisions'])
+    expect(cards(node)).toEqual(['Evaluate docs', 'File decisions', 'Doc migration'])
+    node.remove()
+  })
+
+  it('the_migration_card_starts_the_session_that_brings_the_docs_and_the_specs_back_into_line', () => {
+    const node = view()
+    card(node, 'doc-migration').click()
+    // Nothing to fill in: the job is picked for its own sake, never aimed at anything.
+    expect(node.querySelector('.migration-fields input, .migration-fields textarea')).toBeNull()
+    let seen: unknown
+    node.addEventListener(events.NewSessionRequestedEvent.type, (e) => (seen = [e.mode, e.feature, e.prompt, e.files]))
+    node.querySelector('.migration-fields')!.dispatchEvent(new Event('submit', { cancelable: true }))
+    expect(seen).toEqual(['doc-migration', undefined, undefined, []])
+    node.remove()
+  })
+
+  it('the_migration_card_shows_no_count_of_its_own_unlike_the_waiting_unfiled_decisions', () => {
+    const node = view(undefined, { plans: [], chats: [], unfiled: 3 })
+    tab(node, 'maintenance').click()
+    const migration = card(node, 'doc-migration')
+    expect(migration.querySelector('.waiting')).toBeNull()
+    expect(migration.textContent).not.toMatch(/\d/)
     node.remove()
   })
 

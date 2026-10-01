@@ -1,10 +1,11 @@
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { KIWI_DIR } from '../kiwi-dir'
 import { readOptional, replaceFile } from '../workspace-files'
 
 /**
  * Where the generated map lives and how it is put on disk. Everything under
- * `.agent/repo-map/` is build output: a build replaces the whole set, so an
+ * `.kiwi/repo-map/` is build output: a build replaces the whole set, so an
  * edit a session makes there is not refused, it is lost at the next build.
  *
  * Writing goes through a staging directory and per-file renames, so a reader
@@ -13,7 +14,7 @@ import { readOptional, replaceFile } from '../workspace-files'
  */
 
 /** Workspace-relative root of the map; the form paths take in the injected summary. */
-export const MAP_ROOT = '.agent/repo-map'
+export const MAP_ROOT = `${KIWI_DIR}/repo-map`
 
 /** The small part handed to a session at its start. */
 export const SUMMARY_FILE = 'summary.md'

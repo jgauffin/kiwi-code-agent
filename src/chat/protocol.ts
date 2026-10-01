@@ -6,10 +6,12 @@ import type { PlanStage } from '../agent/phases/plan-stage'
 import type { Spec } from '../agent/phases/spec-model'
 import type { CleanupDecision, Task, VerificationRecord } from '../agent/phases/tasks-file'
 import type { UnitKind } from '../agent/cleanup/unit-size'
+import type { Breach } from '../agent/cleanup/breach'
 import type { ModelProfile } from '../agent/session/model-profile'
 import type { SessionMode } from '../agent/session/session-manager'
 import type { RunBlock, SessionStatus } from '../agent/session/session-status'
 import type { ProfileDefaults } from '../settings/settings-store'
+import type { BundleScope } from '../agent/instructions/bundles'
 import type { CleanupProgress } from './cleanup-progress'
 
 /** The session the chat view shows; its `title` heads the view. */
@@ -91,8 +93,8 @@ export type RunFailure = { mode: SessionMode; message: string }
 /** One line on a run under the plan: its current step while it runs, its outcome once it ended. */
 export type RunState = { live: boolean; text: string }
 
-/** One unit the size sweep flagged, its path workspace-relative. */
-export type CleanupUnit = { path: string; line: number; name: string; kind: UnitKind; lines: number; threshold: number }
+/** One unit the size sweep flagged, its path workspace-relative, with each limit it passed. */
+export type CleanupUnit = { path: string; line: number; name: string; kind: UnitKind; breaches: Breach[] }
 
 /** What the last sweep found, in file order; empty when every unit is within its limit. */
 export type CleanupSweep = { units: CleanupUnit[] }
@@ -133,6 +135,27 @@ export type ResumablePlan = { feature: string; status: 'draft' | 'approved' }
 /** A chat not shown that the new-session screen offers to reopen; its transcript is the context it comes back with. */
 export type ResumableChat = { sessionId: string; title: string; startedAt: string }
 
+/**
+ * What is put to the person about one scope's `AGENTS.md`, over the chat:
+ * moving a `CLAUDE.md` that still holds rules into it, tidying it once it is
+ * long, or both. `text` is what `AGENTS.md` reads, after the move when one is offered.
+ */
+export type AgentsMdOffer = {
+  scope: BundleScope
+  agentsPath: string
+  text: string
+  /** Present when a `CLAUDE.md` is offered to move in. */
+  claudePath?: string
+  /** Words of its own past the tidy threshold; absent when no tidy-up is offered. */
+  tidyWords?: number
+}
+
+/**
+ * `move` moves alone, `tidy` moves first when a move is offered. Either
+ * settles the offer, as `decline` does; `later` puts it off until the next window.
+ */
+export type AgentsMdAnswer = 'move' | 'tidy' | 'decline' | 'later'
+
 export type ToWebview =
   | {
       type: 'state'
@@ -142,16 +165,18 @@ export type ToWebview =
       runs: RunControls[]
       /** Present when the active session is a plan session. */
       plan?: PlanState
-      /** Plans under `plan/` still in progress, for the new-session screen's pick-up list. */
+      /** Plans under `specs/` still in progress, for the new-session screen's pick-up list. */
       plans: ResumablePlan[]
       /** Chats no tab is showing, newest first, for the same list. */
       chats: ResumableChat[]
-      /** Decisions in `plan/unfiled-decisions.md` waiting to be filed into the specs and docs, for the same list. */
+      /** Decisions in `specs/unfiled-decisions.md` waiting to be filed into the specs and docs, for the same list. */
       unfiled: number
       /** The profiles by name and which of them new sessions get, for the new-session screen's pickers. */
       profiles: ProfileDefaults
       /** Every model a provider serves, for the composer's model switch on a chat session. */
       models: ModelProfile[]
+      /** An `AGENTS.md` offer waiting on the person, shown over whatever the tab shows; absent when none is. */
+      agentsMd?: AgentsMdOffer
     }
   /** Full history of the tab, one section per run under it, oldest first. */
   | { type: 'transcript'; sessionId: string; runs: RunSection[] }
@@ -231,6 +256,8 @@ export type FromWebview =
   | { type: 'implement_spec' }
   /** Runs the test commands over the tasks' files again, whatever the last record says. */
   | { type: 'verify_spec' }
+  /** The person's answer to the `AGENTS.md` offer shown for `scope`. */
+  | { type: 'agents_md_answer'; scope: BundleScope; answer: AgentsMdAnswer }
   /** Opens an edited file, at the line the edit changed when one is known. */
   | { type: 'open_file'; path: string; line?: number }
   /** Opens the whole edit in the editor's diff view: the pre-edit snapshot against the file as it now stands. */

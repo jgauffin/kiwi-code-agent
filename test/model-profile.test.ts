@@ -58,6 +58,10 @@ describe('effort', () => {
     expect(effortOf(profile, [claude], 'cleanup')).toBe('low')
   })
 
+  it('a_plan_s_build_without_its_own_effort_runs_medium', () => {
+    expect(effortOf(profile, [claude], 'code-build')).toBe('medium')
+  })
+
   it('a_step_can_set_its_own_effort_and_still_run_the_default_model', () => {
     const own: Profile = { ...profile, steps: { implement: { effort: 'low' } } }
     expect(resolveStep(own, [claude], 'implement')).toMatchObject({ model: 'claude-sonnet-5', effort: 'low' })

@@ -68,28 +68,28 @@ describe('skill index', () => {
 
   it('agent_skills_are_indexed_alongside_claude_skills_and_win_on_a_shared_name', async () => {
     await skill('a', '---\nname: shared\ndescription: From .claude.\n---\nbody')
-    await skill('b', '---\nname: only-agent\ndescription: Agent only.\n---\nbody', '.agent')
-    await skill('c', '---\nname: shared\ndescription: From .agent.\n---\nbody', '.agent')
+    await skill('b', '---\nname: only-agent\ndescription: Agent only.\n---\nbody', '.kiwi')
+    await skill('c', '---\nname: shared\ndescription: From .kiwi.\n---\nbody', '.kiwi')
     const skills = await indexSkills(dir)
     expect(skills.map((s) => [s.name, s.description])).toEqual([
       ['only-agent', 'Agent only.'],
-      ['shared', 'From .agent.'],
+      ['shared', 'From .kiwi.'],
     ])
   })
 
   it('user_skills_under_claude_and_agent_roots_are_indexed', async () => {
     await skill('a', '---\nname: user-claude\ndescription: From ~/.claude.\n---\nbody', '.claude', home)
-    await skill('b', '---\nname: user-agent\ndescription: From ~/.agent.\n---\nbody', '.agent', home)
+    await skill('b', '---\nname: user-agent\ndescription: From ~/.kiwi.\n---\nbody', '.kiwi', home)
     const skills = await indexSkills(dir)
     expect(skills.map((s) => [s.name, s.description])).toEqual([
-      ['user-agent', 'From ~/.agent.'],
+      ['user-agent', 'From ~/.kiwi.'],
       ['user-claude', 'From ~/.claude.'],
     ])
     expect(skills[1]!.dir).toBe(join(home, '.claude', 'skills', 'a'))
   })
 
   it('workspace_skill_replaces_user_skill_with_the_same_name', async () => {
-    await skill('a', '---\nname: shared\ndescription: From the user.\n---\nbody', '.agent', home)
+    await skill('a', '---\nname: shared\ndescription: From the user.\n---\nbody', '.kiwi', home)
     await skill('b', '---\nname: shared\ndescription: From the workspace.\n---\nbody', '.claude')
     const skills = await indexSkills(dir)
     expect(skills.map((s) => [s.name, s.description])).toEqual([['shared', 'From the workspace.']])

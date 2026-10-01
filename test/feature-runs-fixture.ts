@@ -34,6 +34,11 @@ export class FakeSessions implements RunSessions {
     this.closed.push(id)
   }
   async settle(): Promise<void> {}
+  async retryFix(id: string, attempt: number, profile: ModelProfile): Promise<void> {
+    const record = this.get(id)!
+    record.fixAttempt = attempt
+    record.profile = profile
+  }
   get(id: string): SessionRecord | undefined {
     return this.records.find((r) => r.id === id)
   }

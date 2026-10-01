@@ -90,6 +90,11 @@ export class NewSessionView extends HTMLElement {
         <strong>File decisions</strong>
         <span class="hint">{{filingHint}}</span>
       </button>
+      <button type="button" class="type {{migrationState}}" r-click="choose('doc-migration')">
+        <span class="icon">🧹</span>
+        <strong>Doc migration</strong>
+        <span class="hint">Prune what the settled specs already say from the docs, then offer the rest as specs.</span>
+      </button>
     </div>
     <form class="chat-fields" if="isChat" r-submit="create(event)">
       <label>First prompt (optional)
@@ -117,7 +122,7 @@ export class NewSessionView extends HTMLElement {
       <label>User story or feature description
         <textarea name="prompt" rows="6" required placeholder="As a ... I want ... so that ..." r-input="edit('prompt', event)"></textarea>
       </label>
-      <p class="hint">The planner reads docs/**, the README and the other specs, never the code, and writes plan/&lt;feature&gt;.spec.md.</p>
+      <p class="hint">The planner reads docs/**, the README and the other specs, never the code, and writes specs/&lt;feature&gt;.spec.md.</p>
       <div class="submit">
         <button type="submit">Start feature planning</button>
         <linked-files-row class="linked-files"></linked-files-row>
@@ -131,6 +136,10 @@ export class NewSessionView extends HTMLElement {
       <p class="hint">Reads the unfiled decisions with the docs and the specs, says where each one belongs, and moves it there one confirmed write at a time. An entry leaves the file once it stands where a planner looks for it.</p>
       <p class="hint" if="nothingUnfiled">Nothing is waiting. An entry lands there when a chat or an implement run settles something that reaches features other than the one at hand.</p>
       <button type="submit" if="unfiled">File the decisions</button>
+    </form>
+    <form class="migration-fields" if="isMigration" r-submit="create(event)">
+      <p class="hint">Reads docs/**, the README and the specs, offers to cut what a settled spec already says, then offers to turn what no spec holds yet into a draft spec. Never reads the code. Each cut is one confirmed write, asked for by you.</p>
+      <button type="submit">Start the migration</button>
     </form>
     <section class="pick-up" if="any">
       <h3>Pick up where you left off</h3>
@@ -199,11 +208,13 @@ export class NewSessionView extends HTMLElement {
         isPlan: this.mode === 'plan',
         isDocs: this.mode === 'docs',
         isFiling: this.mode === 'file-decisions',
+        isMigration: this.mode === 'doc-migration',
         chatState: this.mode === 'chat' ? 'selected' : '',
         codePlanState: this.mode === 'code-plan' ? 'selected' : '',
         planState: this.mode === 'plan' ? 'selected' : '',
         docsState: this.mode === 'docs' ? 'selected' : '',
         filingState: this.mode === 'file-decisions' ? 'selected' : '',
+        migrationState: this.mode === 'doc-migration' ? 'selected' : '',
       },
       {
         pick: (event: Event) => this.dispatchEvent(new DefaultProfileChangedEvent((event.target as HTMLSelectElement).value)),

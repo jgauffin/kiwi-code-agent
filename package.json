@@ -187,7 +187,7 @@
             "type": "string"
           },
           "default": [],
-          "description": "Workspace-relative globs a Plan session must not read, carved out of docs/**, the root README and plan/*.spec.md. Example: docs/api/**."
+          "description": "Workspace-relative globs a Plan session must not read, carved out of docs/**, the root README and specs/*.spec.md. Example: docs/api/**."
         },
         "kiwiAgent.cutCoveredDocs": {
           "type": "boolean",
@@ -302,10 +302,15 @@
           "default": 30,
           "description": "Seconds a test run whose failures are all on files another hand changed waits before running the same suites again; only a second all-foreign failure is left for you."
         },
+        "kiwiAgent.cleanup.functionComplexity": {
+          "type": "integer",
+          "default": 15,
+          "description": "Cognitive complexity a function may have before the cleanup run after a feature's tests pass splits it: each branch and loop costs one plus how deeply it is nested. 0 turns the limit off."
+        },
         "kiwiAgent.cleanup.functionLines": {
           "type": "integer",
-          "default": 25,
-          "description": "Code lines a function may have before the cleanup run after a feature's tests pass splits it; 0 turns the limit off."
+          "default": 60,
+          "description": "Code lines a function may have before the cleanup run splits it, for the long function that barely branches; complexity is the main limit. 0 turns the limit off."
         },
         "kiwiAgent.cleanup.typeLines": {
           "type": "integer",
@@ -331,9 +336,14 @@
           ],
           "description": "Workspace-relative globs of test files, matched ignoring case and measured against the test limits: a test file stays one file per tested file, so it may grow larger."
         },
+        "kiwiAgent.cleanup.testFunctionComplexity": {
+          "type": "integer",
+          "default": 15,
+          "description": "Cognitive complexity a function in a test file may have before the cleanup run splits it; 0 turns the limit off."
+        },
         "kiwiAgent.cleanup.testFunctionLines": {
           "type": "integer",
-          "default": 60,
+          "default": 120,
           "description": "Code lines a function in a test file may have before the cleanup run splits it; 0 turns the limit off."
         },
         "kiwiAgent.cleanup.testTypeLines": {
@@ -509,12 +519,12 @@
     "build": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run",
+    "test": "node scripts/run-tests.mjs",
     "prompts": "esbuild scripts/prompts.ts --bundle --platform=node --format=cjs --target=node22 --external:vscode --loader:.md=text --log-level=warning --outfile=dist/prompts.cjs && node dist/prompts.cjs",
-    "package": "npm run typecheck && node esbuild.mjs --target=win32-x64 && node scripts/marketplace-readme.mjs && vsce package --no-dependencies --readme-path dist/marketplace-readme.md --target win32-x64 && node esbuild.mjs --target=win32-arm64 && node scripts/marketplace-readme.mjs && vsce package --no-dependencies --readme-path dist/marketplace-readme.md --target win32-arm64",
+    "package": "npm run typecheck && node esbuild.mjs --target=win32-x64 && node scripts/marketplace-readme.mjs && vsce package --no-dependencies --readme-path dist/marketplace-readme.md --target win32-x64 && node esbuild.mjs --target=win32-arm64 && node scripts/marketplace-readme.mjs && vsce package --no-dependencies --readme-path dist/marketplace-readme.md --target win32-arm64 && node esbuild.mjs",
     "link-dev": "node scripts/link-dev.mjs",
     "unlink-dev": "node scripts/link-dev.mjs --unlink",
-    "publish": "npm run typecheck && node esbuild.mjs --target=win32-x64 && node scripts/marketplace-readme.mjs && vsce publish --no-dependencies --readme-path dist/marketplace-readme.md --target win32-x64 && node esbuild.mjs --target=win32-arm64 && node scripts/marketplace-readme.mjs && vsce publish --no-dependencies --readme-path dist/marketplace-readme.md --target win32-arm64"
+    "publish": "npm run typecheck && node esbuild.mjs --target=win32-x64 && node scripts/marketplace-readme.mjs && vsce publish --no-dependencies --readme-path dist/marketplace-readme.md --target win32-x64 && node esbuild.mjs --target=win32-arm64 && node scripts/marketplace-readme.mjs && vsce publish --no-dependencies --readme-path dist/marketplace-readme.md --target win32-arm64 && node esbuild.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.2.112",
@@ -539,6 +549,6 @@
     "esbuild": "^0.28.2",
     "jsdom": "^30.0.1",
     "typescript": "^5.9.0",
-    "vitest": "^5.0.0"
+    "vitest": "^5.0.3"
   }
 }

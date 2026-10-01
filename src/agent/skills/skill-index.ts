@@ -1,6 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { KIWI_DIR } from '../kiwi-dir'
 import { readOptional } from '../workspace-files'
 
 export type SkillEntry = {
@@ -14,11 +15,11 @@ export type SkillEntry = {
 /**
  * Skill roots in override order, later wins: the user's serve every
  * workspace, the workspace's replace them on a shared name, and at each
- * level `.agent/skills` (ours) beats `.claude/skills` (Claude Code's layout,
+ * level `.kiwi/skills` (ours) beats `.claude/skills` (Claude Code's layout,
  * so one skill serves both engines).
  */
 export function skillRoots(cwd: string, home = homedir()): string[] {
-  return [home, cwd].flatMap((base) => [join(base, '.claude', 'skills'), join(base, '.agent', 'skills')])
+  return [home, cwd].flatMap((base) => [join(base, '.claude', 'skills'), join(base, KIWI_DIR, 'skills')])
 }
 
 /** Every `<root>/<folder>/SKILL.md`, one entry per name, sorted. */

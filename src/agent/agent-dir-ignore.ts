@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { AGENT_DIR, parseGitignore } from './repo-map/workspace-scan'
+import { KIWI_DIR } from './kiwi-dir'
+import { parseGitignore } from './repo-map/workspace-scan'
 
 /**
  * Makes sure a repository ignores the agent's folder: run logs, maps and the
@@ -13,8 +14,8 @@ export async function ensureAgentDirIgnored(cwd: string): Promise<'added' | 'pre
   if (!existsSync(join(cwd, '.git'))) return 'no-repo'
   const path = join(cwd, '.gitignore')
   const text = existsSync(path) ? await readFile(path, 'utf8') : ''
-  if (parseGitignore(text)(AGENT_DIR, true)) return 'present'
+  if (parseGitignore(text)(KIWI_DIR, true)) return 'present'
   const separator = text === '' || text.endsWith('\n') ? '' : '\n'
-  await writeFile(path, `${text}${separator}${AGENT_DIR}/\n`, 'utf8')
+  await writeFile(path, `${text}${separator}${KIWI_DIR}/\n`, 'utf8')
   return 'added'
 }

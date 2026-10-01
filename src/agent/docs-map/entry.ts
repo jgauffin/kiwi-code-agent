@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import type { PostToolUseOutcome, SessionHooks, ToolUse } from '../session/hooks'
+import { WRITES_NAMED_FILE } from '../permissions/tool-classes'
 import { parseSections } from '../openai-session/tools/markdown/outline'
 import { DOCS_MAP_ROOT, ENTRY_DIR } from './map-files'
 
@@ -113,7 +114,7 @@ export class DocsMapContract implements SessionHooks {
   constructor(private readonly cwd: string) {}
 
   async postToolUse(tool: ToolUse & { output: string; isError: boolean }): Promise<PostToolUseOutcome> {
-    if (tool.isError || (tool.toolName !== 'Write' && tool.toolName !== 'Edit')) return undefined
+    if (tool.isError || !WRITES_NAMED_FILE.has(tool.toolName)) return undefined
     const input = (typeof tool.input === 'object' && tool.input !== null ? tool.input : {}) as Record<string, unknown>
     const raw = input['file_path']
     if (typeof raw !== 'string') return undefined

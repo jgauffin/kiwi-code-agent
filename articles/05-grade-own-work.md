@@ -41,11 +41,12 @@ No model decides whether the tests were good enough. They passed or they did not
 
 ## Cleanup: size, never taste
 
-Passing tests say nothing about whether the implementation left a function nobody can follow. So once the tests pass, the files the feature's implementation runs edited are measured in code lines:
+Passing tests say nothing about whether the implementation left a function nobody can follow. So once the tests pass, the files the feature's implementation runs edited are measured:
 
-- a function over `kiwiAgent.cleanup.functionLines`
-- a type over `kiwiAgent.cleanup.typeLines`
-- a file over `kiwiAgent.cleanup.fileLines`
+- a function over `kiwiAgent.cleanup.functionComplexity` in cognitive complexity: each branch, loop and catch costs one plus how deeply it is nested
+- a function over `kiwiAgent.cleanup.functionLines` code lines, which catches the long function that barely branches
+- a type over `kiwiAgent.cleanup.typeLines` code lines
+- a file over `kiwiAgent.cleanup.fileLines` code lines
 
 A limit of `0` is off. Test files get their own, larger limits, since a test file grows with the code it covers; which files count as tests is a glob list you control. The measure reads declarations for a fixed set of languages; a file in a language it does not know is measured as a file only. A crude measure that states its limits beats a clever one that guesses.
 

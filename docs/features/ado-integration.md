@@ -9,7 +9,7 @@ Work items are the source for planning and the sink for tasks.
 - Tool `get_work_item(id)` in plan and reconcile sessions returns markdown: title, description, parent chain, Goal / Actor / Impact / Behaviour / Example fields.
 - Excluded: state, comments, tasks, linked PRs, commits, branches, builds, every `System.*` and `Microsoft.VSTS.*` field.
 - Walks parents, children and related items with a depth cap and a total cap, detects cycles, orders deterministically.
-- The closure is snapshotted to `plan/<feature>.context.md`, and the plan session reads that file instead of calling ADO again.
+- The closure is snapshotted to `specs/<feature>.context.md`, and the plan session reads that file instead of calling ADO again.
 - Prose that contains file paths or code identifiers is passed through unchanged; the leak is accepted and noted in the snapshot header.
 
 ## Writing

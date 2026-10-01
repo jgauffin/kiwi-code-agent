@@ -64,7 +64,10 @@ describe('repo map files', () => {
         const text = await readFile(summaryPath(dir), 'utf8')
         expect(text === before || text === after).toBe(true)
         reads++
-        await new Promise((resolve) => setTimeout(resolve, 1))
+        // A session reads the map and lets go; polling a 400 KB file with no
+        // gap would instead hold a handle on it the whole build, and Windows
+        // refuses the rename onto a file anyone has open.
+        await new Promise((resolve) => setTimeout(resolve, 25))
       }
       await build
       expect(reads).toBeGreaterThan(0)
@@ -97,7 +100,7 @@ describe('repo map files', () => {
 
   it('map_paths_are_workspace_relative_under_the_agent_folder', () =>
     withTempDir(async (dir) => {
-      expect(mapPath('types/web.md')).toBe('.agent/repo-map/types/web.md')
-      expect(mapRoot(dir)).toBe(join(dir, '.agent', 'repo-map'))
+      expect(mapPath('types/web.md')).toBe('.kiwi/repo-map/types/web.md')
+      expect(mapRoot(dir)).toBe(join(dir, '.kiwi', 'repo-map'))
     }))
 })

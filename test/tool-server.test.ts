@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { resolve } from 'node:path'
 import { jsonQueryTool, jsonSchemaTool } from '../src/agent/openai-session/tools/json'
 import { ReadTracker } from '../src/agent/openai-session/tools/read-tracker'
-import { bareToolName, toMcpTool, TOOL_SERVER_NAME } from '../src/agent/sdk-session/tool-server'
+import type { Tool } from '../src/agent/openai-session/tools/tool'
+import { bareToolName, toMcpTool, toolNamingLine, TOOL_SERVER_NAME } from '../src/agent/sdk-session/tool-server'
 
 const ctx = { cwd: resolve(import.meta.dirname, 'fixtures-json'), signal: new AbortController().signal, files: new ReadTracker() }
 
@@ -23,6 +24,16 @@ describe('tool server', () => {
 
   it('own_tools_are_always_loaded_so_the_prompts_can_name_them', () => {
     expect(toMcpTool(jsonSchemaTool, ctx)._meta).toEqual({ 'anthropic/alwaysLoad': true })
+  })
+
+  it('the_naming_line_tells_claude_the_prefixed_name_of_every_own_tool', () => {
+    const line = toolNamingLine([jsonSchemaTool, jsonQueryTool] as Tool[])
+    expect(line).toContain(`mcp__${TOOL_SERVER_NAME}__JsonSchema`)
+    expect(line).toContain(`mcp__${TOOL_SERVER_NAME}__JsonQuery`)
+  })
+
+  it('no_own_tools_means_no_naming_line', () => {
+    expect(toolNamingLine([])).toBe('')
   })
 
   it('handler_runs_the_tool_and_maps_its_output_and_error_flag', async () => {

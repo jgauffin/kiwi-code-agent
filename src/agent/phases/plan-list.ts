@@ -1,6 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { PLAN_DIR, WORK_DIR } from './blind-plan'
+import { SPECS_DIR, WORK_DIR } from './blind-plan'
 import { statusOf, type SpecStatus } from './spec-file'
 import { readTasks, TASKS_SUFFIX, tasksDone, type TasksState } from './tasks-file'
 
@@ -13,7 +13,7 @@ const SPEC_SUFFIX = '.spec.md'
 
 /** Every spec in the plan directory, by file name; the slug stands in when the front matter names no feature. */
 export async function listPlans(cwd: string): Promise<PlanSummary[]> {
-  const dir = join(cwd, PLAN_DIR)
+  const dir = join(cwd, SPECS_DIR)
   let names: string[]
   try {
     names = await readdir(dir)

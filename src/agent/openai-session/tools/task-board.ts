@@ -6,6 +6,7 @@ import { changeBoard, nextTask, readBoard, sameName, tasksFile, tasksPath, updat
 import type { FileHands } from '../../session/file-hands'
 import type { PreToolUseOutcome, SessionHooks, ToolUse } from '../../session/hooks'
 import { fail, ok, type Tool, type ToolOutput } from './tool'
+import { errorMessage } from '../../../error-message'
 
 /**
  * The feature's task board as tools, so the implementer never reads or edits
@@ -76,7 +77,7 @@ function readTasksTool(feature: string): Tool<typeof readSchema> {
 
 const updateSchema = z.object({
   task: z.string().min(1).describe('The task name.'),
-  state: z.enum(STATES).optional().describe('in_progress when you start it, done when its code is written and its project builds, tested when every rule it delivers is proven by a passing test named in proves, blocked when no answer would let you finish it.'),
+  state: z.enum(STATES).optional().describe('in_progress when you start it, done when its code is written and its project builds but you must stop before its tests pass (you are sent back to it), tested when every rule it delivers is proven by a passing test named in proves, blocked when no answer would let you finish it or the user put a rule\'s proof out of reach.'),
   blockedReason: z.string().optional().describe('Why the task cannot be finished; required with state blocked.'),
   files: z.array(z.string()).optional().describe('Every workspace-relative file the task touched, its tests included, replacing the list. The test sweep runs over them, so tested needs them named.'),
   proves: z
@@ -118,7 +119,7 @@ function updateTaskTool(feature: string, hands?: FileHands): Tool<typeof updateS
       try {
         board = await changeBoard(tasksPath(ctx.cwd, feature), (b) => updateTask(b, input.task, change))
       } catch (error) {
-        return fail(error instanceof Error ? error.message : String(error))
+        return fail(errorMessage(error))
       }
       const task = board.tasks.find((t) => sameName(t.name, input.task))!
       const tested = task.state === 'tested'

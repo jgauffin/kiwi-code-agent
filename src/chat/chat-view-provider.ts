@@ -1,11 +1,11 @@
 import * as vscode from 'vscode'
-import { actingMode, isBuild, isFeatureless, isPlanning, stepOf, type SessionManager, type SessionMode, type SessionRecord } from '../agent/session/session-manager'
+import { actingMode, isBuild, isFeatureless, offersAllowWrites, stepOf, type SessionManager, type SessionMode, type SessionRecord } from '../agent/session/session-manager'
 import type { ModelProfile, Step } from '../agent/session/model-profile'
 import type { McpServerState, SessionEvent } from '../agent/session/code-session'
 import { appliesModelSwitchNow, blockOf, lastFailure, mostUrgent, nextStatus, takesProfile, type SessionStatus } from '../agent/session/session-status'
 import { readSpecState, setSpecStatus, type SpecState } from '../agent/phases/spec-file'
 import {
-  PLAN_DIR,
+  SPECS_DIR,
   decisionsHandoffPrompt,
   docsAfterApprovalPrompt,
   featureSlug,
@@ -47,7 +47,8 @@ import { editDiffTitle, editLine, isRunSnapshot, runsRoot } from '../agent/edits
 import { buildRepoMap } from '../agent/repo-map/build-map'
 import { finishDocsMap, planDocsMap, readDocsSummary, startDocsMap, type DocsMapResult } from '../agent/docs-map/build'
 import { docsMapKickoff } from '../agent/phases/docs-map'
-import { docsEvaluationKickoff } from '../agent/phases/docs-evaluation'
+import { docMigrationKickoff } from '../agent/phases/doc-migration'
+import { deliversEvaluation, docsEvaluationKickoff } from '../agent/phases/docs-evaluation'
 import { fileDecisionsKickoff } from '../agent/phases/file-decisions'
 import { readUnfiled } from '../agent/phases/unfiled-decisions'
 import { sharedBuild } from '../agent/session/generated-context'
@@ -67,15 +68,18 @@ import type {
   ToWebview,
 } from './protocol'
 import { webviewHtml } from './webview-html'
+import type { AgentsMdOffers } from './agents-md-offers'
+import { agentsMdTidyKickoff } from '../agent/instructions/agents-md-tidy'
 import { FeatureBuild } from './feature-build'
 import { FeatureCleanup } from './feature-cleanup'
 import type { ChatRefresh, Notify, SessionSwitch, SizeLimits, Verifier } from './feature-runs'
 import type { ProfileDefaults } from '../settings/settings-store'
+import { errorMessage } from '../error-message'
 
-/** Where a prompt's allowances go: the workspace's permission allow list, or the session's own, which lasts as long as the extension host. */
+/** Where a prompt's allowances go: the workspace's permission allow list, or the session's own, kept with the session. */
 export interface PermissionStore {
   allowForProject(rules: string[]): Promise<void>
-  allowForSession(sessionId: string, rules: string[]): void
+  allowForSession(sessionId: string, rules: string[]): Promise<void>
 }
 
 /** What new sessions run on, as the new-session screen shows and sets it. */
@@ -119,6 +123,8 @@ export class ChatViewProvider {
   private readonly applying = new Set<string>()
   /** Features whose planner is listing what the docs should now say, right after approval; Implement waits for that turn. */
   private readonly reviewingDocs = new Set<string>()
+  /** Docs evaluations whose findings were delivered in the turn under way; full access is granted when it ends. */
+  private readonly evaluationsDelivered = new Set<string>()
   /** Per running session, its MCP servers as the engine last reported them. */
   private readonly mcpServers = new Map<string, McpServerState[]>()
   /**
@@ -130,6 +136,10 @@ export class ChatViewProvider {
   private readonly pendingModelSwitch = new Map<string, ModelProfile>()
   /** The docs map build in flight: the run's session, where its progress goes, and the turn its caller waits on. */
   private docsMapRun: { sessionId: string; progress: (line: string) => void; done: (errors: string[]) => void } | undefined
+  /** The last state sent, settled either way: the next one waits on it. */
+  private stateTail: Promise<void> = Promise.resolve()
+  /** A state not started yet; every call made before it starts shares it. */
+  private stateQueued: Promise<void> | undefined
   private readonly changed = new vscode.EventEmitter<void>()
   /** Fires when a tab opened or closed, a status changed or the session list changed. */
   readonly onDidChange = this.changed.event
@@ -146,6 +156,7 @@ export class ChatViewProvider {
     private readonly allowWrites: SessionSwitch,
     private readonly permissions: PermissionStore,
     private readonly workspaceRoot: string,
+    private readonly agentsMd: AgentsMdOffers,
   ) {
     const refresh: ChatRefresh = { sendState: () => this.sendState(), changed: () => this.changed.fire() }
     const notify: Notify = {
@@ -318,7 +329,7 @@ export class ChatViewProvider {
   async resumePlan(feature: string, into?: ChatPanel): Promise<void> {
     const path = specPath(this.workspaceRoot, feature)
     const state = await readSpecState(path)
-    if (!state.exists) throw new Error(`No spec for "${feature}" under ${PLAN_DIR}/.`)
+    if (!state.exists) throw new Error(`No spec for "${feature}" under ${SPECS_DIR}/.`)
     const tasks = await readTasks(tasksPath(this.workspaceRoot, feature))
     if (state.status === 'implemented' || (state.status === 'approved' && tasks.exists && tasksDone(tasks.tasks) && tasks.verification?.ok)) {
       throw new Error(`"${feature}" is verified: plan the next change as its own feature.`)
@@ -365,71 +376,96 @@ export class ChatViewProvider {
   onSessionEvent(sessionId: string, event: SessionEvent): void {
     const record = this.sessions.get(sessionId)
     if (record) {
-      const before = this.statuses.get(sessionId) ?? 'idle'
-      const after = nextStatus(before, actingMode(record), event)
-      const failure = lastFailure(this.failures.get(sessionId), event)
-      const failureChanged = failure !== this.failures.get(sessionId)
-      if (failure === undefined) this.failures.delete(sessionId)
-      else this.failures.set(sessionId, failure)
-      if (after !== before || failureChanged) {
-        this.statuses.set(sessionId, after)
-        void this.sendState()
-        this.changed.fire()
-      }
+      this.trackStatus(record, event)
+      // A build has no tab and nobody prompts it: its events are progress for whoever is waiting.
+      if (isBuild(record.mode)) return this.followDocsMap(record, event)
+      if (record.parentId) this.followRun(record, event)
+      this.forwardToTab(record, event)
     }
-    // A build has no tab and nobody prompts it: its events are progress for whoever is waiting.
-    if (record && isBuild(record.mode)) {
-      this.followDocsMap(record, event)
-      return
-    }
-    // A run under a session keeps its one line on the plan bar, and now also fills its own section of the tab.
-    if (record?.parentId) {
-      if (record.mode === 'cleanup') this.cleanup.follow(record, event)
-      else if (record.mode === 'implement') void this.build.followTask(record, event)
-      else this.followCheck(record, event)
-    }
-    if (record) {
-      const tabId = this.tabIdOf(record)
-      void this.panelOf(tabId)?.panel.webview.postMessage({
-        type: 'event',
-        sessionId: tabId,
-        run: this.runRef(record),
-        event,
-      } satisfies ToWebview)
-    }
-    // A task run can hold the floor, so its servers are what the composer shows while it does.
+    this.trackMcpServers(sessionId, event)
+    const startsOrEnds = event.type === 'session_started' || event.type === 'ended'
+    // A run under the plan can hold the floor too, and whether its conversation can be compacted follows its engine.
+    if (startsOrEnds) void this.sendState()
+    if (record?.parentId) return
+    if (startsOrEnds) this.changed.fire()
+    if (record) this.followSession(record, event)
+  }
+
+  /** The session's status and why its last turn failed; the tabs and the Sessions view follow a change in either. */
+  private trackStatus(record: SessionRecord, event: SessionEvent): void {
+    const before = this.statuses.get(record.id) ?? 'idle'
+    const after = nextStatus(before, actingMode(record), event)
+    const failure = lastFailure(this.failures.get(record.id), event)
+    const failureChanged = failure !== this.failures.get(record.id)
+    if (failure === undefined) this.failures.delete(record.id)
+    else this.failures.set(record.id, failure)
+    if (after === before && !failureChanged) return
+    this.statuses.set(record.id, after)
+    void this.sendState()
+    this.changed.fire()
+  }
+
+  /** A run under a session keeps its one line on the plan bar, and now also fills its own section of the tab. */
+  private followRun(record: SessionRecord, event: SessionEvent): void {
+    if (record.mode === 'cleanup') this.cleanup.follow(record, event)
+    else if (record.mode === 'implement') void this.build.followTask(record, event)
+    else this.followCheck(record, event)
+  }
+
+  private forwardToTab(record: SessionRecord, event: SessionEvent): void {
+    const tabId = this.tabIdOf(record)
+    void this.panelOf(tabId)?.panel.webview.postMessage({
+      type: 'event',
+      sessionId: tabId,
+      run: this.runRef(record),
+      event,
+    } satisfies ToWebview)
+  }
+
+  /** A task run can hold the floor, so its servers are what the composer shows while it does. */
+  private trackMcpServers(sessionId: string, event: SessionEvent): void {
     if (event.type === 'mcp_servers') {
       this.mcpServers.set(sessionId, event.servers)
       void this.sendState()
     }
     if (event.type === 'ended') this.mcpServers.delete(sessionId)
-    // A run under the plan can hold the floor too, and whether its conversation can be compacted follows its engine.
-    if (event.type === 'session_started' || event.type === 'ended') void this.sendState()
-    if (record?.parentId) return
-    if (event.type === 'session_started' || event.type === 'ended') this.changed.fire()
-    if (event.type === 'tool_result' && record?.feature && this.isOpen(record.id)) {
+  }
+
+  /** What a session's own events (not a run's under it) set going: the plan bar, the build, a granted evaluation, the plan's next step. */
+  private followSession(record: SessionRecord, event: SessionEvent): void {
+    if (event.type === 'tool_result' && record.feature && this.isOpen(record.id)) {
       // The session just wrote a plan file (a revision, proposals, a task's progress); the plan bar and view must follow.
       void this.sendState()
     }
-    if (event.type === 'turn_done' && !event.isError && record?.mode === 'implement' && record.feature) {
-      const feature = record.feature
+    if (event.type === 'turn_done' && !event.isError && record.mode === 'implement' && record.feature) {
       // A task run under the plan follows its amendment in followTask, before the next task starts.
-      if (record.parentId) void this.build.followBoard(feature)
-      else void this.build.followAmendment(feature).then(() => this.build.followBoard(feature))
+      const feature = record.feature
+      void this.build.followAmendment(feature).then(() => this.build.followBoard(feature))
     }
-    // The evaluation has been said: the session goes on with the full tool set, so what it found is worked on where it was read.
-    if (event.type === 'turn_done' && !event.isError && record?.mode === 'docs' && record.access !== 'full') {
+    this.followDocsEvaluation(record, event)
+    if (event.type === 'turn_done' && record.mode === 'plan' && record.feature) this.followPlanTurn(record, record.feature, event.isError)
+  }
+
+  /**
+   * The evaluation has been said: the session goes on with the full tool set, so what it found is worked on where it was read.
+   * The model marks the reply that says it; the grant waits for the turn to end, since it stops the engine.
+   */
+  private followDocsEvaluation(record: SessionRecord, event: SessionEvent): void {
+    if (record.mode !== 'docs') return
+    if (event.type === 'assistant_message' && deliversEvaluation(event.text)) this.evaluationsDelivered.add(record.id)
+    if (event.type === 'turn_done' && !event.isError && record.access !== 'full' && this.evaluationsDelivered.delete(record.id)) {
       void this.sessions.grantFullAccess(record.id).then(() => this.sendState())
     }
-    if (event.type === 'turn_done' && record?.mode === 'plan' && record.feature) {
-      // However the turn ended, the rulings are no longer in flight: Approve is the user's again, on the spec as it stands.
-      const applied = this.applying.delete(record.feature)
-      const reviewed = this.reviewingDocs.delete(record.feature)
-      if (applied || reviewed) void this.sendState()
-      // The clean check was the go-ahead for the build; the docs listing was the last thing between it and the implementer.
-      if (reviewed && !event.isError) void this.build.implementAfterApproval(record)
-      if (!event.isError) void this.followPlan(record)
-    }
+  }
+
+  private followPlanTurn(record: SessionRecord, feature: string, isError: boolean): void {
+    // However the turn ended, the rulings are no longer in flight: Approve is the user's again, on the spec as it stands.
+    const applied = this.applying.delete(feature)
+    const reviewed = this.reviewingDocs.delete(feature)
+    if (applied || reviewed) void this.sendState()
+    // The clean check was the go-ahead for the build; the docs listing was the last thing between it and the implementer.
+    if (reviewed && !isError) void this.build.implementAfterApproval(record)
+    if (!isError) void this.followPlan(record)
   }
 
   /**
@@ -534,8 +570,9 @@ export class ChatViewProvider {
     if (!spec.exists || spec.status !== 'approved') return
     const path = tasksPath(this.workspaceRoot, feature)
     const existing = await readBoard(path)
+    const decisions = await readDecisions(decisionsPath(this.workspaceRoot, feature))
     await mkdir(dirname(path), { recursive: true })
-    await writeBoard(path, deriveBoard(parseSpec(spec.body), existing, await readScenarioContext(contextPath(this.workspaceRoot, feature))))
+    await writeBoard(path, deriveBoard(parseSpec(spec.body), existing, await readScenarioContext(contextPath(this.workspaceRoot, feature)), spec.built, decisions))
     await this.sendState()
     if (existing) return this.build.implementAfterApproval(plan)
     this.reviewingDocs.add(feature)
@@ -579,7 +616,7 @@ export class ChatViewProvider {
       const count = result.projects.length
       void vscode.window.showInformationMessage(`Kiwipow Agent: repo map built — ${count} project${count === 1 ? '' : 's'}.`)
     } catch (error) {
-      void vscode.window.showWarningMessage(`Kiwipow Agent: the repo map could not be built: ${error instanceof Error ? error.message : String(error)}`)
+      void vscode.window.showWarningMessage(`Kiwipow Agent: the repo map could not be built: ${errorMessage(error)}`)
     }
   }
 
@@ -604,7 +641,7 @@ export class ChatViewProvider {
       const tail = left === 0 ? '' : `, ${left} still to describe`
       void vscode.window.showInformationMessage(`Kiwipow Agent: docs map built: ${described} doc${described === 1 ? '' : 's'}${tail}.`)
     } catch (error) {
-      void vscode.window.showWarningMessage(`Kiwipow Agent: the docs map could not be built: ${error instanceof Error ? error.message : String(error)}`)
+      void vscode.window.showWarningMessage(`Kiwipow Agent: the docs map could not be built: ${errorMessage(error)}`)
     }
   }
 
@@ -672,7 +709,7 @@ export class ChatViewProvider {
     return (await readDocsSummary(this.workspaceRoot)) !== undefined
   }
 
-  /** Every plan under `plan/`, the command's entry point; one summary at the end. */
+  /** Every plan under `specs/`, the command's entry point; one summary at the end. */
   async migratePlans(): Promise<void> {
     const plans = await listPlans(this.workspaceRoot)
     if (plans.length === 0) {
@@ -710,7 +747,7 @@ export class ChatViewProvider {
     webview.html = webviewHtml(webview, this.extensionUri, 'chat-app')
     webview.onDidReceiveMessage((message: FromWebview) => {
       this.handle(message, entry).catch((error: unknown) => {
-        const text = error instanceof Error ? error.message : String(error)
+        const text = errorMessage(error)
         void vscode.window.showErrorMessage(`Kiwipow Agent: ${text}`)
       })
     })
@@ -732,6 +769,12 @@ export class ChatViewProvider {
         return this.sendFromTab(message, shown, entry)
       case 'link_open_file':
         return this.linkOpenFile(entry)
+      case 'agents_md_answer': {
+        const tidy = await this.agentsMd.answer(message.scope, message.answer)
+        // A tab on the new-session screen takes the tidy chat; one showing a session keeps it.
+        if (tidy) await this.newSession('chat', undefined, agentsMdTidyKickoff(tidy.scope, tidy.agentsPath, tidy.bundles), entry.tabId ? undefined : entry)
+        return
+      }
       case 'permission':
         return this.answerPermission(message)
       case 'question':
@@ -757,7 +800,7 @@ export class ChatViewProvider {
       case 'approve_plan':
         // The approval is the go-ahead, so the build starts at once rather than waiting on another prompt.
         if (shown?.mode === 'code-plan' && shown.access !== 'full') {
-          await this.sessions.grantFullAccess(shown.id)
+          await this.sessions.grantFullAccess(shown.id, this.profileFor('code-build'))
           await this.sessions.send(shown.id, codePlanBuildKickoff())
           await this.sendState()
         }
@@ -857,7 +900,7 @@ export class ChatViewProvider {
     // The rules are in place before the call runs, so a second call they cover in the same turn already passes.
     const { remember, ...decision } = message.decision
     if (remember?.project.length) await this.permissions.allowForProject(remember.project)
-    if (remember?.session.length) this.permissions.allowForSession(message.sessionId, remember.session)
+    if (remember?.session.length) await this.permissions.allowForSession(message.sessionId, remember.session)
     await this.sessions.respondToPermission(message.sessionId, message.requestId, decision)
   }
 
@@ -866,8 +909,15 @@ export class ChatViewProvider {
     const filing = message.mode === 'file-decisions' ? this.sessions.list().find((r) => r.mode === 'file-decisions' && this.sessions.isLive(r.id)) : undefined
     if (filing) return this.open(filing.id, entry)
     const prompt = withLinkedFiles(message.prompt ?? '', message.files ?? [])
-    // The docs card and the filing have nothing to fill in, so their sessions start on the job rather than waiting for a prompt.
-    const kickoff = message.mode === 'docs' ? docsEvaluationKickoff() : message.mode === 'file-decisions' ? fileDecisionsKickoff() : undefined
+    // The docs card, the filing and the migration have nothing to fill in, so their sessions start on the job rather than waiting for a prompt.
+    const kickoff =
+      message.mode === 'docs'
+        ? docsEvaluationKickoff()
+        : message.mode === 'file-decisions'
+          ? fileDecisionsKickoff()
+          : message.mode === 'doc-migration'
+            ? docMigrationKickoff()
+            : undefined
     await this.newSession(message.mode, message.feature, prompt !== '' ? prompt : kickoff, entry)
   }
 
@@ -985,7 +1035,7 @@ export class ChatViewProvider {
     const review = await readReview(file)
     change(review, state)
     await mkdir(dirname(file), { recursive: true })
-    await writeReview(file, review, `${PLAN_DIR}/${featureSlug(feature)}.spec.md`)
+    await writeReview(file, review, `${SPECS_DIR}/${featureSlug(feature)}.spec.md`)
     await this.sendState()
   }
 
@@ -1130,24 +1180,39 @@ export class ChatViewProvider {
   }
 
   /**
-   * Every tab is brought up to date, and its caption follows the session's
-   * name: a chat is named by its first message.
+   * Every tab is brought up to date. One state goes out at a time, so a slow
+   * read cannot land after a newer one; the calls made while one runs share
+   * the next, which reads after all of them.
    */
-  private async sendState(): Promise<void> {
+  private sendState(): Promise<void> {
+    if (this.stateQueued) return this.stateQueued
+    const run = this.stateTail.then(() => {
+      this.stateQueued = undefined
+      return this.postState()
+    })
+    this.stateQueued = run
+    this.stateTail = run.catch(() => {})
+    return run
+  }
+
+  /** The state as it stands, to every tab; its caption follows the session's name: a chat is named by its first message. */
+  private async postState(): Promise<void> {
     const plans = await listPlans(this.workspaceRoot).catch((error: unknown) => {
-      void vscode.window.showErrorMessage(`Kiwipow Agent: cannot list plans: ${error instanceof Error ? error.message : String(error)}`)
+      void vscode.window.showErrorMessage(`Kiwipow Agent: cannot list plans: ${errorMessage(error)}`)
       return []
     })
     const unfiled = await readUnfiled(this.workspaceRoot).catch((error: unknown) => {
-      void vscode.window.showErrorMessage(`Kiwipow Agent: cannot read the unfiled decisions: ${error instanceof Error ? error.message : String(error)}`)
+      void vscode.window.showErrorMessage(`Kiwipow Agent: cannot read the unfiled decisions: ${errorMessage(error)}`)
       return []
     })
+    const agentsMd = this.agentsMd.current()
     const shared = {
       plans: plans.flatMap((p) => (p.status === 'verified' ? [] : [{ feature: p.feature, status: p.status }])),
       chats: this.pastChats(),
       unfiled: unfiled.length,
       profiles: this.profileDefaults.read(),
       models: this.registeredModels(),
+      ...(agentsMd ? { agentsMd } : {}),
     }
     for (const entry of this.panels) {
       const record = this.shownBy(entry)
@@ -1157,7 +1222,7 @@ export class ChatViewProvider {
       entry.panel.title = tab?.title ?? NEW_SESSION_TITLE
       const plan = record
         ? await this.planState(record).catch((error: unknown) => {
-            void vscode.window.showErrorMessage(`Kiwipow Agent: cannot read spec: ${error instanceof Error ? error.message : String(error)}`)
+            void vscode.window.showErrorMessage(`Kiwipow Agent: cannot read spec: ${errorMessage(error)}`)
             return undefined
           })
         : undefined
@@ -1216,9 +1281,8 @@ export class ChatViewProvider {
       profileName: run.profile.name,
       live: this.sessions.isLive(run.id),
       settled: run.settled === true,
-      // Planning phases auto-allow their in-scope writes and deny the rest, so the switch has nothing to decide there;
-      // a session granted full access writes wherever the rules let it, and the switch is its own again.
-      ...(!isPlanning(actingMode(run)) ? { allowWrites: this.allowWrites.isEnabled(run.id) } : {}),
+      // A session granted full access writes wherever the rules let it, and the switch is its own again.
+      ...(offersAllowWrites(actingMode(run)) ? { allowWrites: this.allowWrites.isEnabled(run.id) } : {}),
       ...(this.mcpServers.has(run.id) ? { mcp: this.mcpServers.get(run.id)! } : {}),
     }
   }

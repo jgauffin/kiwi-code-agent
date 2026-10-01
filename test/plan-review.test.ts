@@ -158,10 +158,10 @@ describe('resolutions and the approval gate', () => {
 
 describe('commenting is offered on a draft only', () => {
   it('a_missing_or_approved_plan_is_not_commentable', () => {
-    expect(isCommentable({ exists: true, status: 'draft', body })).toBe(true)
-    expect(isCommentable({ exists: true, status: 'approved', body })).toBe(false)
+    expect(isCommentable({ exists: true, status: 'draft', body, built: false })).toBe(true)
+    expect(isCommentable({ exists: true, status: 'approved', body, built: false })).toBe(false)
     expect(isCommentable({ exists: false })).toBe(false)
-    expect(() => assertCommentable({ exists: true, status: 'approved', body })).toThrow(/approved/)
+    expect(() => assertCommentable({ exists: true, status: 'approved', body, built: false })).toThrow(/approved/)
     expect(() => assertCommentable({ exists: false })).toThrow(/No plan/)
   })
 })
@@ -179,8 +179,8 @@ describe('the review file', () => {
     resolveComment(review, first)
     addComment(review, 'Refund', 'bring it back')
 
-    const text = renderReview(review, 'plan/orders.spec.md')
-    expect(text).toContain('# Review of plan/orders.spec.md')
+    const text = renderReview(review, 'specs/orders.spec.md')
+    expect(text).toContain('# Review of specs/orders.spec.md')
     expect(text).toContain('## Round 1, submitted 2026-01-01T00:00:00.000Z')
     expect(text).toContain('- on Cancel command: not what cancelling means\n  - addressed: rewrote the rule\n  - resolved')
     expect(text).not.toContain('item:')
@@ -194,7 +194,7 @@ describe('the review file', () => {
   })
 
   it('a_resolution_the_agent_wrote_loosely_is_still_read', () => {
-    const text = `# Review of plan/orders.spec.md
+    const text = `# Review of specs/orders.spec.md
 
 ## Round 1, submitted 2026-01-01T00:00:00.000Z
 - on Cancel command: wrong
@@ -211,18 +211,18 @@ describe('the review file', () => {
     const dir = await mkdtemp(join(tmpdir(), 'review-'))
     try {
       const path = reviewPath(dir, 'Order cancellation')
-      expect(path).toBe(join(dir, '.agent', 'plan', 'order-cancellation.review.md'))
+      expect(path).toBe(join(dir, '.kiwi', 'specs', 'order-cancellation.review.md'))
       expect(await readReview(path)).toEqual(emptyReview())
 
       const review = emptyReview()
       addComment(review, 'Cancel command', 'wrong')
       strikeItem(review, 'Shipped order')
-      await mkdir(join(dir, 'plan'), { recursive: true })
-      await writeReview(path, review, 'plan/order-cancellation.spec.md')
+      await mkdir(join(dir, 'specs'), { recursive: true })
+      await writeReview(path, review, 'specs/order-cancellation.spec.md')
       expect(await readReview(path)).toEqual(review)
 
       submitRound(review, '2026-01-01T00:00:00.000Z')
-      await writeReview(path, review, 'plan/order-cancellation.spec.md')
+      await writeReview(path, review, 'specs/order-cancellation.spec.md')
       const reloaded = await readReview(path)
       expect(pendingRound(reloaded)).toBeUndefined()
       expect(struckItems(reloaded)).toEqual(['Shipped order'])

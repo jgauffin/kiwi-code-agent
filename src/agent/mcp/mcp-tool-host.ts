@@ -2,6 +2,7 @@ import type { McpServerConfig, McpServers } from './mcp-config'
 import { mcpTool, type McpConnection, type McpConnector } from './mcp-connection'
 import type { McpServerState } from '../session/code-session'
 import type { Tool } from '../openai-session/tools/tool'
+import { errorMessage } from '../../error-message'
 
 type Server = {
   config: McpServerConfig
@@ -59,7 +60,7 @@ export class McpToolHost {
       server.state = { name, status: 'connected' }
     } catch (error) {
       server.tools = []
-      server.state = { name, status: 'failed', error: error instanceof Error ? error.message : String(error) }
+      server.state = { name, status: 'failed', error: errorMessage(error) }
     }
   }
 

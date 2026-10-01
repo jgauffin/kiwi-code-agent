@@ -3,6 +3,7 @@ import { readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, isAbsolute, join, resolve, sep } from 'node:path'
 import type { PostToolUseOutcome, SessionHooks, ToolUse } from '../session/hooks'
+import { WRITES_NAMED_FILE } from '../permissions/tool-classes'
 import { readOptional } from '../workspace-files'
 
 export type MemoryScope = 'project' | 'user'
@@ -33,12 +34,15 @@ export function projectMemoryDir(cwd: string, home: string = homedir()): string 
 
 /**
  * User notes fold into the person's own instructions file instead of a folder
- * of their own: it is the one file Claude Code already reads on every project,
- * on both engines, so a memory that should follow the person everywhere has
- * nowhere else to earn that for free.
+ * of their own: it is a file every engine already reads on every project, so
+ * a memory that should follow the person everywhere has nowhere else to earn
+ * that for free. That file is `CLAUDE.md` until the person moves it into
+ * `AGENTS.md`; once `CLAUDE.md` is gone, notes follow it there \u2014 carried
+ * by the move like the rest of what the file held, and written there from then on.
  */
 export function userMemoryFile(home: string = homedir()): string {
-  return join(home, '.claude', 'CLAUDE.md')
+  const claudeMd = join(home, '.claude', 'CLAUDE.md')
+  return existsSync(claudeMd) ? claudeMd : join(home, 'AGENTS.md')
 }
 
 export type MemoryEntry = { title: string; file: string; summary: string }
@@ -235,7 +239,7 @@ export class MemoryContract implements SessionHooks {
   ) {}
 
   async postToolUse(tool: ToolUse & { output: string; isError: boolean }): Promise<PostToolUseOutcome> {
-    if (tool.isError || (tool.toolName !== 'Write' && tool.toolName !== 'Edit')) return undefined
+    if (tool.isError || !WRITES_NAMED_FILE.has(tool.toolName)) return undefined
     const input = (typeof tool.input === 'object' && tool.input !== null ? tool.input : {}) as Record<string, unknown>
     const raw = input['file_path']
     if (typeof raw !== 'string') return undefined

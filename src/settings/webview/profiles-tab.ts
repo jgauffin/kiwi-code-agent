@@ -1,9 +1,9 @@
 import { EFFORTS, effortLevels, STEP_EFFORT } from '../../agent/session/effort'
 import type { Effort, ModelChoice, Profile, Provider, Step, StepChoice } from '../../agent/session/model-profile'
-import { STEPS } from '../../agent/session/session-manager'
+import { STEP_GROUPS, STEPS, stepTitle, type StepGroup } from '../../agent/session/session-manager'
 import type { SettingsSnapshot } from '../protocol'
 import { DefaultProfileChangedEvent } from '../../chat/webview/events'
-import { ProfileRemovedEvent, ProfileSavedEvent } from './events'
+import { ProfileRemovedEvent, ProfileSavedEvent, ProfileStepGroupSelectedEvent } from './events'
 import { button, el, field, heading, select, settingsFileLink, textInput } from './fields'
 
 /** What a blank effort means on a row: the provider's own for the default, the step's suggestion or the default's for a step. */
@@ -23,6 +23,8 @@ export class ProfilesTab extends HTMLElement {
   private signature = ''
   /** The card open for editing: a profile's index, or one past the end for a new profile. */
   private editing: number | undefined
+  /** The kind of session whose steps the form shows; kept across redraws and profiles. */
+  private group: StepGroup = 'Chat'
 
   update(snapshot: SettingsSnapshot): void {
     const signature = JSON.stringify([snapshot.providers, snapshot.profiles, snapshot.activeProfile])
@@ -68,9 +70,9 @@ export class ProfilesTab extends HTMLElement {
     if (profile.name === snapshot.activeProfile) title.append(el('span', 'badge', 'in use'))
     const chips = el('div', 'chips')
     chips.append(el('span', 'chip', `default ${describe(profile.default)}`))
-    for (const { step, label } of STEPS) {
+    for (const { step } of STEPS) {
       const own = profile.steps?.[step]
-      if (own) chips.append(el('span', 'chip', `${label}: ${describe(own)}`))
+      if (own) chips.append(el('span', 'chip', `${stepTitle(step)}: ${describe(own)}`))
     }
     const controls = el('div', 'controls')
     controls.append(
@@ -97,6 +99,28 @@ export class ProfilesTab extends HTMLElement {
     const inherit = () => stepRows.forEach((row) => row.inherit(defaultRow.whole()))
     defaultRow.addEventListener('change', inherit)
     inherit()
+    // Every pane stays in the form while hidden, so a step set on one tab saves with the rest.
+    const strip = el('nav', 'subtabs')
+    const panes = STEP_GROUPS.map((group) => {
+      const pane = el('div', 'step-pane')
+      pane.append(...stepRows.filter((_, i) => STEPS[i]!.group === group))
+      return { group, pane }
+    })
+    const showGroup = () => {
+      strip.replaceChildren(
+        ...STEP_GROUPS.map((group) => {
+          const tab = button(group, () => tab.dispatchEvent(new ProfileStepGroupSelectedEvent(group)))
+          tab.className = `tab${group === this.group ? ' active' : ''}`
+          return tab
+        }),
+      )
+      for (const { group, pane } of panes) pane.hidden = group !== this.group
+    }
+    form.addEventListener(ProfileStepGroupSelectedEvent.type, (event) => {
+      this.group = event.group
+      showGroup()
+    })
+    showGroup()
     const cancel = button('Cancel', () => {
       this.editing = undefined
       this.draw(snapshot)
@@ -107,7 +131,9 @@ export class ProfilesTab extends HTMLElement {
     save.textContent = 'Save'
     const controls = el('div', 'controls')
     controls.append(save, cancel)
-    form.append(field('Name', name), defaultRow, el('h4', '', 'Per step, only where it differs'), ...stepRows, controls)
+    const steps = el('section', 'steps')
+    steps.append(el('h4', '', 'Per step, only where it differs'), strip, ...panes.map((p) => p.pane))
+    form.append(field('Name', name), defaultRow, steps, controls)
     form.addEventListener('submit', (event) => {
       event.preventDefault()
       this.editing = undefined
@@ -169,6 +195,8 @@ class ChoiceRow extends HTMLElement {
     if (step) {
       const box = document.createElement('input')
       box.type = 'checkbox'
+      box.name = `${key}-override`
+      box.title = 'Own model'
       box.checked = ownModel !== undefined
       this.override = box
       row.prepend(box)

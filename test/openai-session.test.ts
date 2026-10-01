@@ -103,6 +103,7 @@ describe('OpenAiSession', () => {
       'status',
       'assistant_text',
       'context_usage',
+      'reply_usage',
       'assistant_message',
       'status',
       'turn_done',
@@ -115,6 +116,21 @@ describe('OpenAiSession', () => {
     expect(model.requests[0]!.messages).toEqual([
       { role: 'system', content: 'sys' },
       { role: 'user', content: 'hi' },
+    ])
+    await s.dispose()
+  })
+
+  it('each_completion_reports_its_output_tokens', async () => {
+    const model = new ScriptedModel(
+      toolCall('c1', 'Echo', '{"value":"a"}', { promptTokens: 5, completionTokens: 7, cachedTokens: 0 }),
+      text('done', { promptTokens: 9, completionTokens: 3, cachedTokens: 0 }),
+    )
+    const s = session(model)
+    s.send('hi')
+    const events = await untilTurnDone(s)
+    expect(events.filter((e) => e.type === 'reply_usage')).toEqual([
+      { type: 'reply_usage', messageId: '1.1', outputTokens: 7 },
+      { type: 'reply_usage', messageId: '1.2', outputTokens: 3 },
     ])
     await s.dispose()
   })

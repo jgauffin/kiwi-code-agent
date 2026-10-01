@@ -84,7 +84,7 @@ export class ScopeGuard implements SessionHooks {
     // A search directory must itself lie inside the allowed tree, or be the
     // folder a readable glob picks files from: searching from the workspace
     // root would list names of files the phase must not see, while listing
-    // `plan/` beside the specs gives away nothing but the other plan files' names.
+    // `specs/` beside the specs gives away nothing but the other plan files' names.
     const allowed = globs.some((g) => matchesGlob(rel, g) || (directory && (matchesGlob(`${rel}/x`, g) || g.startsWith(`${rel}/`))))
     if (allowed) return undefined
     if (globs.length === 0) return { deny: `Cannot ${verb} ${raw}: this phase writes nothing.` }

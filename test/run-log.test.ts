@@ -41,6 +41,6 @@ describe('RunLog', () => {
 
   it('log_lives_under_agent_runs_per_session', () =>
     withTempDir(async (dir) => {
-      expect(RunLog.forSession(dir, 'abc').path).toBe(join(dir, '.agent', 'runs', 'abc', 'events.jsonl'))
+      expect(RunLog.forSession(dir, 'abc').path).toBe(join(dir, '.kiwi', 'runs', 'abc', 'events.jsonl'))
     }))
 })

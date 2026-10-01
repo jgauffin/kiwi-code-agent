@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { modeSetup, type ModeContext } from '../src/agent/session/mode-setup'
 import type { SessionMode, SessionRecord } from '../src/agent/session/session-manager'
 
@@ -7,10 +9,15 @@ const ctx: ModeContext = {
   workspaceRoot: tmpdir(),
   verifyRules: () => [],
   planIgnore: () => [],
-  cleanupLimits: () => ({ source: { functionLines: 0, typeLines: 0, fileLines: 0 }, tests: { functionLines: 0, typeLines: 0, fileLines: 0 }, testGlobs: [] }),
+  cleanupLimits: () => ({
+    source: { functionLines: 0, functionComplexity: 0, typeLines: 0, fileLines: 0 },
+    tests: { functionLines: 0, functionComplexity: 0, typeLines: 0, fileLines: 0 },
+    testGlobs: [],
+  }),
   withMap: async (_record, prompt) => `${prompt}\n[repo map]`,
   withDocs: async (_record, prompt) => `${prompt}\n[docs map]`,
   withMemories: async (_record, prompt) => `${prompt}\n[memories]`,
+  withInstructions: async (_record, prompt) => `${prompt}\n[instructions]`,
 }
 
 const record = (mode: SessionMode, extra: Partial<SessionRecord> = {}): SessionRecord => ({
@@ -35,6 +42,7 @@ describe('modeSetup', () => {
     ['plan', { feature: 'f' }],
     ['docs', {}],
     ['file-decisions', {}],
+    ['doc-migration', {}],
   ] as const)('the %s phase limits search results to what its scope may read', async (mode, extra) => {
     const setup = await modeSetup(record(mode, extra), ctx)
     expect(setup.readable).toBeTypeOf('function')
@@ -56,13 +64,38 @@ describe('modeSetup', () => {
     expect(codePlan).toContain('[docs map]')
   })
 
+  it('the doc migration judges from the docs map, never the repo map, since it reads no code', async () => {
+    const setup = (await modeSetup(record('doc-migration'), ctx)).systemPrompt
+    expect(setup).toContain('[docs map]')
+    expect(setup).not.toContain('[repo map]')
+  })
+
+  it('a migrated draft is held to the spec contract like the planner\'s own writes', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'doc-migration-'))
+    try {
+      await mkdir(join(dir, 'specs'))
+      await writeFile(join(dir, 'specs', 'x.spec.md'), '# X\n\n## Goal\ng\n\n## Invariants\n- I1: x\n')
+      const { hooks } = await modeSetup(record('doc-migration'), { ...ctx, workspaceRoot: dir })
+      const outcome = await hooks?.postToolUse?.({
+        toolName: 'Write',
+        input: { file_path: join(dir, 'specs', 'x.spec.md') },
+        toolUseId: 't',
+        output: 'ok',
+        isError: false,
+      })
+      expect(outcome?.additionalContext).toContain('is off contract')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('a chat keeps the engine default prompt and every tool', async () => {
     const setup = await modeSetup(record('chat'), ctx)
     expect(setup.systemPrompt).toBeUndefined()
     expect(setup.toolNames).toBeUndefined()
   })
 
-  it.each(['implement', 'code-plan', 'docs', 'file-decisions', 'docs-map', 'reconcile', 'cleanup'] as const)(
+  it.each(['implement', 'code-plan', 'docs', 'file-decisions', 'doc-migration', 'docs-map', 'reconcile', 'cleanup'] as const)(
     'every session that may read the code starts with the memories: %s',
     async (mode) => {
       const setup = await modeSetup(record(mode, { feature: 'f', files: ['a.ts'] }), ctx)
@@ -73,5 +106,18 @@ describe('modeSetup', () => {
   it('the blind planner gets no memories', async () => {
     const setup = await modeSetup(record('plan', { feature: 'f' }), ctx)
     expect(setup.systemPrompt).not.toContain('[memories]')
+  })
+
+  it.each(['implement', 'code-plan', 'docs', 'file-decisions', 'doc-migration', 'docs-map', 'reconcile', 'cleanup'] as const)(
+    'bundle rules reach a session as the person\'s own instructions do: %s',
+    async (mode) => {
+      const setup = await modeSetup(record(mode, { feature: 'f', files: ['a.ts'] }), ctx)
+      expect(setup.systemPrompt).toContain('[instructions]')
+    },
+  )
+
+  it('no bundles for the blind planner', async () => {
+    const setup = await modeSetup(record('plan', { feature: 'f' }), ctx)
+    expect(setup.systemPrompt).not.toContain('[instructions]')
   })
 })

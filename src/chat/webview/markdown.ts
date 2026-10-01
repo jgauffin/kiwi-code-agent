@@ -2,6 +2,7 @@ import DOMPurify from 'dompurify'
 import { Marked } from 'marked'
 import mermaid from 'mermaid'
 import { escapeHtml, highlightCode } from './highlight'
+import { errorMessage } from '../../error-message'
 
 /**
  * Markdown for assistant text. Mermaid fences become diagrams once the
@@ -54,7 +55,7 @@ export function renderMarkdown(text: string, target: HTMLElement, final: boolean
     for (const node of diagrams) {
       if (node.querySelector('svg')) continue
       node.classList.add('failed')
-      node.title = error instanceof Error ? error.message : String(error)
+      node.title = errorMessage(error)
     }
   })
 }

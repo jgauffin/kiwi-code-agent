@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { projectMemoryDir, rebuildProjectIndex, userMemoryFile } from '../src/agent/memory/memories'
 import { chatMemorySection, memorySection, readMemorySources, withMemories } from '../src/agent/memory/session-context'
+import { readInstructionFiles, instructionsText } from '../src/agent/instructions/instruction-files'
 import { buildSystemPrompt } from '../src/agent/openai-session/system-prompt'
 
 let cwd: string
@@ -38,10 +39,11 @@ describe('index first and note on demand', () => {
     expect(prompt).not.toContain('vendor ticket number')
   })
 
-  it("a person's own note has no separate body: the bullet is already the whole of it", async () => {
+  it("a person's own note has no separate body: the bullet is already the whole of it, carried through the instruction files", async () => {
     await withNotes()
-    const prompt = await withMemories('implement', 'BASE', cwd, home)
-    expect(prompt).toContain('**Terse replies**: keep answers short.')
+    // The person's notes live inside their own instruction file; `withMemories` carries only the project's.
+    expect(await withMemories('implement', 'BASE', cwd, home)).not.toContain('Terse replies')
+    expect(instructionsText(await readInstructionFiles(cwd, home))).toContain('**Terse replies**: keep answers short.')
   })
 })
 
@@ -59,32 +61,20 @@ describe('memory written mid-session', () => {
   })
 })
 
-describe('project over user on a clash', () => {
-  it('both scopes present says the project note holds', async () => {
-    await withNotes()
-    expect(await withMemories('implement', 'BASE', cwd, home)).toContain(
-      'Where a project note and one of your own say different things about the same subject, the project note holds.',
-    )
-  })
-
-  it('nothing to clash against when only one scope has notes', async () => {
-    const dir = projectMemoryDir(cwd, home)
-    await mkdir(dir, { recursive: true })
-    await writeFile(join(dir, 'solo.md'), '# Solo\nJust the one.\n')
-    await rebuildProjectIndex(dir)
-    expect(await withMemories('implement', 'BASE', cwd, home)).not.toContain('the project note holds')
-  })
-})
-
-describe('same memories on both engines', () => {
-  it('the own loop and the Claude engine read the same project and user notes', async () => {
+describe('same project notes on both engines', () => {
+  it('the own loop and the Claude engine read the same project index', async () => {
     await withNotes()
     const openAi = await buildSystemPrompt(cwd, undefined, home)
     const claude = await chatMemorySection(cwd, home)
-    for (const marker of ['[Proxy quirk](proxy-quirk.md)', '**Terse replies**: keep answers short.']) {
-      expect(openAi).toContain(marker)
-      expect(claude).toContain(marker)
-    }
+    expect(openAi).toContain('[Proxy quirk](proxy-quirk.md)')
+    expect(claude).toContain('[Proxy quirk](proxy-quirk.md)')
+  })
+
+  it("the person's own note rides the instruction files on both engines instead, not the project index", async () => {
+    await withNotes()
+    expect(await chatMemorySection(cwd, home)).not.toContain('Terse replies')
+    const section = instructionsText(await readInstructionFiles(cwd, home))
+    expect(section).toContain('Terse replies')
   })
 })
 
@@ -93,7 +83,6 @@ describe('no second copy on the Claude engine', () => {
     await withNotes()
     const section = (await chatMemorySection(cwd, home))!
     expect(section.split('Proxy quirk').length - 1).toBe(1)
-    expect(section.split('Terse replies').length - 1).toBe(1)
   })
 
   it("the own loop's chat prompt carries the person's notes once, through its instruction files, not again through the index", async () => {
@@ -115,8 +104,13 @@ describe('the blind planner gets none', () => {
 })
 
 describe('readMemorySources and memorySection', () => {
-  it('a missing project index and a missing user file add nothing', async () => {
-    expect(await readMemorySources(cwd, home)).toEqual({ project: undefined, user: undefined })
-    expect(memorySection({ project: undefined, user: undefined })).toBeUndefined()
+  it('a missing project index adds nothing', async () => {
+    expect(await readMemorySources(cwd, home)).toEqual({ project: undefined })
+    expect(memorySection({ project: undefined })).toBeUndefined()
+  })
+
+  it('a project note renders under its own heading', () => {
+    expect(memorySection({ project: 'a project note' })).toContain('Project notes:')
+    expect(memorySection({ project: 'a project note' })).toContain('a project note')
   })
 })

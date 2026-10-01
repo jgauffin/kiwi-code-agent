@@ -1,0 +1,321 @@
+{
+  "spec": "87c59b3f",
+  "tasks": [
+    {
+      "name": "Remembering what the person settled",
+      "text": "During a session the agent notices something that will matter again and writes it down.",
+      "delivers": [
+        "Written on a correction or a standing rule",
+        "Single-use fact",
+        "One note per memory",
+        "Project or user scope",
+        "Scope named by the person",
+        "One memory file for the person",
+        "The write is shown in chat",
+        "Contradicting memory is replaced",
+        "Intent is filed rather than remembered",
+        "Memories stay out of the repository",
+        "Index cap"
+      ],
+      "files": [
+        "src/agent/memory/memories.ts",
+        "src/agent/openai-session/system-prompt.ts",
+        "src/session-engines.ts",
+        "src/agent/sdk-session/sdk-session.ts",
+        "test/memories.test.ts",
+        "test/system-prompt.test.ts",
+        "test/sdk-session.test.ts",
+        "plan/project-and-user-wide-memories.spec.md",
+        "test/repo-map-files.test.ts"
+      ],
+      "newFiles": [],
+      "foreignFiles": [
+        "src/agent/sdk-session/sdk-session.ts",
+        "test/system-prompt.test.ts",
+        "test/sdk-session.test.ts"
+      ],
+      "context": [
+        "src/agent/phases/unfiled-decisions.ts",
+        "src/agent/openai-session/system-prompt.ts",
+        "src/session-engines.ts",
+        "src/agent/sdk-session/sdk-session.ts",
+        "src/agent/instructions/instruction-files.ts",
+        "src/settings/settings-store.ts",
+        "src/agent/agent-dir-ignore.ts",
+        "src/agent/session/hooks.ts"
+      ],
+      "how": "",
+      "proves": [
+        {
+          "item": "Written on a correction or a standing rule",
+          "file": "test/system-prompt.test.ts",
+          "test": "a_correction_or_a_standing_rule_is_told_apart_from_a_single_use_fact_and_written_down"
+        },
+        {
+          "item": "Single-use fact",
+          "file": "test/memories.test.ts",
+          "test": "tells_a_single_use_fact_apart_from_what_is_worth_remembering"
+        },
+        {
+          "item": "One note per memory",
+          "file": "test/memories.test.ts",
+          "test": "a_notes_title_and_summary_come_from_the_note_itself_and_the_index_lists_them_oldest_first"
+        },
+        {
+          "item": "Project or user scope",
+          "file": "test/memories.test.ts",
+          "test": "writing_a_project_note_rebuilds_the_index_and_names_the_memory_and_its_scope_in_the_chat_line"
+        },
+        {
+          "item": "Scope named by the person",
+          "file": "test/memories.test.ts",
+          "test": "lets_the_person_name_the_scope_instead_of_the_agent_guessing"
+        },
+        {
+          "item": "One memory file for the person",
+          "file": "test/memories.test.ts",
+          "test": "a_bullet_written_into_the_users_memory_file_is_noted_for_the_user"
+        },
+        {
+          "item": "The write is shown in chat",
+          "file": "test/memories.test.ts",
+          "test": "writing_a_project_note_rebuilds_the_index_and_names_the_memory_and_its_scope_in_the_chat_line"
+        },
+        {
+          "item": "Contradicting memory is replaced",
+          "file": "test/memories.test.ts",
+          "test": "a_note_written_again_under_the_same_name_replaces_the_old_one_instead_of_sitting_beside_it"
+        },
+        {
+          "item": "Intent is filed rather than remembered",
+          "file": "test/memories.test.ts",
+          "test": "sends_product_intent_to_the_unfiled_decisions_and_a_team_wide_note_to_the_docs_instead_of_a_memory"
+        },
+        {
+          "item": "Memories stay out of the repository",
+          "file": "test/memories.test.ts",
+          "test": "a_projects_notes_sit_under_the_persons_home_keyed_by_the_checkout_so_they_never_reach_the_repository"
+        },
+        {
+          "item": "Index cap",
+          "file": "test/memories.test.ts",
+          "test": "a_project_write_past_the_cap_says_which_note_was_dropped"
+        }
+      ],
+      "note": "The sweep's failure (all 116 files at startup: \"Cannot read properties of undefined (reading 'config')\", \"Vitest failed to find the runner\") was worker startup, not this feature's code; the user ruled that vitest.config.mts belongs to the other session running on this feature, so I left it alone. What I did fix, on the user's call, is a real race the sweep's config change exposed: test/repo-map-files.test.ts's a_reader_during_a_build_sees_a_whole_file_never_a_partly_written_one re-read a 400 KB file with no gap, so a handle was open ~99% of the time and Windows refused the build's rename onto it (EPERM) until the retry budget ran out - it failed about three runs in five on its own. The reader now lets go for 25ms between reads, as a session that reads the map once does, and the test still proves a reader never sees half a file. 6/6 green on that file, the whole suite green (1416 passed, 3 skipped), npm run typecheck clean. (src/agent/workspace-files.ts's longer, backing-off retry budget came from the other session, not from me.)",
+      "built": "src/agent/memory/memories.ts: MemoryScope, MEMORY_CAP (50); projectMemoryDir(cwd, home) = the Claude Agent SDK's own default auto-memory folder, ~/.claude/projects/<sanitized-cwd>/memory/, used as our own explicit notes folder (not the SDK's hidden auto-memory tool, which is turned off); userMemoryFile(home) = ~/.claude/CLAUDE.md, the one file user-scope memory lives in as a `## Memories` section; MemoryEntry, DroppedNote; rebuildProjectIndex(dir) rebuilds MEMORY.md from the note files on disk oldest-by-mtime-first and enforces the cap (the \"notes are the truth\" rebuild the next tasks can reuse); enforceUserMemoryCap(text) dedupes/caps the Memories section's bullets; MemoryContract (SessionHooks) wired into every session via src/session-engines.ts composeHooks, watches Write/Edit and hands back the chat-line instruction; memoryWritingInstructions(cwd, home) is the prompt text wired into both engines' chat system prompts (src/agent/openai-session/system-prompt.ts buildSystemPrompt, and src/session-engines.ts startClaude's append-prompt branch). SdkSession.buildOptions (src/agent/sdk-session/sdk-session.ts) now always sets settings: { autoMemoryEnabled: false }.",
+      "state": "tested",
+      "removed": false,
+      "group": "Remembering what the person settled"
+    },
+    {
+      "name": "Starting a session with what is already known",
+      "text": "Starting a session with what is already known",
+      "delivers": [
+        "Every session that may read the code starts with the memories",
+        "The blind planner gets none",
+        "Index first and note on demand",
+        "Memory written mid-session",
+        "Project over user on a clash",
+        "Same memories on both engines",
+        "No second copy on the Claude engine"
+      ],
+      "files": [
+        "src/agent/memory/session-context.ts",
+        "src/agent/memory/memories.ts",
+        "src/agent/session/mode-setup.ts",
+        "src/session-engines.ts",
+        "src/agent/openai-session/system-prompt.ts",
+        "test/memory-session-context.test.ts",
+        "test/mode-setup.test.ts"
+      ],
+      "newFiles": [],
+      "foreignFiles": [],
+      "context": [
+        "src/agent/session/mode-setup.ts",
+        "src/session-engines.ts",
+        "src/agent/repo-map/session-context.ts",
+        "src/agent/docs-map/session-context.ts",
+        "src/agent/phases/blind-plan.ts",
+        "src/agent/phases/reconcile.ts",
+        "src/agent/phases/implement.ts",
+        "src/agent/phases/code-plan.ts",
+        "src/agent/phases/cleanup.ts"
+      ],
+      "how": "",
+      "proves": [
+        {
+          "item": "Every session that may read the code starts with the memories",
+          "file": "test/mode-setup.test.ts",
+          "test": "modeSetup > every session that may read the code starts with the memories: implement/code-plan/docs/file-decisions/docs-map/reconcile/cleanup"
+        },
+        {
+          "item": "The blind planner gets none",
+          "file": "test/mode-setup.test.ts",
+          "test": "modeSetup > the blind planner gets no memories"
+        },
+        {
+          "item": "Index first and note on demand",
+          "file": "test/memory-session-context.test.ts",
+          "test": "index first and note on demand > a project note is named by its index line, its body left for a later Read"
+        },
+        {
+          "item": "Memory written mid-session",
+          "file": "test/memory-session-context.test.ts",
+          "test": "memory written mid-session > a note settled after the session starts is not retrofitted into the index it started with"
+        },
+        {
+          "item": "Project over user on a clash",
+          "file": "test/memory-session-context.test.ts",
+          "test": "project over user on a clash > both scopes present says the project note holds"
+        },
+        {
+          "item": "Same memories on both engines",
+          "file": "test/memory-session-context.test.ts",
+          "test": "same memories on both engines > the own loop and the Claude engine read the same project and user notes"
+        },
+        {
+          "item": "No second copy on the Claude engine",
+          "file": "test/memory-session-context.test.ts",
+          "test": "no second copy on the Claude engine > the project note is said once in the Claude chat prompt / the own loop's chat prompt carries the person's notes once"
+        }
+      ],
+      "note": "Empirically verified (real `claude -p` runs against a throwaway CLAUDE_CONFIG_DIR, not just the .d.ts) that under this codebase's actual wiring (`settingSources: ['project','local']`, `autoMemoryEnabled: false`, both pre-existing and untouched here) the Claude engine reads neither scope natively today, so \"no second copy\" has nothing to dedupe on the Claude side; both scopes are added there explicitly, the same words the own loop's instruction-file read already says for the person's notes. On the own loop, only the user scope was already covered (by the pre-existing, unrelated \"instruction files\" feature reading ~/.claude/CLAUDE.md whole); the project scope was not reaching it at all before this task, on either engine, in any mode.",
+      "built": "`src/agent/memory/session-context.ts`: wantsMemories(mode) = mode !== 'plan'; MemorySources = {project, user}; readMemorySources(cwd, home) reads the project's MEMORY.md and the person's whole `## Memories` section (via memories.ts's new userMemorySection); memorySection(sources) renders both into one \"## What is already known\" block, index-only (a project note's body is never inlined, only its index line), and states \"the project note holds\" on a clash, but only when both scopes have notes; withMemories(mode, systemPrompt, cwd, home) appends that block for every mode but 'plan', used as `ctx.withMemories` (new field on ModeContext, wired in mode-setup.ts's implement/code-plan/docs/file-decisions/docs-map/reconcile/cleanup cases, deliberately left out of 'plan'); chatMemorySection(cwd, home) = memorySection(readMemorySources(...)) reused by session-engines.ts's startClaude for its chat/full-access branch (both scopes, since the Claude engine's own CLAUDE.md loading excludes `user` and its auto-memory tool is off). memories.ts gained userMemorySection(text). system-prompt.ts's buildSystemPrompt (the own loop's chat prompt) now also appends the project index alongside the instruction files it already reads whole (which is where the person's own notes already reach it, so only `project` is passed there, not `user`, avoiding a second copy on that engine's side too).",
+      "state": "tested",
+      "removed": false,
+      "group": "Starting a session with what is already known"
+    },
+    {
+      "name": "Reviewing and forgetting",
+      "text": "Reviewing and forgetting",
+      "delivers": [
+        "Memories can be listed and opened",
+        "Forgetting removes the note and its line",
+        "Notes are the truth",
+        "A wrong memory is corrected where it misleads"
+      ],
+      "files": [
+        "src/agent/memory/memories.ts",
+        "src/settings/protocol.ts",
+        "src/settings/settings-store.ts",
+        "src/settings/settings-panel.ts",
+        "src/settings/webview/events.ts",
+        "src/settings/webview/memories-tab.ts",
+        "src/settings/webview/settings-app.ts",
+        "src/settings/webview/settings.css",
+        "src/extension.ts",
+        "src/agent/workspace-files.ts",
+        "vitest.config.mts",
+        "scripts/run-tests.mjs",
+        "package.json",
+        "test/memories.test.ts",
+        "test/settings-store.test.ts",
+        "test/settings-app.test.ts",
+        "test/models-section.test.ts",
+        "test/profiles-tab.test.ts",
+        "test/providers-tab.test.ts",
+        "test/repo-map-files.test.ts"
+      ],
+      "newFiles": [],
+      "foreignFiles": [
+        "src/agent/memory/memories.ts",
+        "src/settings/protocol.ts",
+        "src/settings/settings-store.ts",
+        "src/settings/settings-panel.ts",
+        "src/settings/webview/events.ts",
+        "src/settings/webview/settings-app.ts",
+        "src/extension.ts",
+        "src/agent/workspace-files.ts",
+        "test/memories.test.ts",
+        "test/settings-store.test.ts",
+        "test/settings-app.test.ts",
+        "test/models-section.test.ts",
+        "test/profiles-tab.test.ts",
+        "test/providers-tab.test.ts",
+        "test/repo-map-files.test.ts"
+      ],
+      "context": [
+        "src/settings/webview/project-tab.ts",
+        "src/settings/webview/profiles-tab.ts",
+        "src/settings/protocol.ts",
+        "src/settings/settings-panel.ts",
+        "src/settings/settings-store.ts",
+        "src/agent/docs-map/doc-index.ts",
+        "src/agent/docs-map/map-files.ts",
+        "src/chat/protocol.ts"
+      ],
+      "how": "",
+      "proves": [
+        {
+          "item": "Memories can be listed and opened",
+          "file": "test/settings-app.test.ts",
+          "test": "MemoriesTab > memories_can_be_listed_each_with_its_own_scope and MemoriesTab > opening_a_memory_posts_its_scope_and_file_to_the_host"
+        },
+        {
+          "item": "Forgetting removes the note and its line",
+          "file": "test/memories.test.ts",
+          "test": "forgetMemory > forgetting_a_project_memory_removes_the_note_file_and_its_index_line and forgetMemory > forgetting_a_user_memory_removes_its_bullet_and_leaves_the_rest_of_the_file"
+        },
+        {
+          "item": "Notes are the truth",
+          "file": "test/memories.test.ts",
+          "test": "listMemories > a_note_added_or_deleted_by_hand_since_the_index_was_last_written_is_already_reflected_the_index_is_rebuilt_from_the_notes"
+        },
+        {
+          "item": "A wrong memory is corrected where it misleads",
+          "file": "test/memories.test.ts",
+          "test": "memoryWritingInstructions > a_memory_that_turns_out_wrong_is_corrected_in_place_rather_than_waited_on_for_a_staleness_sweep"
+        }
+      ],
+      "note": "The sweep's suite-wide failure (\"Vitest failed to find the runner\", \"Cannot read properties of undefined (reading 'config')\" on all 123 files, before any test ran) is the test runner on Windows, not this feature's code: from a working directory spelled with a lower-case drive letter (`d:\\...`, how the harness and some shells spell it) Vitest resolves itself under two spellings of the same path and loads itself twice. Reproduced exactly by running `npm test` from `d:\\...` (123 failed, no tests). The earlier attempt to normalize the drive letter from inside vitest.config.mts does not work - also tried with an explicit `root` - because by the time the config is loaded the double resolution has happened; the fix is now `scripts/run-tests.mjs`, which `npm test` runs: it normalizes the drive letter and spawns Vitest as a child process that only ever sees the upper-case spelling. vitest.config.mts keeps pool: 'threads' (per-file isolation without a 120+ process spawn storm) and now only documents the requirement. Verified: `npm test` from `d:\\...` green (120 passed, 3 skipped, 1597 tests), from `D:\\...` green, narrowed runs (test/memories.test.ts, test/settings-app.test.ts: 58 passed) green, `npm run typecheck` clean.",
+      "built": "Test runner entry: `npm test` now runs `scripts/run-tests.mjs`, which upper-cases the working directory's drive letter and spawns `node_modules/vitest/vitest.mjs run` with the remaining arguments forwarded, so `npm test -- <file> -t \"<name>\"` still narrows a run. vitest.config.mts keeps pool: 'threads' and the markdown-as-text plugin; it no longer chdirs (too late to help). Unchanged otherwise: memories.ts (listMemories, forgetMemory, removeUserMemoryBullet, memoryPath), settings-store.ts MemoryPort/SettingsStore.forgetMemory, SettingsSnapshot.memories, FromSettingsWebview open_memory/forget_memory, settings-panel.ts memoryPathOf, the webview Memories tab (memories-tab.ts, MemoryOpenedEvent/MemoryForgottenEvent).",
+      "state": "tested",
+      "removed": false,
+      "group": "Reviewing and forgetting"
+    }
+  ],
+  "verification": [
+    {
+      "at": "2026-10-01T18:07:04.184Z",
+      "ok": true,
+      "text": "`npm test` in ."
+    },
+    {
+      "at": "2026-10-01T18:00:49.349Z",
+      "ok": false,
+      "text": "`npm test` in ."
+    },
+    {
+      "at": "2026-10-01T17:57:45.121Z",
+      "ok": false,
+      "text": "`npm test` in ."
+    },
+    {
+      "at": "2026-10-01T15:52:06.389Z",
+      "ok": false,
+      "text": "`npm test` in ."
+    },
+    {
+      "at": "2026-10-01T10:44:01.154Z",
+      "ok": false,
+      "text": "`npm test` in ."
+    },
+    {
+      "at": "2026-10-01T10:30:54.127Z",
+      "ok": false,
+      "text": "`npm test` in ."
+    },
+    {
+      "at": "2026-10-01T10:29:30.758Z",
+      "ok": false,
+      "text": "`npm test` in ."
+    },
+    {
+      "at": "2026-10-01T10:09:40.259Z",
+      "ok": false,
+      "text": "`npm test` in ."
+    }
+  ],
+  "cleanup": "skipped"
+}

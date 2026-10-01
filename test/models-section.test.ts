@@ -1,8 +1,12 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { SettingsSnapshot } from '../src/settings/protocol'
 
 ;(globalThis as Record<string, unknown>).acquireVsCodeApi = () => ({ postMessage: () => {} })
+
+// Test files share a worker, so the module registry is cleared first: what
+// loads here is this file's own, bound to its stub and its document.
+vi.resetModules()
 
 const { ModelsSection } = await import('../src/settings/webview/models-section')
 
@@ -15,10 +19,11 @@ function snapshot(): SettingsSnapshot {
     permissions: { allow: [], deny: [], denyGitWrites: false },
     verify: [],
     verifyFailureBudget: 3,
-    cleanup: { functionLines: 25, typeLines: 200, fileLines: 400, tests: [], testFunctionLines: 60, testTypeLines: 600, testFileLines: 1200, ignore: [] },
+    cleanup: { functionLines: 60, functionComplexity: 15, typeLines: 200, fileLines: 400, tests: [], testFunctionLines: 120, testFunctionComplexity: 15, testTypeLines: 600, testFileLines: 1200, ignore: [] },
     planIgnore: [],
     cutCoveredDocs: false,
     memories: { project: [], user: [] },
+    bundles: { available: [], applied: [], suggested: [], offerPending: false },
     nodePath: '',
     traceEngine: false,
     compactAtTokens: 400_000,
