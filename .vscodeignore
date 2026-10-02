@@ -5,6 +5,7 @@ src/**
 test/**
 specs/**
 scripts/**
+build/**
 assets/**
 docs/**
 !docs/logos/kiwipow-agent-logo-128.png

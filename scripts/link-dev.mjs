@@ -4,7 +4,7 @@
 // the repo. After `npm run build`, "Developer: Reload Window" picks up the
 // new dist. `--unlink` uninstalls.
 import { execSync } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -13,7 +13,7 @@ const repo = fileURLToPath(new URL('..', import.meta.url)).replace(/[\\/]$/, '')
 const pkg = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8'))
 const id = `${pkg.publisher}.${pkg.name}`
 const extensions = join(homedir(), '.vscode', 'extensions')
-const vsix = join(repo, `${pkg.name}-${pkg.version}.vsix`)
+const vsix = join(repo, 'build', `${pkg.name}-${pkg.version}.vsix`)
 const run = (cmd) => execSync(cmd, { stdio: 'inherit', shell: true, cwd: repo })
 
 if (process.argv.includes('--unlink')) {
@@ -24,7 +24,10 @@ if (process.argv.includes('--unlink')) {
 // `npm run package` emits one .vsix per platform target; a dev build needs
 // neither, and an untargeted .vsix installs into a folder without a target
 // suffix, which is the folder this script replaces with the junction.
-if (!existsSync(vsix)) run('node esbuild.mjs && npx vsce package --no-dependencies')
+if (!existsSync(vsix)) {
+  mkdirSync(join(repo, 'build'), { recursive: true })
+  run(`node esbuild.mjs && npx vsce package --no-dependencies --out "${vsix}"`)
+}
 run(`code --install-extension "${vsix}"`)
 
 // VS Code lowercases the extension id when it names the folder.

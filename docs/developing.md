@@ -21,5 +21,5 @@ Reload the window once. From then on, after `npm run build` (or the `npm: watch`
 ## Package
 
 ```
-npm run package   # kiwipow-agent-<version>.vsix
+npm run package   # build/kiwipow-agent-<target>-<version>.vsix, one per platform target
 ```
