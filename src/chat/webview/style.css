@@ -1844,6 +1844,10 @@ chat-app {
       }
     }
 
+    & .kickoff {
+      text-align: left;
+    }
+
     & .compaction {
       text-align: left;
 

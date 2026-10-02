@@ -25,7 +25,8 @@ export function skillTool(skills: SkillEntry[]): Tool<typeof schema> {
       const skill = skills.find((s) => s.name === input.name)
       if (!skill) return fail(`Unknown skill "${input.name}". Available: ${skills.map((s) => s.name).join(', ')}`)
       const body = await readSkillBody(skill)
-      return ok(truncate(`Skill "${skill.name}" loaded. Its folder is ${skill.dir}; relative paths in the instructions refer to files there.\n\n${body}`))
+      // The body reaches the model only; the chat shows that the skill was loaded.
+      return { ...ok(`Skill "${skill.name}" loaded. Its folder is ${skill.dir}; relative paths in the instructions refer to files there.`), context: truncate(body) }
     },
   }
 }

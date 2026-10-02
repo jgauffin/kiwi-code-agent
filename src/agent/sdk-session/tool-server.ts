@@ -1,6 +1,6 @@
 import { createSdkMcpServer, tool, type McpSdkServerConfigWithInstance, type SdkMcpToolDefinition } from '@anthropic-ai/claude-agent-sdk'
 import type { z } from 'zod'
-import type { Tool, ToolContext } from '../openai-session/tools/tool'
+import { modelText, type Tool, type ToolContext } from '../openai-session/tools/tool'
 
 /**
  * The SDK has no tool surface besides MCP, so the tools this extension owns
@@ -34,7 +34,7 @@ export function toMcpTool<S extends z.ZodObject>(t: Tool<S>, ctx: ToolContext): 
     t.schema.shape,
     async (args) => {
       const output = await t.execute(args as z.infer<S>, ctx)
-      return { content: [{ type: 'text', text: output.text }], isError: output.isError }
+      return { content: [{ type: 'text', text: modelText(output) }], isError: output.isError }
     },
     // The prompts name these tools, so the model must see them without a tool search first.
     { annotations: { readOnlyHint: t.readOnly }, alwaysLoad: true },

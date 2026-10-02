@@ -75,6 +75,7 @@ import { FeatureCleanup } from './feature-cleanup'
 import type { ChatRefresh, Notify, SessionSwitch, SizeLimits, Verifier } from './feature-runs'
 import type { ProfileDefaults } from '../settings/settings-store'
 import { errorMessage } from '../error-message'
+import { forDisplay } from './display-event'
 
 /** Where a prompt's allowances go: the workspace's permission allow list, or the session's own, kept with the session. */
 export interface PermissionStore {
@@ -102,6 +103,9 @@ type WebviewMessage<T extends FromWebview['type']> = Extract<FromWebview, { type
 
 /** Read when a spec is approved, so a change in settings applies to the next approval. */
 const cutCoveredDocs = (): boolean => vscode.workspace.getConfiguration('kiwiAgent').get<boolean>('cutCoveredDocs', false)
+
+/** What the chat shows for the docs listing a spec's approval hands the planner. */
+const DOCS_REVIEW_LABEL = 'Spec approved: listing the docs it touches'
 
 /**
  * Hosts the chat UI: one editor tab per session, so a session keeps running
@@ -287,22 +291,25 @@ export class ChatViewProvider {
     } else this.createPanel(tabId)
   }
 
-  /** `into` is the tab the session is started from, which then shows it; without one the session gets its own tab. */
-  async newSession(mode: SessionMode, feature?: string, prompt?: string, into?: ChatPanel): Promise<SessionRecord | undefined> {
+  /**
+   * `into` is the tab the session is started from, which then shows it; without one the session gets its own tab.
+   * `label` marks a first prompt the extension wrote: the chat shows the label in its place.
+   */
+  async newSession(mode: SessionMode, feature?: string, prompt?: string, into?: ChatPanel, label?: string): Promise<SessionRecord | undefined> {
     if (!isFeatureless(mode) && !feature) throw new Error(`A ${mode} session needs a feature name`)
     const record = await this.sessions.create(this.profileFor(mode), mode, feature)
     // Approving the plan is the consent for the writes it maps out, so the switch starts on where a build session carries it out.
     if (mode === 'implement' || mode === 'cleanup') this.allowWrites.setEnabled(record.id, true)
-    return await this.activate(record, prompt, into)
+    return await this.activate(record, prompt, into, label)
   }
 
   /**
    * Shows a newly created session, and sends its first prompt when there is
    * one. A run on a feature joins the tab that feature already has.
    */
-  private async activate(record: SessionRecord, prompt?: string, into?: ChatPanel): Promise<SessionRecord> {
+  private async activate(record: SessionRecord, prompt?: string, into?: ChatPanel, label?: string): Promise<SessionRecord> {
     await this.reveal(record, into)
-    if (prompt) await this.sessions.send(record.id, prompt)
+    if (prompt) await this.sessions.send(record.id, prompt, label)
     return record
   }
 
@@ -337,7 +344,7 @@ export class ChatViewProvider {
     // The list is newest first; the latest session on the spec is the one that knows it best.
     const owner = this.sessions.list().find((r) => r.mode === 'plan' && r.feature && specPath(this.workspaceRoot, r.feature) === path)
     if (owner) await this.open(owner.id, into)
-    else await this.newSession('plan', feature, resumePlanPrompt(feature), into)
+    else await this.newSession('plan', feature, resumePlanPrompt(feature), into, 'Picking the plan up')
   }
 
   async open(sessionId: string, into?: ChatPanel): Promise<void> {
@@ -418,7 +425,7 @@ export class ChatViewProvider {
       type: 'event',
       sessionId: tabId,
       run: this.runRef(record),
-      event,
+      event: forDisplay(event),
     } satisfies ToWebview)
   }
 
@@ -523,7 +530,7 @@ export class ChatViewProvider {
     const child = await this.sessions.create(this.profileFor('reconcile'), 'reconcile', record.feature, { parentId: record.id, continues: previous })
     this.checks.set(record.id, { live: true, text: 'Checking the spec against the code…' })
     await this.sendState()
-    await this.sessions.send(child.id, reconcileKickoff(child.engineSessionId !== undefined))
+    await this.sessions.send(child.id, reconcileKickoff(child.engineSessionId !== undefined), 'Checking the spec against the code')
   }
 
   /**
@@ -548,7 +555,7 @@ export class ChatViewProvider {
       text = `Checked: ${open.length === 0 ? 'the code is clear' : `${open.length} decision${open.length === 1 ? '' : 's'}`}`
       const unproposed = open.filter((d) => d.proposals.length === 0).map((d) => d.title)
       if (unproposed.length > 0 && this.sessions.get(parentId)) {
-        await this.sessions.send(parentId, decisionsHandoffPrompt(feature, unproposed))
+        await this.sessions.send(parentId, decisionsHandoffPrompt(feature, unproposed), `${unproposed.length} open decision${unproposed.length === 1 ? '' : 's'} handed over`)
       }
     }
     this.checks.set(parentId, { live: false, text })
@@ -576,7 +583,7 @@ export class ChatViewProvider {
     await this.sendState()
     if (existing) return this.build.implementAfterApproval(plan)
     this.reviewingDocs.add(feature)
-    await this.sendToPlanner(plan, docsAfterApprovalPrompt(feature, cutCoveredDocs()))
+    await this.sendToPlanner(plan, docsAfterApprovalPrompt(feature, cutCoveredDocs()), DOCS_REVIEW_LABEL)
   }
 
   /** A build the last window cut off mid-turn goes on where it stood. */
@@ -595,8 +602,9 @@ export class ChatViewProvider {
       const prompt = migrateSpecPrompt(feature, report.problems)
       const live = this.sessions.list().find((r) => r.mode === 'plan' && r.feature === feature && this.sessions.isLive(r.id))
       this.repairing.add(feature)
-      if (live) await this.sessions.send(live.id, prompt)
-      else await this.newSession('plan', feature, prompt)
+      const label = 'Bringing the plan files to the contract'
+      if (live) await this.sessions.send(live.id, prompt, label)
+      else await this.newSession('plan', feature, prompt, undefined, label)
     }
     await this.sendState()
     return report
@@ -672,7 +680,7 @@ export class ChatViewProvider {
     let errors: string[]
     try {
       onProgress(`Describing ${docs.length} doc${docs.length === 1 ? '' : 's'}…`)
-      await this.sessions.send(record.id, docsMapKickoff(docs))
+      await this.sessions.send(record.id, docsMapKickoff(docs), `Describing ${docs.length} doc${docs.length === 1 ? '' : 's'}`)
       errors = await finished
     } finally {
       this.docsMapRun = undefined
@@ -772,7 +780,7 @@ export class ChatViewProvider {
       case 'agents_md_answer': {
         const tidy = await this.agentsMd.answer(message.scope, message.answer)
         // A tab on the new-session screen takes the tidy chat; one showing a session keeps it.
-        if (tidy) await this.newSession('chat', undefined, agentsMdTidyKickoff(tidy.scope, tidy.agentsPath, tidy.bundles), entry.tabId ? undefined : entry)
+        if (tidy) await this.newSession('chat', undefined, agentsMdTidyKickoff(tidy.scope, tidy.agentsPath, tidy.bundles), entry.tabId ? undefined : entry, `Tidying ${tidy.agentsPath}`)
         return
       }
       case 'permission':
@@ -801,7 +809,7 @@ export class ChatViewProvider {
         // The approval is the go-ahead, so the build starts at once rather than waiting on another prompt.
         if (shown?.mode === 'code-plan' && shown.access !== 'full') {
           await this.sessions.grantFullAccess(shown.id, this.profileFor('code-build'))
-          await this.sessions.send(shown.id, codePlanBuildKickoff())
+          await this.sessions.send(shown.id, codePlanBuildKickoff(), 'Plan approved: building it')
           await this.sendState()
         }
         return
@@ -912,13 +920,14 @@ export class ChatViewProvider {
     // The docs card, the filing and the migration have nothing to fill in, so their sessions start on the job rather than waiting for a prompt.
     const kickoff =
       message.mode === 'docs'
-        ? docsEvaluationKickoff()
+        ? { text: docsEvaluationKickoff(), label: 'Evaluating the docs' }
         : message.mode === 'file-decisions'
-          ? fileDecisionsKickoff()
+          ? { text: fileDecisionsKickoff(), label: 'Filing the decisions' }
           : message.mode === 'doc-migration'
-            ? docMigrationKickoff()
+            ? { text: docMigrationKickoff(), label: 'Migrating the docs' }
             : undefined
-    await this.newSession(message.mode, message.feature, prompt !== '' ? prompt : kickoff, entry)
+    if (prompt !== '' || !kickoff) await this.newSession(message.mode, message.feature, prompt, entry)
+    else await this.newSession(message.mode, message.feature, kickoff.text, entry, kickoff.label)
   }
 
   private async approveSpec(shown: SessionRecord | undefined): Promise<void> {
@@ -940,7 +949,7 @@ export class ChatViewProvider {
     if (checkDue(await readSpecState(path), tasks, decisions)) return this.startCheck(record)
     // A board an earlier mapping left, current with the spec: nothing to check, the docs listing and the build follow.
     this.reviewingDocs.add(feature)
-    await this.sendToPlanner(record, docsAfterApprovalPrompt(feature, cutCoveredDocs()))
+    await this.sendToPlanner(record, docsAfterApprovalPrompt(feature, cutCoveredDocs()), DOCS_REVIEW_LABEL)
   }
 
   private async sendRulings(shown: SessionRecord | undefined): Promise<void> {
@@ -1053,15 +1062,15 @@ export class ChatViewProvider {
     assertAllRuled(decisions)
     const rulings = pending.map((d) => ({ title: d.title, ruling: d.ruling ?? '' }))
     this.applying.add(feature)
-    await this.sendToPlanner(record, rulingsHandoffPrompt(feature, rulings))
+    await this.sendToPlanner(record, rulingsHandoffPrompt(feature, rulings), `${rulings.length} ruling${rulings.length === 1 ? '' : 's'} sent`)
     return true
   }
 
   /** A prompt for the plan session that owns the feature, or a fresh plan session when it is gone. */
-  private async sendToPlanner(record: SessionRecord, prompt: string): Promise<void> {
+  private async sendToPlanner(record: SessionRecord, prompt: string, label: string): Promise<void> {
     const courier = this.courier()
-    if (courier.isLive(record.id)) await courier.send(record.id, prompt)
-    else await courier.start(record.feature!, prompt)
+    if (courier.isLive(record.id)) await courier.send(record.id, prompt, label)
+    else await courier.start(record.feature!, prompt, label)
     await this.sendState()
   }
 
@@ -1069,9 +1078,9 @@ export class ChatViewProvider {
   private courier(): ReviewCourier {
     return {
       isLive: (sessionId) => this.sessions.isLive(sessionId),
-      send: (sessionId, text) => this.sessions.send(sessionId, text),
-      start: async (feature, prompt) => {
-        await this.newSession('plan', feature, prompt)
+      send: (sessionId, text, label) => this.sessions.send(sessionId, text, label),
+      start: async (feature, prompt, label) => {
+        await this.newSession('plan', feature, prompt, undefined, label)
       },
     }
   }
@@ -1260,7 +1269,7 @@ export class ChatViewProvider {
     if (!entry) return
     const runs: RunSection[] = []
     for (const run of this.runsOf(record)) {
-      runs.push({ ...this.runRef(run), events: await this.sessions.transcript(run.id) })
+      runs.push({ ...this.runRef(run), events: (await this.sessions.transcript(run.id)).map(forDisplay) })
     }
     void entry.panel.webview.postMessage({ type: 'transcript', sessionId: tabId, runs } satisfies ToWebview)
   }

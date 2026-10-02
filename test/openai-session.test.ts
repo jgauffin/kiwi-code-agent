@@ -448,7 +448,7 @@ describe('OpenAiSession', () => {
     await s.dispose()
   })
 
-  it('pre_hook_can_deny_a_tool_and_post_hook_context_is_appended_to_the_result', async () => {
+  it('pre_hook_can_deny_a_tool_and_post_hook_context_reaches_the_model_beside_the_result', async () => {
     const model = new ScriptedModel(toolCall('c1', 'Echo', '{"value":"a"}'), toolCall('c2', 'Echo', '{"value":"b"}'), text('ok'))
     const s = new OpenAiSession({
       id: 's1',
@@ -470,8 +470,9 @@ describe('OpenAiSession', () => {
     const events = await untilTurnDone(s)
     expect(events.filter((e) => e.type === 'tool_result')).toEqual([
       { type: 'tool_result', toolUseId: 'c1', text: 'Blocked: not a', isError: true },
-      { type: 'tool_result', toolUseId: 'c2', text: 'echo:b\n\nseen c2', isError: false },
+      { type: 'tool_result', toolUseId: 'c2', text: 'echo:b', isError: false, context: 'seen c2' },
     ])
+    expect(model.requests.at(-1)!.messages).toContainEqual({ role: 'tool', toolCallId: 'c2', content: 'echo:b\n\nseen c2' })
     await s.dispose()
   })
 

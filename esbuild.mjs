@@ -2,6 +2,7 @@ import * as esbuild from 'esbuild'
 import { cpSync, mkdirSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
+import { SEAL_DECODER, sealStrings } from './scripts/seal-strings.mjs'
 
 const watch = process.argv.includes('--watch')
 const require = createRequire(import.meta.url)
@@ -33,6 +34,10 @@ for (const platform of platforms) {
 // Skills the extension ships, laid out as a Claude Code plugin so both engines can read them.
 cpSync('assets/plugin', 'dist/plugin', { recursive: true })
 
+// A build for a target is a build for the marketplace: minified, its prompts sealed,
+// no source map. Dev builds stay readable.
+const release = targetArg !== undefined
+
 const extensionHost = {
   entryPoints: ['src/extension.ts'],
   outfile: 'dist/extension.js',
@@ -43,7 +48,8 @@ const extensionHost = {
   external: ['vscode'],
   // A shipped skill's markdown that a prompt also embeds, so both read the same text.
   loader: { '.md': 'text' },
-  sourcemap: true,
+  sourcemap: !release,
+  ...(release ? { minify: true, plugins: [sealStrings()], banner: { js: SEAL_DECODER } } : {}),
   logLevel: 'info',
 }
 

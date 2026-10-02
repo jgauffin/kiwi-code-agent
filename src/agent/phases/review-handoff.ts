@@ -17,8 +17,9 @@ import { readSpecState } from './spec-file'
 /** How a submitted review reaches the plan session: the owning one, or a fresh one when it is gone. */
 export interface ReviewCourier {
   isLive(sessionId: string): boolean
-  send(sessionId: string, text: string): Promise<void>
-  start(feature: string, prompt: string): Promise<void>
+  /** `label` is what the chat shows in place of the prompt. */
+  send(sessionId: string, text: string, label: string): Promise<void>
+  start(feature: string, prompt: string, label: string): Promise<void>
 }
 
 /** The plan session that wrote the spec; decisions in it are ruled on there too, the check is a run, not an owner. */
@@ -143,7 +144,8 @@ export async function submitReview(options: {
   await writeReview(path, review, `${SPECS_DIR}/${featureSlug(feature)}.spec.md`)
 
   const prompt = reviewPrompt({ feature, round, body: state.body, struck: struckItems(review) })
-  if (courier.isLive(owner.sessionId)) await courier.send(owner.sessionId, prompt)
-  else await courier.start(feature, prompt)
+  const label = `Review round ${round.number} sent`
+  if (courier.isLive(owner.sessionId)) await courier.send(owner.sessionId, prompt, label)
+  else await courier.start(feature, prompt, label)
   return round
 }

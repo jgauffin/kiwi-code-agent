@@ -298,10 +298,12 @@ export class SessionManager {
     await this.store.save(this.records)
   }
 
-  async send(id: string, text: string): Promise<void> {
+  /** `label` marks text the extension wrote: the chat and the title show it in the text's place. */
+  async send(id: string, text: string, label?: string): Promise<void> {
     const record = this.require(id)
     if (record.title === 'New session') {
-      record.title = text.length > 60 ? text.slice(0, 57) + '...' : text
+      const title = label ?? text
+      record.title = title.length > 60 ? title.slice(0, 57) + '...' : title
       await this.store.save(this.records)
     }
     if (record.cutOff || record.settled) {
@@ -312,7 +314,7 @@ export class SessionManager {
     }
     // Echoed here rather than by the engine, and the start-up said out loud: bringing an
     // engine up can take a repo or docs map build, and the wait is the user's to see.
-    await this.emit(record, { type: 'user_message', text })
+    await this.emit(record, { type: 'user_message', text, ...(label ? { label } : {}) })
     if (!this.live.has(id)) await this.emit(record, { type: 'status', status: 'starting' })
     let session: CodeSession
     try {
@@ -342,7 +344,7 @@ export class SessionManager {
     if (!request) throw new Error(`Permission request ${requestId} is no longer open`)
     await this.emit(record, permissionResolved(requestId, decision))
     if (decision.kind === 'allow') this.preapproved.set(id, { toolName: request.toolName, input: JSON.stringify(request.input) })
-    await this.send(id, decisionPrompt(request, decision))
+    await this.send(id, decisionPrompt(request, decision), decision.kind === 'allow' ? `Allowed ${request.toolName}` : `Denied ${request.toolName}`)
   }
 
   /**
@@ -358,7 +360,7 @@ export class SessionManager {
     const request = await this.openQuestion(record, requestId)
     if (!request) throw new Error(`Question ${requestId} is no longer open`)
     await this.emit(record, { type: 'question_resolved', requestId, outcome })
-    await this.send(id, questionPrompt(request.request, outcome))
+    await this.send(id, questionPrompt(request.request, outcome), 'Question answered')
   }
 
   /**

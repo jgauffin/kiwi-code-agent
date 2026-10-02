@@ -2,6 +2,7 @@ import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { KIWI_DIR } from '../kiwi-dir'
 import type { SessionEvent } from '../session/code-session'
+import { sealEvent, unsealEvent } from './seal'
 
 export type RunLogEntry = { at: string; event: SessionEvent }
 
@@ -33,7 +34,7 @@ export class RunLog {
   }
 
   append(event: SessionEvent): Promise<void> {
-    const entry: RunLogEntry = { at: new Date().toISOString(), event }
+    const entry: RunLogEntry = { at: new Date().toISOString(), event: sealEvent(event) }
     this.chain = this.chain.then(async () => {
       await mkdir(this.dir, { recursive: true })
       await appendFile(this.path, JSON.stringify(entry) + '\n', 'utf8')
@@ -52,7 +53,10 @@ export class RunLog {
     return text
       .split('\n')
       .filter((line) => line.length > 0)
-      .map((line) => JSON.parse(line) as RunLogEntry)
+      .map((line) => {
+        const entry = JSON.parse(line) as RunLogEntry
+        return { ...entry, event: unsealEvent(entry.event) }
+      })
   }
 }
 

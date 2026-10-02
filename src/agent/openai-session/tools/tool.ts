@@ -36,7 +36,19 @@ export type ToolContext = {
 }
 
 /** `items`: the whole result, uncut, as plain JSON values for a script to work through; the model reads `text`. */
-export type ToolOutput = { text: string; isError: boolean; items?: unknown[] }
+/** `context` is read by the model after `text` and never shown in the chat: hook context, a skill's body. */
+export type ToolOutput = { text: string; isError: boolean; items?: unknown[]; context?: string }
+
+/** A tool result as the model reads it: what the chat shows, then what only the model sees. */
+export function modelText(output: { text: string; context?: string }): string {
+  return output.context ? `${output.text}\n\n${output.context}` : output.text
+}
+
+/** The output with its context folded into the text, for a caller that reads the text alone (a script, an MCP client). */
+export function folded(output: ToolOutput): ToolOutput {
+  const { context, ...rest } = output
+  return context ? { ...rest, text: modelText(output) } : rest
+}
 
 export interface Tool<S extends z.ZodObject = z.ZodObject> {
   readonly name: string

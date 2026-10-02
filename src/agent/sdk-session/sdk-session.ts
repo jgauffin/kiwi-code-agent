@@ -19,7 +19,7 @@ import { SdkCompaction } from './compaction'
 import { spawnWithRuntime, type NodeRuntime } from './node-runtime'
 import { bareToolName, toolServer } from './tool-server'
 import { ReadTracker } from '../openai-session/tools/read-tracker'
-import { fail, type Tool, type ToolContext } from '../openai-session/tools/tool'
+import { fail, folded, type Tool, type ToolContext } from '../openai-session/tools/tool'
 import { confirmReason, denyReason, gateCall, reviewEdits, type AskPermission, type PermissionShown } from '../permissions/gate'
 import type { QuestionOutcome, UserQuestionRequest } from '../session/user-question'
 import { errorMessage } from '../../error-message'
@@ -361,7 +361,7 @@ export class SdkSession implements CodeSession {
         const gate = await gateCall(this.options.hooks, ask, tool, use(name, parsed.data))
         if (gate.refused) return gate.refused
         try {
-          return await tool.execute(parsed.data, this.toolContext)
+          return folded(await tool.execute(parsed.data, this.toolContext))
         } catch (error) {
           return fail(`${name} failed: ${errorMessage(error)}`)
         }

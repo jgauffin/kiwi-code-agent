@@ -110,14 +110,15 @@ describe('Skill tool', () => {
     expect(definition.description).toContain('- relaxjs-forms: Building forms.')
   })
 
-  it('loads_the_body_without_frontmatter_and_names_the_folder_for_relative_paths', async () => {
+  it('loads_the_body_without_frontmatter_for_the_model_only_and_names_the_folder_for_relative_paths', async () => {
     await skill('forms', '---\nname: relaxjs-forms\ndescription: Building forms.\n---\n# Forms\n\nSee [ref](reference.md).\n')
     const tool = skillTool(await indexSkills(dir))
     const result = await tool.execute({ name: 'relaxjs-forms' }, ctx)
     expect(result.isError).toBe(false)
     expect(result.text).toContain(join(dir, '.claude', 'skills', 'forms'))
-    expect(result.text).toContain('# Forms\n\nSee [ref](reference.md).')
-    expect(result.text).not.toContain('description:')
+    expect(result.text).not.toContain('# Forms')
+    expect(result.context).toContain('# Forms\n\nSee [ref](reference.md).')
+    expect(result.context).not.toContain('description:')
     expect(tool.readOnly).toBe(true)
   })
 

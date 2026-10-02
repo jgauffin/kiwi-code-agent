@@ -197,7 +197,7 @@ export class FeatureBuild {
       if (this.deps.statusOf(previous.id) === 'implementing') return
       // The switch does not outlive the window, and the approval that turned it on still stands.
       allowWrites.setEnabled(previous.id, true)
-      await sessions.send(previous.id, TASK_CARRY_ON)
+      await sessions.send(previous.id, TASK_CARRY_ON, `Carrying on with ${task.name}`)
       return
     }
     const spec = await readSpecState(specPath(workspaceRoot, feature))
@@ -209,7 +209,7 @@ export class FeatureBuild {
     allowWrites.setEnabled(run.id, true)
     await this.deps.refresh.sendState()
     const decisions = await readDecisions(decisionsPath(workspaceRoot, feature))
-    await sessions.send(run.id, taskKickoff(started, task.name, parseSpec(spec.body), decisions))
+    await sessions.send(run.id, taskKickoff(started, task.name, parseSpec(spec.body), decisions), `Started ${task.name}`)
   }
 
   /**
@@ -264,7 +264,7 @@ export class FeatureBuild {
       // The switch does not outlive the window.
       this.deps.allowWrites.setEnabled(previous.id, true)
       await this.deps.refresh.sendState()
-      await sessions.send(previous.id, fixRetry(feature, failures, workspaceRoot))
+      await sessions.send(previous.id, fixRetry(feature, failures, workspaceRoot), fixLabel(failures))
       return
     }
     const board = await readBoard(tasksPath(workspaceRoot, feature))
@@ -273,7 +273,7 @@ export class FeatureBuild {
     const run = await sessions.create(profile, 'implement', feature, { ...(plan ? { parentId: plan.id } : {}), fixAttempt: attempt })
     this.deps.allowWrites.setEnabled(run.id, true)
     await this.deps.refresh.sendState()
-    await sessions.send(run.id, fixKickoff(feature, board, failures, workspaceRoot))
+    await sessions.send(run.id, fixKickoff(feature, board, failures, workspaceRoot), fixLabel(failures))
   }
 
   /**
@@ -306,4 +306,9 @@ export class FeatureBuild {
       await this.deps.listener.passed(feature)
     }
   }
+}
+
+/** What the chat shows for a failed sweep handed to the fix run. */
+function fixLabel(failures: VerificationFailure[]): string {
+  return `Tests failed: ${failures.length} command${failures.length === 1 ? '' : 's'} handed to the fix run`
 }

@@ -100,6 +100,16 @@ describe('migrateLayout', () => {
 
   it('a_migrated_workspace_is_left_as_it_is', async () => {
     await files(cwd, { 'specs/audit.spec.md': 'spec', '.kiwi/runs/r.jsonl': 'log' })
-    expect(await migrateLayout(cwd, home)).toEqual({ moved: [], blocked: [] })
+    expect(await migrateLayout(cwd, home)).toEqual({ moved: [], blocked: [], failed: [] })
+  })
+
+  it('an_entry_the_system_refuses_to_move_is_reported_and_the_rest_of_the_layout_still_moves', async () => {
+    await files(cwd, { '.kiwi/scratch': 'a file where the folder belongs', '.agent/scratch/s1/a.txt': 'a', '.agent/plan/audit.tasks.json': '{}', 'plan/audit.spec.md': 'spec' })
+    const report = await migrateLayout(cwd, home)
+    expect(report.failed.map((failure) => failure.path)).toEqual(['.agent/scratch/s1'])
+    expect(report.failed[0]?.reason).toBeTruthy()
+    expect(await text(cwd, '.agent/scratch/s1/a.txt')).toBe('a')
+    expect(await text(cwd, '.kiwi/specs/audit.tasks.json')).toBe('{}')
+    expect(await text(cwd, 'specs/audit.spec.md')).toBe('spec')
   })
 })

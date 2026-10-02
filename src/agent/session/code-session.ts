@@ -48,7 +48,11 @@ export function permissionResolved(requestId: string, decision: PermissionDecisi
  */
 export type SessionEvent =
   | { type: 'session_started'; engineSessionId: string; model: string; engineVersion?: string }
-  | { type: 'user_message'; text: string }
+  /**
+   * `label` is set when the extension wrote the text (a kickoff, a handoff): the chat
+   * shows the label, and the text goes to the model and to the run log only, sealed.
+   */
+  | { type: 'user_message'; text: string; label?: string }
   | { type: 'assistant_text'; messageId: string; delta: string; parentToolUseId?: string }
   | { type: 'assistant_thinking'; messageId: string; delta: string; parentToolUseId?: string }
   /** Final text of an assistant message, replaces whatever was streamed under the same id. */
@@ -57,8 +61,11 @@ export type SessionEvent =
   | { type: 'reply_usage'; messageId: string; outputTokens: number; parentToolUseId?: string }
   /** `malformed` is set when the model's arguments were not JSON: `input` is then their text as written. */
   | { type: 'tool_call'; toolUseId: string; name: string; input: unknown; malformed?: true; parentToolUseId?: string }
-  /** `edit` is set on a file edit that changed something: the diff the step made, as the chat shows it. */
-  | { type: 'tool_result'; toolUseId: string; text: string; isError: boolean; parentToolUseId?: string; edit?: FileEditChange }
+  /**
+   * `edit` is set on a file edit that changed something: the diff the step made, as the chat shows it.
+   * `context` is what the model reads after `text` and the chat never shows: hook context, a skill's body.
+   */
+  | { type: 'tool_result'; toolUseId: string; text: string; isError: boolean; parentToolUseId?: string; edit?: FileEditChange; context?: string }
   | {
       type: 'permission_request'
       requestId: string

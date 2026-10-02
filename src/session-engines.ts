@@ -1,5 +1,5 @@
 import * as vscode from 'vscode'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import type { SessionRecord } from './agent/session/session-manager'
@@ -247,15 +247,9 @@ export class SessionEngines {
   }
 
   private async setupFor(record: SessionRecord, onProgress: StartProgress): Promise<ModeSetup> {
-    const { workspaceRoot, output } = this.deps
+    const { workspaceRoot } = this.deps
     const setup = await modeSetup(record, this.modeContext(onProgress))
     const runDir = RunLog.forSession(workspaceRoot, record.id).dir
-    // What the session started from, so a run can be judged against it later (which docs map it had, for one).
-    if (setup.systemPrompt !== undefined) {
-      await mkdir(runDir, { recursive: true })
-        .then(() => writeFile(join(runDir, 'system-prompt.md'), setup.systemPrompt!, 'utf8'))
-        .catch((error: unknown) => output.appendLine(`could not record the system prompt: ${errorMessage(error)}`))
-    }
     // Last in line, so a call another hook denies is never captured: nothing changed.
     const recorder = new FileEditRecorder({ cwd: workspaceRoot, runDir })
     this.editRecorders.set(record.id, recorder)

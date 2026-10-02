@@ -178,7 +178,7 @@ export class FeatureCleanup implements BuildListener {
     this.cleanups.set(feature, { live: true, text: 'Splitting oversized units…' })
     this.cleanupProgress.set(feature, startProgress(flagged.map((u) => this.cleanupUnit(u))))
     await this.deps.refresh.sendState()
-    await sessions.send(child.id, cleanupKickoff(sizeReport(workspaceRoot, flagged), false))
+    await sessions.send(child.id, cleanupKickoff(sizeReport(workspaceRoot, flagged), false), `Splitting ${flagged.length} oversized unit${flagged.length === 1 ? '' : 's'}`)
   }
 
   /** True when the split moved; an edit on a flagged file has that file measured again. */

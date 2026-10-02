@@ -8,7 +8,7 @@ import type { McpServers } from '../mcp/mcp-config'
 import type { McpToolHost } from '../mcp/mcp-tool-host'
 import type { ChatCompletionClient, ChatMessage, CompletionRequest, ToolCall, ToolDefinition, Usage } from './chat-messages'
 import { ReadTracker } from './tools/read-tracker'
-import { toDefinition, type Tool, type ToolContext, type ToolOutput } from './tools/tool'
+import { folded, modelText, toDefinition, type Tool, type ToolContext, type ToolOutput } from './tools/tool'
 import { UNANSWERED_TOOL_RESULT } from './history'
 import { isAbsolute, resolve } from 'node:path'
 import { COMPACT_AT, compact, DEFAULT_CONTEXT_WINDOW, estimateTokens, isContextTooLong, KEEP_SHARE, pathsReadIn, SUMMARY_MAX_TOKENS, SUMMARY_PROMPT } from './compaction'
@@ -228,8 +228,8 @@ export class OpenAiSession implements CodeSession {
         for (const call of assistant.toolCalls) {
           if (signal.aborted) throw new InterruptedError()
           const result = await this.runTool(call, signal)
-          this.emit({ type: 'tool_result', toolUseId: call.id, text: result.text, isError: result.isError })
-          this.messages.push({ role: 'tool', toolCallId: call.id, content: result.text })
+          this.emit({ type: 'tool_result', toolUseId: call.id, text: result.text, isError: result.isError, ...(result.context ? { context: result.context } : {}) })
+          this.messages.push({ role: 'tool', toolCallId: call.id, content: modelText(result) })
         }
         if (signal.aborted) throw new InterruptedError()
       }
@@ -390,8 +390,9 @@ export class OpenAiSession implements CodeSession {
       output = { text: `${tool.name} failed: ${errorMessage(error)}`, isError: true }
     }
     const post = await this.options.hooks?.postToolUse?.({ ...use, output: output.text, isError: output.isError })
-    const context = [pre?.additionalContext, post?.additionalContext].filter((c): c is string => !!c)
-    return context.length ? { ...output, text: `${output.text}\n\n${context.join('\n\n')}` } : output
+    // Kept apart from the text: the model reads it, the chat does not show it.
+    const context = [output.context, pre?.additionalContext, post?.additionalContext].filter((c): c is string => !!c)
+    return context.length ? { ...output, context: context.join('\n\n') } : output
   }
 
   /** The permission decision every call passes, whether the model or a running script makes it. */
@@ -409,7 +410,7 @@ export class OpenAiSession implements CodeSession {
       files: this.files,
       ledger: this.ledger,
       ask: (request) => this.askUser(callId, request),
-      call: (name, input) => this.runTool({ id: nextId(), name, arguments: JSON.stringify(input) }, signal),
+      call: async (name, input) => folded(await this.runTool({ id: nextId(), name, arguments: JSON.stringify(input) }, signal)),
       authorize: (name, input) => denyReason(this.options.hooks, { toolName: name, input, toolUseId: nextId() }),
       confirm: (name, input) =>
         confirmReason(this.options.hooks, (id, n, v, shown) => this.askPermission(id, n, v, signal, shown), { toolName: name, input, toolUseId: nextId() }),

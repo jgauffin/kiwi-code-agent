@@ -116,8 +116,9 @@ export class ChatTranscript extends HTMLElement {
       case 'user_message':
         this.resume?.remove()
         this.resume = undefined
-        // A test-run handoff quotes the command's output, colours and all.
-        this.insert(block('user', event.text, renderAnsi))
+        // What the extension sent on the person's behalf is named, not quoted; the host never passes its text on.
+        if (event.label) this.insert(block('turn kickoff', event.label))
+        else this.insert(block('user', event.text, renderAnsi))
         this.activity = atWork(WAITING_ON_MODEL)
         break
       case 'assistant_text': {

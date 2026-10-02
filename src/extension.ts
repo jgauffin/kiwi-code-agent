@@ -59,6 +59,7 @@ export function activate(context: vscode.ExtensionContext): void {
     (report) => {
       for (const move of report.moved) output.appendLine(`layout: moved ${move.from} to ${move.to}`)
       for (const path of report.blocked) output.appendLine(`layout: left ${path}, its new place already holds one of that name`)
+      for (const failure of report.failed) output.appendLine(`layout: could not move ${failure.path}: ${failure.reason}`)
     },
     (error: unknown) => output.appendLine(`layout migration failed: ${errorMessage(error)}`),
   )

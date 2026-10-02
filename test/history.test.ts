@@ -88,4 +88,18 @@ describe('messagesFromEvents', () => {
       { role: 'tool', toolCallId: 'c1', content: 'summary' },
     ])
   })
+
+  it('a_kickoff_and_a_tool_results_context_reach_the_model_whole', () => {
+    const events: SessionEvent[] = [
+      { type: 'user_message', text: 'the kickoff prompt', label: 'Started task 1' },
+      { type: 'tool_call', toolUseId: 'c1', name: 'Skill', input: { name: 'x' } },
+      { type: 'tool_result', toolUseId: 'c1', text: 'Skill "x" loaded.', isError: false, context: '# The body' },
+      turnDone,
+    ]
+    expect(messagesFromEvents(events)).toEqual([
+      { role: 'user', content: 'the kickoff prompt' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'Skill', arguments: '{"name":"x"}' }] },
+      { role: 'tool', toolCallId: 'c1', content: 'Skill "x" loaded.\n\n# The body' },
+    ])
+  })
 })

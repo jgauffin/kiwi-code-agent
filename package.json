@@ -206,7 +206,7 @@
             "Headings with line ranges and each doc's opening paragraph, read at session start at no model cost."
           ],
           "default": "described",
-          "description": "The docs map Plan and Docs sessions start with. Each session's prompt is kept in its run folder as system-prompt.md, so the two can be compared."
+          "description": "The docs map Plan and Docs sessions start with."
         },
         "kiwiAgent.permissions.allow": {
           "type": "array",

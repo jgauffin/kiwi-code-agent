@@ -1,5 +1,6 @@
 import type { SessionEvent } from '../session/code-session'
 import type { ChatMessage, ToolCall } from './chat-messages'
+import { modelText } from './tools/tool'
 
 /** What a tool call the log never answered is answered with; the API rejects an assistant message whose calls have no result. */
 export const UNANSWERED_TOOL_RESULT = '[interrupted before this tool ran]'
@@ -55,7 +56,7 @@ export function messagesFromEvents(events: SessionEvent[]): ChatMessage[] {
         break
       }
       case 'tool_result':
-        if (unanswered.delete(event.toolUseId)) messages.push({ role: 'tool', toolCallId: event.toolUseId, content: event.text })
+        if (unanswered.delete(event.toolUseId)) messages.push({ role: 'tool', toolCallId: event.toolUseId, content: modelText(event) })
         if (unanswered.size === 0) current = undefined
         break
       case 'turn_done':
