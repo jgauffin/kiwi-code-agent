@@ -1,6 +1,9 @@
-import { writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { KIWI_DIR } from '../kiwi-dir'
+import { BUNDLE_MARKER_FILE, indexRoot, type SkillBundleSource } from '../skills/skill-index'
 import { readOptional } from '../workspace-files'
 import { scanWorkspace } from '../repo-map/workspace-scan'
 
@@ -10,13 +13,22 @@ export type BundleScope = 'project' | 'user'
 /** What a bundle applies to: no language or framework in particular, or one named one. */
 export type BundleTarget = { kind: 'any' } | { kind: 'language'; name: string } | { kind: 'framework'; name: string }
 
-/** A bundle as the catalog offers it: rule text and nothing else, named by where it comes from, what it is called, and its version. */
+/** One file a bundled skill carries, by the path relative to its own folder that the rest of the skill refers to. */
+export type BundleSkillFile = { path: string; content: string }
+
+/** A skill a bundle carries: its name and description for showing before it is applied, and every file its folder holds so a template or a script it ships is complete where it lands. */
+export type BundleSkill = { name: string; description: string; files: BundleSkillFile[] }
+
+/** A bundle as the catalog offers it: rule text, skills, or both, named by where it comes from, what it is called, and its version. */
 export type Bundle = {
   source: string
   name: string
   version: string
   target: BundleTarget
+  /** Empty when this bundle carries no rule text: a skills-only bundle writes nothing into `AGENTS.md`. */
   text: string
+  /** The skills this bundle carries, if any. */
+  skills?: BundleSkill[]
   /** Set when its source could not be reached just now and this is the copy last fetched, not what the source holds today. */
   asOf?: string
 }
@@ -121,20 +133,128 @@ export async function appliedBundles(cwd: string, home: string = homedir()): Pro
   return [...parseAppliedBundles(project, 'project'), ...parseAppliedBundles(user, 'user')]
 }
 
-/** Applies one bundle in the given scope's file, creating the file when it does not exist yet. */
+/**
+ * Applies one bundle in the given scope: its rule text into the scope's file,
+ * creating it when it does not exist yet, and its skills alongside it. A
+ * bundle carrying no rule text writes nothing into the file at all; what it
+ * is shows only in the skills it installed.
+ */
 export async function applyBundle(scope: BundleScope, bundle: Bundle, cwd: string, home: string = homedir()): Promise<void> {
-  const path = bundleFilePath(scope, cwd, home)
-  const current = (await readOptional(path)) ?? ''
-  await writeFile(path, applyBundleText(current, bundle), 'utf8')
+  if (bundle.text.trim() !== '') {
+    const path = bundleFilePath(scope, cwd, home)
+    const current = (await readOptional(path)) ?? ''
+    await writeFile(path, applyBundleText(current, bundle), 'utf8')
+  }
+  await installBundleSkills(scope, bundle, cwd, home)
 }
 
-/** Removes one bundle's block from the given scope's file; nothing to do when the file or the block does not exist. */
+/** Where a bundle's skills land: the workspace's own skills folder for the project, the person's own under their home directory for themselves. */
+export function bundleSkillsPath(scope: BundleScope, cwd: string, home: string = homedir()): string {
+  return join(scope === 'project' ? cwd : home, KIWI_DIR, 'skills')
+}
+
+/**
+ * Writes one bundled skill's whole folder under a skills root: every file it
+ * carries, at the relative path it names itself, and, when `owner` is given,
+ * the marker that tells it apart from a skill written by hand. Applying a
+ * bundle only ever writes these files; a script among them runs only when a
+ * session later chooses to run it.
+ */
+export async function writeBundleSkill(root: string, skill: BundleSkill, owner?: SkillBundleSource): Promise<void> {
+  const dir = join(root, skill.name)
+  for (const file of skill.files) {
+    const filePath = join(dir, ...file.path.split('/'))
+    await mkdir(dirname(filePath), { recursive: true })
+    await writeFile(filePath, file.content, 'utf8')
+  }
+  if (owner) await writeFile(join(dir, BUNDLE_MARKER_FILE), JSON.stringify(owner), 'utf8')
+}
+
+/** The names of the skills under this root that this exact bundle installed, by the marker it left; empty once none of its skills are there any more. */
+export async function bundleSkillNames(root: string, source: string, name: string): Promise<string[]> {
+  const entries = await indexRoot(root)
+  return entries.filter((entry) => entry.bundle?.source === source && entry.bundle?.name === name).map((entry) => entry.name)
+}
+
+/** Every file a skill now has on disk, the bundle's own marker left out, read back to tell a hand edit from an untouched install before an update would replace it. */
+export async function readInstalledSkillFiles(root: string, skillName: string): Promise<BundleSkillFile[]> {
+  const dir = join(root, skillName)
+  const files: BundleSkillFile[] = []
+  async function walk(sub: string): Promise<void> {
+    let entries
+    try {
+      entries = await readdir(join(dir, sub), { withFileTypes: true })
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+      throw error
+    }
+    for (const entry of entries) {
+      const relative = sub ? `${sub}/${entry.name}` : entry.name
+      if (entry.isDirectory()) {
+        await walk(relative)
+        continue
+      }
+      if (relative === BUNDLE_MARKER_FILE) continue
+      files.push({ path: relative, content: await readFile(join(dir, relative), 'utf8') })
+    }
+  }
+  await walk('')
+  return files.sort((a, b) => a.path.localeCompare(b.path))
+}
+
+function skillsFingerprint(skills: readonly { name: string; files: readonly BundleSkillFile[] }[]): string {
+  const canonical = skills
+    .map((skill) => ({ name: skill.name, files: [...skill.files].sort((a, b) => a.path.localeCompare(b.path)) }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+  return createHash('sha256').update(JSON.stringify(canonical)).digest('hex')
+}
+
+/** A hash of exactly what a bundle's skills should write, so the files actually on disk can later be compared against it to tell a hand edit from an untouched install. */
+export function hashBundleSkills(skills: readonly BundleSkill[]): string {
+  return skillsFingerprint(skills)
+}
+
+/** What a bundle's own skills look like on disk right now, hashed the same way as `hashBundleSkills`; `undefined` once none of them are installed any more. */
+export async function installedSkillsHash(scope: BundleScope, source: string, name: string, cwd: string, home: string = homedir()): Promise<string | undefined> {
+  const root = bundleSkillsPath(scope, cwd, home)
+  const names = await bundleSkillNames(root, source, name)
+  if (names.length === 0) return undefined
+  const skills = await Promise.all(names.map(async (skillName) => ({ name: skillName, files: await readInstalledSkillFiles(root, skillName) })))
+  return skillsFingerprint(skills)
+}
+
+/**
+ * Writes every skill a bundle carries under the scope's own skills root,
+ * marked with the bundle that installed it. A skill this bundle installed
+ * before that the new version no longer carries is removed, and every skill
+ * it still carries lands in a fresh folder so a file the new version drops
+ * does not linger; a skill the bundle never installed is never touched.
+ */
+export async function installBundleSkills(scope: BundleScope, bundle: Bundle, cwd: string, home: string = homedir()): Promise<void> {
+  const root = bundleSkillsPath(scope, cwd, home)
+  const owner: SkillBundleSource = { source: bundle.source, name: bundle.name, version: bundle.version }
+  const keep = new Set((bundle.skills ?? []).map((skill) => skill.name))
+  for (const existingName of await bundleSkillNames(root, bundle.source, bundle.name)) {
+    if (!keep.has(existingName)) await rm(join(root, existingName), { recursive: true, force: true })
+  }
+  for (const skill of bundle.skills ?? []) {
+    await rm(join(root, skill.name), { recursive: true, force: true })
+    await writeBundleSkill(root, skill, owner)
+  }
+}
+
+/** Removes one bundle's block from the given scope's file, and the skills it installed there alongside it; nothing outside those two is touched, and a bundle with no block or no skills there now does nothing for that part. */
 export async function removeBundle(scope: BundleScope, source: string, name: string, cwd: string, home: string = homedir()): Promise<void> {
   const path = bundleFilePath(scope, cwd, home)
   const current = await readOptional(path)
-  if (current === undefined) return
-  const { text, removed } = removeBundleText(current, source, name)
-  if (removed) await writeFile(path, text, 'utf8')
+  if (current !== undefined) {
+    const { text, removed } = removeBundleText(current, source, name)
+    if (removed) await writeFile(path, text, 'utf8')
+  }
+  const root = bundleSkillsPath(scope, cwd, home)
+  for (const skillName of await bundleSkillNames(root, source, name)) {
+    await rm(join(root, skillName), { recursive: true, force: true })
+  }
 }
 
 /** Languages and frameworks this workspace holds, for matching a bundle's target against. */

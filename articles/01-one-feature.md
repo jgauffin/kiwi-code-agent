@@ -93,6 +93,7 @@ You wrote one sentence, answered two questions, read a spec, made one decision, 
 
 - It needs docs worth reading. With nothing under `docs/`, the planner can only ask you.
 - It is a workflow. For a one-line fix, a plain chat session is the better tool, and it is there.
+- It costs more than a chat would. A planning session, a check against the code, a run per task, a test run and a cleanup pass spend more tokens and more of your attention than typing "add order cancellation" into a chat and reading the diff. What comes back is a feature that matches what you meant, a rule you can point at a test for, and a spec the next feature is planned against and later sessions check before they change it. Slower process, more accurate result.
 
 What would the forgotten limit in your codebase be?
 

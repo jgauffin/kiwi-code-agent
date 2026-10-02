@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import { readOptional } from '../workspace-files'
 import { KIWI_DIR } from '../kiwi-dir'
-import { applyBundle, type AppliedBundle, type Bundle, type BundleScope, type BundleTarget } from './bundles'
+import { applyBundle, bundleSkillNames, bundleSkillsPath, installBundleSkills, type AppliedBundle, type Bundle, type BundleScope, type BundleSkill, type BundleTarget } from './bundles'
 
 /** The product's own bundle repository: always a source, named nowhere, so a bundle reaches everyone by a pull request against it. */
 export const PRODUCT_CATALOG_SOURCE = 'https://github.com/jgauffin/kiwipow-agent-bundles'
@@ -41,18 +41,31 @@ const targetSchema: z.ZodType<BundleTarget> = z.union([
   z.object({ kind: z.literal('framework'), name: z.string() }),
 ])
 
+/** One file a catalog entry's skill carries, by the path relative to its own folder. */
+const skillFileSchema = z.object({ path: z.string().min(1), content: z.string() }).passthrough()
+
+/** One skill a catalog entry carries: its name and description, and the whole folder of files it ships with. */
+const skillSchema = z
+  .object({
+    name: z.string().min(1),
+    description: z.string().default(''),
+    files: z.array(skillFileSchema).default([]),
+  })
+  .passthrough()
+
 /**
  * A bundle entry as a source repository's catalog may write it. `.passthrough()`
  * lets a command, a tool, a permission or a setting ride along without
- * failing the parse; only `name`, `version`, `target` and `text` are ever
- * read off it, so anything else carried in it is ignored, not acted on.
+ * failing the parse; only `name`, `version`, `target`, `text` and `skills`
+ * are ever read off it, so anything else carried in it is ignored, not acted on.
  */
 const catalogEntrySchema = z
   .object({
     name: z.string().min(1),
     version: z.string().min(1),
     target: targetSchema.default({ kind: 'any' }),
-    text: z.string(),
+    text: z.string().default(''),
+    skills: z.array(skillSchema).default([]),
   })
   .passthrough()
 
@@ -62,7 +75,7 @@ const catalogSchema = z.object({
   required: z.array(z.string()).default([]),
 })
 
-/** A source's catalog, read off its own repository: its bundles, rule text only, and the names it requires. */
+/** A source's catalog, read off its own repository: its bundles, rule text and skills only, and the names it requires. */
 export type SourceCatalog = { bundles: Bundle[]; required: string[] }
 
 /** The catalog a source's `bundles.json` holds; unreadable or malformed text names none rather than failing the fetch. */
@@ -76,7 +89,14 @@ export function parseCatalogSource(text: string, source: string): SourceCatalog 
   const parsed = catalogSchema.safeParse(json)
   if (!parsed.success) return { bundles: [], required: [] }
   return {
-    bundles: parsed.data.bundles.map((entry) => ({ source, name: entry.name, version: entry.version, target: entry.target, text: entry.text })),
+    bundles: parsed.data.bundles.map((entry) => ({
+      source,
+      name: entry.name,
+      version: entry.version,
+      target: entry.target,
+      text: entry.text,
+      ...(entry.skills.length > 0 ? { skills: entry.skills.map((skill): BundleSkill => ({ name: skill.name, description: skill.description, files: skill.files.map((f) => ({ path: f.path, content: f.content })) })) } : {}),
+    })),
     required: parsed.data.required,
   }
 }
@@ -142,13 +162,22 @@ export function requiredBundleText(source: string, text: string): string {
  * block later be removed by hand — and reports what it applied.
  */
 export async function applyRequiredBundles(fetched: readonly FetchedSource[], applied: readonly AppliedBundle[], cwd: string, home?: string): Promise<AppliedBundle[]> {
-  const missing = missingRequiredBundles(requiredBundles(fetched), applied)
+  const allRequired = requiredBundles(fetched)
+  const missing = missingRequiredBundles(allRequired, applied)
   const newlyApplied: AppliedBundle[] = []
   for (const required of missing) {
     const bundle = fetched.find((source) => source.source === required.source)?.bundles.find((b) => b.name === required.name)
     if (!bundle) continue
     await applyBundle('project', { ...bundle, text: requiredBundleText(required.source, bundle.text) }, cwd, home)
     newlyApplied.push({ source: required.source, name: required.name, version: bundle.version, scope: 'project' })
+  }
+  // A required bundle already applied keeps its block as it was; a skill it installed that has since been deleted is written back.
+  for (const r of allRequired.filter((x) => !missing.some((m) => m.source === x.source && m.name === x.name))) {
+    const bundle = fetched.find((source) => source.source === r.source)?.bundles.find((b) => b.name === r.name)
+    if (!bundle?.skills?.length) continue
+    const root = bundleSkillsPath('project', cwd, home)
+    const owned = new Set(await bundleSkillNames(root, r.source, r.name))
+    if (bundle.skills.some((skill) => !owned.has(skill.name))) await installBundleSkills('project', bundle, cwd, home)
   }
   return newlyApplied
 }
@@ -171,11 +200,20 @@ export function hashBundleText(text: string): string {
   return createHash('sha256').update(text.trim()).digest('hex')
 }
 
-/** What is known about one applied bundle's block, for telling a hand edit from an untouched one before an update would replace it. */
-export type HandEditCheck = { scope: BundleScope; source: string; name: string; writtenHash?: string | undefined; currentText?: string | undefined }
+/** What is known about one applied bundle's block and its installed skills, for telling a hand edit from an untouched one before an update would replace either. */
+export type HandEditCheck = {
+  scope: BundleScope
+  source: string
+  name: string
+  writtenHash?: string | undefined
+  currentText?: string | undefined
+  /** The skills' own hash as it was right after installing them, and as its files read back right now; a mismatch says a skill file was edited by hand. */
+  writtenSkillsHash?: string | undefined
+  currentSkillsHash?: string | undefined
+}
 
-/** A newer version a source holds for a bundle already applied, with whether its block was edited by hand since it was written. */
-export type BundleUpdate = { source: string; name: string; scope: BundleScope; from: string; to: string; handEdited: boolean }
+/** A newer version a source holds for a bundle already applied, with whether its block or a skill file it installed was edited by hand since it was written. */
+export type BundleUpdate = { source: string; name: string; scope: BundleScope; from: string; to: string; handEdited: boolean; skillHandEdited: boolean }
 
 const dismissKey = (scope: BundleScope, source: string, name: string): string => `${scope}|${source}|${name}`
 
@@ -197,7 +235,8 @@ export function bundleUpdates(
     if (dismissedVersions.get(dismissKey(a.scope, a.source, a.name)) === candidate.version) continue
     const check = checks.find((c) => c.scope === a.scope && c.source === a.source && c.name === a.name)
     const handEdited = check?.writtenHash !== undefined && check.currentText !== undefined && hashBundleText(check.currentText) !== check.writtenHash
-    updates.push({ source: a.source, name: a.name, scope: a.scope, from: a.version, to: candidate.version, handEdited })
+    const skillHandEdited = check?.writtenSkillsHash !== undefined && check.currentSkillsHash !== undefined && check.currentSkillsHash !== check.writtenSkillsHash
+    updates.push({ source: a.source, name: a.name, scope: a.scope, from: a.version, to: candidate.version, handEdited, skillHandEdited })
   }
   return updates
 }

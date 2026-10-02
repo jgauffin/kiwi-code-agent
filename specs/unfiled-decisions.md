@@ -15,6 +15,11 @@
 - affects: agents md rule bundles, docs/settings.md
 - built: true
 
+### A bundle may carry skills as well as rule text
+- decided: A bundle declares whether it carries rule text, skills or both, and a bundle carrying skills travels the same sources, accepting, matching, versioning and required lists as a rule-text bundle; a bundled skill arrives with the files it refers to, is marked with its source, bundle and version, loses a name clash to a skill nobody's bundle installed, and nothing in a bundle runs when it is applied. Bundles still carry no commands, permission rules, settings or MCP servers.
+- affects: organization bundles, agents md rule bundles, instructions and skills, docs/settings.md, docs/intent/agent.md
+- built: false
+
 ### Memories are kept in Claude Code's memory files
 - decided: The agent's project-wide and user-wide memories are kept in Claude Code's memory layout rather than a store of our own, so a session on the Claude Agent SDK reads them natively while a session on an OpenAI-compatible endpoint reaches the same notes through the agent's memory tools; memories stay with the person's own files and are never kept in the workspace's source.
 - affects: project and user wide memories, instructions and skills, docs/settings.md, docs/intent/agent.md

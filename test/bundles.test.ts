@@ -1,7 +1,11 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { readOptional } from '../src/agent/workspace-files'
+
+vi.mock('node:child_process', () => ({ spawn: vi.fn(), exec: vi.fn() }))
+import { exec, spawn } from 'node:child_process'
 import {
   appliedBundles,
   appliedBundleText,
@@ -9,11 +13,17 @@ import {
   applyBundleText,
   bundleFilePath,
   bundleMatches,
+  bundleSkillNames,
+  bundleSkillsPath,
+  hashBundleSkills,
+  installBundleSkills,
+  installedSkillsHash,
   matchingBundles,
   parseAppliedBundles,
   removeBundle,
   removeBundleText,
   workspaceSignals,
+  writeBundleSkill,
   type Bundle,
 } from '../src/agent/instructions/bundles'
 
@@ -32,6 +42,23 @@ afterEach(async () => {
 
 const style: Bundle = { source: 'product', name: 'python-style', version: '1.0.0', target: { kind: 'any' }, text: 'Reproduce a bug before fixing it.' }
 const react: Bundle = { source: 'product', name: 'react-practice', version: '2.1.0', target: { kind: 'framework', name: 'react' }, text: 'Keep components small.' }
+const skillBundle: Bundle = {
+  source: 'product',
+  name: 'bug-repro',
+  version: '1.0.0',
+  target: { kind: 'any' },
+  text: '',
+  skills: [
+    {
+      name: 'bug-repro',
+      description: 'Reproduce a bug with a failing test before fixing it.',
+      files: [
+        { path: 'SKILL.md', content: '---\nname: bug-repro\ndescription: Reproduce a bug with a failing test before fixing it.\n---\nWrite the failing test first.' },
+        { path: 'scripts/run.sh', content: '#!/bin/sh\necho reproducing\n' },
+      ],
+    },
+  ],
+}
 
 describe('bundleFilePath (project or person scope)', () => {
   it('a_project_scope_bundle_is_written_into_the_workspaces_agents_md_never_claude_md', () => {
@@ -170,5 +197,156 @@ describe('matched by what the workspace holds', () => {
     const holds = await workspaceSignals(cwd)
     expect(holds.languages.has('csharp')).toBe(true)
     expect(holds.frameworks.has('Microsoft.AspNetCore.App')).toBe(true)
+  })
+})
+
+describe('skills-only bundle', () => {
+  it('a_bundle_carrying_no_rule_text_writes_nothing_into_agents_md', async () => {
+    await applyBundle('project', skillBundle, cwd, home)
+    expect(await readOptional(join(cwd, 'AGENTS.md'))).toBeUndefined()
+  })
+
+  it('what_it_is_shows_only_in_the_skills_it_installed', async () => {
+    await applyBundle('project', skillBundle, cwd, home)
+    expect(await appliedBundles(cwd, home)).toEqual([])
+    const root = bundleSkillsPath('project', cwd, home)
+    expect(await readFile(join(root, 'bug-repro', 'SKILL.md'), 'utf8')).toContain('Write the failing test first.')
+  })
+})
+
+describe("the skill's whole folder travels", () => {
+  it('a_bundled_skill_lands_with_its_description_and_every_file_it_refers_to_by_relative_path', async () => {
+    await installBundleSkills('project', skillBundle, cwd, home)
+    const root = bundleSkillsPath('project', cwd, home)
+    expect(await readFile(join(root, 'bug-repro', 'SKILL.md'), 'utf8')).toContain('description: Reproduce a bug with a failing test before fixing it.')
+    expect(await readFile(join(root, 'bug-repro', 'scripts', 'run.sh'), 'utf8')).toBe('#!/bin/sh\necho reproducing\n')
+  })
+
+  it('a_person_scope_skill_lands_under_the_persons_own_profile', async () => {
+    await writeBundleSkill(bundleSkillsPath('user', cwd, home), skillBundle.skills![0]!)
+    expect(await readFile(join(home, '.kiwi', 'skills', 'bug-repro', 'SKILL.md'), 'utf8')).toContain('Write the failing test first.')
+  })
+})
+
+describe('bundled skills are told apart from hand-written ones', () => {
+  it('installing_a_bundles_skill_marks_it_with_the_bundles_source_name_and_version', async () => {
+    await installBundleSkills('project', skillBundle, cwd, home)
+    const root = bundleSkillsPath('project', cwd, home)
+    const marker = JSON.parse(await readFile(join(root, 'bug-repro', '.bundle.json'), 'utf8'))
+    expect(marker).toEqual({ source: 'product', name: 'bug-repro', version: '1.0.0' })
+  })
+
+  it('a_skill_written_by_hand_with_writeBundleSkill_carries_no_marker', async () => {
+    const root = bundleSkillsPath('project', cwd, home)
+    await writeBundleSkill(root, skillBundle.skills![0]!)
+    await expect(readFile(join(root, 'bug-repro', '.bundle.json'), 'utf8')).rejects.toThrow()
+  })
+})
+
+describe('nothing in a bundle runs when it is applied', () => {
+  afterEach(() => vi.mocked(spawn).mockClear())
+
+  it('applying_a_bundle_whose_skill_carries_a_script_only_writes_files_and_runs_nothing', async () => {
+    await applyBundle('project', skillBundle, cwd, home)
+    expect(spawn).not.toHaveBeenCalled()
+    expect(exec).not.toHaveBeenCalled()
+    const script = await readFile(join(bundleSkillsPath('project', cwd, home), 'bug-repro', 'scripts', 'run.sh'), 'utf8')
+    expect(script).toBe('#!/bin/sh\necho reproducing\n')
+  })
+})
+
+describe("an update replaces a bundle's skills whole", () => {
+  it('installing_a_newer_version_drops_a_file_the_new_version_no_longer_carries', async () => {
+    await installBundleSkills('project', skillBundle, cwd, home)
+    const root = bundleSkillsPath('project', cwd, home)
+    await expect(readFile(join(root, 'bug-repro', 'scripts', 'run.sh'), 'utf8')).resolves.toBeDefined()
+
+    const updated: Bundle = { ...skillBundle, version: '2.0.0', skills: [{ name: 'bug-repro', description: skillBundle.skills![0]!.description, files: [skillBundle.skills![0]!.files[0]!] }] }
+    await installBundleSkills('project', updated, cwd, home)
+
+    await expect(readFile(join(root, 'bug-repro', 'scripts', 'run.sh'), 'utf8')).rejects.toThrow()
+    expect(await readFile(join(root, 'bug-repro', 'SKILL.md'), 'utf8')).toContain('Write the failing test first.')
+  })
+
+  it('installing_a_newer_version_removes_a_skill_the_new_version_no_longer_includes', async () => {
+    const twoSkills: Bundle = { ...skillBundle, skills: [...skillBundle.skills!, { name: 'second-skill', description: 'Another one.', files: [{ path: 'SKILL.md', content: '# second' }] }] }
+    await installBundleSkills('project', twoSkills, cwd, home)
+    const root = bundleSkillsPath('project', cwd, home)
+    await expect(readFile(join(root, 'second-skill', 'SKILL.md'), 'utf8')).resolves.toBeDefined()
+
+    const droppedSecond: Bundle = { ...twoSkills, version: '2.0.0', skills: [skillBundle.skills![0]!] }
+    await installBundleSkills('project', droppedSecond, cwd, home)
+
+    await expect(readFile(join(root, 'second-skill', 'SKILL.md'), 'utf8')).rejects.toThrow()
+    expect(await readFile(join(root, 'bug-repro', 'SKILL.md'), 'utf8')).toContain('Write the failing test first.')
+  })
+
+  it('updating_a_bundle_never_touches_a_skill_it_did_not_install', async () => {
+    const root = bundleSkillsPath('project', cwd, home)
+    await writeBundleSkill(root, { name: 'hand-written', description: 'Written by the team.', files: [{ path: 'SKILL.md', content: '# hand written' }] })
+    await installBundleSkills('project', skillBundle, cwd, home)
+
+    const updated: Bundle = { ...skillBundle, version: '2.0.0' }
+    await installBundleSkills('project', updated, cwd, home)
+
+    expect(await readFile(join(root, 'hand-written', 'SKILL.md'), 'utf8')).toContain('hand written')
+  })
+})
+
+describe('skill changed by hand', () => {
+  it('installed_skill_files_hash_the_same_as_the_bundle_until_a_file_is_edited_by_hand', async () => {
+    await installBundleSkills('project', skillBundle, cwd, home)
+    const written = hashBundleSkills(skillBundle.skills!)
+    expect(await installedSkillsHash('project', skillBundle.source, skillBundle.name, cwd, home)).toBe(written)
+
+    const root = bundleSkillsPath('project', cwd, home)
+    await writeFile(join(root, 'bug-repro', 'SKILL.md'), 'Someone changed this by hand.', 'utf8')
+
+    expect(await installedSkillsHash('project', skillBundle.source, skillBundle.name, cwd, home)).not.toBe(written)
+  })
+
+  it('a_hand_edited_skill_applied_for_the_person_stays_under_their_own_profile_after_an_update', async () => {
+    await installBundleSkills('user', skillBundle, cwd, home)
+    const root = bundleSkillsPath('user', cwd, home)
+    await writeFile(join(root, 'bug-repro', 'SKILL.md'), 'Someone changed this by hand.', 'utf8')
+
+    await installBundleSkills('user', { ...skillBundle, version: '2.0.0' }, cwd, home)
+
+    expect(await readFile(join(root, 'bug-repro', 'SKILL.md'), 'utf8')).toContain('Write the failing test first.')
+    await expect(readFile(join(bundleSkillsPath('project', cwd, home), 'bug-repro', 'SKILL.md'), 'utf8')).rejects.toThrow()
+  })
+})
+
+describe("removing a bundle takes its skills with it", () => {
+  it('removing_a_bundle_removes_the_skills_it_installed', async () => {
+    await applyBundle('project', skillBundle, cwd, home)
+    const root = bundleSkillsPath('project', cwd, home)
+    await expect(readFile(join(root, 'bug-repro', 'SKILL.md'), 'utf8')).resolves.toBeDefined()
+
+    await removeBundle('project', skillBundle.source, skillBundle.name, cwd, home)
+
+    await expect(readFile(join(root, 'bug-repro', 'SKILL.md'), 'utf8')).rejects.toThrow()
+    expect(await bundleSkillNames(root, skillBundle.source, skillBundle.name)).toEqual([])
+  })
+
+  it('removing_a_bundle_leaves_a_skill_it_did_not_install_in_place', async () => {
+    const root = bundleSkillsPath('project', cwd, home)
+    await writeBundleSkill(root, { name: 'hand-written', description: 'Written by the team.', files: [{ path: 'SKILL.md', content: '# hand written' }] })
+    await applyBundle('project', skillBundle, cwd, home)
+
+    await removeBundle('project', skillBundle.source, skillBundle.name, cwd, home)
+
+    expect(await readFile(join(root, 'hand-written', 'SKILL.md'), 'utf8')).toContain('hand written')
+  })
+
+  it('removing_a_bundle_with_rule_text_and_skills_drops_both', async () => {
+    const withBoth: Bundle = { ...style, name: 'bug-repro', skills: skillBundle.skills! }
+    await applyBundle('project', withBoth, cwd, home)
+
+    await removeBundle('project', withBoth.source, withBoth.name, cwd, home)
+
+    expect(await appliedBundles(cwd, home)).toEqual([])
+    const root = bundleSkillsPath('project', cwd, home)
+    await expect(readFile(join(root, 'bug-repro', 'SKILL.md'), 'utf8')).rejects.toThrow()
   })
 })

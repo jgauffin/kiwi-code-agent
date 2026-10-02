@@ -2,6 +2,8 @@
 
 For dev.to. Short, plain, no hype. One idea per article, each grounded in what ships, all following one running example: order cancellation, where the code silently refunds nothing over 500.
 
+One trade runs under all of them, and every article should be willing to say it: this workflow spends more tokens and more time than asking a chat for the feature, and in return the features are accurate, they do not contradict each other, and the specs survive the feature and are checked again by every later feature and every session that changes code, so nothing degrades. Slower process, more accurate result.
+
 Files are numbered in publishing order.
 
 | # | Title | Subject | File |

@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { appliedBundles, removeBundle, type AppliedBundle } from '../src/agent/instructions/bundles'
+import { appliedBundles, bundleSkillsPath, removeBundle, type AppliedBundle } from '../src/agent/instructions/bundles'
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn() }))
 
@@ -15,6 +15,7 @@ import {
   fetchableSources,
   parseCatalogSource,
   fetchSource,
+  catalogBundles,
   requiredBundles,
   missingRequiredBundles,
   applyRequiredBundles,
@@ -151,6 +152,80 @@ describe('rule text only', () => {
   })
 })
 
+describe('rule text and skills only', () => {
+  it('a bundle entry carrying mcp servers and other extras contributes only its rule text and its skills', () => {
+    const text = JSON.stringify({
+      bundles: [
+        {
+          name: 'bug-repro',
+          version: '1.0.0',
+          target: { kind: 'any' },
+          text: '',
+          skills: [{ name: 'bug-repro', description: 'Reproduce a bug before fixing it.', files: [{ path: 'SKILL.md', content: '# Bug repro' }] }],
+          command: 'rm -rf /',
+          tool: 'Bash',
+          permissions: { allow: ['*'] },
+          settings: { traceEngine: true },
+          mcpServers: { git: { command: 'git-mcp' } },
+        },
+      ],
+      required: [],
+    })
+    expect(parseCatalogSource(text, 'company').bundles).toEqual([
+      {
+        source: 'company',
+        name: 'bug-repro',
+        version: '1.0.0',
+        target: { kind: 'any' },
+        text: '',
+        skills: [{ name: 'bug-repro', description: 'Reproduce a bug before fixing it.', files: [{ path: 'SKILL.md', content: '# Bug repro' }] }],
+      },
+    ])
+  })
+})
+
+describe('skills as a bundle payload', () => {
+  it('a bundle carrying rule text and skills both is fetched, parsed and versioned exactly as a rule-text bundle is', async () => {
+    const text = JSON.stringify({
+      bundles: [
+        {
+          name: 'tests-first',
+          version: '1.0.0',
+          target: { kind: 'any' },
+          text: 'Write the test before the fix.',
+          skills: [{ name: 'tdd-helper', description: 'Scaffolds a failing test.', files: [{ path: 'SKILL.md', content: '# TDD helper' }] }],
+        },
+      ],
+      required: [],
+    })
+    const fetched = await fetchSource('company', fakeGit({ company: text }), fakeCache())
+    const expected = [
+      {
+        source: 'company',
+        name: 'tests-first',
+        version: '1.0.0',
+        target: { kind: 'any' },
+        text: 'Write the test before the fix.',
+        skills: [{ name: 'tdd-helper', description: 'Scaffolds a failing test.', files: [{ path: 'SKILL.md', content: '# TDD helper' }] }],
+      },
+    ]
+    expect(fetched.bundles).toEqual(expected)
+    expect(catalogBundles([fetched])).toEqual(expected)
+    expect(isNewerVersion('1.1.0', fetched.bundles[0]!.version)).toBe(true)
+  })
+
+  it('a bundle that carries only skills and no rule text is fetched and parsed the same as any other', async () => {
+    const text = JSON.stringify({
+      bundles: [{ name: 'bug-repro', version: '1.0.0', target: { kind: 'any' }, skills: [{ name: 'bug-repro', description: 'Reproduce first.', files: [] }] }],
+      required: [],
+    })
+    const fetched = await fetchSource('company', fakeGit({ company: text }), fakeCache())
+    expect(fetched.bundles).toEqual([
+      { source: 'company', name: 'bug-repro', version: '1.0.0', target: { kind: 'any' }, text: '', skills: [{ name: 'bug-repro', description: 'Reproduce first.', files: [] }] },
+    ])
+  })
+})
+
 let cwd: string
 
 beforeEach(async () => {
@@ -182,6 +257,42 @@ describe('a source may require bundles', () => {
   })
 })
 
+const requiredWithSkill: FetchedSource = {
+  source: 'company',
+  bundles: [
+    {
+      source: 'company',
+      name: 'tests-first',
+      version: '1.0.0',
+      target: { kind: 'any' },
+      text: 'Write the test before the fix.',
+      skills: [{ name: 'tdd-helper', description: 'Scaffolds a failing test.', files: [{ path: 'SKILL.md', content: '# TDD helper' }] }],
+    },
+  ],
+  required: ['tests-first'],
+  reachable: true,
+}
+
+describe('a required bundle carries skills too', () => {
+  it('a_required_bundles_skills_are_installed_the_first_time_its_source_is_used', async () => {
+    await applyRequiredBundles([requiredWithSkill], [], cwd)
+    const root = bundleSkillsPath('project', cwd)
+    expect(await readFile(join(root, 'tdd-helper', 'SKILL.md'), 'utf8')).toContain('TDD helper')
+  })
+
+  it('a_required_bundles_skills_are_installed_again_once_they_have_been_deleted', async () => {
+    const applied = await applyRequiredBundles([requiredWithSkill], [], cwd)
+    const root = bundleSkillsPath('project', cwd)
+    await rm(join(root, 'tdd-helper'), { recursive: true, force: true })
+    await expect(readFile(join(root, 'tdd-helper', 'SKILL.md'), 'utf8')).rejects.toThrow()
+
+    // The block is still there, so the bundle is not "missing" its first apply: only the skill is gone.
+    await applyRequiredBundles([requiredWithSkill], applied, cwd)
+
+    expect(await readFile(join(root, 'tdd-helper', 'SKILL.md'), 'utf8')).toContain('TDD helper')
+  })
+})
+
 describe('a required bundle comes back', () => {
   it('a required bundle whose block was removed is applied again, with a line naming the source that requires it', async () => {
     await applyRequiredBundles([requiredSource()], [], cwd)
@@ -200,7 +311,7 @@ describe('updates are never silent', () => {
 
   it('a newer version a source holds for an applied bundle is surfaced as an update', () => {
     const fetched: FetchedSource[] = [{ source: 's', bundles: [{ source: 's', name: 'b', version: '2.0.0', target: { kind: 'any' }, text: 't' }], required: [], reachable: true }]
-    expect(bundleUpdates(fetched, applied, [], new Map())).toEqual([{ source: 's', name: 'b', scope: 'project', from: '1.0.0', to: '2.0.0', handEdited: false }])
+    expect(bundleUpdates(fetched, applied, [], new Map())).toEqual([{ source: 's', name: 'b', scope: 'project', from: '1.0.0', to: '2.0.0', handEdited: false, skillHandEdited: false }])
   })
 
   it('keeping a version silences it, but a later version past it still raises its own notice', () => {
@@ -209,7 +320,7 @@ describe('updates are never silent', () => {
     expect(bundleUpdates(stillV2, applied, [], keptAtV2)).toEqual([])
 
     const nowV3: FetchedSource[] = [{ source: 's', bundles: [{ source: 's', name: 'b', version: '3.0.0', target: { kind: 'any' }, text: 't' }], required: [], reachable: true }]
-    expect(bundleUpdates(nowV3, applied, [], keptAtV2)).toEqual([{ source: 's', name: 'b', scope: 'project', from: '1.0.0', to: '3.0.0', handEdited: false }])
+    expect(bundleUpdates(nowV3, applied, [], keptAtV2)).toEqual([{ source: 's', name: 'b', scope: 'project', from: '1.0.0', to: '3.0.0', handEdited: false, skillHandEdited: false }])
   })
 
   it('isNewerVersion compares dot-separated parts numerically', () => {

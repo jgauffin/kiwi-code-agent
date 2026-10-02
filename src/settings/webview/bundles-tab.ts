@@ -1,4 +1,4 @@
-import type { AppliedBundle, Bundle, BundleScope, BundleTarget } from '../../agent/instructions/bundles'
+import type { AppliedBundle, Bundle, BundleScope, BundleSkill, BundleTarget } from '../../agent/instructions/bundles'
 import type { SettingsSnapshot } from '../protocol'
 import { BundleAppliedEvent, BundleOfferDismissedEvent, BundleRemovedEvent } from './events'
 import { button, el, heading, note, select } from './fields'
@@ -33,9 +33,9 @@ export class BundlesTab extends HTMLElement {
   private render(): void {
     const { available, applied, suggested, offerPending } = this.snapshot
     this.replaceChildren(
-      heading('Bundles', 'Shared rule text, applied or offered'),
+      heading('Bundles', 'Shared rule text and skills, applied or offered'),
       note(
-        'A bundle is a named, versioned set of rule text, written as one marked block into AGENTS.md so the whole team can see it in source. Its text is shown here before it is applied, and nothing is written to a file until you accept it.',
+        'A bundle is a named, versioned set of rule text, skills, or both, applied as one marked block into AGENTS.md and a folder per skill. Its rule text and its skills are shown here before it is applied, and nothing is written to a file until you accept it.',
       ),
       ...(offerPending ? [this.offer(suggested)] : []),
       this.group('Applied', applied.length > 0 ? applied.map((a) => this.appliedRow(a)) : [note('Nothing applied yet.')]),
@@ -79,15 +79,32 @@ export class BundlesTab extends HTMLElement {
     const text = el('div', 'text')
     text.append(el('strong', 'title', bundle.name), el('span', 'summary', `${bundle.source} \u00b7 v${bundle.version} \u00b7 ${targetLabel(bundle.target)}`))
     row.append(text)
-    if (this.expanded.has(id)) row.append(el('pre', 'bundle-text', bundle.text))
+    const hasText = bundle.text.trim() !== ''
+    const skills = bundle.skills ?? []
+    if (this.expanded.has(id)) {
+      if (hasText) row.append(el('pre', 'bundle-text', bundle.text))
+      if (skills.length > 0) row.append(this.skillsList(skills))
+    }
     const controls = el('div', 'controls')
-    controls.append(button(this.expanded.has(id) ? 'Hide rules' : 'Show rules', () => this.toggle(id)))
+    const shown = hasText && skills.length > 0 ? 'details' : skills.length > 0 ? 'skills' : 'rules'
+    controls.append(button(this.expanded.has(id) ? `Hide ${shown}` : `Show ${shown}`, () => this.toggle(id)))
     const scope = select('scope', SCOPE_OPTIONS, this.scopeChoice.get(id) ?? 'project')
     scope.addEventListener('change', () => this.scopeChoice.set(id, scope.value as BundleScope))
     controls.append(scope)
     controls.append(button(already ? 'Re-apply' : 'Apply', () => this.dispatchEvent(new BundleAppliedEvent(this.scopeChoice.get(id) ?? 'project', bundle))))
     row.append(controls)
     return row
+  }
+
+  /** The name and description of every skill a bundle would add, shown before it is applied. */
+  private skillsList(skills: BundleSkill[]): HTMLElement {
+    const list = el('ul', 'bundle-skills')
+    for (const skill of skills) {
+      const item = el('li', 'bundle-skill')
+      item.append(el('strong', '', skill.name), el('span', '', `: ${skill.description}`))
+      list.append(item)
+    }
+    return list
   }
 
   private toggle(id: string): void {

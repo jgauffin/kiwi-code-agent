@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { indexSkills as indexUnder } from '../src/agent/skills/skill-index'
+import { BUNDLE_MARKER_FILE, indexSkills as indexUnder, indexSkillsDetailed, writeSkillsPlugin, type SkillBundleSource } from '../src/agent/skills/skill-index'
 import { skillTool } from '../src/agent/openai-session/tools/skill'
 import { ReadTracker } from '../src/agent/openai-session/tools/read-tracker'
 import { toDefinition, type ToolContext } from '../src/agent/openai-session/tools/tool'
@@ -28,6 +28,14 @@ async function skill(folder: string, content: string, root = '.claude', base = d
 }
 
 const indexSkills = (cwd: string) => indexUnder(cwd, home)
+
+const owner: SkillBundleSource = { source: 'product', name: 'bug-repro', version: '1.0.0' }
+
+/** A skill a bundle installed: the same layout as `skill()`, marked with the bundle that owns it. */
+async function bundledSkill(folder: string, content: string, root = '.kiwi', base = dir, bundle: SkillBundleSource = owner): Promise<void> {
+  await skill(folder, content, root, base)
+  await writeFile(join(base, root, 'skills', folder, BUNDLE_MARKER_FILE), JSON.stringify(bundle))
+}
 
 describe('skill index', () => {
   it('lists_each_skill_by_frontmatter_name_and_description', async () => {
@@ -100,6 +108,42 @@ describe('skill index', () => {
     await mkdir(join(dir, '.claude', 'skills', 'empty'), { recursive: true })
     expect(await indexSkills(dir)).toEqual([])
   })
+
+  it('a_skill_a_bundle_installed_is_marked_with_its_source_bundle_name_and_version', async () => {
+    await bundledSkill('bug-repro', '---\nname: bug-repro\ndescription: Reproduce a bug first.\n---\nbody')
+    const skills = await indexSkills(dir)
+    expect(skills[0]!.bundle).toEqual(owner)
+  })
+
+  it('a_hand_written_skill_carries_no_bundle_marking', async () => {
+    await skill('forms', '---\nname: relaxjs-forms\ndescription: Building forms.\n---\nbody')
+    const skills = await indexSkills(dir)
+    expect(skills[0]!.bundle).toBeUndefined()
+  })
+
+  it('the_persons_own_skill_wins_a_name_clash_with_a_bundles_skill_even_from_a_root_that_normally_overrides', async () => {
+    // The profile's own skill would normally lose to the workspace's under root order; a bundle's
+    // skill at the workspace must not be the one that wins just because it comes from that root.
+    await skill('a', '---\nname: shared\ndescription: From the person.\n---\nbody', '.kiwi', home)
+    await bundledSkill('b', '---\nname: shared\ndescription: From a bundle.\n---\nbody', '.kiwi', dir)
+    const skills = await indexSkills(dir)
+    expect(skills.map((s) => [s.name, s.description, s.bundle])).toEqual([['shared', 'From the person.', undefined]])
+  })
+
+  it('a_bundle_skill_that_lost_a_name_clash_is_named_as_not_applied', async () => {
+    await skill('a', '---\nname: shared\ndescription: From the person.\n---\nbody', '.kiwi', home)
+    await bundledSkill('b', '---\nname: shared\ndescription: From a bundle.\n---\nbody', '.kiwi', dir)
+    const { shadowed } = await indexSkillsDetailed(dir, home)
+    expect(shadowed).toEqual([{ name: 'shared', bundle: owner }])
+  })
+
+  it('two_bundle_skills_of_the_same_name_are_not_reported_as_shadowed_the_later_root_still_wins', async () => {
+    await bundledSkill('a', '---\nname: shared\ndescription: Profile bundle.\n---\nbody', '.kiwi', home, { ...owner, version: '1.0.0' })
+    await bundledSkill('b', '---\nname: shared\ndescription: Workspace bundle.\n---\nbody', '.kiwi', dir, { ...owner, version: '2.0.0' })
+    const { skills, shadowed } = await indexSkillsDetailed(dir, home)
+    expect(shadowed).toEqual([])
+    expect(skills.map((s) => [s.description, s.bundle?.version])).toEqual([['Workspace bundle.', '2.0.0']])
+  })
 })
 
 describe('Skill tool', () => {
@@ -127,5 +171,35 @@ describe('Skill tool', () => {
     const result = await skillTool(await indexSkills(dir)).execute({ name: 'nope' }, ctx)
     expect(result.isError).toBe(true)
     expect(result.text).toContain('relaxjs-forms')
+  })
+
+  it('a_bundled_skill_is_offered_and_loads_like_any_other', async () => {
+    await bundledSkill('bug-repro', '---\nname: bug-repro\ndescription: Reproduce a bug first.\n---\nWrite the failing test first.')
+    const skills = await indexSkills(dir)
+    const definition = toDefinition(skillTool(skills))
+    expect(definition.description).toContain('- bug-repro: Reproduce a bug first.')
+    const result = await skillTool(skills).execute({ name: 'bug-repro' }, ctx)
+    expect(result.isError).toBe(false)
+    expect(result.context).toContain('Write the failing test first.')
+  })
+})
+
+describe('writeSkillsPlugin', () => {
+  it('mirrors_every_resolved_skill_including_a_bundled_one_under_its_own_name', async () => {
+    await skill('forms', '---\nname: relaxjs-forms\ndescription: Building forms.\n---\nbody')
+    await bundledSkill('bug-repro', '---\nname: bug-repro\ndescription: Reproduce a bug first.\n---\nWrite the failing test first.')
+    const pluginDir = join(dir, 'plugin')
+    await writeSkillsPlugin(pluginDir, await indexSkills(dir))
+    expect(await readFile(join(pluginDir, 'skills', 'relaxjs-forms', 'SKILL.md'), 'utf8')).toContain('Building forms.')
+    expect(await readFile(join(pluginDir, 'skills', 'bug-repro', 'SKILL.md'), 'utf8')).toContain('Write the failing test first.')
+  })
+
+  it('drops_a_skill_removed_since_the_last_build_rather_than_leaving_it_behind', async () => {
+    await skill('a', '---\nname: gone\ndescription: Removed since.\n---\nbody')
+    const pluginDir = join(dir, 'plugin')
+    await writeSkillsPlugin(pluginDir, await indexSkills(dir))
+    await rm(join(dir, '.claude', 'skills', 'a'), { recursive: true, force: true })
+    await writeSkillsPlugin(pluginDir, await indexSkills(dir))
+    await expect(readFile(join(pluginDir, 'skills', 'gone', 'SKILL.md'), 'utf8')).rejects.toThrow()
   })
 })

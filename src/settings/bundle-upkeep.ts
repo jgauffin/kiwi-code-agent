@@ -1,5 +1,5 @@
 import { homedir } from 'node:os'
-import { appliedBundles, appliedBundleText, applyBundle, matchingBundles, removeBundle, workspaceSignals, type BundleScope } from '../agent/instructions/bundles'
+import { appliedBundles, appliedBundleText, applyBundle, hashBundleSkills, installedSkillsHash, matchingBundles, removeBundle, workspaceSignals, type BundleScope } from '../agent/instructions/bundles'
 import {
   applyRequiredBundles,
   bundleSources,
@@ -54,11 +54,14 @@ export class BundleUpkeep {
       applied: () => appliedBundles(workspaceRoot, this.home),
       apply: async (scope, bundle) => {
         await applyBundle(scope, bundle, workspaceRoot, this.home)
-        await this.recordHash(scope, bundle.source, bundle.name, hashBundleText(bundle.text))
+        // A skills-only bundle writes no block, so there is no text to hash against a later hand edit.
+        if (bundle.text.trim() !== '') await this.recordHash(scope, bundle.source, bundle.name, hashBundleText(bundle.text))
+        if ((bundle.skills?.length ?? 0) > 0) await this.recordSkillHash(scope, bundle.source, bundle.name, hashBundleSkills(bundle.skills!))
       },
       remove: async (scope, source, name) => {
         await removeBundle(scope, source, name, workspaceRoot, this.home)
         await this.clearHash(scope, source, name)
+        await this.clearSkillHash(scope, source, name)
       },
     }
   }
@@ -85,6 +88,10 @@ export class BundleUpkeep {
     return this.deps.config.get<Record<string, string>>('bundleHashes', {})
   }
 
+  private skillHashes(): Record<string, string> {
+    return this.deps.config.get<Record<string, string>>('bundleSkillHashes', {})
+  }
+
   private fetchAll(): Promise<FetchedSource[]> {
     return Promise.all(fetchableSources(this.named(), new Set(this.accepted())).map((source) => fetchSource(source, this.git, this.cache)))
   }
@@ -102,6 +109,19 @@ export class BundleUpkeep {
     await this.deps.config.update('bundleHashes', rest, 'workspace')
   }
 
+  /** A bundle's skills were last written to match this hash; kept per workspace so a later hand edit to one of their files can be told from an update before it replaces them. */
+  private async recordSkillHash(scope: BundleScope, source: string, name: string, hash: string): Promise<void> {
+    if (!this.deps.config.hasWorkspace()) return
+    await this.deps.config.update('bundleSkillHashes', { ...this.skillHashes(), [hashKey(scope, source, name)]: hash }, 'workspace')
+  }
+
+  private async clearSkillHash(scope: BundleScope, source: string, name: string): Promise<void> {
+    if (!this.deps.config.hasWorkspace()) return
+    const rest = { ...this.skillHashes() }
+    delete rest[hashKey(scope, source, name)]
+    await this.deps.config.update('bundleSkillHashes', rest, 'workspace')
+  }
+
   private async acceptNewSources(): Promise<void> {
     for (const repo of pendingSources(this.named(), new Set(this.accepted()))) {
       const choice = await this.deps.ask(`accept "${repo}" as a bundle source?`, 'Accept', 'Not now')
@@ -115,6 +135,8 @@ export class BundleUpkeep {
     for (const bundle of newlyRequired) {
       const text = await appliedBundleText(bundle.scope, bundle.source, bundle.name, workspaceRoot, this.home)
       if (text !== undefined) await this.recordHash(bundle.scope, bundle.source, bundle.name, hashBundleText(text))
+      const full = fetched.find((source) => source.source === bundle.source)?.bundles.find((b) => b.name === bundle.name)
+      if (full?.skills?.length) await this.recordSkillHash(bundle.scope, bundle.source, bundle.name, hashBundleSkills(full.skills))
     }
     if (newlyRequired.length > 0) {
       this.deps.log(`bundles: applied ${newlyRequired.length} required bundle${newlyRequired.length === 1 ? '' : 's'} (${newlyRequired.map((b) => b.name).join(', ')})`)
@@ -131,12 +153,16 @@ export class BundleUpkeep {
         name: a.name,
         writtenHash: this.hashes()[hashKey(a.scope, a.source, a.name)],
         currentText: await appliedBundleText(a.scope, a.source, a.name, workspaceRoot, this.home),
+        writtenSkillsHash: this.skillHashes()[hashKey(a.scope, a.source, a.name)],
+        currentSkillsHash: await installedSkillsHash(a.scope, a.source, a.name, workspaceRoot, this.home),
       })),
     )
     const dismissed = new Map(Object.entries(config.get<Record<string, string>>('bundleUpdatesDismissed', {})))
     for (const update of bundleUpdates(fetched, applied, checks, dismissed)) {
-      const editedNote = update.handEdited ? ' Its block was edited by hand since it was applied.' : ''
-      const choice = await this.deps.ask(`"${update.name}" has a newer version (${update.from} → ${update.to}).${editedNote}`, 'Update', 'Keep this version')
+      const notes: string[] = []
+      if (update.handEdited) notes.push(' Its block was edited by hand since it was applied.')
+      if (update.skillHandEdited) notes.push(' A skill file was edited by hand since it was installed.')
+      const choice = await this.deps.ask(`"${update.name}" has a newer version (${update.from} → ${update.to}).${notes.join('')}`, 'Update', 'Keep this version')
       if (choice === 'Update') {
         const candidate = fetched.find((source) => source.source === update.source)?.bundles.find((b) => b.name === update.name)
         if (candidate) await this.port.apply(update.scope, candidate)

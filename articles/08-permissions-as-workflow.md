@@ -66,6 +66,8 @@ How many permission prompts did you actually read today?
 
 That closes the series. Seven mechanisms, one idea: put the human judgement where it is cheap, and let machinery do the parts that machinery can be trusted with.
 
+None of it is the fast path, and it is not meant to be. The workflow spends tokens and minutes a single chat turn does not, and returns features that say what you meant, that do not contradict each other, and specs that stay on disk and are checked again every time another feature is planned or another session changes the code. Slower process, more accurate result, and nothing that degrades while you are not looking.
+
 ---
 
 *Kiwipow Agent is on the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=CoderrAB.kiwipow-agent); source and issues are on [GitHub](https://github.com/jgauffin/kiwi-code-agent).*

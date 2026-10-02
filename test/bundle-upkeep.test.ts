@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { appliedBundles, appliedBundleText, bundleFilePath, type Bundle } from '../src/agent/instructions/bundles'
+import { appliedBundles, appliedBundleText, bundleFilePath, bundleSkillsPath, type Bundle } from '../src/agent/instructions/bundles'
 import { PRODUCT_CATALOG_SOURCE, hashBundleText, type GitPort, type SourceCachePort } from '../src/agent/instructions/bundle-sources'
 import { BundleUpkeep } from '../src/settings/bundle-upkeep'
 import type { SettingsTarget } from '../src/settings/protocol'
@@ -60,6 +60,9 @@ function memoryCache(): SourceCachePort {
 
 const styleV1 = { name: 'style', version: '1.0.0', text: 'Reproduce a bug before fixing it.' }
 const styleV2 = { name: 'style', version: '2.0.0', text: 'Reproduce a bug before fixing it, with a test.' }
+const skill = { name: 'bug-repro', description: 'Reproduce first.', files: [{ path: 'SKILL.md', content: '# Bug repro' }] }
+const styleV1WithSkill = { ...styleV1, skills: [skill] }
+const styleV2WithSkill = { ...styleV2, skills: [skill] }
 
 function upkeep(config: ConfigPort, git: GitPort, answers: (string | undefined)[] = []) {
   const asked: string[] = []
@@ -151,6 +154,33 @@ describe('BundleUpkeep.onActivate', () => {
     await subject.onActivate()
 
     expect(asked).toEqual(['"style" has a newer version (1.0.0 → 2.0.0). Its block was edited by hand since it was applied.'])
+  })
+
+  it('a_skill_file_edited_by_hand_since_it_was_installed_says_so_before_an_update_replaces_it', async () => {
+    const config = fakeConfig()
+    const { subject: before } = upkeep(config.port, fakeGit({}))
+    await before.port.apply('project', { ...styleV1WithSkill, source: PRODUCT_CATALOG_SOURCE, target: { kind: 'any' } } satisfies Bundle)
+    const skillPath = join(bundleSkillsPath('project', cwd, home), 'bug-repro', 'SKILL.md')
+    await writeFile(skillPath, 'Someone changed this by hand.', 'utf8')
+    const { subject, asked } = upkeep(config.port, fakeGit({ [PRODUCT_CATALOG_SOURCE]: { bundles: [styleV2WithSkill] } }), [undefined])
+
+    await subject.onActivate()
+
+    expect(asked).toEqual(['"style" has a newer version (1.0.0 → 2.0.0). A skill file was edited by hand since it was installed.'])
+  })
+
+  it('an_unreachable_source_never_removes_or_disables_an_installed_skill', async () => {
+    const config = fakeConfig()
+    const { subject: before } = upkeep(config.port, fakeGit({ [PRODUCT_CATALOG_SOURCE]: { bundles: [styleV1WithSkill] } }))
+    await before.port.apply('project', { ...styleV1WithSkill, source: PRODUCT_CATALOG_SOURCE, target: { kind: 'any' } } satisfies Bundle)
+    const skillPath = join(bundleSkillsPath('project', cwd, home), 'bug-repro', 'SKILL.md')
+    expect(await readFile(skillPath, 'utf8')).toContain('Bug repro')
+
+    // A fresh cache with nothing in it and a git that answers nothing: the source cannot be reached and never was.
+    const { subject } = upkeep(config.port, fakeGit({}))
+    await subject.onActivate()
+
+    expect(await readFile(skillPath, 'utf8')).toContain('Bug repro')
   })
 
   it('without_a_project_open_nothing_is_asked_fetched_or_written', async () => {

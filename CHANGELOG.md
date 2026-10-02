@@ -2,6 +2,8 @@
 
 ## 0.2.5
 
+- Accepting a newer version of a bundle replaces the skills it installed whole, dropping any file the new version no longer carries; removing a bundle removes its skills the same way. A required bundle's skills are reinstalled if you delete them, and a skill file you edited by hand is called out before an update would overwrite it. A source that can't be reached never touches a skill already installed.
+- A bundle's skills install into `.kiwi/skills`: a project-scope bundle commits them with the workspace, a person-scope one puts them under your own profile for every workspace you open. They load on both engines, the same as a skill you wrote yourself; your own skill wins over a bundle's of the same name, and the bundle's is reported as not applied.
 - Escape in the prompt box stops the running turn, the same as the Stop button.
 - A feature left at `implemented` is offered on the new-session screen as *implemented: ready to verify*, and its plan bar stands on Verify once its working files are swept. Before, a feature built but not yet proven was shown as finished and there was no way back into it.
 - A code check can be asked for on a feature that is built but not yet proven; before, only one still waiting to be implemented could be checked.

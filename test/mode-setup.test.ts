@@ -120,4 +120,14 @@ describe('modeSetup', () => {
     const setup = await modeSetup(record('plan', { feature: 'f' }), ctx)
     expect(setup.systemPrompt).not.toContain('[instructions]')
   })
+
+  it.each(['implement', 'code-plan', 'reconcile', 'cleanup'] as const)('the %s session carries the Skill tool, a bundled skill among what it may load', async (mode) => {
+    const setup = await modeSetup(record(mode, { feature: 'f', files: ['a.ts'] }), ctx)
+    expect(setup.toolNames).toContain('Skill')
+  })
+
+  it('the blind planner never carries the Skill tool: it decides what to build, not how code is written', async () => {
+    const setup = await modeSetup(record('plan', { feature: 'f' }), ctx)
+    expect(setup.toolNames).not.toContain('Skill')
+  })
 })

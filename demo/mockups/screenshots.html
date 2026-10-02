@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kiwipow Agent screenshot mockups</title>
+<link rel="stylesheet" href="../../src/chat/webview/style.css">
+<style>
+  /* Mockup only: the real webview fills the window; here each panel is sized to its content so several fit one page. */
+  body { background: var(--vscode-editor-background); padding: 1rem; display: flex; flex-direction: column; gap: 2rem; }
+  chat-app { height: auto; max-width: 920px; }
+  chat-app > .chats { flex: none; }
+  h2.shot { font: 600 12px var(--vscode-font-family); color: var(--vscode-descriptionForeground); text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 0.4rem; }
+  /* Dark Modern, the theme the other article screenshots were taken in. Swap body's class to vscode-light for the Light Modern set below. */
+  :root {
+    --vscode-font-family: "Segoe UI", "Segoe WPC", system-ui, sans-serif;
+    --vscode-font-size: 13px;
+    --vscode-editor-font-family: Consolas, "Courier New", monospace;
+    --vscode-editor-font-size: 14px;
+    --vscode-foreground: #cccccc;
+    --vscode-descriptionForeground: #9d9d9d;
+    --vscode-disabledForeground: #cccccc80;
+    --vscode-editor-background: #1f1f1f;
+    --vscode-editorWidget-background: #202020;
+    --vscode-editorWidget-border: #454545;
+    --vscode-panel-border: #2b2b2b;
+    --vscode-widget-border: #313131;
+    --vscode-focusBorder: #0078d4;
+    --vscode-textLink-foreground: #4daafc;
+    --vscode-errorForeground: #f85149;
+    --vscode-editorWarning-foreground: #cca700;
+    --vscode-inputValidation-warningBorder: #cca700;
+    --vscode-inputValidation-warningBackground: #352a05;
+    --vscode-button-background: #0078d4;
+    --vscode-button-foreground: #ffffff;
+    --vscode-button-hoverBackground: #026ec1;
+    --vscode-button-secondaryBackground: #313131;
+    --vscode-button-secondaryForeground: #cccccc;
+    --vscode-button-secondaryHoverBackground: #3c3c3c;
+    --vscode-button-border: #ffffff1f;
+    --vscode-input-background: #313131;
+    --vscode-input-foreground: #cccccc;
+    --vscode-input-border: #3c3c3c;
+    --vscode-list-hoverBackground: #2a2d2e;
+    --vscode-sideBarSectionHeader-background: #181818;
+    --vscode-textCodeBlock-background: #2b2b2b;
+    --vscode-gitDecoration-addedResourceForeground: #81b88b;
+    --vscode-gitDecoration-deletedResourceForeground: #c74e39;
+    --vscode-gitDecoration-modifiedResourceForeground: #e2c08d;
+    --vscode-diffEditor-insertedTextBackground: rgba(155, 185, 85, 0.2);
+    --vscode-diffEditor-removedTextBackground: rgba(255, 0, 0, 0.2);
+    --vscode-charts-green: #89d185;
+    --vscode-charts-red: #f14c4c;
+    --vscode-charts-blue: #3794ff;
+    --vscode-charts-orange: #d18616;
+    --vscode-testing-iconPassed: #73c991;
+  }
+
+  body.vscode-light {
+    --vscode-foreground: #3b3b3b;
+    --vscode-descriptionForeground: #717171;
+    --vscode-disabledForeground: #a0a0a0;
+    --vscode-editor-background: #ffffff;
+    --vscode-editorWidget-background: #f8f8f8;
+    --vscode-editorWidget-border: #c8c8c8;
+    --vscode-panel-border: #e5e5e5;
+    --vscode-widget-border: #e5e5e5;
+    --vscode-focusBorder: #005fb8;
+    --vscode-textLink-foreground: #005fb8;
+    --vscode-errorForeground: #e51400;
+    --vscode-editorWarning-foreground: #bf8803;
+    --vscode-inputValidation-warningBorder: #b89500;
+    --vscode-inputValidation-warningBackground: #f6f5d2;
+    --vscode-button-background: #005fb8;
+    --vscode-button-hoverBackground: #0258a8;
+    --vscode-button-secondaryBackground: #e5e5e5;
+    --vscode-button-secondaryForeground: #3b3b3b;
+    --vscode-button-secondaryHoverBackground: #cccccc;
+    --vscode-button-border: #cecece;
+    --vscode-input-background: #ffffff;
+    --vscode-input-foreground: #3b3b3b;
+    --vscode-input-border: #cecece;
+    --vscode-list-hoverBackground: #f0f0f0;
+    --vscode-sideBarSectionHeader-background: #f8f8f8;
+    --vscode-textCodeBlock-background: #f3f3f3;
+    --vscode-gitDecoration-addedResourceForeground: #587c0c;
+    --vscode-gitDecoration-deletedResourceForeground: #ad0707;
+    --vscode-gitDecoration-modifiedResourceForeground: #895503;
+    --vscode-diffEditor-removedTextBackground: rgba(255, 0, 0, 0.1);
+    --vscode-charts-green: #587c0c;
+    --vscode-charts-red: #ad0707;
+    --vscode-charts-blue: #005fb8;
+    --vscode-charts-orange: #bf8803;
+    --vscode-testing-iconPassed: #587c0c;
+  }
+</style>
+</head>
+<body class="vscode-dark">
+
+<section>
+<h2 class="shot">runscript-diff.png</h2>
+<chat-app><div class="chats"><div class="transcript">
+  <permission-card class="permission">
+    <div class="prompt">
+      <strong>Apply changes to 4 files</strong>
+      <div class="whole">
+        <div class="body">
+          <div class="changes">
+      <div class="change">
+        <button type="button" class="link file" title="Open demo/order-cancellation/order.ts">demo/order-cancellation/order.ts</button>
+        <div class="edit">
+        <pre class="diff">
+          <span class="diff-line hunk">@@ -1,5 +1,7 @@</span>
+          <span class="diff-line ctx"> <span class="code hljs"><span class="hljs-keyword">export</span> <span class="hljs-keyword">type</span> <span class="hljs-title class_">OrderLine</span> = { sku: <span class="hljs-built_in">string</span>; price: <span class="hljs-built_in">number</span>; quantity: <span class="hljs-built_in">number</span> }</span></span>
+          <span class="diff-line ctx"> <span class="code hljs"></span></span>
+          <span class="diff-line add">+<span class="code hljs"><span class="hljs-keyword">export</span> <span class="hljs-keyword">type</span> <span class="hljs-title class_">RefundDecision</span> = { amount: <span class="hljs-built_in">number</span>; manualReview: <span class="hljs-built_in">boolean</span> }</span></span>
+          <span class="diff-line add">+<span class="code hljs"></span></span>
+          <span class="diff-line ctx"> <span class="code hljs"><span class="hljs-keyword">export</span> <span class="hljs-keyword">type</span> <span class="hljs-title class_">Order</span> = {</span></span>
+          <span class="diff-line ctx"> <span class="code hljs">  id: <span class="hljs-built_in">string</span></span></span>
+          <span class="diff-line ctx"> <span class="code hljs">  status: <span class="hljs-string">'open'</span> | <span class="hljs-string">'shipped'</span> | <span class="hljs-string">'cancelled'</span></span></span>
+        </pre>
+        </div>
+      </div>
+      <div class="change">
+        <button type="button" class="link file" title="Open demo/order-cancellation/refund-policy.ts">demo/order-cancellation/refund-policy.ts</button>
+        <div class="edit">
+        <pre class="diff">
+          <span class="diff-line hunk">@@ -1,12 +1,11 @@</span>
+          <span class="diff-line del">-<span class="code hljs"><span class="hljs-keyword">import</span> <span class="hljs-keyword">type</span> { <span class="hljs-title class_">Order</span> } <span class="hljs-keyword">from</span> <span class="hljs-string">'./order'</span></span></span>
+          <span class="diff-line add">+<span class="code hljs"><span class="hljs-keyword">import</span> <span class="hljs-keyword">type</span> { <span class="hljs-title class_">Order</span>, <span class="hljs-title class_">RefundDecision</span> } <span class="hljs-keyword">from</span> <span class="hljs-string">'./order'</span></span></span>
+          <span class="diff-line ctx"> <span class="code hljs"></span></span>
+          <span class="diff-line ctx"> <span class="code hljs"><span class="hljs-keyword">const</span> MANUAL_REVIEW_LIMIT = <span class="hljs-number">500</span></span></span>
+          <span class="diff-line ctx"> <span class="code hljs"></span></span>
+          <span class="diff-line ctx"> <span class="code hljs"><span class="hljs-keyword">export</span> <span class="hljs-keyword">class</span> <span class="hljs-title class_">RefundPolicy</span> {</span></span>
+          <span class="diff-line del">-<span class="code hljs">  amountFor(order: <span class="hljs-title class_">Order</span>): <span class="hljs-built_in">number</span> {</span></span>
+          <span class="diff-line add">+<span class="code hljs">  decide(order: <span class="hljs-title class_">Order</span>): <span class="hljs-title class_">RefundDecision</span> {</span></span>
+          <span class="diff-line ctx"> <span class="code hljs">    <span class="hljs-keyword">const</span> paid = order.lines.reduce((sum, line) =&gt; sum + line.price * line.quantity, <span class="hljs-number">0</span>)</span></span>
+          <span class="diff-line del">-<span class="code hljs">    <span class="hljs-keyword">if</span> (paid &gt; MANUAL_REVIEW_LIMIT) <span class="hljs-keyword">return</span> <span class="hljs-number">0</span></span></span>
+          <span class="diff-line del">-<span class="code hljs">    <span class="hljs-keyword">return</span> paid</span></span>
+          <span class="diff-line add">+<span class="code hljs">    <span class="hljs-keyword">return</span> { amount: paid, manualReview: paid &gt; MANUAL_REVIEW_LIMIT }</span></span>
+          <span class="diff-line ctx"> <span class="code hljs">  }</span></span>
+          <span class="diff-line ctx"> <span class="code hljs"></span></span>
+          <span class="diff-line ctx"> <span class="code hljs">  <span class="hljs-keyword">async</span> pay(orderId: <span class="hljs-built_in">string</span>, amount: <span class="hljs-built_in">number</span>): <span class="hljs-title class_">Promise</span>&lt;<span class="hljs-built_in">void</span>&gt; {</span></span>
+        </pre>
+        </div>
+      </div>
+      <div class="change">
+        <button type="button" class="link file" title="Open demo/order-cancellation/cancel-order.ts">demo/order-cancellation/cancel-order.ts</button>
+        <div class="edit">
+        <pre class="diff">
+          <span class="diff-line hunk">@@ -12,8 +12,9 @@</span>
+          <span class="diff-line ctx"> <span class="code hljs">    <span class="hljs-keyword">if</span> (!order) <span class="hljs-keyword">throw</span> <span class="hljs-keyword">new</span> <span class="hljs-title class_">Error</span>(<span class="hljs-string">`Unknown order ${orderId}`</span>)</span></span>
+          <span class="diff-line ctx"> <span class="code hljs">    <span class="hljs-keyword">if</span> (order.status === <span class="hljs-string">'cancelled'</span>) <span class="hljs-keyword">return</span></span></span>
+          <span class="diff-line ctx"> <span class="code hljs"></span></span>
+          <span class="diff-line del">-<span class="code hljs">    <span class="hljs-keyword">const</span> amount = this.refunds.amountFor(order)</span></span>
+          <span class="diff-line add">+<span class="code hljs">    <span class="hljs-keyword">const</span> decision = this.refunds.decide(order)</span></span>
+          <span class="diff-line ctx"> <span class="code hljs">    <span class="hljs-keyword">await</span> this.orders.markCancelled(orderId, reason)</span></span>
+          <span class="diff-line del">-<span class="code hljs">    <span class="hljs-keyword">if</span> (amount &gt; <span class="hljs-number">0</span>) <span class="hljs-keyword">await</span> this.refunds.pay(orderId, amount)</span></span>
+          <span class="diff-line add">+<span class="code hljs">    <span class="hljs-keyword">if</span> (decision.manualReview) <span class="hljs-keyword">await</span> this.orders.flagForReview(orderId, decision.amount)</span></span>
+          <span class="diff-line add">+<span class="code hljs">    <span class="hljs-keyword">else</span> <span class="hljs-keyword">await</span> this.refunds.pay(orderId, decision.amount)</span></span>
+          <span class="diff-line ctx"> <span class="code hljs">  }</span></span>
+          <span class="diff-line ctx"> <span class="code hljs">}</span></span>
+        </pre>
+        </div>
+      </div>
+      <div class="change">
+        <button type="button" class="link file" title="Open demo/order-cancellation/order-repository.ts">demo/order-cancellation/order-repository.ts</button>
+        <div class="edit">
+        <pre class="diff">
+          <span class="diff-line hunk">@@ -9,4 +9,8 @@</span>
+          <span class="diff-line ctx"> <span class="code hljs">  <span class="hljs-keyword">async</span> markCancelled(orderId: <span class="hljs-built_in">string</span>, reason: <span class="hljs-built_in">string</span>): <span class="hljs-title class_">Promise</span>&lt;<span class="hljs-built_in">void</span>&gt; {</span></span>
+          <span class="diff-line ctx"> <span class="code hljs">    console.log(<span class="hljs-string">`Cancelling ${orderId}: ${reason}`</span>)</span></span>
+          <span class="diff-line ctx"> <span class="code hljs">  }</span></span>
+          <span class="diff-line add">+<span class="code hljs"></span></span>
+          <span class="diff-line add">+<span class="code hljs">  <span class="hljs-keyword">async</span> flagForReview(orderId: <span class="hljs-built_in">string</span>, amount: <span class="hljs-built_in">number</span>): <span class="hljs-title class_">Promise</span>&lt;<span class="hljs-built_in">void</span>&gt; {</span></span>
+          <span class="diff-line add">+<span class="code hljs">    console.log(<span class="hljs-string">`Refund of ${amount} for ${orderId} awaits manual review`</span>)</span></span>
+          <span class="diff-line add">+<span class="code hljs">  }</span></span>
+          <span class="diff-line ctx"> <span class="code hljs">}</span></span>
+        </pre>
+        </div>
+      </div>
+          </div>
+        </div>
+        <div class="actions">
+          <button type="button" class="allow">Allow</button>
+          <button type="button" class="deny">Deny</button>
+        </div>
+      </div>
+      <input type="text" class="deny-reason" placeholder="Reason if denied (optional)">
+    </div>
+  </permission-card>
+</div></div></chat-app>
+</section>
+
+<section>
+<h2 class="shot">stale-write.png &mdash; variant A, the other session named</h2>
+<chat-app><div class="chats"><div class="transcript">
+      <details class="tool done failed" open>
+        <summary>RunScript</summary>
+        <pre class="input">{
+  "script": "const dir = 'demo/order-cancellation'\n\nawait edit({\n  file_path: dir + '/order.ts',\n  old_string: 'export type Order = {',\n  ..."
+}</pre>
+        <pre class="result error">Blocked: File changed on disk since it was read: demo/order-cancellation/cancel-order.ts. Read it again before editing. It was changed by a Kiwipow Agent implement session on "order-cancellation".</pre>
+      </details>
+</div></div></chat-app>
+</section>
+
+<section>
+<h2 class="shot">stale-write.png &mdash; variant B, changed outside the agent</h2>
+<chat-app><div class="chats"><div class="transcript">
+      <details class="tool done failed" open>
+        <summary>RunScript</summary>
+        <pre class="input">{
+  "script": "const dir = 'demo/order-cancellation'\n\nawait edit({\n  file_path: dir + '/order.ts',\n  old_string: 'export type Order = {',\n  ..."
+}</pre>
+        <pre class="result error">Blocked: File changed on disk since it was read: demo/order-cancellation/cancel-order.ts. Read it again before editing. It was changed from outside Kiwipow Agent.</pre>
+      </details>
+</div></div></chat-app>
+</section>
+
+</body>
+</html>

@@ -41,7 +41,7 @@ import { CODE_READING, CodeOutlineGate } from './agent/code-outline/code-outline
 import { codeSearchTool } from './agent/code-outline/code-search'
 import { RepeatedEdit } from './agent/script/repeated-edit'
 import { SCRIPT_WRITING, ScriptGate } from './agent/script/script-gate'
-import { indexSkills } from './agent/skills/skill-index'
+import { indexSkillsDetailed, writeSkillsPlugin, type SkillEntry } from './agent/skills/skill-index'
 import { connectMcp } from './agent/mcp/mcp-connect'
 import type { McpServerSet } from './agent/mcp/mcp-servers'
 import { McpToolHost } from './agent/mcp/mcp-tool-host'
@@ -145,11 +145,17 @@ export class SessionEngines {
       await mkdir(join(workspaceRoot, scratch), { recursive: true }).catch((error: unknown) =>
         output.appendLine(`could not create the scratch folder: ${errorMessage(error)}`),
       )
+    // Indexed per session so a skill added to the workspace, the profile or a bundle shows up on the next one.
+    const { skills, shadowed } = await indexSkillsDetailed(workspaceRoot, undefined, join(this.pluginPath, 'skills'))
+    this.traceStart(record, `${skills.length} skills indexed`)
+    for (const skip of shadowed)
+      this.traceStart(record, `bundle "${skip.bundle.name}" v${skip.bundle.version}'s skill "${skip.name}" not applied: the person's own skill of that name wins`)
     const start: EngineStart = {
       record,
       setup,
       ownTools,
       mcpServers,
+      skills,
       whereLine: `\n${workingDirectoryInstruction(workspaceRoot)}`,
       scratchLine: scratch ? `\n${scratchInstruction(scratch)}` : '',
       onProgress,
@@ -162,11 +168,16 @@ export class SessionEngines {
     }
   }
 
-  private async startClaude({ record, setup, ownTools, mcpServers, whereLine, scratchLine, onProgress }: EngineStart): Promise<CodeSession> {
+  private async startClaude({ record, setup, ownTools, mcpServers, skills, whereLine, scratchLine, onProgress }: EngineStart): Promise<CodeSession> {
     const { profile } = record
     const { context, output, workspaceRoot } = this.deps
     // Until the engine reports in, the wait is on its own start-up.
     onProgress('Starting Claude Code')
+    // The engine only discovers skills from its own plugin folders and the project's `.claude/skills`,
+    // never `.kiwi/skills`; mirroring the already-resolved list into one throwaway plugin folder is
+    // what makes a workspace, profile or bundled skill offered here exactly as the other engine sees it.
+    const skillsPluginPath = vscode.Uri.joinPath(context.globalStorageUri, 'skills-plugin', record.id).fsPath
+    await writeSkillsPlugin(skillsPluginPath, skills)
     // A key stored on the provider is the user's choice over the editor's Claude login; none leaves that login in charge.
     const anthropicKey = profile.apiKeySecret ? await context.secrets.get(secretKey(profile.apiKeySecret)) : undefined
     this.traceStart(record, anthropicKey ? `using the API key "${profile.apiKeySecret}"` : 'no API key stored, using the editor login')
@@ -188,7 +199,7 @@ export class SessionEngines {
       profile,
       cwd: workspaceRoot,
       cliPath: this.cliPath,
-      pluginPath: this.pluginPath,
+      pluginPath: skillsPluginPath,
       runtime: nodeRuntime(),
       ...(record.engineSessionId ? { resumeEngineSessionId: record.engineSessionId } : {}),
       // Telemetry posts go through axios, which cannot authenticate against a
@@ -214,7 +225,7 @@ export class SessionEngines {
     })
   }
 
-  private async startOpenAi({ record, setup, ownTools, mcpServers, whereLine, scratchLine, onProgress }: EngineStart): Promise<CodeSession> {
+  private async startOpenAi({ record, setup, ownTools, mcpServers, skills, whereLine, scratchLine, onProgress }: EngineStart): Promise<CodeSession> {
     const { profile } = record
     const { context, output, workspaceRoot } = this.deps
     if (!profile.baseUrl) throw new Error(`Profile "${profile.name}" has no baseUrl`)
@@ -223,9 +234,6 @@ export class SessionEngines {
     const apiKey = await context.secrets.get(secretKey(profile.apiKeySecret))
     if (!apiKey) throw new Error(`No API key stored for "${profile.apiKeySecret}". Set it on the provider in Kiwipow Agent settings.`)
     onProgress(`Connecting to ${profile.name}`)
-    // Indexed per session so a skill added to the workspace or the user profile shows up on the next one.
-    const skills = await indexSkills(workspaceRoot, undefined, join(this.pluginPath, 'skills'))
-    this.traceStart(record, `${skills.length} skills indexed`)
     const allTools = [readTool, writeTool, editTool, multiEditTool, globTool, grepTool, ...ownTools, bashTool(), ...(skills.length ? [skillTool(skills)] : [])]
     // A session that ran before, or continues one that did, picks its conversation up from the run log.
     const resume = record.engineSessionId
@@ -375,6 +383,8 @@ type EngineStart = {
   setup: ModeSetup
   ownTools: Tool[]
   mcpServers: Awaited<ReturnType<McpServerSet['current']>> | undefined
+  /** The workspace's, the person's and every bundle's skills, already resolved to one entry per name. */
+  skills: SkillEntry[]
   whereLine: string
   scratchLine: string
   onProgress: StartProgress

@@ -78,6 +78,14 @@ Planning wants the strongest reasoner you can afford. Implementation wants throu
 
 ![Profiles: a model chosen per step](https://raw.githubusercontent.com/jgauffin/kiwi-code-agent/main/articles/images/profiles.png)
 
+## It costs more, on purpose
+
+All of this spends more than asking a chat for the feature. A planning session, a check that reads the code, a decision you rule on, an implementation run per task, a test run, a cleanup pass: the tokens are real and so are the minutes.
+
+What they buy is accuracy that lasts. The feature says what you meant rather than what the code happened to do. It does not contradict the feature you shipped last month, because the planner reads that one's approved spec as settled before it writes a rule. Every rule is proven by a test named after it, so a year later a failure tells you which promise broke. And the spec does not stop mattering once the board is green: every session that changes code checks the specs covering what it is about to touch, and asks you before it breaks a rule. Nothing erodes quietly between releases.
+
+A fast agent hands you code in a minute and sends the bill later, in a review, a bug report, or a rule nobody remembers deciding. Slower process, more accurate result.
+
 ## Who it's for, and who it isn't
 
 It is for teams whose intent lives somewhere other than the code: docs, specs, tickets, a README that says what the product is. The more that is written down, the better the planner plans, and the more a forgotten workaround stands out against it.
