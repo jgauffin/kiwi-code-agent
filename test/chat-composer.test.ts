@@ -43,6 +43,19 @@ describe('ChatComposer while a question waits', () => {
   })
 })
 
+describe('ChatComposer keys', () => {
+  it('escape_in_the_prompt_box_stops_the_run', async () => {
+    const { InterruptRequestedEvent } = await import('../src/chat/webview/events')
+    const node = composer()
+    let asked = 0
+    node.addEventListener(InterruptRequestedEvent.type, () => asked++)
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    node.querySelector('textarea')!.dispatchEvent(event)
+    expect(asked).toBe(1)
+    expect(event.defaultPrevented).toBe(true)
+  })
+})
+
 describe('ChatComposer linked files', () => {
   function submit(node: InstanceType<typeof ChatComposer>, text: string): void {
     node.querySelector('textarea')!.value = text

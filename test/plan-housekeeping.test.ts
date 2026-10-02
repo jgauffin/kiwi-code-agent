@@ -40,7 +40,7 @@ afterEach(async () => {
 })
 
 describe('plan housekeeping', () => {
-  it('finished_feature_idle_a_week_is_marked_implemented_and_loses_its_working_files', async () => {
+  it('finished_feature_idle_a_week_is_marked_verified_and_loses_its_working_files', async () => {
     await workspace(
       {
         'specs/audit.spec.md': approvedSpec,
@@ -51,18 +51,38 @@ describe('plan housekeeping', () => {
       8,
     )
     const report = await sweepPlans(dir, NOW)
-    expect(await readFile(join(dir, 'specs/audit.spec.md'), 'utf8')).toContain('status: implemented')
+    expect(await readFile(join(dir, 'specs/audit.spec.md'), 'utf8')).toContain('status: verified')
     expect(await exists('.kiwi/specs/audit.tasks.json')).toBe(false)
     expect(await exists('.kiwi/specs/audit.review.md')).toBe(false)
     expect(await exists('.kiwi/specs/audit.decisions.md')).toBe(false)
-    expect(report.implemented).toEqual(['specs/audit.spec.md'])
+    expect(report.recorded).toEqual([{ path: 'specs/audit.spec.md', status: 'verified' }])
   })
 
-  it('finished_feature_touched_this_week_keeps_its_working_files', async () => {
+  it('finished_feature_is_marked_verified_without_waiting_for_its_working_files_to_be_due', async () => {
     await workspace({ 'specs/audit.spec.md': approvedSpec, '.kiwi/specs/audit.tasks.json': finishedBoard }, 6)
     await sweepPlans(dir, NOW)
-    expect(await readFile(join(dir, 'specs/audit.spec.md'), 'utf8')).toContain('status: approved')
+    expect(await readFile(join(dir, 'specs/audit.spec.md'), 'utf8')).toContain('status: verified')
     expect(await exists('.kiwi/specs/audit.tasks.json')).toBe(true)
+  })
+
+  it('every_task_tested_with_a_failed_run_is_marked_implemented', async () => {
+    const failed = renderBoard(withRecord(board(task('Log', { state: 'tested' })), { at: '2026-09-14T10:00:00Z', ok: false, text: '' }))
+    await workspace({ 'specs/audit.spec.md': approvedSpec, '.kiwi/specs/audit.tasks.json': failed }, 1)
+    await sweepPlans(dir, NOW)
+    expect(await readFile(join(dir, 'specs/audit.spec.md'), 'utf8')).toContain('status: implemented')
+  })
+
+  it('a_task_reopened_after_verification_takes_the_status_back_to_approved', async () => {
+    const verifiedSpec = '---\nfeature: Audit\nstatus: verified\n---\n# Audit\n'
+    await workspace({ 'specs/audit.spec.md': verifiedSpec, '.kiwi/specs/audit.tasks.json': renderBoard(board(task('Log', { state: 'in_progress' }))) }, 1)
+    await sweepPlans(dir, NOW)
+    expect(await readFile(join(dir, 'specs/audit.spec.md'), 'utf8')).toContain('status: approved')
+  })
+
+  it('a_spec_left_implemented_by_an_earlier_version_with_no_board_is_recorded_as_verified', async () => {
+    await workspace({ 'specs/audit.spec.md': '---\nfeature: Audit\nstatus: implemented\n---\n# Audit\n' }, 90)
+    await sweepPlans(dir, NOW)
+    expect(await readFile(join(dir, 'specs/audit.spec.md'), 'utf8')).toContain('status: verified')
   })
 
   it('feature_under_development_keeps_its_working_files_however_old', async () => {
@@ -76,7 +96,7 @@ describe('plan housekeeping', () => {
     const report = await sweepPlans(dir, NOW)
     expect(report.converted).toEqual(['.kiwi/specs/audit.tasks.md'])
     // Converted, it is still a finished board untouched for a week: the sweep takes it in the same run.
-    expect(report.implemented).toEqual(['specs/audit.spec.md'])
+    expect(report.recorded).toEqual([{ path: 'specs/audit.spec.md', status: 'verified' }])
     expect(await exists('.kiwi/specs/audit.tasks.json')).toBe(false)
   })
 
@@ -93,7 +113,8 @@ describe('plan housekeeping', () => {
     )
     await sweepPlans(dir, NOW)
     expect(await exists('.kiwi/specs/audit.tasks.json')).toBe(true)
-    expect(await readFile(join(dir, 'specs/audit.spec.md'), 'utf8')).toContain('status: approved')
+    // The cleanup is the dev's to decide on, so it never holds the feature short of verified.
+    expect(await readFile(join(dir, 'specs/audit.spec.md'), 'utf8')).toContain('status: verified')
   })
 
   it('working_files_without_a_spec_are_removed_after_a_week', async () => {
@@ -141,7 +162,7 @@ describe('plan housekeeping', () => {
   it('a_finished_feature_whose_week_old_working_files_are_still_under_plan_is_swept_in_the_same_run', async () => {
     await workspace({ 'specs/audit.spec.md': approvedSpec, 'specs/audit.tasks.md': legacyFinishedBoard, 'specs/audit.review.md': '# Review\n' }, 8)
     await sweepPlans(dir, NOW)
-    expect(await readFile(join(dir, 'specs/audit.spec.md'), 'utf8')).toContain('status: implemented')
+    expect(await readFile(join(dir, 'specs/audit.spec.md'), 'utf8')).toContain('status: verified')
     for (const path of ['specs/audit.tasks.md', 'specs/audit.review.md', '.kiwi/specs/audit.tasks.json', '.kiwi/specs/audit.review.md']) {
       expect(await exists(path)).toBe(false)
     }
@@ -156,6 +177,6 @@ describe('plan housekeeping', () => {
 
   it('a_workspace_without_plans_sweeps_nothing', async () => {
     await workspace({}, 0)
-    expect(await sweepPlans(dir, NOW)).toEqual({ converted: [], moved: [], blocked: [], implemented: [], removed: [] })
+    expect(await sweepPlans(dir, NOW)).toEqual({ converted: [], moved: [], blocked: [], recorded: [], removed: [] })
   })
 })

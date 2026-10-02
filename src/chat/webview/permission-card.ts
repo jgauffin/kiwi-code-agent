@@ -6,6 +6,7 @@ import type { RememberedRules } from '../protocol'
 import { editDiffView, fileLink } from './edit-diff'
 import { PermissionDecidedEvent } from './events'
 import { fillCode } from './highlight'
+import { renderMarkdown } from './markdown'
 
 type PermissionRequest = Extract<SessionEvent, { type: 'permission_request' }>
 
@@ -60,16 +61,10 @@ export class PermissionCard extends HTMLElement {
       </div>
       <div class="whole" unless="isShell">
         <div class="body"></div>
-        <fieldset class="covers" if="hasScopes">
-          <legend>Covers</legend>
-          <label loop="s in scopes"><input type="radio" name="{{coversName}}" checked="{{s.picked}}" r-change="pickScope(s)"> {{s.label}}</label>
-        </fieldset>
         <div class="actions" if="pending">
           <button type="button" class="allow-session" if="wholeRule" title="{{sessionTitle}}" r-click="allowWhole('session')">Allow {{wholeLabel}} for session</button>
           <button type="button" class="allow-project" if="wholeRule" title="{{projectTitle}}" r-click="allowWhole('project')">Allow {{wholeLabel}} for project</button>
-          <button type="button" class="allow" unless="wholeRule" disabled="{{widened}}" r-click="allowWhole('once')">Allow</button>
-          <button type="button" class="allow-session" if="hasScopes" disabled="{{onlyThisCall}}" title="{{scopeSessionTitle}}" r-click="allowScope('session')">Allow for session</button>
-          <button type="button" class="allow-project" if="hasScopes" disabled="{{onlyThisCall}}" title="{{scopeProjectTitle}}" r-click="allowScope('project')">Allow for project</button>
+          <button type="button" class="allow" unless="wholeRule" r-click="allowWhole('once')">Allow</button>
           <button type="button" class="deny" r-click="denyWhole()">Deny</button>
         </div>
       </div>
@@ -82,8 +77,6 @@ export class PermissionCard extends HTMLElement {
   private answers: (LineAnswer | undefined)[] = []
   private decision: PermissionDecision['kind'] | undefined
   private remembered: RememberedRules = { session: [], project: [] }
-  /** How far a write's answer reaches: 0 is this call alone, then each of the request's write scopes. */
-  private scope = 0
   /** Only ever what the host reports back, since the field itself is gone by then. */
   private reason = ''
   private filled = false
@@ -118,12 +111,10 @@ export class PermissionCard extends HTMLElement {
     const settled = this.decision === 'allow' && isShellTool(r.toolName)
     const isShell = isShellTool(r.toolName) && this.lines.length > 0
     // A tool is allowed as a whole, whatever its arguments; a file write per call, the session's "Allow writes" covers the rest.
-    const wholeRule = isShell ? undefined : projectRuleFor(r.toolName)
+    // A plan is answered for itself: a remembered rule would wave the next plan through unread.
+    const wholeRule = isShell || planText(r) !== undefined ? undefined : projectRuleFor(r.toolName)
     // The engine may ask on its own account about a call every rule lets through; no line is left to answer, so the call is.
     const askedAnyway = isShell && this.decision === undefined && this.lines.every((line) => line.passes)
-    // A write to one project file can be answered for the file or its folder; only a wider scope is worth remembering.
-    const writeScopes = isShell ? [] : (r.writeScopes ?? [])
-    const picked = writeScopes[this.scope - 1]
     this.classList.toggle('allowed', settled)
     this.template.render(
       {
@@ -140,13 +131,6 @@ export class PermissionCard extends HTMLElement {
         wholeLabel: wholeRule ? ruleLabel(wholeRule) : '',
         sessionTitle: `Later calls of ${wholeRule} pass without asking, for as long as this session lasts.`,
         projectTitle: `Writes ${wholeRule} to kiwiAgent.permissions.allow in this workspace.`,
-        hasScopes: writeScopes.length > 0 && this.decision === undefined,
-        coversName: `covers-${r.requestId}`,
-        scopes: [{ index: 0, label: 'this edit' }, ...writeScopes.map((s, i) => ({ index: i + 1, label: s.label }))].map((s) => ({ ...s, picked: s.index === this.scope })),
-        widened: picked !== undefined,
-        onlyThisCall: picked === undefined,
-        scopeSessionTitle: picked ? `Later writes to ${picked.label} pass without asking, for as long as this session lasts.` : '',
-        scopeProjectTitle: picked ? `Writes ${picked.rule} to kiwiAgent.permissions.allow in this workspace.` : '',
         pending: this.decision === undefined,
         outcome: this.outcomeText(),
       },
@@ -154,15 +138,6 @@ export class PermissionCard extends HTMLElement {
         answerLine: (l: LineRow, answer: LineAnswer) => this.answer(l.index, answer),
         allowWhole: (scope: 'session' | 'project') => {
           if (wholeRule) this.remembered[scope].push(wholeRule)
-          this.decide({ kind: 'allow' })
-        },
-        pickScope: (s: { index: number }) => {
-          this.scope = s.index
-          this.render()
-        },
-        allowScope: (scope: 'session' | 'project') => {
-          if (!picked) return
-          this.remembered[scope].push(picked.rule)
           this.decide({ kind: 'allow' })
         },
         denyWhole: () => this.decide({ kind: 'deny' }),
@@ -188,12 +163,17 @@ export class PermissionCard extends HTMLElement {
       this.querySelectorAll<HTMLElement>('li.command > code').forEach((code, index) => fillCode(code, this.lines[index]?.text ?? '', 'bash'))
       return
     }
-    // A file edit is asked about as the change it would make, decided or not: its arguments are never what the user answers.
-    this.querySelector('div.body')?.appendChild(r.edits ? changeList(r.edits) : r.edit ? editDiffView(r.edit) : jsonInput(r.input))
+    // A file edit is asked about as the change it would make, and a plan as the plan, decided or not:
+    // their arguments are never what the user answers.
+    const plan = planText(r)
+    this.querySelector('div.body')?.appendChild(
+      r.edits ? changeList(r.edits) : r.edit ? editDiffView(r.edit) : plan !== undefined ? planView(plan) : jsonInput(r.input),
+    )
   }
 
   /** A shell call is named by what it is for, as the model described it; another call by its tool. */
   private heading(r: PermissionRequest): string {
+    if (planText(r) !== undefined) return 'Proceed with this plan?'
     if (!isShellTool(r.toolName)) return r.title ?? r.toolName
     const described = (r.input as { description?: unknown })?.description
     return typeof described === 'string' && described.trim() ? described : (r.description ?? 'Run a command')
@@ -248,15 +228,10 @@ export class PermissionCard extends HTMLElement {
     if (this.decision === undefined) return ''
     if (this.decision === 'deny') return this.reason ? `Denied: ${this.reason}` : 'Denied'
     const kept = [
-      ...this.remembered.session.map((rule) => `${this.rememberedLabel(rule)} for session`),
-      ...this.remembered.project.map((rule) => `${this.rememberedLabel(rule)} for project`),
+      ...this.remembered.session.map((rule) => `${ruleLabel(rule)} for session`),
+      ...this.remembered.project.map((rule) => `${ruleLabel(rule)} for project`),
     ]
     return kept.length ? `Allowed (${kept.join(', ')})` : 'Allowed'
-  }
-
-  /** A write scope is named as the prompt offered it, `docs/` rather than its glob. */
-  private rememberedLabel(rule: string): string {
-    return this.request?.writeScopes?.find((s) => s.rule === rule)?.label ?? ruleLabel(rule)
   }
 }
 
@@ -271,6 +246,20 @@ function changeList(edits: FileEditChange[]): HTMLElement {
     list.appendChild(item)
   }
   return list
+}
+
+/** The plan a model asks to leave planning with, as the markdown it wrote. */
+function planText(r: PermissionRequest): string | undefined {
+  if (r.toolName !== 'ExitPlanMode') return undefined
+  const plan = (r.input as { plan?: unknown } | null)?.plan
+  return typeof plan === 'string' && plan.trim() ? plan : undefined
+}
+
+function planView(plan: string): HTMLElement {
+  const article = document.createElement('article')
+  article.className = 'plan'
+  renderMarkdown(plan, article, true)
+  return article
 }
 
 function jsonInput(input: unknown): HTMLElement {

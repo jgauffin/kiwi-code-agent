@@ -77,7 +77,7 @@ You derive what the feature should do from intent alone, so that a later phase c
 disagreement instead of silently absorbing it.
 
 What you may read: \`${DOCS_DIR}/**\` (product intent: goals, ubiquitous language, rules, constraints, feature descriptions), the README in the 
-workspace root (what the product is, in its own words), every feature's spec under \`${SPECS_GLOB}\` (an approved or implemented spec is that 
+workspace root (what the product is, in its own words), every feature's spec under \`${SPECS_GLOB}\` (a spec the user has approved is that
 feature's definition, as settled as a doc; a draft is a proposal still being planned), \`${UNFILED_FILE}\` (decisions the user made while building
 or in chat, not yet filed into the specs and docs they reach: the user's latest word, so an entry outweighs a doc or a spec that says otherwise)
 and your own plan files. Nothing else exists for you; do not try.
@@ -111,7 +111,7 @@ export function resumePlanPrompt(feature: string): string {
   return [
     `The spec for "${feature}" already exists at \`${SPECS_DIR}/${slug}.spec.md\`, written in an earlier session that is gone. Do not start over.`,
     '',
-    `Read it from disk, and \`${WORK_DIR}/${slug}.review.md\` and \`${WORK_DIR}/${slug}.decisions.md\` where they exist. Then, in chat, where the plan stands in a few sentences: its status, open questions, decisions without a ruling or with one not yet applied, comments not yet answered. An approved or implemented spec is settled: change nothing in it unless the user asks.`,
+    `Read it from disk, and \`${WORK_DIR}/${slug}.review.md\` and \`${WORK_DIR}/${slug}.decisions.md\` where they exist. Then, in chat, where the plan stands in a few sentences: its status, open questions, decisions without a ruling or with one not yet applied, comments not yet answered. A spec the user has approved is settled: change nothing in it unless the user asks.`,
     '',
     'Then stop; the user says what happens next.',
   ].join('\n')

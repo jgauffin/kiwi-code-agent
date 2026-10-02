@@ -14,6 +14,7 @@ export type PickUp = { plans: ResumablePlan[]; chats: ResumableChat[]; unfiled: 
 const STATUS_HINT: Record<ResumablePlan['status'], string> = {
   draft: 'draft: review, check or approve',
   approved: 'approved: ready to implement',
+  implemented: 'implemented: ready to verify',
 }
 
 const when = (iso: string): string => new Date(iso).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
@@ -109,7 +110,7 @@ export class NewSessionView extends HTMLElement {
       <label>What should be done?
         <textarea name="prompt" rows="6" required placeholder="The change, and why" r-input="edit('prompt', event)"></textarea>
       </label>
-      <p class="hint">The planner settles what you want before it reads the code, then plans in chat. Continue in chat builds it.</p>
+      <p class="hint">The planner settles what you want before it reads the code, then plans in chat. Approve plan builds it.</p>
       <div class="submit">
         <button type="submit">Start planning</button>
         <linked-files-row class="linked-files"></linked-files-row>

@@ -1,11 +1,12 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { SPECS_DIR, WORK_DIR } from './blind-plan'
-import { statusOf, type SpecStatus } from './spec-file'
+import { statusOf } from './spec-file'
+import { isSettled, type SpecStatus } from './spec-status'
 import { readTasks, TASKS_SUFFIX, tasksDone, type TasksState } from './tasks-file'
 
-/** `verified` is derived from the task board and its verification record, as the plan bar does. */
-export type PlanStatus = 'draft' | 'approved' | 'verified'
+/** The spec's own status, with `verified` derived from the board for a spec that has yet to record it. */
+export type PlanStatus = SpecStatus
 
 export type PlanSummary = { feature: string; path: string; status: PlanStatus }
 
@@ -28,14 +29,14 @@ export async function listPlans(cwd: string): Promise<PlanSummary[]> {
     const text = await readFile(path, 'utf8')
     const status = statusOf(text)
     const tasks = await readTasks(join(cwd, WORK_DIR, `${slug}${TASKS_SUFFIX}`))
-    plans.push({ feature: featureOf(text) ?? slug, path, status: status === 'implemented' || finished(status, tasks) ? 'verified' : status })
+    plans.push({ feature: featureOf(text) ?? slug, path, status: finished(status, tasks) ? 'verified' : status })
   }
   return plans
 }
 
 /** Built and proven: the tests passed. What the cleanup left is the dev's to decide on, so it never holds the feature open. */
 export function finished(status: SpecStatus, tasks: TasksState): boolean {
-  return status === 'approved' && tasks.exists && tasksDone(tasks.tasks) && tasks.verification?.ok === true
+  return isSettled(status) && tasks.exists && tasksDone(tasks.tasks) && tasks.verification?.ok === true
 }
 
 /** The specs still waiting for approval. */

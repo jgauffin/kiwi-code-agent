@@ -1,6 +1,6 @@
 ---
 feature: Chosing models
-status: approved
+status: verified
 ---
 
 # Chosing models

@@ -11,6 +11,7 @@ import { projectScriptsInstruction } from '../permissions/package-scripts'
 import { rulingKind, type Decision } from './decisions'
 import { UNFILED_DECISIONS } from './unfiled-decisions'
 import type { SpecState } from './spec-file'
+import { isSettled, isVerified } from './spec-status'
 import type { Item, Spec } from './spec-model'
 import { liveTasks, sameName, tasksDone, type Task, type TaskBoard, type TasksState } from './tasks-file'
 import { READ_TASKS_TOOL, UPDATE_TASK_TOOL, detail, marker } from '../openai-session/tools/task-board'
@@ -116,8 +117,8 @@ function rulesOf(spec: Spec, names: string[]): Item[] {
  */
 export function assertImplementable(spec: SpecState, tasks: TasksState): void {
   if (!spec.exists) throw new Error('No spec to implement: plan the feature first.')
-  if (spec.status === 'implemented') throw new Error('The feature is implemented: plan the next change as its own feature.')
-  if (spec.status !== 'approved') throw new Error('The spec is not approved: rule on the decisions and approve it first.')
+  if (isVerified(spec.status)) throw new Error('The feature is verified: plan the next change as its own feature.')
+  if (!isSettled(spec.status)) throw new Error('The spec is not approved: rule on the decisions and approve it first.')
   if (!tasks.exists) throw new Error('No tasks to implement yet: the board is derived once the spec is checked against the code.')
   if (tasksDone(tasks.tasks)) {
     throw new Error('Every task is tested: plan the next change as its own feature rather than reopening this one.')
@@ -185,7 +186,6 @@ Rules:
 - ${CODE_READING} Before writing a test, outline the test file or folder it belongs in: the rule may already be proven, and the neighbouring tests show the pattern to follow.
 - ${EDIT_WRITING}
 - ${SCRIPT_WRITING}${scripts ? `\n- ${scripts}` : ''}
-- Shell commands already run in ${cwd}; do not cd there.
 - Tested means you ran the task's tests and they passed, not that you stopped. A task you marked tested without a run of your own is a false record.
 - When your task is tested or blocked, say in a sentence or two what you did and stop. The next task starts in a run of its own, and the full sweep runs once every task is tested; it is not your test run.`
 }

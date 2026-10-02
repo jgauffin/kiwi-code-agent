@@ -59,7 +59,7 @@ describe('what a doc migration is told to judge', () => {
 
   it('settled_specs_only_a_draft_spec_never_costs_a_doc_section', () => {
     expect(prompt).toContain('Only a settled spec counts.')
-    expect(prompt).toContain('status approved or implemented')
+    expect(prompt).toContain('A spec the user has approved is what the product says, whatever stage its build has reached')
     expect(prompt).toContain('a draft is still a proposal')
   })
 

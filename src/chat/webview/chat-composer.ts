@@ -34,7 +34,8 @@ type Switches = {
 }
 
 /**
- * Prompt input. Enter sends, Shift+Enter breaks the line. Held while the
+ * Prompt input. Enter sends, Shift+Enter breaks the line, Escape stops the
+ * run as the Stop button does. Held while the
  * session waits on a question card: a prompt sent then would queue behind
  * the unanswered question and look like a hang. Stop stays available.
  *
@@ -151,6 +152,10 @@ export class ChatComposer extends HTMLElement {
           if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault()
             this.send()
+          }
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            this.dispatchEvent(new InterruptRequestedEvent())
           }
         },
         changeModel: (event: Event) => this.dispatchEvent(new SessionModelChangedEvent((event.target as HTMLSelectElement).value)),

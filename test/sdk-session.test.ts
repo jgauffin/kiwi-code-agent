@@ -752,7 +752,7 @@ describe('SdkSession', () => {
       await settle()
       expect(sent(fake).filter((t) => t === COMPACT_COMMAND)).toHaveLength(1)
       expect(events.filter((e) => e.type === 'turn_done')).toEqual([expect.objectContaining({ isError: true })])
-      expect(events).toContainEqual(expect.objectContaining({ type: 'assistant_message', text: 'Prompt is too long' }))
+      expect(events).toContainEqual(expect.objectContaining({ type: 'error', message: 'Prompt is too long' }))
       await session.dispose()
     })
 

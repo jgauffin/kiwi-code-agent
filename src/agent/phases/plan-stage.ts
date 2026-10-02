@@ -2,6 +2,7 @@ import { pendingDecisions, type Decision } from './decisions'
 import { struckItems, type Review } from './plan-review'
 import { standingStrikes } from './review-handoff'
 import type { SpecState } from './spec-file'
+import { isSettled, isVerified, type SpecStatus } from './spec-status'
 import { parseSpec, specFingerprint } from './spec-model'
 import { tasksDone, tasksFresh, type TasksState } from './tasks-file'
 
@@ -31,8 +32,6 @@ export type PlanStage =
 
 export function planStage(spec: SpecState, review: Review, tasks: TasksState, decisions: Decision[] = []): PlanStage {
   if (!spec.exists) return 'missing'
-  // The working files are swept once a feature is implemented; the spec alone says where it stands.
-  if (spec.status === 'implemented') return 'verified'
   if (spec.status === 'draft') {
     const comments = review.rounds.flatMap((r) => r.comments)
     if (comments.some((c) => !c.resolution)) return 'under_review'
@@ -40,9 +39,39 @@ export function planStage(spec: SpecState, review: Review, tasks: TasksState, de
     if (comments.some((c) => !c.closed)) return 'final_draft'
     return 'created'
   }
-  if (!tasks.exists) return pendingDecisions(decisions).length > 0 ? 'ruling' : 'checking'
-  if (!tasksDone(tasks.tasks)) return 'under_development'
-  return tasks.verification?.ok ? 'verified' : 'verification'
+  // The board is the live word while it exists, so a reopened task or a failed re-run outranks the status the spec carries.
+  if (tasks.exists) {
+    if (!tasksDone(tasks.tasks)) return 'under_development'
+    return tasks.verification?.ok ? 'verified' : 'verification'
+  }
+  // The working files are swept once a feature is verified; the spec alone says where it stands.
+  if (spec.status === 'verified') return 'verified'
+  if (spec.status === 'implemented') return 'verification'
+  return pendingDecisions(decisions).length > 0 ? 'ruling' : 'checking'
+}
+
+/**
+ * The status that records a stage in the spec, so the committed file says where
+ * the feature stands once the working files it was derived from are swept.
+ * `undefined` while there is no spec to record it in.
+ */
+export function statusForStage(stage: PlanStage): SpecStatus | undefined {
+  switch (stage) {
+    case 'missing':
+      return undefined
+    case 'created':
+    case 'under_review':
+    case 'final_draft':
+      return 'draft'
+    case 'checking':
+    case 'ruling':
+    case 'under_development':
+      return 'approved'
+    case 'verification':
+      return 'implemented'
+    case 'verified':
+      return 'verified'
+  }
 }
 
 /** The board predates the spec as it stands: a ruling or a revision changed the plan after the board was derived. */
@@ -57,7 +86,7 @@ export function tasksStale(spec: SpecState, tasks: TasksState): boolean {
  * the planner's revision of the rules is what the check has to see.
  */
 export function checkDue(spec: SpecState, tasks: TasksState, decisions: Decision[]): boolean {
-  if (!spec.exists || spec.status !== 'approved') return false
+  if (!spec.exists || !isSettled(spec.status) || isVerified(spec.status)) return false
   if (pendingDecisions(decisions).length > 0) return false
   return !tasks.exists || tasksStale(spec, tasks)
 }

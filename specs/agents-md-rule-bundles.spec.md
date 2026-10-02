@@ -1,6 +1,6 @@
 ---
 feature: Agents.md rule bundles
-status: approved
+status: verified
 ---
 
 # Agents.md rule bundles

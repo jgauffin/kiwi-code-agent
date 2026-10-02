@@ -3,6 +3,7 @@ import type { QuestionOutcome } from '../agent/session/user-question'
 import type { Decision } from '../agent/phases/decisions'
 import type { CommentRef, Review } from '../agent/phases/plan-review'
 import type { PlanStage } from '../agent/phases/plan-stage'
+import type { SpecStatus } from '../agent/phases/spec-status'
 import type { Spec } from '../agent/phases/spec-model'
 import type { CleanupDecision, Task, VerificationRecord } from '../agent/phases/tasks-file'
 import type { UnitKind } from '../agent/cleanup/unit-size'
@@ -35,7 +36,7 @@ export type PlanState = {
   /** Where the feature stands, derived from its files. */
   stage: PlanStage
   /** The spec's front-matter status; `missing` while no spec is written. */
-  status: 'missing' | 'draft' | 'approved' | 'implemented'
+  status: 'missing' | SpecStatus
   /** Spec markdown without its front matter; absent while no spec is written. */
   body?: string
   /** The spec as the contract reads it; absent while no spec is written. */
@@ -130,7 +131,7 @@ export type RunControls = RunRef & {
 export type RunSection = RunRef & { events: SessionEvent[] }
 
 /** A plan on disk the new-session screen offers to pick up; verified ones are finished and not offered. */
-export type ResumablePlan = { feature: string; status: 'draft' | 'approved' }
+export type ResumablePlan = { feature: string; status: 'draft' | 'approved' | 'implemented' }
 
 /** A chat not shown that the new-session screen offers to reopen; its transcript is the context it comes back with. */
 export type ResumableChat = { sessionId: string; title: string; startedAt: string }

@@ -54,6 +54,7 @@ import { MemoryContract, memoryWritingInstructions } from './agent/memory/memori
 import { chatMemorySection, withMemories } from './agent/memory/session-context'
 import { instructionsText, readInstructionFiles, withInstructionFiles } from './agent/instructions/instruction-files'
 import { scratchDir, scratchInstruction } from './agent/scratch/scratch-folder'
+import { workingDirectoryInstruction } from './agent/session/working-directory'
 import { withRepoMap, workspaceRepoMap } from './agent/repo-map/session-context'
 import { outlineDocsMap, withDocsMap, workspaceDocsMap, type DocsMapStyle } from './agent/docs-map/session-context'
 import { renderOutlineMap } from './agent/docs-map/outline-map'
@@ -144,7 +145,15 @@ export class SessionEngines {
       await mkdir(join(workspaceRoot, scratch), { recursive: true }).catch((error: unknown) =>
         output.appendLine(`could not create the scratch folder: ${errorMessage(error)}`),
       )
-    const start: EngineStart = { record, setup, ownTools, mcpServers, scratchLine: scratch ? `\n${scratchInstruction(scratch)}` : '', onProgress }
+    const start: EngineStart = {
+      record,
+      setup,
+      ownTools,
+      mcpServers,
+      whereLine: `\n${workingDirectoryInstruction(workspaceRoot)}`,
+      scratchLine: scratch ? `\n${scratchInstruction(scratch)}` : '',
+      onProgress,
+    }
     switch (record.profile.engine) {
       case 'claude-sdk':
         return this.startClaude(start)
@@ -153,7 +162,7 @@ export class SessionEngines {
     }
   }
 
-  private async startClaude({ record, setup, ownTools, mcpServers, scratchLine, onProgress }: EngineStart): Promise<CodeSession> {
+  private async startClaude({ record, setup, ownTools, mcpServers, whereLine, scratchLine, onProgress }: EngineStart): Promise<CodeSession> {
     const { profile } = record
     const { context, output, workspaceRoot } = this.deps
     // Until the engine reports in, the wait is on its own start-up.
@@ -191,9 +200,9 @@ export class SessionEngines {
       },
       ...(setup.hooks ? { hooks: setup.hooks } : {}),
       ...(setup.systemPrompt !== undefined
-        ? { systemPrompt: setup.systemPrompt + scratchLine + toolNaming }
+        ? { systemPrompt: setup.systemPrompt + whereLine + scratchLine + toolNaming }
         : {
-            appendSystemPrompt: `${DOC_READING}\n${CODE_READING}\n${SCRIPT_WRITING}\n${EDIT_WRITING}\n${projectScriptsInstruction(workspaceRoot)}\n${SPEC_READING}\n${CHAT_DECISIONS}\n${memoryWritingInstructions(workspaceRoot)}${chatMemories ? `\n\n${chatMemories}` : ''}${chatInstructionFiles?.length ? `\n\n${instructionsText(chatInstructionFiles)}` : ''}${scratchLine}${toolNaming}`,
+            appendSystemPrompt: `${DOC_READING}\n${CODE_READING}\n${SCRIPT_WRITING}\n${EDIT_WRITING}\n${projectScriptsInstruction(workspaceRoot)}\n${SPEC_READING}\n${CHAT_DECISIONS}\n${memoryWritingInstructions(workspaceRoot)}${chatMemories ? `\n\n${chatMemories}` : ''}${chatInstructionFiles?.length ? `\n\n${instructionsText(chatInstructionFiles)}` : ''}${whereLine}${scratchLine}${toolNaming}`,
           }),
       ...(setup.toolNames ? { tools: setup.toolNames } : {}),
       compactAtTokens: this.compactAtTokens(profile),
@@ -205,7 +214,7 @@ export class SessionEngines {
     })
   }
 
-  private async startOpenAi({ record, setup, ownTools, mcpServers, scratchLine, onProgress }: EngineStart): Promise<CodeSession> {
+  private async startOpenAi({ record, setup, ownTools, mcpServers, whereLine, scratchLine, onProgress }: EngineStart): Promise<CodeSession> {
     const { profile } = record
     const { context, output, workspaceRoot } = this.deps
     if (!profile.baseUrl) throw new Error(`Profile "${profile.name}" has no baseUrl`)
@@ -234,7 +243,7 @@ export class SessionEngines {
       cwd: workspaceRoot,
       client: new OpenAiClient({ baseUrl: profile.baseUrl, apiKey, fetch: this.tracedFetch(record) }),
       tools: offered,
-      systemPrompt: (setup.systemPrompt ?? (await buildSystemPrompt(workspaceRoot, profile.systemPromptFile))) + scratchLine,
+      systemPrompt: (setup.systemPrompt ?? (await buildSystemPrompt(workspaceRoot, profile.systemPromptFile))) + whereLine + scratchLine,
       ...(resume ? { resume } : {}),
       ...(contextWindow ? { contextWindow } : {}),
       compactAtTokens: this.compactAtTokens(profile),
@@ -366,6 +375,7 @@ type EngineStart = {
   setup: ModeSetup
   ownTools: Tool[]
   mcpServers: Awaited<ReturnType<McpServerSet['current']>> | undefined
+  whereLine: string
   scratchLine: string
   onProgress: StartProgress
 }

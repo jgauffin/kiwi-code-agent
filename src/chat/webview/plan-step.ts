@@ -1,4 +1,5 @@
 import type { CleanupUnit, PlanState, RunFailure } from '../protocol'
+import { isVerified } from '../../agent/phases/spec-status'
 import type { SessionMode } from '../../agent/session/session-manager'
 import type { RunBlock } from '../../agent/session/session-status'
 
@@ -90,7 +91,7 @@ export function planStep(plan: PlanState): PlanStep {
     : derived.next.kind === 'waiting' && !plan.atWork
       ? stopped(derived.current, plan)
       : derived
-  const complete = (plan.status === 'implemented' || plan.stage === 'verified') && !plan.blocked && !plan.cleanup?.live && !plan.verification?.live
+  const complete = plan.stage === 'verified' && !plan.blocked && !plan.cleanup?.live && !plan.verification?.live
   return { ...step, reached: reached(step.current, plan), yours: !complete && (step.next.kind === 'action' || step.next.kind === 'goto'), complete }
 }
 
@@ -144,7 +145,8 @@ export const failureText = (failure: RunFailure): string => `${capitalized(RUN_N
 
 function derive(plan: PlanState): Derived {
   if (plan.status === 'missing') return { current: 'plan', next: { kind: 'waiting', text: 'the planner is writing the spec' } }
-  if (plan.status === 'implemented') return { current: 'cleanup', next: { kind: 'done', text: 'implemented' } }
+  // A swept feature stands on its spec alone: no board is left to offer a cleanup from.
+  if (isVerified(plan.status) && plan.tasks.length === 0) return { current: 'cleanup', next: { kind: 'done', text: 'verified' } }
 
   const pending = pendingRound(plan)
   if (pending) {

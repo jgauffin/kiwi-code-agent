@@ -86,22 +86,24 @@ export class SdkEventMapper {
 
   private mapAssistant(msg: Extract<SDKMessage, { type: 'assistant' }>): SessionEvent[] {
     const parent = parentOf(msg.parent_tool_use_id)
-    const events: SessionEvent[] = []
-    if (msg.error) {
-      events.push({ type: 'error', message: ASSISTANT_ERRORS[msg.error] ?? `Assistant error: ${msg.error}`, fatal: false })
-    }
     const textParts: string[] = []
+    const calls: SessionEvent[] = []
     for (const block of msg.message.content) {
       if (block.type === 'text') {
         textParts.push(block.text)
       } else if (block.type === 'tool_use') {
-        events.push({ type: 'tool_call', toolUseId: block.id, name: bareToolName(block.name), input: block.input, ...parent })
+        calls.push({ type: 'tool_call', toolUseId: block.id, name: bareToolName(block.name), input: block.input, ...parent })
       }
     }
-    if (textParts.length > 0) {
-      events.push({ type: 'assistant_message', messageId: msg.message.id, text: textParts.join(''), ...parent })
+    const text = textParts.join('')
+    // An errored message carries the refusal as its text rather than words
+    // from the model, so it is reported as the error and not as a reply.
+    if (msg.error) {
+      const message = ASSISTANT_ERRORS[msg.error] ?? (text.trim() || `Assistant error: ${msg.error}`)
+      return [{ type: 'error', message, fatal: false }, ...calls]
     }
-    return events
+    if (text.length === 0) return calls
+    return [...calls, { type: 'assistant_message', messageId: msg.message.id, text, ...parent }]
   }
 
   private mapUser(msg: Extract<SDKMessage, { type: 'user' }>): SessionEvent[] {

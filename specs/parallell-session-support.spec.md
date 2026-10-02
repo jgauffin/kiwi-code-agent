@@ -1,6 +1,6 @@
 ---
 feature: Parallell session support
-status: approved
+status: verified
 ---
 
 # Parallell session support

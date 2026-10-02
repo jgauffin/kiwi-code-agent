@@ -243,7 +243,7 @@ describe('the plan session knows what a review asks of it', () => {
     expect(prompt).toContain('.kiwi/specs/order-cancellation.review.md')
     expect(prompt).toContain('.kiwi/specs/order-cancellation.decisions.md')
     expect(prompt).toContain('Do not start over')
-    expect(prompt).toContain('An approved or implemented spec is settled')
+    expect(prompt).toContain('A spec the user has approved is settled')
     expect(prompt).toContain('Then stop')
   })
 })

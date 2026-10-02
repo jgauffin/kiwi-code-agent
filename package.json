@@ -2,7 +2,7 @@
   "name": "kiwipow-agent",
   "displayName": "Kiwipow Agent",
   "description": "Coding sessions in VS Code with a choice of model engine per session.",
-  "version": "0.2.3",
+  "version": "0.2.5",
   "publisher": "CoderrAB",
   "icon": "docs/logos/kiwipow-agent-logo-128.png",
   "galleryBanner": {

@@ -494,6 +494,38 @@ describe('SessionManager', () => {
     }
   })
 
+  it('turning_allow_writes_on_answers_the_prompts_it_covers_and_leaves_the_rest_waiting', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+    try {
+      const engines: FakeSession[] = []
+      const store = memoryStore()
+      const manager = new SessionManager(
+        store,
+        async (r) => {
+          const s = new FakeSession(r.id, r.profile, r.engineSessionId)
+          engines.push(s)
+          return s
+        },
+        (id) => RunLog.forSession(dir, id),
+        () => {},
+        undefined,
+        // Stands in for the policy, which reads the switch off the record: with it on a write passes, a shell call still asks.
+        async (id, call) => (store.list().find((r) => r.id === id)?.allowWrites ?? false) && call.toolName === 'Write',
+      )
+      const record = await manager.create(profile)
+      await manager.send(record.id, 'write it')
+      engines[0]!.out.push({ type: 'permission_request', requestId: 'req-1', toolName: 'Write', input: { file_path: 'a.txt', content: 'x' } })
+      engines[0]!.out.push({ type: 'permission_request', requestId: 'req-2', toolName: 'Bash', input: { command: 'rm -rf dist' } })
+      await tick()
+
+      await manager.setAllowWrites(record.id, true)
+      expect(engines[0]!.answered).toEqual([{ requestId: 'req-1', decision: { kind: 'allow' } }])
+      await manager.disposeAll()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('an_allow_given_after_the_engine_stopped_answers_the_same_call_once_when_the_resumed_engine_asks_again', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'sm-'))
     try {

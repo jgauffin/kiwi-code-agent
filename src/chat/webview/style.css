@@ -1657,28 +1657,32 @@ chat-app {
         gap: 0.4rem;
       }
 
-      /* How far a write's answer reaches, picked before the button that says for how long. */
-      & .covers {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 0.2rem 0.8rem;
-        margin: 0.3rem 0 0.4rem;
-        padding: 0;
-        border: none;
+      /* A plan is read before it is answered, so it scrolls in place rather than pushing the buttons off screen. */
+      & .plan {
+        max-height: 24rem;
+        overflow: auto;
+        margin: 0.3rem 0;
 
-        & legend {
-          float: left;
-          margin-right: 0.2rem;
-          padding: 0;
-          opacity: 0.8;
+        & > :first-child {
+          margin-top: 0;
         }
 
-        & label {
-          display: inline-flex;
-          align-items: center;
-          gap: 0.25rem;
-          font-family: var(--vscode-editor-font-family);
+        & h1,
+        & h2,
+        & h3 {
+          font-size: 1em;
+          margin: 0.6rem 0 0.2rem;
+        }
+
+        & p,
+        & ul,
+        & ol {
+          margin: 0.3rem 0;
+        }
+
+        & ul,
+        & ol {
+          padding-left: 1.2em;
         }
       }
 

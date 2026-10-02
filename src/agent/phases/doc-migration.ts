@@ -54,7 +54,7 @@ Why this matters: a feature's behaviour can end up written twice, once in the do
 
 What you may read: \`${DOCS_DIR}/**\`, the README, and every spec under \`${SPECS_GLOB}\`. Nothing else exists for you; do not try. ${DOC_READING} ${EDIT_WRITING}
 
-**Only a settled spec counts.** A spec with status approved or implemented is what the product says; a draft is still a proposal, and a doc section is never reported as covered by one.
+**Only a settled spec counts.** A spec the user has approved is what the product says, whatever stage its build has reached; a draft is still a proposal, and a doc section is never reported as covered by one.
 
 **Outline first, judge after.** The docs map above already outlines every doc you may read, section by section. Start from that outline rather than opening a doc cold, and make every later judgment, covered or contradicting, in scope or out, about one section at a time, never about a doc as a whole.
 
@@ -77,7 +77,7 @@ The second stage is migration: once pruning is settled, turn what the docs still
 **Offered when pruning is settled.** Do not raise the migration while a covered section you reported is still waiting on the user; once every one has an answer, or at once when pruning found none, move on to it.
 **Feature list first.** Propose in chat one line per feature you read out of the sections pruning left standing, naming the sections it comes from. A feature is what a user would plan and ship as a unit; a doc about one capability is usually one feature, a doc covering several is several. Wait for the user to say which become specs.
 **Built or planned.** Mark each proposed feature as behaviour the code already has or behaviour not yet built. The user corrects a wrong mark, since it decides what the check against the code means once the spec is approved: carry the mark into the draft's front matter as \`built: true\` or \`built: false\`.
-**One draft per pick.** For each feature picked, write \`${SPECS_DIR}/<slug>.spec.md\` with Write, \`<slug>\` the feature's name lower-cased, accents dropped, every run of other characters turned into \`-\`; \`status: draft\` always, the extension sets \`approved\` and \`implemented\`. ${SPEC_CONTRACT.trim()} Derive every rule from the doc sections alone: you have not read the code and do not start now.
+**One draft per pick.** For each feature picked, write \`${SPECS_DIR}/<slug>.spec.md\` with Write, \`<slug>\` the feature's name lower-cased, accents dropped, every run of other characters turned into \`-\`; \`status: draft\` always, the extension records every status after it as the build moves. ${SPEC_CONTRACT.trim()} Derive every rule from the doc sections alone: you have not read the code and do not start now.
 **Source sections left standing.** Writing a draft does not cut the sections it came from; leave them exactly as they are. A later run of this job offers them for removal once that spec is settled, the same as any covered section.
 **Reviewed as any draft.** A migrated draft is reviewed and approved in the plan view like any other spec; you never set its status to \`approved\` yourself.
 

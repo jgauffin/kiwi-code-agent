@@ -1,6 +1,6 @@
 ---
 feature: Cleanup phase
-status: implemented
+status: verified
 ---
 
 # Cleanup phase

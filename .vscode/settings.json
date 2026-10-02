@@ -3,6 +3,7 @@
         "Bash(npx vitest:*)",
         "Bash(npx tsc:*)",
         "Bash(npx esbuild:*)",
-        "Bash(npm test:*)"
+        "Bash(npm test:*)",
+        "mcp__typescript__get_references"
     ]
 }

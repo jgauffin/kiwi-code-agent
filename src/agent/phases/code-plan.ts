@@ -27,7 +27,7 @@ Then, the code. Find what the change builds on: the frameworks and libraries ins
 
 Then, the plan, in chat: what changes and where, what is reused, what is new, and how it is verified. Short enough to scan, concrete enough to build from. Stop and let the developer steer; revise until they agree.
 
-When they agree, tell them to press Continue in chat: the conversation carries on there with the tools to build it.`
+When they agree, tell them to press Approve plan in chat: the conversation carries on there with the tools to build it.`
 }
 
 /** The first prompt of the chat a code plan continues into. */

@@ -1,6 +1,7 @@
 import { compileTemplate } from '@relax.js/core/html'
 import type { PlanState } from '../protocol'
 import type { Decision } from '../../agent/phases/decisions'
+import { isVerified } from '../../agent/phases/spec-status'
 import { PlanFocusRequestedEvent } from './events'
 import { PlanTab } from './plan-tab'
 import { OPTIONS_MARKUP, optionRows, pickOf, type OptionRow } from './plan-ruling-options'
@@ -118,8 +119,8 @@ export class PlanDecisionsTab extends PlanTab {
   /** What the code and the spec disagree on, and the ways to settle it. */
   private card(plan: PlanState, decision: Decision | undefined) {
     const writing = this.editor?.kind === 'ruling' && decision !== undefined && same(this.editor.target, decision.title)
-    // The check runs after approval, so an approved spec takes rulings; only an implemented one is settled.
-    const rulable = plan.status === 'draft' || plan.status === 'approved'
+    // The check runs after approval, so a spec still being built takes rulings; only a verified one is settled.
+    const rulable = plan.status !== 'missing' && !isVerified(plan.status)
     const attention = rulable && decision?.state === 'open' && decision.proposals.length > 0
     return {
       className: `decision ${decision?.state ?? 'open'}${attention ? ' attention' : ''}`,

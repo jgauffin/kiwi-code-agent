@@ -3,6 +3,7 @@ import { sameModelProfile, type ModelProfile, type Step } from './model-profile'
 import type { RunLog } from '../runs/run-log'
 import { answerText, UNANSWERED_RESULT, type QuestionOutcome, type UserQuestionRequest } from './user-question'
 import { nextStatus, underWay, type SessionStatus } from './session-status'
+import type { ToolUse } from './hooks'
 import { errorMessage } from '../../error-message'
 
 /**
@@ -179,6 +180,15 @@ export type EventDecorator = (sessionId: string, event: SessionEvent) => Promise
 
 const noDecoration: EventDecorator = async (_sessionId, event) => event
 
+/**
+ * Whether the rules in force now let a call through without asking. A prompt
+ * still open is read against it when the user turns a switch on instead of
+ * answering: what the switch covers is no longer theirs to click.
+ */
+export type CallPasses = (sessionId: string, call: ToolUse) => Promise<boolean>
+
+const nothingPasses: CallPasses = async () => false
+
 /** A stored record in today's shape: one written before modes existed is a chat, one stored as `opened` has full access. */
 function fromStore(stored: SessionRecord & { opened?: true }): SessionRecord {
   const { opened, ...record } = stored
@@ -206,6 +216,7 @@ export class SessionManager {
     private readonly runLogFor: (sessionId: string) => RunLog,
     private readonly listener: SessionListener,
     private readonly decorate: EventDecorator = noDecoration,
+    private readonly passes: CallPasses = nothingPasses,
   ) {
     this.records = store.list().map(fromStore)
   }
@@ -296,6 +307,21 @@ export class SessionManager {
     if (enabled) record.allowWrites = true
     else delete record.allowWrites
     await this.store.save(this.records)
+    if (enabled) await this.answerWhatPassesNow(record)
+  }
+
+  /**
+   * A switch just turned on answers the prompts it covers: the write the
+   * session is waiting on goes through, rather than needing the click the
+   * switch was meant to spare. What it does not cover is still asked.
+   */
+  private async answerWhatPassesNow(record: SessionRecord): Promise<void> {
+    const live = this.live.get(record.id)
+    if (!live) return
+    for (const request of await this.openRequests(record)) {
+      const call = { toolName: request.toolName, input: request.input, toolUseId: request.toolUseId ?? request.requestId }
+      if (await this.passes(record.id, call)) live.respondToPermission(request.requestId, { kind: 'allow' })
+    }
   }
 
   /** `label` marks text the extension wrote: the chat and the title show it in the text's place. */
@@ -536,12 +562,17 @@ export class SessionManager {
 
   /** The request as logged, if nothing has decided it since. */
   private async openRequest(record: SessionRecord, requestId: string): Promise<PermissionRequest | undefined> {
-    let request: PermissionRequest | undefined
+    return (await this.openRequests(record)).find((request) => request.requestId === requestId)
+  }
+
+  /** Every prompt the log shows as still waiting, in the order they were asked. */
+  private async openRequests(record: SessionRecord): Promise<PermissionRequest[]> {
+    const open = new Map<string, PermissionRequest>()
     for (const event of await this.transcript(record.id)) {
-      if (event.type === 'permission_request' && event.requestId === requestId) request = event
-      if (event.type === 'permission_resolved' && event.requestId === requestId) request = undefined
+      if (event.type === 'permission_request') open.set(event.requestId, event)
+      if (event.type === 'permission_resolved') open.delete(event.requestId)
     }
-    return request
+    return [...open.values()]
   }
 
   /** The question as logged, if nothing has resolved it since; a request is resolved at most once. */

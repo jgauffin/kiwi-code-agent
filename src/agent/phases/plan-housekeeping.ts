@@ -1,9 +1,12 @@
-import { mkdir, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, rename, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { exists, namesIn, readOptional } from '../workspace-files'
 import { SPECS_DIR, WORK_DIR } from './blind-plan'
+import { emptyReview } from './plan-review'
 import { finished } from './plan-list'
-import { statusOf, withStatus } from './spec-file'
+import { planStage, statusForStage } from './plan-stage'
+import { alignSpecStatus, readSpecState, statusOf } from './spec-file'
+import type { SpecStatus } from './spec-status'
 import { readTasks, TASKS_SUFFIX } from './tasks-file'
 import { convertLegacyBoard, LEGACY_TASKS_SUFFIX } from './legacy-tasks'
 
@@ -17,6 +20,8 @@ export const WORKING_FILES_KEPT_MS = 7 * 24 * 60 * 60 * 1000
 
 const WORKING_FILE = /^(.+)\.(review\.md|decisions\.md|tasks\.md|tasks\.json)$/
 
+const SPEC_SUFFIX = '.spec.md'
+
 /** Workspace-relative paths, by what happened to them. */
 export type SweepReport = {
   /** Markdown task boards converted to JSON. */
@@ -25,8 +30,8 @@ export type SweepReport = {
   moved: string[]
   /** Working files left in `specs/` because the working directory already holds one of that name. */
   blocked: string[]
-  /** Specs marked implemented before their working files went. */
-  implemented: string[]
+  /** Specs whose status was rewritten to the stage their files put them at. */
+  recorded: { path: string; status: SpecStatus }[]
   /** Working files deleted. */
   removed: string[]
 }
@@ -38,23 +43,21 @@ export type SweepReport = {
  * from. A draft or a feature under development is never touched, however old.
  */
 export async function sweepPlans(cwd: string, now: Date): Promise<SweepReport> {
-  const report: SweepReport = { converted: [], moved: [], blocked: [], implemented: [], removed: [] }
+  const report: SweepReport = { converted: [], moved: [], blocked: [], recorded: [], removed: [] }
   await moveLegacyFiles(cwd, report)
   const workDir = join(cwd, WORK_DIR)
   for (const name of (await namesIn(workDir)).filter((n) => n.endsWith(LEGACY_TASKS_SUFFIX))) {
     if (await convertLegacyBoard(join(workDir, name))) report.converted.push(`${WORK_DIR}/${name}`)
   }
+  await recordStatuses(cwd, report)
   for (const [slug, files] of bySlug(await namesIn(workDir))) {
     const touched = await Promise.all(files.map(async (f) => (await stat(join(workDir, f))).mtimeMs))
     if (now.getTime() - Math.max(...touched) < WORKING_FILES_KEPT_MS) continue
-    const spec = join(cwd, SPECS_DIR, `${slug}.spec.md`)
-    const text = await readOptional(spec)
-    if (text !== undefined && statusOf(text) !== 'implemented') {
+    const text = await readOptional(join(cwd, SPECS_DIR, `${slug}${SPEC_SUFFIX}`))
+    if (text !== undefined) {
       const tasks = await readTasks(join(workDir, `${slug}${TASKS_SUFFIX}`))
       // A postponed cleanup is the dev's word to come back to it, and the board holds what to come back to.
       if (!finished(statusOf(text), tasks) || (tasks.exists && tasks.cleanup === 'postponed')) continue
-      await writeFile(spec, withStatus(text, 'implemented'), 'utf8')
-      report.implemented.push(`${SPECS_DIR}/${slug}.spec.md`)
     }
     for (const file of files) {
       await rm(join(workDir, file))
@@ -68,6 +71,25 @@ export async function sweepPlans(cwd: string, now: Date): Promise<SweepReport> {
     }
   }
   return report
+}
+
+/**
+ * Every spec records the stage its files put its feature at, so the status
+ * never lags the board and still says where the feature stands once the board
+ * is swept. Which status a stage maps to never turns on the review or the
+ * decisions, so the board alone is read here.
+ */
+async function recordStatuses(cwd: string, report: SweepReport): Promise<void> {
+  const specDir = join(cwd, SPECS_DIR)
+  for (const name of (await namesIn(specDir)).filter((n) => n.endsWith(SPEC_SUFFIX))) {
+    const path = join(specDir, name)
+    const spec = await readSpecState(path)
+    if (!spec.exists) continue
+    const tasks = await readTasks(join(cwd, WORK_DIR, `${name.slice(0, -SPEC_SUFFIX.length)}${TASKS_SUFFIX}`))
+    // `implemented` was the terminal status before it came to name the build, and only a sweep of a verified feature ever wrote it with no board left.
+    const status = spec.status === 'implemented' && !tasks.exists ? 'verified' : statusForStage(planStage(spec, emptyReview(), tasks))
+    if (status !== undefined && (await alignSpecStatus(path, status))) report.recorded.push({ path: `${SPECS_DIR}/${name}`, status })
+  }
 }
 
 async function moveLegacyFiles(cwd: string, report: SweepReport): Promise<void> {

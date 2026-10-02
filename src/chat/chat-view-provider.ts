@@ -3,7 +3,8 @@ import { actingMode, isBuild, isFeatureless, offersAllowWrites, stepOf, type Ses
 import type { ModelProfile, Step } from '../agent/session/model-profile'
 import type { McpServerState, SessionEvent } from '../agent/session/code-session'
 import { appliesModelSwitchNow, blockOf, lastFailure, mostUrgent, nextStatus, takesProfile, type SessionStatus } from '../agent/session/session-status'
-import { readSpecState, setSpecStatus, type SpecState } from '../agent/phases/spec-file'
+import { alignSpecStatus, readSpecState, setSpecStatus, type SpecState } from '../agent/phases/spec-file'
+import { isVerified } from '../agent/phases/spec-status'
 import {
   SPECS_DIR,
   decisionsHandoffPrompt,
@@ -16,11 +17,11 @@ import {
 } from '../agent/phases/blind-plan'
 import { assertAllRuled, assertRulingsSent, compactAppliedDecisions, decisionsFile, decisionsPath, openDecisions, pendingDecisions, readDecisions, withRuling } from '../agent/phases/decisions'
 import { contextPath, readScenarioContext } from '../agent/phases/scenario-context'
-import { listPlans } from '../agent/phases/plan-list'
+import { finished, listPlans } from '../agent/phases/plan-list'
 import { progressLine, reconcileKickoff } from '../agent/phases/reconcile'
 import { assertImplementable, implementationStarts } from '../agent/phases/implement'
 import { codePlanBuildKickoff } from '../agent/phases/code-plan'
-import { checkDue, isApprovable, planStage, tasksStale } from '../agent/phases/plan-stage'
+import { checkDue, isApprovable, planStage, statusForStage, tasksStale } from '../agent/phases/plan-stage'
 import { parseSpec } from '../agent/phases/spec-model'
 import { followRenames, migratePlan, type MigrationReport } from '../agent/phases/migrate-plan'
 import { deriveBoard, readBoard, readTasks, tasksDone, tasksPath, writeBoard, type TasksState } from '../agent/phases/tasks-file'
@@ -338,7 +339,7 @@ export class ChatViewProvider {
     const state = await readSpecState(path)
     if (!state.exists) throw new Error(`No spec for "${feature}" under ${SPECS_DIR}/.`)
     const tasks = await readTasks(tasksPath(this.workspaceRoot, feature))
-    if (state.status === 'implemented' || (state.status === 'approved' && tasks.exists && tasksDone(tasks.tasks) && tasks.verification?.ok)) {
+    if (isVerified(state.status) || finished(state.status, tasks)) {
       throw new Error(`"${feature}" is verified: plan the next change as its own feature.`)
     }
     // The list is newest first; the latest session on the spec is the one that knows it best.
@@ -962,9 +963,9 @@ export class ChatViewProvider {
     const path = this.specPathOf(shown)
     const feature = shown?.feature
     if (!path || !feature) return
-    // Decisions come after approval, so an approved spec takes a ruling; an implemented one is settled.
+    // Decisions come after approval, so a spec still being built takes a ruling; a verified one is settled.
     const spec = await readSpecState(path)
-    if (!spec.exists || spec.status === 'implemented') throw new Error('The feature is implemented: there is nothing left to rule on.')
+    if (!spec.exists || isVerified(spec.status)) throw new Error('The feature is verified: there is nothing left to rule on.')
     const decisions = decisionsPath(this.workspaceRoot, feature)
     await writeFile(decisions, withRuling(await readFile(decisions, 'utf8'), message.decision, message.ruling), 'utf8')
     await this.sendState()
@@ -1100,6 +1101,9 @@ export class ChatViewProvider {
     const tasks: TasksState = await readTasks(tasksPath(this.workspaceRoot, feature))
     const decisions = await readDecisions(decisionsPath(this.workspaceRoot, feature))
     const stage = planStage(state, review, tasks, decisions)
+    // The spec records the stage as the person works, so the status never lags the board and still says where the feature stands once the board is swept.
+    const recorded = statusForStage(stage)
+    if (recorded !== undefined) await alignSpecStatus(path, recorded)
     const spec = state.exists ? parseSpec(state.body) : undefined
     const relativeTo = (file: string) => relative(this.workspaceRoot, file).split('\\').join('/')
     const runs = this.runsOf(record).map((r) => ({ mode: r.mode, status: this.statusOf(r.id) }))
@@ -1114,7 +1118,7 @@ export class ChatViewProvider {
       tasksPath: relativeTo(tasksPath(this.workspaceRoot, feature)),
       decisionsPath: decisionsFile(feature),
       stage,
-      status: state.exists ? state.status : 'missing',
+      status: recorded ?? 'missing',
       ...(state.exists ? { body: state.body } : {}),
       ...(spec ? { spec } : {}),
       stale: tasksStale(state, tasks),

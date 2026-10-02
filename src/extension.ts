@@ -74,7 +74,7 @@ export function activate(context: vscode.ExtensionContext): void {
       for (const path of report.converted) output.appendLine(`plan housekeeping: converted ${path} to JSON`)
       for (const path of report.moved) output.appendLine(`plan housekeeping: moved ${path} to the working files`)
       for (const path of report.blocked) output.appendLine(`plan housekeeping: left ${path}, the working files already hold one of that name`)
-      for (const path of report.implemented) output.appendLine(`plan housekeeping: marked ${path} implemented`)
+      for (const { path, status } of report.recorded) output.appendLine(`plan housekeeping: marked ${path} ${status}`)
       for (const path of report.removed) output.appendLine(`plan housekeeping: removed ${path}`)
     },
     (error: unknown) => output.appendLine(`plan housekeeping failed: ${errorMessage(error)}`),
@@ -174,6 +174,10 @@ export function activate(context: vscode.ExtensionContext): void {
     (id, event) => chat.onSessionEvent(id, event),
     // The edit diff and the command lines are added once, before the event is logged, so a reload shows the same thing.
     async (id, event) => policyFor(id).decorate((await engines.recorderOf(id)?.decorate(event)) ?? event),
+    async (id, call) => {
+      const outcome = await policyFor(id).preToolUse(call)
+      return outcome !== undefined && 'allow' in outcome && outcome.allow === true
+    },
   )
   const permissionStore: PermissionStore = {
     allowForProject: async (rules) => {

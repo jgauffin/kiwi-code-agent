@@ -6,3 +6,7 @@
 - **Access**: what a session may do, `scoped` by its mode or `full`. Granted one way and in place; the session keeps its mode and thread.
 
 Identifiers that say "session" for a thread (`engineSessionId`, `CodeSession`, `SdkSession`, `OpenAiSession`) are pending a rename.
+
+# Changelog
+
+Anything a developer using the extension would notice goes in `CHANGELOG.md` as part of the change: a new or changed behaviour, a setting, a renamed or removed command, something they have to do themselves after upgrading. One line, in the unreleased section for the version in `package.json`, written from their side rather than the code's. Work they never see (refactors, build and packaging, tests, docs) stays out.

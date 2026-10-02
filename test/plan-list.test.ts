@@ -60,8 +60,8 @@ describe('plan list', () => {
     }
   })
 
-  it('an_implemented_spec_is_verified_without_its_working_files', async () => {
-    const dir = await workspace({ 'audit.spec.md': '---\nfeature: Audit\nstatus: implemented\n---\n# Audit\n' })
+  it('a_verified_spec_is_verified_without_its_working_files', async () => {
+    const dir = await workspace({ 'audit.spec.md': '---\nfeature: Audit\nstatus: verified\n---\n# Audit\n' })
     try {
       expect(await listPlans(dir)).toMatchObject([{ feature: 'Audit', status: 'verified' }])
     } finally {

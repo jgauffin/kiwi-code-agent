@@ -36,15 +36,16 @@ export function fileDecisionsPrompt(cwd: string): string {
 
 \`${UNFILED_FILE}\` holds decisions the user made while a feature was built or in chat that reach features other than the one at hand. A feature here is planned blind: the planner reads \`${DOCS_DIR}/**\`, the workspace README and the specs under \`${SPECS_GLOB}\`, never the code. An entry stays in the unfiled file until what it decided stands where a planner looks for it.
 
-Each entry is \`### Title\` with a \`decided\` line and an \`affects\` line naming the features it reaches, and \`docs\` for what no spec holds yet.
+Each entry is \`### Title\` with a \`decided\` line, an \`affects\` line naming the features it reaches, and \`docs\` for what no spec holds yet, and a \`built\` line saying whether the product already works this way.
 
 What you may read: \`${DOCS_DIR}/**\`, the README, the specs and the unfiled file. The docs map above gives you every doc and every section. ${DOC_READING} Nothing else exists for you; do not try. ${EDIT_WRITING}
 
 First, in chat, one line per entry: where it goes, as the rule or section it changes or adds, and nothing else. Then stop and wait: the user picks what is filed.
 
 Where an entry goes:
-- A draft or approved spec: its rules are amended to the spec contract. A rule's text changes, or an edge case or a rule is added under the scenario it belongs to; a name never changes once written. A plan whose build has started is checked against the code again on its own plan bar once its spec changed: say so when you amend one.
-- An implemented spec describes code that is built. Do not edit it: say the change is a feature to plan.
+- \`built: false\` is never written into a spec as a rule: a spec's rules are what its build delivers, so a planner would read it as already there. It goes to \`${DOCS_DIR}/\` as what the product should do, and you say it is a feature to plan.
+- \`built: true\` on a spec still being planned or built: its rules are amended to the spec contract. A rule's text changes, or an edge case or a rule is added under the scenario it belongs to; a name never changes once written. A plan whose build has started is checked against the code again on its own plan bar once its spec changed: say so when you amend one.
+- A verified spec describes a feature that is finished. Do not edit it: say the change is a feature to plan.
 - \`${DOCS_DIR}/\`: under a heading of its own that says what it is, so a rule can cite it as \`path#Heading\`. A constraint every feature has to respect, such as which identity provider owns sign-in, belongs in the docs even when specs hold parts of it.
 - In the product's language, as the rules and docs around it are written.
 

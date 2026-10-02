@@ -1,7 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises'
-
-/** `implemented` is written by the extension once the feature is verified, so the stage outlives the working files. */
-export type SpecStatus = 'draft' | 'approved' | 'implemented'
+import { parseSpecStatus, type SpecStatus } from './spec-status'
 
 /** `body` is the markdown after the front matter, what a reader should see. `built` is `true` for a spec migrated from a doc about behaviour the code already has, deciding what a clean check against the code means for it. */
 export type SpecState = { exists: false } | { exists: true; status: SpecStatus; body: string; built: boolean }
@@ -48,8 +46,7 @@ export function bodyOf(text: string): string {
 }
 
 export function statusOf(text: string): SpecStatus {
-  const value = frontMatterValue(text, 'status')
-  return value === 'approved' || value === 'implemented' ? value : 'draft'
+  return parseSpecStatus(frontMatterValue(text, 'status'))
 }
 
 /** Whether the migration that wrote this spec marked it as behaviour the code already has, `built: true` in the front matter. */
@@ -64,4 +61,12 @@ export async function setSpecStatus(path: string, status: SpecStatus): Promise<v
 
 export function withStatus(text: string, status: SpecStatus): string {
   return withFrontMatterValue(text, 'status', status)
+}
+
+/** Writes the status when the file says something else, so the spec mirrors where the feature stands; `true` when it changed. */
+export async function alignSpecStatus(path: string, status: SpecStatus): Promise<boolean> {
+  const text = await readFile(path, 'utf8')
+  if (statusOf(text) === status) return false
+  await writeFile(path, withStatus(text, status), 'utf8')
+  return true
 }

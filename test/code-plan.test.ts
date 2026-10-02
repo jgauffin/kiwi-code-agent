@@ -11,7 +11,7 @@ describe('code plan', () => {
   it('the_intent_is_settled_before_the_code_is_read', () => {
     const prompt = codePlanPrompt('/ws')
     expect(prompt.indexOf('before reading any code')).toBeGreaterThan(-1)
-    expect(prompt.indexOf('before reading any code')).toBeLessThan(prompt.indexOf('Continue in chat'))
+    expect(prompt.indexOf('before reading any code')).toBeLessThan(prompt.indexOf('Approve plan in chat'))
   })
 
   it('a_code_plan_keeps_to_the_approved_specs_and_asks_before_breaking_a_rule', () => {

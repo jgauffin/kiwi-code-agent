@@ -26,11 +26,11 @@ describe('planStep', () => {
     expect(step.next).toMatchObject({ kind: 'waiting' })
   })
 
-  it('an_implemented_spec_whose_working_files_are_swept_is_done_and_opens_on_the_spec', () => {
-    const implemented = plan({ status: 'implemented', stage: 'verified', commentable: false })
-    const step = planStep(implemented)
+  it('a_verified_spec_whose_working_files_are_swept_is_done_and_opens_on_the_spec', () => {
+    const swept = plan({ status: 'verified', stage: 'verified', tasks: [], commentable: false })
+    const step = planStep(swept)
     expect(step.next).toMatchObject({ kind: 'done' })
-    expect(tabFor(step.current, implemented)).toBe('spec')
+    expect(tabFor(step.current, swept)).toBe('spec')
   })
 
   it('a_draft_with_no_comment_open_offers_approve', () => {

@@ -246,27 +246,11 @@ describe('PermissionPolicy', () => {
     expect(await use(policy({ deny: ['Writes(docs/**)'] }), 'Write', { file_path: 'docs/a.md' })).toMatchObject({ deny: expect.stringContaining('Writes(docs/**)') })
   })
 
-  it('a_write_prompt_on_one_project_file_offers_that_file_and_its_folder_as_rules_matching_only_themselves', async () => {
+  it('a_write_prompt_is_left_as_it_came_since_its_answer_reaches_no_further_than_the_call', () => {
     const p = policy({})
     const request = (toolName: string, input: unknown) => ({ type: 'permission_request' as const, requestId: 'r', toolName, input })
-    expect(p.decorate(request('Edit', { file_path: 'docs/product.md' }))).toMatchObject({
-      writeScopes: [
-        { label: 'docs/product.md', rule: 'Writes(docs/product.md)' },
-        { label: 'docs/', rule: 'Writes(docs/**)' },
-      ],
-    })
-    // A file at the root has no folder short of the whole project, which is the Allow writes switch's to give.
-    expect(p.decorate(request('Write', { file_path: 'README.md' }))).toMatchObject({ writeScopes: [{ label: 'README.md', rule: 'Writes(README.md)' }] })
-    // Glob syntax in a path is taken literally, so the rule covers that file and no other.
-    const decorated = p.decorate(request('Edit', { file_path: 'src/app/[id]/page.tsx' }))
-    const [file, folder] = decorated.type === 'permission_request' ? (decorated.writeScopes ?? []) : []
-    expect(await use(policy({ allow: [file!.rule] }), 'Edit', { file_path: 'src/app/[id]/page.tsx' })).toEqual({ allow: true })
-    expect(await use(policy({ allow: [file!.rule] }), 'Edit', { file_path: 'src/app/i/page.tsx' })).toBeUndefined()
-    expect(await use(policy({ allow: [folder!.rule] }), 'Write', { file_path: 'src/app/[id]/layout.tsx' })).toEqual({ allow: true })
-    // Nothing to widen: a write outside the project, a move between two files, a script over several.
-    expect(p.decorate(request('Write', { file_path: '../other/a.md' }))).not.toHaveProperty('writeScopes')
-    expect(p.decorate(request('Move', { source: 'a.md', destination: 'b.md' }))).not.toHaveProperty('writeScopes')
-    expect(p.decorate(request('RunScript', { files: ['a.md', 'b.md'] }))).not.toHaveProperty('writeScopes')
+    for (const asked of [request('Edit', { file_path: 'docs/product.md' }), request('Move', { source: 'a.md', destination: 'b.md' })])
+      expect(p.decorate(asked)).toBe(asked)
   })
 
   it('a_shell_prompt_is_decorated_with_its_lines_under_the_rules_in_force_and_nothing_else_is_touched', () => {

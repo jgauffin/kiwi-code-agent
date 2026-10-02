@@ -1,6 +1,6 @@
 ---
 feature: Project and User wide memories
-status: approved
+status: verified
 ---
 
 # Project and User wide memories

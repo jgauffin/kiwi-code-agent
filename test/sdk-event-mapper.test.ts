@@ -94,6 +94,20 @@ describe('SdkEventMapper', () => {
     expect((error as { message: string }).message).not.toContain('billing_error')
   })
 
+  it('a_refused_request_reports_the_api_message_instead_of_an_error_code', () => {
+    const body =
+      'API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"tools.22.custom.input_schema: input_schema does not support oneOf, allOf, or anyOf at the top level"}}'
+    const msg = {
+      type: 'assistant',
+      error: 'unknown',
+      parent_tool_use_id: null,
+      uuid: 'u',
+      session_id: 's',
+      message: { id: 'msg_1', content: [{ type: 'text', text: body }] },
+    } as unknown as SDKMessage
+    expect(new SdkEventMapper().map(msg)).toEqual([{ type: 'error', message: body, fatal: false }])
+  })
+
   it('subagent_output_is_tagged_with_its_parent_tool_use', () => {
     const msg = {
       type: 'assistant',

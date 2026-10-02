@@ -22,7 +22,7 @@ import { projectScriptsInstruction } from '../permissions/package-scripts'
  */
 export async function buildSystemPrompt(cwd: string, profilePromptFile?: string, home = homedir()): Promise<string> {
   const parts = [
-    `You are a coding agent working in the directory ${cwd} on ${process.platform}.`,
+    'You are a coding agent.',
     'Work through the tools: Read before Edit or Write, Grep and Glob to find things, JsonSchema and JsonQuery to look inside JSON files, Bash for builds, tests and git.',
     DOC_READING,
     CODE_READING,

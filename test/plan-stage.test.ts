@@ -76,9 +76,21 @@ describe('plan stage', () => {
     expect(planStage(approved, noReview, passed)).toBe('verified')
   })
 
-  it('an_implemented_spec_is_verified_without_a_board_or_a_review', () => {
+  it('a_verified_spec_is_verified_without_a_board_or_a_review', () => {
+    const verified: SpecState = { exists: true, status: 'verified', body, built: false }
+    expect(planStage(verified, noReview, noTasks)).toBe('verified')
+  })
+
+  it('an_implemented_spec_without_a_board_is_still_waiting_on_its_test_run', () => {
     const implemented: SpecState = { exists: true, status: 'implemented', body, built: false }
-    expect(planStage(implemented, noReview, noTasks)).toBe('verified')
+    expect(planStage(implemented, noReview, noTasks)).toBe('verification')
+  })
+
+  it('the_board_outranks_the_status_the_spec_carries_while_it_exists', () => {
+    const verified: SpecState = { exists: true, status: 'verified', body, built: false }
+    expect(planStage(verified, noReview, tasksState(task('A')))).toBe('under_development')
+    const failed = stateOfBoard({ tasks: [tested], verification: [{ at: '2026-09-14T10:00:00Z', ok: false, text: '' }] })
+    expect(planStage(verified, noReview, failed)).toBe('verification')
   })
 
   it('a_board_is_stale_once_the_spec_changed_under_it', () => {

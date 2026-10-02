@@ -1,6 +1,6 @@
 ---
 feature: Doc migration
-status: approved
+status: verified
 ---
 
 # Doc migration
@@ -13,7 +13,7 @@ A maintenance job the person picks when they want the docs and the specs brought
 
 - **Maintenance job**: offered on the Maintenance tab of the new-session screen beside *Evaluate docs* and *File decisions*, as a session with the planner's read scope that never reads code (docs/plan-sessions.md#Plan sessions)
   - **Nothing counted on the tab**: the tab shows no number for this job, unlike the waiting unfiled decisions (docs/intent/agent.md#Unfiled decisions)
-- **Settled specs only**: only specs with status approved or implemented are treated as what the product says; a draft spec never costs a doc section
+- **Settled specs only**: only a spec the person has approved is treated as what the product says, whatever stage its build has reached; a draft spec never costs a doc section
 - **Outline before judgment**: the job's first pass is the outline of each doc it may read, section by section, and every later judgment is made per section
 - **Feature content decides scope**: a section is in scope only when its content describes product behaviour; architecture, rationale, guidelines, settings reference and how-to-build sections are out of scope whatever file or folder they sit in
 - **Confirmed doc writes**: every write into `docs/**` is put to the person first and made only when they say so, one at a time (docs/intent/agent.md#Docs split)
@@ -44,7 +44,7 @@ The second stage: the feature descriptions that no spec holds.
 What the check against the code means for a spec written from a doc about code that already exists.
 
 - **Check on approval**: approving a migrated spec runs the ordinary check against the code, and every disagreement arrives as a decision to rule (docs/plan-sessions.md#The view)
-- **Clean check on built behaviour**: A spec marked as behaviour already built whose check reports nothing is approved with a task board whose tasks only add the tests that prove its rules, and reaches implemented the usual way once those tests pass.
+- **Clean check on built behaviour**: A spec marked as behaviour already built whose check reports nothing is approved with a task board whose tasks only add the tests that prove its rules, and reaches verified the usual way once those tests pass.
   - **No proofs expected** [removed]
   - **Tests without new behaviour**: the tasks of such a board add tests only, and a rule none of the existing behaviour satisfies is reported as a disagreement rather than built here (docs/intent/agent.md#Phase 3: Implement)
 - **Drift becomes the build**: when the check reports disagreements on built behaviour, rulings, tasks and implementation follow as usual, so only what disagrees gets built (docs/plan-sessions.md#The view)

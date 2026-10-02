@@ -158,7 +158,7 @@ describe('blind plan helpers', () => {
   it('prompt_reads_the_other_specs_as_intent_and_asks_when_a_doc_and_a_spec_disagree', () => {
     const prompt = blindPlanPrompt('Order cancellation', cwd)
     expect(prompt).toContain('specs/*.spec.md')
-    expect(flowed(prompt)).toContain("an approved or implemented spec is that feature's definition")
+    expect(flowed(prompt)).toContain("a spec the user has approved is that feature's definition")
     expect(flowed(prompt)).toContain('Where a doc and an approved spec disagree, ask')
     expect(prompt).toContain('or of another feature\'s spec ends with its citation')
     // The docs are edited only on request, and never by way of an amendment file.

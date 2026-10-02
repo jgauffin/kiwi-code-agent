@@ -179,65 +179,6 @@ describe('a call that is not a shell command', () => {
     expect(labels(c)).toEqual(['Allow', 'Deny'])
   })
 
-  describe('a write the policy offered wider scopes for', () => {
-    const writeRequest = (): Request => ({
-      type: 'permission_request',
-      requestId: 'w1',
-      toolName: 'Edit',
-      input: { file_path: 'docs/product.md' },
-      writeScopes: [
-        { label: 'docs/product.md', rule: 'Writes(docs/product.md)' },
-        { label: 'docs/', rule: 'Writes(docs/**)' },
-      ],
-    })
-    const widths = (c: Card) => [...c.querySelectorAll('.covers label')].map((l) => l.textContent?.trim())
-    const pick = (c: Card, label: string) => {
-      const input = [...c.querySelectorAll<HTMLLabelElement>('.covers label')].find((l) => l.textContent?.trim() === label)!.querySelector('input')!
-      input.checked = true
-      input.dispatchEvent(new Event('change'))
-    }
-    const enabled = (c: Card) => [...c.querySelectorAll('button')].filter((b) => !b.disabled).map((b) => b.textContent)
-
-    it('starts_on_this_edit_where_only_a_one_off_allow_makes_sense', () => {
-      const { card: c } = card(writeRequest())
-
-      expect(widths(c)).toEqual(['this edit', 'docs/product.md', 'docs/'])
-      expect(labels(c)).toEqual(['Allow', 'Allow for session', 'Allow for project', 'Deny'])
-      expect(enabled(c)).toEqual(['Allow', 'Deny'])
-    })
-
-    it('a_wider_scope_is_remembered_for_as_long_as_the_button_says_and_never_allowed_just_once', () => {
-      const { card: c, decisions } = card(writeRequest())
-
-      pick(c, 'docs/')
-      expect(enabled(c)).toEqual(['Allow for session', 'Allow for project', 'Deny'])
-      press(c, 'Allow for session')
-
-      expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'allow', remember: { session: ['Writes(docs/**)'], project: [] } }])
-      c.resolve('allow')
-      expect(c.querySelector('.decision')?.textContent).toBe('Allowed (docs/ for session)')
-    })
-
-    it('the_file_can_be_allowed_for_the_project', () => {
-      const { card: c, decisions } = card(writeRequest())
-
-      pick(c, 'docs/product.md')
-      press(c, 'Allow for project')
-
-      expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'allow', remember: { session: [], project: ['Writes(docs/product.md)'] } }])
-    })
-
-    it('two_prompts_on_screen_keep_their_picks_apart', () => {
-      const { card: first } = card(writeRequest())
-      const { card: second } = card({ ...writeRequest(), requestId: 'w2' })
-
-      pick(first, 'docs/')
-
-      expect(enabled(second)).toEqual(['Allow', 'Deny'])
-      expect(enabled(first)).toEqual(['Allow for session', 'Allow for project', 'Deny'])
-    })
-  })
-
   it('an_answered_edit_keeps_showing_the_change_it_asked_about_never_its_raw_arguments', () => {
     const change = { path: 'a.ts', label: 'a.ts', diffs: ['@@ -1 +1 @@\n-a\n+b'], omitted: 0 }
     const { card: c } = card({ type: 'permission_request', requestId: 'e1', toolName: 'Edit', input: { file_path: 'a.ts' }, edit: change })
@@ -258,6 +199,36 @@ describe('a call that is not a shell command', () => {
     expect(labels(c)).toEqual(['a.ts', 'b.ts', 'Allow', 'Deny'])
 
     press(c, 'Allow')
+
+    expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'allow' }])
+  })
+})
+
+describe('a plan the model asks to leave planning with', () => {
+  const planRequest = (): Request => ({
+    type: 'permission_request',
+    requestId: 'p1',
+    toolName: 'ExitPlanMode',
+    title: 'ExitPlanMode',
+    input: { plan: '## Steps\n\n- Read `a.ts`\n- Write the test' },
+  })
+  const labels = (c: Card) => [...c.querySelectorAll('button')].map((b) => b.textContent)
+
+  it('is_shown_as_the_markdown_it_was_written_in_never_as_the_raw_arguments', () => {
+    const { card: c } = card(planRequest())
+
+    expect(c.querySelector('pre.input')).toBeNull()
+    expect(c.querySelector('strong')?.textContent).toBe('Proceed with this plan?')
+    const plan = c.querySelector('.plan')
+    expect(plan?.querySelector('h2')?.textContent).toBe('Steps')
+    expect([...plan!.querySelectorAll('li')].map((item) => item.textContent)).toEqual(['Read a.ts', 'Write the test'])
+  })
+
+  it('is_answered_for_this_plan_alone_so_no_remembered_rule_waves_the_next_one_through', () => {
+    const { card: c, decisions } = card(planRequest())
+
+    expect(labels(c)).toEqual(['Allow', 'Deny'])
+    ;[...c.querySelectorAll('button')].find((b) => b.textContent === 'Allow')!.click()
 
     expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'allow' }])
   })

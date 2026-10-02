@@ -48,7 +48,7 @@ The rest of the noise is removed by not offering the capability at all.
 
 The blind planner may read `docs/**`, the README and the specs, and write its own spec. Writing that spec is its job, so it is not a question. It has no shell in its tool set, so a shell is never proposed and there is nothing to decline. The cleanup run may write the files it flagged and new files beside them, and has no shell either.
 
-Every session has a scratch folder where it writes without asking. And when you want to get out of the way, one switch, "Allow writes", lets writes below the project root through without prompting, from a file tool or the shell. A move or copy with one end outside the project still asks, and a deny rule or a phase scope still blocks. The switch buys fewer clicks, never more reach.
+Every session has a scratch folder where it writes without asking. And when you want to get out of the way, one switch, "Allow writes", lets writes below the project root through without prompting, from a file tool or the shell. Tick it while a prompt is on screen and that prompt is answered too, if the switch covers the call: it replaces the click rather than being asked for twice. A move or copy with one end outside the project still asks, and a deny rule or a phase scope still blocks. The switch buys fewer clicks, never more reach.
 
 If git is not the agent's business in your project, one setting denies every git command that changes the repository, whatever the allow rules say. Status, log and diff still run.
 
