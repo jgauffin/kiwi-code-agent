@@ -865,6 +865,10 @@ export class ChatViewProvider {
         return this.implementSpec(shown)
       case 'verify_spec':
         return shown?.feature ? void (await this.build.verify(shown.feature, true)) : undefined
+      case 'hand_back_task':
+        return this.implementSpec(shown, message.task)
+      case 'accept_task':
+        return shown?.feature ? this.build.acceptTask(shown.feature, message.task) : undefined
       case 'open_file':
         return this.openFile(message)
       case 'open_edit_diff':
@@ -989,12 +993,13 @@ export class ChatViewProvider {
     this.changed.fire()
   }
 
-  private async implementSpec(shown: SessionRecord | undefined): Promise<void> {
+  /** `task` names the blocked task to hand back; without it the build carries on where it stands. */
+  private async implementSpec(shown: SessionRecord | undefined, task?: string): Promise<void> {
     const record = this.planRecordOf(shown)
     const path = this.specPathOf(shown)
     if (record?.mode !== 'plan' || !record.feature || !path) return
     assertImplementable(await readSpecState(path), await readTasks(tasksPath(this.workspaceRoot, record.feature)))
-    await this.build.startImplementing(record, true)
+    await this.build.startImplementing(record, true, task)
   }
 
   private async openFile(message: WebviewMessage<'open_file'>): Promise<void> {
@@ -1108,6 +1113,7 @@ export class ChatViewProvider {
     const lastRun = [...this.runsOf(record)].reverse().find((r) => this.statuses.has(r.id))
     const failureMessage = lastRun ? this.failures.get(lastRun.id) : undefined
     const failure = lastRun && failureMessage !== undefined ? { mode: lastRun.mode, message: failureMessage } : undefined
+    const testPlan = this.build.testPlan(tasks.exists ? tasks.tasks : [])
     return {
       specPath: relativeTo(path),
       tasksPath: relativeTo(tasksPath(this.workspaceRoot, feature)),
@@ -1126,6 +1132,8 @@ export class ChatViewProvider {
       implementable: fromPlan && stage === 'under_development' && !this.reviewingDocs.has(feature) && implementationStarts(state, tasks, implementerBusy),
       // Offered while the board is tested and the last record did not pass; a re-run after a pass is a manual choice too.
       verifiable: (stage === 'verification' || stage === 'verified') && verification?.live !== true,
+      verifies: testPlan.verifies,
+      verifyCommands: testPlan.commands,
       ...(verification ? { verification } : {}),
       ...cleanupState,
       ...(tasks.exists && tasks.cleanup ? { cleanupDecision: tasks.cleanup } : {}),

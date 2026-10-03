@@ -44,9 +44,11 @@ export class SingleRunChat extends HTMLElement implements PhaseChat {
   private readonly empty: HTMLElement
   private runs: RunControls[] = []
 
+  /** `head` stands above the conversations: what the phase did that no run says, such as the test run Verify shows. */
   constructor(
     readonly phase: ChatPhase,
     emptyText: string,
+    private readonly head?: HTMLElement,
   ) {
     super()
     this.empty = el('p', 'empty', emptyText)
@@ -57,6 +59,7 @@ export class SingleRunChat extends HTMLElement implements PhaseChat {
     this.className = 'phase-chat'
     this.dataset.phase = this.phase
     this.sections.className = 'runs'
+    if (this.head) this.append(this.head)
     this.append(this.empty, this.sections)
     this.refresh()
   }

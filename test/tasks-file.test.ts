@@ -6,10 +6,13 @@ import { decisions } from '../src/agent/phases/decisions'
 import { parseSpec, specFingerprint } from '../src/agent/phases/spec-model'
 import {
   TESTS_ONLY_HOW,
+  acceptTask,
   deliveredBy,
   deriveBoard,
   nextTask,
   blockedTask,
+  blockedToReassess,
+  markReassessed,
   parseBoard,
   provenBy,
   readBoard,
@@ -192,6 +195,52 @@ describe('the next task to build', () => {
     const old = JSON.parse(renderBoard(board(task('A')))) as { tasks: Record<string, unknown>[] }
     delete old.tasks[0]!['built']
     expect(parseBoard(JSON.stringify(old)).tasks[0]!.built).toBe('')
+  })
+
+  it('another_look_at_the_end_only_a_blocked_task_not_yet_looked_at_again_is_handed_back_by_the_build', () => {
+    const b = board(task('A', { state: 'blocked', blockedReason: 'no db', reassessed: true }), task('B', { state: 'blocked', blockedReason: 'no e2e' }))
+    expect(blockedToReassess(b)?.name).toBe('B')
+    expect(blockedToReassess(markReassessed(b, 'B'))).toBeUndefined()
+    expect(blockedTask(b, 'b')?.name).toBe('B')
+  })
+
+  it('a_second_look_holds_through_the_look_and_drops_once_the_task_is_finished', () => {
+    const looked = markReassessed(board(task('A', { state: 'blocked', blockedReason: 'no db', files: ['src/a.ts'] })), 'A')
+    const looking = updateTask(looked, 'A', { state: 'in_progress' })
+    expect(looking.tasks[0]!.reassessed).toBe(true)
+    expect(updateTask(looking, 'A', { state: 'blocked', blockedReason: 'still no db' }).tasks[0]!.reassessed).toBe(true)
+    expect(updateTask(looking, 'A', { state: 'tested' }).tasks[0]!.reassessed).toBeUndefined()
+  })
+})
+
+describe('the developer accepts a blocked task', () => {
+  const stuck = board(task('A', { state: 'tested', files: ['src/a.ts'] }), task('B', { delivers: ['Refund'], state: 'blocked', blockedReason: 'no e2e setup', reassessed: true }))
+
+  it('accept_as_is_records_it_as_accepted_with_the_reason_it_was_blocked', () => {
+    const accepted = acceptTask(stuck, 'b').tasks[1]!
+    expect(accepted).toMatchObject({ state: 'tested', accepted: 'no e2e setup' })
+    expect(accepted.blockedReason).toBeUndefined()
+    expect(accepted.reassessed).toBeUndefined()
+    expect(parseBoard(renderBoard(acceptTask(stuck, 'B')))).toEqual(acceptTask(stuck, 'B'))
+  })
+
+  it('accepted_is_finished', () => {
+    expect(tasksDone(stuck.tasks)).toBe(false)
+    expect(tasksDone(acceptTask(stuck, 'B').tasks)).toBe(true)
+  })
+
+  it('still_unproven_a_rule_an_accepted_task_delivers_without_a_test_stays_without_one', () => {
+    expect(unprovenItems(acceptTask(stuck, 'B').tasks)).toEqual(['Refund'])
+  })
+
+  it('only_a_blocked_task_can_be_accepted', () => {
+    expect(() => acceptTask(stuck, 'A')).toThrow(/only a blocked task/)
+  })
+
+  it('acceptance_drops_once_a_run_moves_the_task_again', () => {
+    const accepted = acceptTask(stuck, 'B')
+    expect(updateTask(accepted, 'B', { note: 'n' }).tasks[1]!.accepted).toBe('no e2e setup')
+    expect(updateTask(accepted, 'B', { state: 'in_progress' }).tasks[1]!.accepted).toBeUndefined()
   })
 })
 

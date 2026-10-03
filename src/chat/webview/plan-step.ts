@@ -1,5 +1,6 @@
 import type { CleanupUnit, PlanState, RunFailure } from '../protocol'
 import { isVerified } from '../../agent/phases/spec-status'
+import type { Task } from '../../agent/phases/tasks-file'
 import type { SessionMode } from '../../agent/session/session-manager'
 import type { RunBlock } from '../../agent/session/session-status'
 
@@ -59,6 +60,12 @@ export type PlanStep = {
 type Derived = Omit<PlanStep, 'reached' | 'yours' | 'complete'>
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`
+
+/** Nothing is left to build but blocked tasks: with no run at work, the build stands still until the person hands one back or accepts it. */
+export function onlyBlockedLeft(live: Task[]): boolean {
+  const unfinished = live.filter((t) => t.state !== 'tested')
+  return unfinished.length > 0 && unfinished.every((t) => t.state === 'blocked')
+}
 
 const RUN_NOUN: Record<SessionMode, string> = {
   chat: 'the session',
@@ -207,6 +214,18 @@ function derive(plan: PlanState): Derived {
     }
     const tested = live.filter((t) => t.state === 'tested').length
     const blocked = live.filter((t) => t.state === 'blocked').length
+    // The build handed each one back once and it stayed blocked: the person decides, on the task's row.
+    if (!plan.atWork && !plan.failure && onlyBlockedLeft(live)) {
+      return {
+        current: 'implement',
+        next: {
+          kind: 'goto',
+          tab: 'tasks',
+          label: `${plural(blocked, 'task')} still blocked`,
+          hint: 'Every other task is finished and these stayed blocked after another look: hand one back to its run, answer it in its chat, or accept it as it is.',
+        },
+      }
+    }
     // The scenario under way is what the person wants to know; the count is how far along it is.
     const current = live.find((t) => t.state === 'in_progress')
     const where = current ? `${current.group ?? current.name}, ` : ''
@@ -215,11 +234,13 @@ function derive(plan: PlanState): Derived {
   }
 
   if (plan.stage === 'verification') {
-    if (plan.verification?.live) return { current: 'verify', next: { kind: 'waiting', text: plan.verification.text } }
+    // With no test command for the tasks' files the step is not shown: the empty run that moves the feature on is the end of Implement.
+    const current: Step = plan.verifies ? 'verify' : 'implement'
+    if (plan.verification?.live) return { current, next: { kind: 'waiting', text: plan.verification.text } }
     // A failed run goes to a fix run, which starts the tests again when its turn ends: running them under it would test half-made fixes.
-    if (plan.atWork) return { current: 'verify', next: { kind: 'waiting', text: 'the implementer is fixing the failed tests' } }
+    if (plan.atWork) return { current, next: { kind: 'waiting', text: 'the implementer is fixing the failed tests' } }
     return {
-      current: 'verify',
+      current,
       next: { kind: 'action', action: 'verify', label: plan.lastVerification ? 'Verify again' : 'Verify', hint: 'Run the test commands over the files the tasks name.' },
     }
   }
@@ -275,9 +296,14 @@ function reached(current: Step, plan: PlanState): Step[] {
   return steps
 }
 
-/** The steps the stepper shows: Rule only once the check found something, since a clean check asks nothing of the person. */
+/**
+ * The steps the stepper shows: Rule only once the check found something,
+ * since a clean check asks nothing of the person, and Verify only when a test
+ * command applies to the feature, since a step that runs nothing would say
+ * tests were run.
+ */
 export function shownSteps(plan: PlanState): Step[] {
-  return STEPS.filter((step) => step !== 'rule' || plan.decisions.length > 0)
+  return STEPS.filter((step) => (step !== 'rule' || plan.decisions.length > 0) && (step !== 'verify' || plan.verifies))
 }
 
 const TAB_ORDER: Tab[] = ['spec', 'review', 'decisions', 'tasks', 'cleanup']

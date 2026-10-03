@@ -3,6 +3,7 @@ import type { PlanState } from '../protocol'
 import type { Task } from '../../agent/phases/tasks-file'
 import { PlanTab } from './plan-tab'
 import { blockedReason, same, TASK_STATE } from './plan-parts'
+import { onlyBlockedLeft } from './plan-step'
 import { post } from './vscode-api'
 import './markdown-text'
 
@@ -14,6 +15,8 @@ type TaskRow = {
   stated: boolean
   state: string
   stateLabel: string
+  /** Blocked with nothing else left to build: the row offers Hand back and Accept as is. */
+  decidable: boolean
   gap: boolean
   gapText: string
   hasFiles: boolean
@@ -56,6 +59,10 @@ export class PlanTasksTab extends PlanTab {
               <summary>how</summary>
               <markdown-text class="body" block text="{{t.how}}"></markdown-text>
             </details>
+            <div class="decide" if="t.decidable">
+              <button type="button" title="Hand the task back to the run that blocked it, in its own conversation, told what blocked it." r-click="handBack(t.name)">Hand back</button>
+              <button type="button" title="Count the task as finished without a test. The board records that you accepted it and why it was blocked; its rules stay without proof." r-click="accept(t.name)">Accept as is</button>
+            </div>
           </li>
         </ul>
       </div>
@@ -66,27 +73,35 @@ export class PlanTasksTab extends PlanTab {
   protected draw(plan: PlanState): void {
     if (this.childElementCount === 0) this.appendChild(this.template.content)
     const record = plan.lastVerification
+    // A pass with nothing run proves nothing, so it is not called one.
+    const none = record?.runs?.length === 0
+    // A blocked task is the person's once the build has nothing else to do.
+    const deciding = plan.status !== 'draft' && !plan.atWork && onlyBlockedLeft(plan.tasks.filter((t) => !t.removed))
     this.template.render(
       {
         tasksPath: plan.tasksPath,
         // The build owns the board once the spec is approved; a draft's board is a plan, not progress.
-        groups: grouped(plan.tasks, plan.status !== 'draft'),
+        groups: grouped(plan.tasks, plan.status !== 'draft', deciding),
         verified: record !== undefined,
-        verdict: record?.ok === false ? 'failed' : 'ok',
-        verdictLabel: record?.ok ? 'tests passed' : 'tests failed',
+        verdict: none ? 'none' : record?.ok === false ? 'failed' : 'ok',
+        verdictLabel: none ? 'no tests ran' : record?.ok ? 'tests passed' : 'tests failed',
         verdictText: record ? `${record.text} (${record.at})` : '',
       },
-      { open: (path: string) => post({ type: 'open_file', path }) },
+      {
+        open: (path: string) => post({ type: 'open_file', path }),
+        handBack: (task: string) => post({ type: 'hand_back_task', task }),
+        accept: (task: string) => post({ type: 'accept_task', task }),
+      },
     )
   }
 }
 
 /** Runs of tasks that share a heading, in the order the file has them. */
-function grouped(tasks: Task[], stated: boolean): Group[] {
+function grouped(tasks: Task[], stated: boolean, deciding: boolean): Group[] {
   const groups: Group[] = []
   for (const task of tasks) {
     const title = task.group ?? ''
-    const row = taskRow(task, stated)
+    const row = taskRow(task, stated, deciding)
     const last = groups.at(-1)
     if (last && last.title === title) last.tasks.push(row)
     else groups.push({ title, titled: title !== '', tasks: [row] })
@@ -99,16 +114,18 @@ function grouped(tasks: Task[], stated: boolean): Group[] {
  * sentence, where it stands, the paths it changes and the ones it reads, and
  * the build steps on demand. A bare list of paths explains nothing.
  */
-function taskRow(task: Task, stated: boolean): TaskRow {
+function taskRow(task: Task, stated: boolean, deciding: boolean): TaskRow {
   const unproven = task.state === 'tested' ? task.delivers.filter((d) => !task.proves.some((p) => same(p.item, d))) : []
+  const state = task.accepted !== undefined ? 'accepted' : task.state
   return {
-    className: `task ${task.state}${task.removed ? ' removed' : ''}`,
+    className: `task ${state}${task.removed ? ' removed' : ''}`,
     name: task.name,
     rest: task.text ? `: ${task.text}` : '',
     removed: task.removed,
     stated: !task.removed && stated,
-    state: task.state,
-    stateLabel: blockedReason(task) ?? TASK_STATE[task.state],
+    state,
+    stateLabel: blockedReason(task) ?? (task.accepted !== undefined ? `accepted untested: ${task.accepted}` : TASK_STATE[task.state]),
+    decidable: deciding && !task.removed && task.state === 'blocked',
     gap: !task.removed && stated && unproven.length > 0,
     gapText: `no test for ${unproven.join(', ')}`,
     hasFiles: task.files.length > 0,

@@ -65,6 +65,10 @@ export const TASK_CARRY_ON = `Carry on with your task from where you stopped: ${
 export const taskRetry = (reason: string): string =>
   `Your task was blocked: ${reason}\n\nThe user hands it back to you: what stood in the way may have changed since. Look again before you block it on the same reason. ${READ_TASKS_TOOL} with its name shows where it stands. It is unfinished until tested or blocked: if nothing within this task can prove what is left, block it with that as the reason.`
 
+/** A blocked task the build hands back by itself once every other task is finished: what blocked it may have been one of them. */
+export const taskReassess = (reason: string): string =>
+  `Your task was blocked: ${reason}\n\nEvery other task on the board is finished now, so what stood in the way may be gone: look at it again before you block it on the same reason. ${READ_TASKS_TOOL} with its name shows where it stands. It is unfinished until tested or blocked: if nothing within this task can prove what is left, block it again with that as the reason, and the user decides what happens to it.`
+
 /**
  * The failed sweep for a run of its own: the output, the tasks whose files or
  * tests the output names in full, and what every task built, so the fix

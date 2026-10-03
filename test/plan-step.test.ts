@@ -134,6 +134,26 @@ describe('planStep', () => {
     expect(step.yours).toBe(false)
   })
 
+  it('verify_only_when_tests_run_the_step_is_hidden_and_the_empty_run_ends_implement', () => {
+    const none = plan({ stage: 'verification', status: 'approved', commentable: false, verifies: false, verification: { live: true, text: 'Running the tests…' } })
+    expect(shownSteps(none)).not.toContain('verify')
+    expect(shownSteps(plan({ verifies: true }))).toContain('verify')
+    expect(planStep(none).current).toBe('implement')
+  })
+
+  it('still_blocked_waits_for_the_developer_the_bar_points_at_the_blocked_tasks', () => {
+    const blocked = { ...task('blocked'), name: 'Refund', blockedReason: 'no e2e setup' }
+    const stuck = plan({ stage: 'under_development', status: 'approved', commentable: false, atWork: false, implementable: true, tasks: [task('tested'), blocked] })
+    const step = planStep(stuck)
+    expect(step.current).toBe('implement')
+    expect(step.next).toMatchObject({ kind: 'goto', tab: 'tasks', label: '1 task still blocked' })
+    expect(step.yours).toBe(true)
+    // While the build looks at it again, it is not the developer's yet.
+    expect(planStep(plan({ ...stuck, atWork: true })).next).toMatchObject({ kind: 'waiting' })
+    // Another task still to build keeps the build going.
+    expect(planStep(plan({ ...stuck, tasks: [task('open'), blocked] })).next).not.toMatchObject({ tab: 'tasks' })
+  })
+
   it('a_verified_feature_stands_at_the_cleanup_step', () => {
     const verified = { stage: 'verified' as const, status: 'approved' as const, commentable: false }
     const step = planStep(plan(verified))

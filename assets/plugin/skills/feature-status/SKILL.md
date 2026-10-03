@@ -23,8 +23,10 @@ the question as the extension would.
   One `### Title` per decision; a heading ending `[applied]` or `[withdrawn]` is settled, one with a
   `- ruling:` line awaits the planner, one without awaits the user.
 - `.kiwi/specs/<slug>.tasks.json`: the task board. Each task has `state` (`open`, `in_progress`,
-  `done`, `tested`, `blocked` with `blockedReason`) and `removed`. `verification[0]` is the newest
-  test run, `ok` its outcome. Read it with JsonQuery rather than whole.
+  `done`, `tested`, `blocked` with `blockedReason`) and `removed`; a `tested` task with `accepted`
+  was accepted by the user while blocked, untested, for the reason it holds. `verification[0]` is
+  the newest test run, `ok` its outcome; an empty `runs` means no test command applied, so no tests
+  ran. Read it with JsonQuery rather than whole.
 
 The working files under `.kiwi/specs/` are deleted a week after a verified feature was last
 touched, once its spec is marked `implemented`. A missing working file therefore means either
@@ -43,9 +45,9 @@ Take the first that holds:
 4. Approved, no board:
    - a decision not `[applied]`/`[withdrawn]`: the user rules on it (no `ruling:`) or the planner applies rulings;
    - otherwise: the check against the code is running or due.
-5. Board with a live (not `removed`) task that is not `tested`: under development. Name blocked tasks and their reasons.
+5. Board with a live (not `removed`) task that is not `tested`: under development. Name blocked tasks and their reasons; when only blocked tasks are left, they wait for the user to hand back or accept.
 6. Every live task `tested`, `verification[0].ok` not true: verification pending or failing.
-7. Every live task `tested` and `verification[0].ok`: **done**.
+7. Every live task `tested` and `verification[0].ok`: **done**. Say so when tasks were accepted untested or no tests ran.
 
 "Is it done" means stage 2 or 7. For anything else, say the stage and who it waits on: the user or
 the planner/implementer.

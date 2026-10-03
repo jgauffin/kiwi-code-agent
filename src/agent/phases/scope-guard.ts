@@ -1,4 +1,5 @@
-import { matchesGlob } from 'node:path'
+import { existsSync } from 'node:fs'
+import { matchesGlob, resolve } from 'node:path'
 import type { PreToolUseOutcome, SessionHooks, ToolUse } from '../session/hooks'
 import { projectPaths, type ProjectPaths } from '../permissions/project-paths'
 import { MARKDOWN_SEARCH_TOOL } from '../openai-session/tools/markdown-search'
@@ -10,6 +11,8 @@ export type Scope = {
   readable: string[]
   /** Globs, workspace-relative, of what Write and Edit may touch. */
   writable: string[]
+  /** Globs where the phase may create a file that is not there yet, and go on writing the files it created; a file already there stays read-only. */
+  creatable?: string[]
   /** Globs a write may reach only with the user's say-so: neither the phase's deliverable nor off limits, so the ordinary permission prompt decides. */
   askable?: string[]
   /** Globs carved out of `readable`; a match is denied even when readable allows it. */
@@ -36,9 +39,11 @@ export function readableIn(scope: Scope): (relPath: string) => boolean {
  */
 export class ScopeGuard implements SessionHooks {
   private readonly paths: ProjectPaths
+  /** Workspace-relative files this phase created under `creatable`, which it may keep writing. */
+  private readonly created = new Set<string>()
 
   constructor(
-    cwd: string,
+    private readonly cwd: string,
     private readonly scope: Scope,
   ) {
     this.paths = projectPaths(cwd)
@@ -76,12 +81,22 @@ export class ScopeGuard implements SessionHooks {
     return (this.scope.readableOutside ?? []).some((dir) => this.paths.under(dir, raw))
   }
 
-  /** A deliverable is allowed outright; an askable path is left to the permission prompt; anything else is denied. */
+  /** A deliverable is allowed outright, and so is a new file where the phase may create one; an askable path is left to the permission prompt; anything else is denied. */
   private write(raw: unknown): PreToolUseOutcome {
     const denied = this.check(raw, this.scope.writable, 'write')
     if (denied === undefined) return { allow: true }
+    if (this.creates(raw)) return { allow: true }
     if (this.scope.askable && this.check(raw, this.scope.askable, 'write') === undefined) return undefined
     return denied
+  }
+
+  /** A file not there yet under `creatable`, or one this phase created there. */
+  private creates(raw: unknown): boolean {
+    if (!this.scope.creatable || this.check(raw, this.scope.creatable, 'write') !== undefined) return false
+    const rel = this.paths.relative(raw as string)
+    if (!this.created.has(rel) && existsSync(resolve(this.cwd, rel))) return false
+    this.created.add(rel)
+    return true
   }
 
   private check(raw: unknown, globs: string[], verb: string, directory = false): PreToolUseOutcome {

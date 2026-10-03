@@ -1,7 +1,7 @@
 import { readdirSync } from 'node:fs'
 import { dirname, isAbsolute, join, matchesGlob, relative, resolve } from 'node:path'
 import { CODE_OUTLINE_TOOL } from '../code-outline/code-outline-tool'
-import { readTasks, recordVerification, taskFiles, tasksDone, tasksPath, type TasksState, type VerificationRecord } from './tasks-file'
+import { readTasks, recordVerification, taskFiles, tasksDone, tasksPath, type CommandOutcome, type Task, type TasksState, type VerificationRecord } from './tasks-file'
 import { UPDATE_TASK_TOOL } from '../openai-session/tools/task-board'
 import { classifyFailure, type Classification } from './verification-attribution'
 import type { FileHands } from '../session/file-hands'
@@ -110,11 +110,27 @@ export function verificationDue(tasks: TasksState): boolean {
 
 export const describeCommand =(c: VerifyCommand, cwd: string): string => `\`${c.command}\` in ${relative(cwd, c.cwd).split('\\').join('/') || '.'}`
 
+/** The commands the tasks' files select, as the Verify step lists them before a run. */
+export const plannedCommands = (tasks: Task[], rules: VerifyRule[], cwd: string): string[] => commandsFor(taskFiles(tasks), rules, cwd).map((c) => describeCommand(c, cwd))
+
+/**
+ * Whether the feature has a test run to show: a rule applies to a file its
+ * tasks name. While no task names a file yet, which rules apply is not known,
+ * so any rule configured counts.
+ */
+export function runsTests(tasks: Task[], rules: VerifyRule[], cwd: string): boolean {
+  const files = taskFiles(tasks)
+  return files.length === 0 ? rules.length > 0 : commandsFor(files, rules, cwd).length > 0
+}
+
+export const NOTHING_RAN = "no tests ran: no test command applies to the tasks' files"
+
 /**
  * Runs the test commands the tasks' files select and records the outcome in
- * the tasks file, newest first. No rule matching any file is recorded as
- * passed with nothing run: there was nothing configured to prove, and the
- * record says so.
+ * the tasks file, newest first, with each command and the output of each
+ * failure. No rule matching any file is recorded as passed with nothing run,
+ * and the record says no tests ran: it moves the feature on without claiming
+ * tests passed.
  */
 export async function runVerification(options: {
   cwd: string
@@ -138,12 +154,16 @@ export async function runVerification(options: {
   const commands = commandsFor(taskFiles(tasks.tasks), rules, cwd)
   const maxOutputChars = options.maxOutputChars ?? 8000
 
+  let outcomes: CommandOutcome[] = []
   const runOnce = async (): Promise<VerificationFailure[]> => {
     const failures: VerificationFailure[] = []
+    outcomes = []
     for (const command of commands) {
       options.onStart?.(command)
       const result = await run(command.command, command.cwd)
-      if (!result.ok) failures.push({ ...command, output: trimFront(result.output, maxOutputChars) })
+      const output = trimFront(result.output, maxOutputChars)
+      outcomes.push({ command: describeCommand(command, cwd), ok: result.ok, ...(result.ok ? {} : { output }) })
+      if (!result.ok) failures.push({ ...command, output })
     }
     return failures
   }
@@ -171,8 +191,9 @@ export async function runVerification(options: {
   const record: VerificationRecord = {
     at: options.now ?? new Date().toISOString(),
     ok: failures.length === 0 && held.length === 0,
-    text: failures.length > 0 || held.length > 0 ? [...failures, ...held].map((f) => describeCommand(f, cwd)).join('; ') : ran || 'nothing to run',
+    text: failures.length > 0 || held.length > 0 ? [...failures, ...held].map((f) => describeCommand(f, cwd)).join('; ') : ran || NOTHING_RAN,
     ...(held.length > 0 ? { foreign: held.map((h) => ({ command: describeCommand(h, cwd), files: h.files, hand: h.hand })) } : {}),
+    runs: outcomes,
   }
   await recordVerification(path, record)
   return { record, failures, held }

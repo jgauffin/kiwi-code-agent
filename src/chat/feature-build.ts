@@ -5,14 +5,34 @@ import { underWay, type SessionStatus } from '../agent/session/session-status'
 import { specPath } from '../agent/phases/blind-plan'
 import { decisionsPath, readDecisions } from '../agent/phases/decisions'
 import { contextPath, readScenarioContext } from '../agent/phases/scenario-context'
-import { TASK_CARRY_ON, fixKickoff, fixRetry, implementationStarts, taskKickoff, taskRetry, taskSettled } from '../agent/phases/implement'
+import { TASK_CARRY_ON, fixKickoff, fixRetry, implementationStarts, taskKickoff, taskReassess, taskRetry, taskSettled } from '../agent/phases/implement'
 import { tasksStale } from '../agent/phases/plan-stage'
 import { readSpecState } from '../agent/phases/spec-file'
 import { parseSpec } from '../agent/phases/spec-model'
-import { blockedTask, changeBoard, deriveBoard, nextTask, readBoard, readTasks, recordVerification, sameName, tasksPath, updateTask, writeBoard } from '../agent/phases/tasks-file'
+import {
+  acceptTask,
+  blockedTask,
+  blockedToReassess,
+  changeBoard,
+  deriveBoard,
+  markReassessed,
+  nextTask,
+  nothingRan,
+  readBoard,
+  readTasks,
+  recordVerification,
+  sameName,
+  tasksPath,
+  updateTask,
+  writeBoard,
+  type Task,
+  type TaskBoard,
+} from '../agent/phases/tasks-file'
 import {
   countsAgainstBudget,
   describeCommand,
+  plannedCommands,
+  runsTests,
   runVerification,
   verificationDue,
   type Attribute,
@@ -63,6 +83,13 @@ export class FeatureBuild {
     return this.verifications.get(feature)
   }
 
+  /** Whether the tasks have a test run to show, and the commands it would run over their files as they stand. */
+  testPlan(tasks: Task[]): { verifies: boolean; commands: string[] } {
+    const { workspaceRoot, verifier } = this.deps
+    const rules = verifier.rules()
+    return { verifies: runsTests(tasks, rules, workspaceRoot), commands: plannedCommands(tasks, rules, workspaceRoot) }
+  }
+
   /**
    * Runs the test commands over the tasks' files, records the outcome, and
    * hands a failure to the implementer, up to the budget of consecutive
@@ -95,7 +122,7 @@ export class FeatureBuild {
       held = outcome.held
       if (outcome.record.ok) {
         this.verifyFailures.delete(feature)
-        text = `Tests passed: ${outcome.record.text}`
+        text = nothingRan(outcome.record) ? `No tests ran: no test command applies to the tasks' files` : `Tests passed: ${outcome.record.text}`
         passed = true
       } else if (!countsAgainstBudget(outcome)) {
         // All foreign on the retry too (`Held rather than verified`): stays in verification, spared from the budget, and asked about below.
@@ -186,47 +213,70 @@ export class FeatureBuild {
    * up again instead. With no task left the board goes to the test sweep.
    *
    * A blocked task is skipped while the build moves on by itself, or it would
-   * be picked up again the moment it blocked. `handBack` is the person asking
-   * for the build: once nothing open is left, a blocked task goes back to an
-   * implementer, told what blocked it.
+   * be picked up again the moment it blocked. Once nothing else is left, each
+   * blocked task goes back once to the run that blocked it, in its own
+   * conversation, since what blocked it may have been one of the others; one
+   * still blocked after that waits for the person. `handBack` is the person
+   * asking for the build: a blocked task goes back to its run, told what
+   * blocked it; `name` picks which one.
    */
-  async startImplementing(plan: SessionRecord, handBack = false): Promise<void> {
+  async startImplementing(plan: SessionRecord, handBack = false, name?: string): Promise<void> {
     const { workspaceRoot, sessions, allowWrites } = this.deps
     const feature = plan.feature!
     const path = tasksPath(workspaceRoot, feature)
     const board = await readBoard(path)
-    const task = board ? (nextTask(board) ?? (handBack ? blockedTask(board) : undefined)) : undefined
+    const ahead = board && (name === undefined ? (nextTask(board) ?? blockedToReassess(board)) : undefined)
+    const task = ahead ?? (board && (handBack || name !== undefined) ? blockedTask(board, name) : undefined)
     if (!board || !task) return this.followBoard(feature)
-    const blockedOn = task.state === 'blocked' ? task.blockedReason : undefined
+    const blockedOn = task.state === 'blocked' ? (task.blockedReason ?? 'no reason given') : undefined
+    // Handed back by the build itself, not by the person: marked so a second block waits for them.
+    const lookAgain = blockedOn !== undefined && ahead === task
+    const why = blockedOn === undefined ? undefined : lookAgain ? taskReassess(blockedOn) : taskRetry(blockedOn)
+    const toInProgress = (b: TaskBoard): TaskBoard => {
+      const moved = updateTask(b, task.name, { state: 'in_progress' })
+      return lookAgain ? markReassessed(moved, task.name) : moved
+    }
     const previous = sessions.list().find((r) => r.mode === 'implement' && r.feature === feature && r.task !== undefined && sameName(r.task, task.name))
     if (previous) {
       if (this.deps.statusOf(previous.id) === 'implementing') return
-      if (blockedOn !== undefined) {
-        await changeBoard(path, (b) => updateTask(b, task.name, { state: 'in_progress' }))
+      if (why !== undefined) {
+        await changeBoard(path, toInProgress)
         await this.deps.refresh.sendState()
       }
       // The switch does not outlive the window, and the approval that turned it on still stands.
       allowWrites.setEnabled(previous.id, true)
-      await sessions.send(previous.id, blockedOn !== undefined ? taskRetry(blockedOn) : TASK_CARRY_ON, `Carrying on with ${task.name}`)
+      await sessions.send(previous.id, why ?? TASK_CARRY_ON, lookAgain ? `Another look at ${task.name}` : `Carrying on with ${task.name}`)
       return
     }
     const spec = await readSpecState(specPath(workspaceRoot, feature))
     if (!spec.exists) return
     // Started by the host, so the run's only board call is the one that records how the task ended.
     const profile = this.deps.profileFor('implement')
-    const started = await changeBoard(path, (b) => updateTask(b, task.name, { state: 'in_progress' }))
+    const started = await changeBoard(path, toInProgress)
     const run = await sessions.create(profile, 'implement', feature, { parentId: plan.id, task: task.name })
     allowWrites.setEnabled(run.id, true)
     await this.deps.refresh.sendState()
     const decisions = await readDecisions(decisionsPath(workspaceRoot, feature))
     const kickoff = taskKickoff(started, task.name, parseSpec(spec.body), decisions)
-    await sessions.send(run.id, blockedOn !== undefined ? `${kickoff}\n\n${taskRetry(blockedOn)}` : kickoff, `Started ${task.name}`)
+    await sessions.send(run.id, why !== undefined ? `${kickoff}\n\n${why}` : kickoff, `Started ${task.name}`)
+  }
+
+  /**
+   * The person accepts a blocked task as it is: it counts as finished, so a
+   * board left with nothing else goes on to the test run.
+   */
+  async acceptTask(feature: string, name: string): Promise<void> {
+    await changeBoard(tasksPath(this.deps.workspaceRoot, feature), (b) => acceptTask(b, name))
+    await this.deps.refresh.sendState()
+    await this.followBoard(feature)
   }
 
   /**
    * A task run's turn ended. Its task settled: the run is closed and the next
    * task's run starts. Not settled: the run waits for the user, who can carry
-   * it on. A run that fixed a failed sweep is closed and hands the board back
+   * it on. A blocked task's run is closed without being settled, so the
+   * person can still answer it in its own conversation, which hands the task
+   * back. A run that fixed a failed sweep is closed and hands the board back
    * to the sweep.
    */
   async followTask(record: SessionRecord, event: SessionEvent): Promise<void> {
@@ -245,7 +295,8 @@ export class FeatureBuild {
     }
     const board = await readBoard(tasksPath(workspaceRoot, feature))
     if (!board || !taskSettled(board, record.task)) return
-    await sessions.settle(record.id)
+    if (blockedTask(board, record.task)) await sessions.close(record.id)
+    else await sessions.settle(record.id)
     const plan = sessions.get(record.parentId!)
     if (plan) await this.startImplementing(plan)
   }

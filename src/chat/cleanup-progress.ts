@@ -20,7 +20,7 @@ export type CleanupProgress = {
   units: UnitProgress[]
   /** Workspace-relative, in the order they were written. */
   newFiles: string[]
-  /** Where the run noted pieces that belong in another folder; absent until it noted one. */
+  /** Where the run noted pieces that belong in a file already there; absent until it noted one. */
   movesFile?: string
   /** The run's latest step, one line. */
   activity?: string

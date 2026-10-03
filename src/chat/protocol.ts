@@ -55,6 +55,10 @@ export type PlanState = {
   implementable: boolean
   /** The test run can be started from here: every task is tested and no run is live. */
   verifiable: boolean
+  /** A test command applies to the tasks' files (or, before any task names one, any is configured): the Verify step is shown only then. */
+  verifies: boolean
+  /** The test commands a run would run over the tasks' files as they stand, described; what the Verify step lists before its first run. */
+  verifyCommands: string[]
   /** The test run: what it is doing, or how the last one in this window ended. Absent before the first. */
   verification?: RunState
   /** The cleanup run after the tests passed: what it is splitting, or how it ended. Absent before the first and once a new test run starts. */
@@ -273,6 +277,10 @@ export type FromWebview =
   | { type: 'implement_spec' }
   /** Runs the test commands over the tasks' files again, whatever the last record says. */
   | { type: 'verify_spec' }
+  /** Hands a blocked task back to the run that blocked it, in that run's own conversation. */
+  | { type: 'hand_back_task'; task: string }
+  /** Accepts a blocked task as it is: finished by the developer's word, recorded as accepted rather than tested by a test. */
+  | { type: 'accept_task'; task: string }
   /** The person's answer to the `AGENTS.md` offer shown for `scope`. */
   | { type: 'agents_md_answer'; scope: BundleScope; answer: AgentsMdAnswer }
   /** Opens an edited file, at the line the edit changed when one is known. */

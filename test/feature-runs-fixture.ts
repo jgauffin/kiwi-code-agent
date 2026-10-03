@@ -10,6 +10,7 @@ export class FakeSessions implements RunSessions {
   readonly records: SessionRecord[] = []
   readonly sent: { id: string; text: string }[] = []
   readonly closed: string[] = []
+  readonly settled: string[] = []
 
   async create(profile: ModelProfile, mode: SessionMode = 'chat', feature?: string, options: Parameters<RunSessions['create']>[3] = {}): Promise<SessionRecord> {
     const record: SessionRecord = {
@@ -33,7 +34,9 @@ export class FakeSessions implements RunSessions {
   async close(id: string): Promise<void> {
     this.closed.push(id)
   }
-  async settle(): Promise<void> {}
+  async settle(id: string): Promise<void> {
+    this.settled.push(id)
+  }
   async retryFix(id: string, attempt: number, profile: ModelProfile): Promise<void> {
     const record = this.get(id)!
     record.fixAttempt = attempt

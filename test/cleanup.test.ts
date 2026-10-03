@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { afterAll, describe, expect, it } from 'vitest'
 import { ScopeGuard } from '../src/agent/phases/scope-guard'
 import { CLEANUP_TOOLS, MOVES_FILE, cleanupKickoff, cleanupPrompt, cleanupScope } from '../src/agent/phases/cleanup'
 import { ASK_USER_TOOL } from '../src/agent/openai-session/tools/ask-user'
@@ -6,9 +9,15 @@ import { CODE_READING } from '../src/agent/code-outline/code-outline-gate'
 import { CODE_OUTLINE_TOOL } from '../src/agent/code-outline/code-outline-tool'
 import { progressLine } from '../src/agent/phases/reconcile'
 
-const cwd = process.platform === 'win32' ? 'D:\\work\\repo' : '/work/repo'
+const cwd = mkdtempSync(join(tmpdir(), 'cleanup-scope-'))
+for (const file of ['src/orders/cancel.ts', 'src/orders/ship.ts', 'src/orders/refund.ts', 'src/billing/invoice.ts', 'top.ts', 'specs/orders.spec.md']) {
+  mkdirSync(dirname(join(cwd, file)), { recursive: true })
+  writeFileSync(join(cwd, file), '')
+}
 const guard = new ScopeGuard(cwd, cleanupScope(['src/orders/cancel.ts', 'src/orders/ship.ts', 'top.ts']))
 const use = (toolName: string, input: unknown) => guard.preToolUse({ toolName, input, toolUseId: 't' })
+
+afterAll(() => rmSync(cwd, { recursive: true, force: true }))
 
 describe('ScopeGuard for a cleanup run', () => {
   it('the_flagged_files_and_new_files_beside_them_are_writable_without_a_prompt', async () => {
@@ -17,16 +26,24 @@ describe('ScopeGuard for a cleanup run', () => {
     expect(await use('Write', { file_path: 'top-helpers.ts' })).toEqual({ allow: true })
   })
 
-  it('files_further_away_the_spec_and_the_docs_are_read_only', async () => {
-    expect(await use('Edit', { file_path: 'src/orders/sub/deep.ts' })).toMatchObject({ deny: expect.any(String) })
-    expect(await use('Edit', { file_path: 'src/billing/invoice.ts' })).toMatchObject({ deny: expect.any(String) })
+  it('a_new_file_may_land_in_any_folder_and_be_written_again', async () => {
+    expect(await use('Write', { file_path: 'src/orders/cancellation/reasons.ts' })).toEqual({ allow: true })
+    expect(await use('Write', { file_path: 'lib/money.ts' })).toEqual({ allow: true })
+    expect(await use('Write', { file_path: 'src/shared/money.ts' })).toEqual({ allow: true })
+    mkdirSync(join(cwd, 'src/shared'), { recursive: true })
+    writeFileSync(join(cwd, 'src/shared/money.ts'), '')
+    expect(await use('Edit', { file_path: 'src/shared/money.ts' })).toEqual({ allow: true })
+  })
+
+  it('files_already_there_and_the_spec_are_read_only', async () => {
+    expect(await use('Edit', { file_path: 'src/orders/refund.ts' })).toMatchObject({ deny: expect.any(String) })
+    expect(await use('Write', { file_path: 'src/billing/invoice.ts' })).toMatchObject({ deny: expect.any(String) })
     expect(await use('Edit', { file_path: 'specs/orders.spec.md' })).toMatchObject({ deny: expect.any(String) })
-    expect(await use('Edit', { file_path: 'docs/intent/orders.md' })).toMatchObject({ deny: expect.any(String) })
     expect(await use('Read', { file_path: 'src/billing/invoice.ts' })).toBeUndefined()
     expect(await use('Grep', { pattern: 'cancel', path: 'src' })).toBeUndefined()
   })
 
-  it('code_that_belongs_further_away_is_recorded_in_the_moves_file_rather_than_moved', async () => {
+  it('code_that_belongs_in_a_file_already_there_is_recorded_in_the_moves_file_rather_than_moved', async () => {
     expect(await use('Edit', { file_path: MOVES_FILE })).toEqual({ allow: true })
     expect(await use('Write', { file_path: MOVES_FILE })).toEqual({ allow: true })
     expect(CLEANUP_TOOLS).not.toContain('Move')
@@ -41,8 +58,10 @@ describe('ScopeGuard for a cleanup run', () => {
     expect(CLEANUP_TOOLS).not.toContain('Bash')
   })
 
-  it('the_scope_lists_each_folder_once', () => {
-    expect(cleanupScope(['src/a.ts', 'src/b.ts']).writable).toEqual(['src/a.ts', 'src/*', 'src/b.ts', MOVES_FILE])
+  it('the_scope_writes_the_listed_files_and_creates_anywhere', () => {
+    const scope = cleanupScope(['src/a.ts', 'test/a.test.ts'])
+    expect(scope.writable).toEqual(['src/a.ts', 'test/a.test.ts', MOVES_FILE])
+    expect(scope.creatable).toEqual(['**'])
   })
 })
 
@@ -52,7 +71,7 @@ describe('cleanup prompt', () => {
     const prompt = cleanupPrompt('Order cancellation', cwd, { source: { ...off, functionLines: 25, typeLines: 200 }, tests: off, testGlobs: [] })
     expect(prompt).not.toContain(': 0')
     expect(prompt).toContain('grew past these limits, and you split them.\n\n- Function length: 25 code lines\n- Type length: 200 lines\n\n')
-    expect(prompt).toContain('Edit only the files listed, new files in their folders')
+    expect(prompt).toContain('Edit only the files listed, the new files you create')
     expect(prompt).toContain('Keep behaviour')
     expect(prompt).toContain('the tests are run for you')
     expect(prompt).toContain(MOVES_FILE)

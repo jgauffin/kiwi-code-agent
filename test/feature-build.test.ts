@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readBoard, tasksPath, writeBoard } from '../src/agent/phases/tasks-file'
@@ -46,6 +46,7 @@ const fixRuns = () => sessions.records.filter((r) => r.fixAttempt !== undefined)
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'feature-build-'))
   await mkdir(join(dir, '.kiwi', 'specs'), { recursive: true })
+  await mkdir(join(dir, 'specs'))
   await writeBoard(tasksPath(dir, FEATURE), board(task('Cancel', { state: 'tested', files: ['src/order.ts'] })))
   sessions = new FakeSessions()
   notify = new FakeNotify()
@@ -105,22 +106,86 @@ describe('FeatureBuild.startImplementing', () => {
       board(task('Cancel', { state: 'tested', files: ['src/order.ts'] }), task('Refund', { state: 'blocked', blockedReason: 'no e2e setup' })),
     )
 
-  it('a_task_that_just_blocked_is_not_picked_up_again_by_the_build_itself', async () => {
+  const refund = async () => (await readBoard(tasksPath(dir, FEATURE)))!.tasks.find((t) => t.name === 'Refund')!
+  const approvedSpec = () =>
+    writeFile(
+      join(dir, 'specs', 'order-cancellation.spec.md'),
+      '---\nfeature: Order cancellation\nstatus: approved\n---\n\n# Order cancellation\n\n## Goal\nCancel.\n\n## Refund\n- **Refund on cancel**: refunded.\n',
+    )
+
+  it('a_task_that_just_blocked_waits_while_another_is_left_to_build', async () => {
+    await approvedSpec()
+    await writeBoard(tasksPath(dir, FEATURE), board(task('Cancel'), task('Refund', { state: 'blocked', blockedReason: 'no e2e setup' })))
+    const plan = await sessions.create(profile, 'plan', FEATURE)
+    await sessions.create(profile, 'implement', FEATURE, { parentId: plan.id, task: 'Refund' })
+    await build().startImplementing(plan)
+    // The open task gets a run of its own; the blocked one is left alone.
+    expect(sessions.records.filter((r) => r.task === 'Cancel')).toHaveLength(1)
+    expect((await refund()).state).toBe('blocked')
+  })
+
+  it('another_look_at_the_end_the_blocked_task_goes_back_once_to_its_own_run_told_the_rest_is_finished', async () => {
     await stuck()
+    const plan = await sessions.create(profile, 'plan', FEATURE)
+    const run = await sessions.create(profile, 'implement', FEATURE, { parentId: plan.id, task: 'Refund' })
+    await build().startImplementing(plan)
+    expect(sessions.sent.map((s) => s.id)).toEqual([run.id])
+    expect(sessions.sent[0]!.text).toContain('no e2e setup')
+    expect(sessions.sent[0]!.text).toContain('Every other task on the board is finished')
+    expect(await refund()).toMatchObject({ state: 'in_progress', reassessed: true })
+  })
+
+  it('still_blocked_waits_for_the_developer_and_is_not_handed_back_again_by_itself', async () => {
+    await writeBoard(
+      tasksPath(dir, FEATURE),
+      board(task('Cancel', { state: 'tested', files: ['src/order.ts'] }), task('Refund', { state: 'blocked', blockedReason: 'no e2e setup', reassessed: true })),
+    )
     const plan = await sessions.create(profile, 'plan', FEATURE)
     await sessions.create(profile, 'implement', FEATURE, { parentId: plan.id, task: 'Refund' })
     await build().startImplementing(plan)
     expect(sessions.sent).toEqual([])
   })
 
-  it('the_person_asking_again_hands_a_blocked_task_back_to_its_run_with_the_reason', async () => {
+  it('its_run_is_gone_a_new_run_takes_up_the_blocked_task_told_why_it_was_blocked', async () => {
     await stuck()
     const plan = await sessions.create(profile, 'plan', FEATURE)
-    const run = await sessions.create(profile, 'implement', FEATURE, { parentId: plan.id, task: 'Refund' })
-    await build().startImplementing(plan, true)
-    expect(sessions.sent.map((s) => s.id)).toEqual([run.id])
+    await approvedSpec()
+    await build().startImplementing(plan)
+    const run = sessions.records.find((r) => r.task === 'Refund')
+    expect(run).toBeDefined()
+    expect(sessions.sent.map((s) => s.id)).toEqual([run!.id])
     expect(sessions.sent[0]!.text).toContain('no e2e setup')
-    const refund = (await readBoard(tasksPath(dir, FEATURE)))!.tasks.find((t) => t.name === 'Refund')!
-    expect(refund.state).toBe('in_progress')
+  })
+
+  it('hand_back_the_person_hands_a_named_blocked_task_back_to_its_run_with_the_reason', async () => {
+    await writeBoard(
+      tasksPath(dir, FEATURE),
+      board(task('Cancel', { state: 'tested', files: ['src/order.ts'] }), task('Refund', { state: 'blocked', blockedReason: 'no e2e setup', reassessed: true })),
+    )
+    const plan = await sessions.create(profile, 'plan', FEATURE)
+    const run = await sessions.create(profile, 'implement', FEATURE, { parentId: plan.id, task: 'Refund' })
+    await build().startImplementing(plan, true, 'Refund')
+    expect(sessions.sent.map((s) => s.id)).toEqual([run.id])
+    expect(sessions.sent[0]!.text).toContain('The user hands it back to you')
+    expect((await refund()).state).toBe('in_progress')
+  })
+
+  it('accepted_is_finished_accepting_the_last_blocked_task_starts_the_test_run', async () => {
+    await stuck()
+    testsPass = true
+    await build().acceptTask(FEATURE, 'Refund')
+    expect(await refund()).toMatchObject({ state: 'tested', accepted: 'no e2e setup' })
+    expect(events).toEqual([`starting ${FEATURE}`, `passed ${FEATURE}`])
+  })
+})
+
+describe('FeatureBuild.followTask', () => {
+  it('answer_in_the_chat_a_run_whose_task_ended_blocked_is_closed_but_not_settled', async () => {
+    await writeBoard(tasksPath(dir, FEATURE), board(task('Refund', { state: 'blocked', blockedReason: 'no e2e setup', reassessed: true })))
+    const plan = await sessions.create(profile, 'plan', FEATURE)
+    const run = await sessions.create(profile, 'implement', FEATURE, { parentId: plan.id, task: 'Refund' })
+    await build().followTask(run, { type: 'turn_done', isError: false } as never)
+    expect(sessions.closed).toEqual([run.id])
+    expect(sessions.settled).toEqual([])
   })
 })

@@ -2,8 +2,20 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { commandsFor, countsAgainstBudget, findUpward, runVerification, verificationDue, verificationHandoffPrompt, type Attribute, type VerifyRule } from '../src/agent/phases/verification'
-import { readTasks, stateOfBoard, writeBoard, type Task } from '../src/agent/phases/tasks-file'
+import {
+  NOTHING_RAN,
+  commandsFor,
+  countsAgainstBudget,
+  findUpward,
+  plannedCommands,
+  runVerification,
+  runsTests,
+  verificationDue,
+  verificationHandoffPrompt,
+  type Attribute,
+  type VerifyRule,
+} from '../src/agent/phases/verification'
+import { nothingRan, readBoard, readTasks, stateOfBoard, writeBoard, type Task } from '../src/agent/phases/tasks-file'
 import { board as boardOf, task } from './task-board-fixture'
 
 let dir: string
@@ -64,6 +76,22 @@ describe('commandsFor', () => {
   })
 })
 
+describe('runsTests', () => {
+  it('verify_only_when_tests_run_a_rule_has_to_apply_to_a_file_the_tasks_name', () => {
+    expect(runsTests([tested('T1', 'src/app/orders.ts')], rules, dir)).toBe(true)
+    expect(runsTests([tested('T1', 'docs/intent/orders.md')], rules, dir)).toBe(false)
+  })
+
+  it('before_any_file_is_named_any_configured_rule_counts', () => {
+    expect(runsTests([task('T1')], rules, dir)).toBe(true)
+    expect(runsTests([task('T1')], [], dir)).toBe(false)
+  })
+
+  it('before_the_first_run_the_commands_that_will_run_are_described', () => {
+    expect(plannedCommands([tested('T1', 'src/app/orders.ts')], rules, dir)).toEqual(['`npm test` in .'])
+  })
+})
+
 describe('findUpward', () => {
   it('finds_the_nearest_matching_file_and_stops_at_the_root', () => {
     expect(findUpward(join(dir, 'src', 'Api', 'Orders'), '*.csproj', dir)).toBe(join(dir, 'src', 'Api', 'Api.csproj'))
@@ -112,11 +140,37 @@ describe('runVerification', () => {
     expect(prompt).toContain('stopping on a fix you have not run costs another one')
   })
 
-  it('nothing_to_run_is_recorded_as_such_rather_than_leaving_the_board_stuck', async () => {
+  it('nothing_run_is_no_pass_the_record_moves_the_board_on_and_says_no_tests_ran', async () => {
     await board(tested('T1', 'docs/intent/orders.md'))
     const result = await runVerification({ cwd: dir, feature: 'Order cancellation', rules, run })
     expect(runs).toEqual([])
-    expect(result.record).toMatchObject({ ok: true, text: 'nothing to run' })
+    expect(result.record).toMatchObject({ ok: true, text: NOTHING_RAN, runs: [] })
+    expect(nothingRan(result.record)).toBe(true)
+  })
+
+  it('the_run_on_view_each_command_is_recorded_with_how_it_ended_and_a_failure_keeps_its_output', async () => {
+    await board(tested('T1', 'src/Api/Orders/Order.cs'), tested('T2', 'src/app/orders.ts'))
+    const failing = async (command: string, cwd: string) => {
+      runs.push({ command, cwd })
+      return command === 'npm test' ? { ok: false, output: 'THE ERROR' } : { ok: true, output: 'all good' }
+    }
+    const result = await runVerification({ cwd: dir, feature: 'Order cancellation', rules, run: failing })
+    expect(result.record.runs).toEqual([
+      { command: expect.stringContaining('dotnet test'), ok: true },
+      { command: '`npm test` in .', ok: false, output: 'THE ERROR' },
+    ])
+    expect(nothingRan(result.record)).toBe(false)
+  })
+
+  it('only_the_newest_record_keeps_its_failures_output', async () => {
+    await board(tested('T1', 'src/app/orders.ts'))
+    outcome = { ok: false, output: 'FIRST' }
+    await runVerification({ cwd: dir, feature: 'Order cancellation', rules, run })
+    outcome = { ok: false, output: 'SECOND' }
+    await runVerification({ cwd: dir, feature: 'Order cancellation', rules, run })
+    const saved = (await readBoard(boardPath()))!.verification
+    expect(saved[0]!.runs).toEqual([{ command: '`npm test` in .', ok: false, output: 'SECOND' }])
+    expect(saved[1]!.runs).toEqual([{ command: '`npm test` in .', ok: false }])
   })
 
   it('refuses_without_a_tasks_file', async () => {

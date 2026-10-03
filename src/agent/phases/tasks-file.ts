@@ -227,13 +227,6 @@ export const blockedTask = (board: TaskBoard, name?: string): Task | undefined =
 
 /** A blocked task the build has not yet handed back by itself: once nothing else is left to build, it gets another look. */
 export const blockedToReassess = (board: TaskBoard): Task | undefined => liveTasks(board.tasks).find((t) => t.state === 'blocked' && !t.reassessed)
-
-/** Nothing is left to build but tasks that stayed blocked: the build stands still until the person hands one back or accepts it. */
-export const onlyBlockedLeft = (tasks: Task[]): boolean => {
-  const unfinished = liveTasks(tasks).filter((t) => t.state !== 'tested')
-  return unfinished.length > 0 && unfinished.every((t) => t.state === 'blocked')
-}
-
 /** Work has started: some task has moved from open. */
 export const started = (tasks: Task[]): boolean => liveTasks(tasks).some((t) => t.state !== 'open')
 
@@ -304,13 +297,15 @@ export function updateTask(board: TaskBoard, name: string, change: TaskProgress)
   const { blockedReason: _, accepted, reassessed, ...rest } = current
   const files = change.files ?? current.files
   // The test sweep runs over the files the tasks name: a tested task naming none would pass it with nothing run.
-  if (state === 'tested' && files.length === 0) throw new Error(`"${current.name}" names no file: give files, every file the task touched, with its tests.`)
+  // A task the developer accepted stays as they left it until a run moves it again, files or none.
+  const keepsAcceptance = accepted !== undefined && change.state === undefined
+  if (state === 'tested' && files.length === 0 && !keepsAcceptance) throw new Error(`"${current.name}" names no file: give files, every file the task touched, with its tests.`)
   const next: Task = {
     ...rest,
     state,
     ...(state === 'blocked' ? { blockedReason: reason! } : {}),
     // Acceptance stands only while nothing moves the task again; another look holds through the look itself, so a task blocked again is not handed back once more.
-    ...(accepted !== undefined && change.state === undefined ? { accepted } : {}),
+    ...(keepsAcceptance ? { accepted } : {}),
     ...(reassessed && (state === 'blocked' || state === 'in_progress') ? { reassessed } : {}),
     files,
     newFiles: current.newFiles.filter((f) => files.includes(f)),

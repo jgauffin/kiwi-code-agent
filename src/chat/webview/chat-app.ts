@@ -8,6 +8,7 @@ import { PlanBar } from './plan-bar'
 import { PlanTabs } from './plan-tabs'
 import { PlanView } from './plan-view'
 import { SingleRunChat, TaskRunChat, type PhaseChat } from './phase-chat'
+import { TestRunView } from './test-run-view'
 import { planStep, shownSteps, tabFor, type Step, type Tab } from './plan-step'
 import { LinkedFilesRow } from './linked-files-row'
 import { AgentsMdOverlay } from './agents-md-overlay'
@@ -61,10 +62,11 @@ export class ChatApp extends HTMLElement {
   private readonly planTabs = new PlanTabs()
   private readonly planView = new PlanView()
   private readonly newSession = new NewSessionView()
+  private readonly testRun = new TestRunView()
   private readonly chats = new Map<ChatPhase, PhaseChat>([
     ['plan', new SingleRunChat('plan', 'The planner has not started.')],
     ['implement', new TaskRunChat()],
-    ['verify', new SingleRunChat('verify', 'No fix run: the tests have not failed.')],
+    ['verify', new SingleRunChat('verify', 'No fix run: no test run has failed.', this.testRun)],
     ['cleanup', new SingleRunChat('cleanup', 'No cleanup has run. Pick files to split on the Cleanup tab.')],
     ['session', new SingleRunChat('session', '')],
   ])
@@ -185,6 +187,7 @@ export class ChatApp extends HTMLElement {
         this.models = message.models
         this.runs = message.runs
         this.plan = message.plan
+        this.testRun.update(this.plan)
         this.agentsMd.show(message.agentsMd)
         for (const [phase, chat] of this.chats) chat.update(this.runs.filter((r) => phaseOfRun(r) === phase))
         this.followStep()

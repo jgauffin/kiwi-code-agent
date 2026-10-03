@@ -13,7 +13,9 @@
 - Decision findings describe what the product does, without file or code names.
 - Compaction keeps what each session type needs; a task run keeps its task and rules word for word.
 - *Pick up where you left off* lists finished plans (marked done), code plans and docs sessions, newest worked in first, and opens a finished plan in its planning session.
-- *Continue implementing* on a board where only blocked tasks are left hands the first one back to its implementer, told why it was blocked. Before, the button did nothing and the chat stayed locked on the settled task.
+- Verify only appears when a test command applies to the feature's files, and its view shows each command, its result and any failure output; a run with nothing to run says no tests ran.
+- A blocked task gets one more look, in its own chat, once every other task is done; if it stays blocked, hand it back or accept it as is from the Tasks tab.
+- Cleanup can put split-out code in a new file in the folder it belongs in, not only beside its source.
 
 ## 0.2.5
 

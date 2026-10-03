@@ -936,10 +936,18 @@ chat-app {
           border-color: var(--vscode-testing-iconPassed);
         }
 
-        &.blocked {
+        &.blocked,
+        &.accepted {
           color: var(--vscode-editorWarning-foreground);
           border-color: var(--vscode-editorWarning-foreground);
         }
+      }
+
+      /* A task still blocked once nothing else is left: the person's to decide. */
+      & .decide {
+        display: flex;
+        gap: 0.4rem;
+        margin: 0.3rem 0 0.1rem 1rem;
       }
 
       & .paths {
@@ -996,6 +1004,10 @@ chat-app {
 
         &.failed .kind {
           color: var(--vscode-errorForeground);
+        }
+
+        &.none .kind {
+          color: var(--vscode-editorWarning-foreground);
         }
       }
 
@@ -1356,6 +1368,82 @@ chat-app {
       /* The switcher names the task above its conversation already. */
       &.task-chat .run-head {
         display: none;
+      }
+
+      /* The test run Verify shows above the fix run's conversation. */
+      & > test-run-view {
+        display: block;
+        padding: 0.4rem 0.6rem;
+        border-bottom: 1px solid var(--vscode-panel-border);
+
+        & p {
+          margin: 0.2rem 0;
+        }
+
+        & .running {
+          opacity: 0.8;
+        }
+
+        & .verdict {
+          font-weight: 600;
+
+          &.ok {
+            color: var(--vscode-testing-iconPassed);
+          }
+
+          &.failed {
+            color: var(--vscode-errorForeground);
+          }
+
+          &.none {
+            color: var(--vscode-editorWarning-foreground);
+          }
+        }
+
+        & .commands {
+          list-style: none;
+          padding: 0;
+          margin: 0.2rem 0;
+        }
+
+        & .command {
+          padding: 0.1rem 0;
+
+          & > .mark {
+            display: inline-block;
+            width: 1.2rem;
+          }
+
+          &.ok > .mark {
+            color: var(--vscode-testing-iconPassed);
+          }
+
+          &.failed > .mark {
+            color: var(--vscode-errorForeground);
+          }
+        }
+
+        & details.output {
+          margin-left: 1.2rem;
+
+          & > summary {
+            cursor: pointer;
+            opacity: 0.7;
+          }
+
+          & > pre {
+            max-height: 20rem;
+            overflow: auto;
+            margin: 0.2rem 0;
+            padding: 0.3rem;
+            background: var(--vscode-textCodeBlock-background);
+            white-space: pre-wrap;
+          }
+        }
+
+        & .foreign {
+          color: var(--vscode-editorWarning-foreground);
+        }
       }
     }
   }

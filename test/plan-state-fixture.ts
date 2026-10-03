@@ -15,6 +15,8 @@ export function planState(over: Partial<PlanState> = {}): PlanState {
     checkable: false,
     implementable: false,
     verifiable: false,
+    verifies: true,
+    verifyCommands: [],
     tasks: [],
     review: { rounds: [] },
     commentable: true,
