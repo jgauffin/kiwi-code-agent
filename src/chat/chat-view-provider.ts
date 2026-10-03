@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { actingMode, isBuild, isFeatureless, lastActive, offersAllowWrites, stepOf, type SessionManager, type SessionMode, type SessionRecord } from '../agent/session/session-manager'
 import { atEffort, switchedTo, type ModelOffer, type ModelProfile, type Step } from '../agent/session/model-profile'
 import type { McpServerState, SessionEvent } from '../agent/session/code-session'
-import { appliesModelSwitchNow, blockOf, lastFailure, mostUrgent, nextStatus, takesProfile, type SessionStatus } from '../agent/session/session-status'
+import { appliesModelSwitchNow, awaitsUser, blockOf, lastFailure, mostUrgent, nextStatus, takesProfile, type SessionStatus } from '../agent/session/session-status'
 import { alignSpecStatus, readSpecState, setSpecStatus, type SpecState } from '../agent/phases/spec-file'
 import { isVerified } from '../agent/phases/spec-status'
 import {
@@ -97,8 +97,21 @@ export const CHAT_PANEL_TYPE = 'kiwiAgent.chatPanel'
 /** What a tab is called before a session is started on it. */
 const NEW_SESSION_TITLE = 'New session'
 
-/** A chat tab in the editor area and the session tab it shows; absent while it shows the new-session screen. */
-type ChatPanel = { panel: vscode.WebviewPanel; tabId?: string }
+/**
+ * The tab's icon. `waiting` is an animated PNG that fades in and out, the only
+ * way an editor tab can draw attention: VS Code takes a still image and offers
+ * no animation of its own.
+ */
+const TAB_ICON = { idle: 'head-128.png', waiting: 'head-waiting.png' } as const
+type TabIcon = keyof typeof TAB_ICON
+
+/**
+ * A chat tab in the editor area and the session tab it shows; absent while it
+ * shows the new-session screen. `icon` is the one last assigned: reassigning
+ * it would start the fade over, and the state goes out far more often than the
+ * status changes.
+ */
+type ChatPanel = { panel: vscode.WebviewPanel; tabId?: string; icon?: TabIcon }
 
 /** One kind of message from the tab. */
 type WebviewMessage<T extends FromWebview['type']> = Extract<FromWebview, { type: T }>
@@ -240,6 +253,13 @@ export class ChatViewProvider {
     return this.statuses.get(child?.id ?? sessionId) ?? 'idle'
   }
 
+  /** Assigned only on a change: setting it again restarts the fade from the top. */
+  private wearIcon(entry: ChatPanel, icon: TabIcon): void {
+    if (entry.icon === icon) return
+    entry.icon = icon
+    entry.panel.iconPath = vscode.Uri.joinPath(this.extensionUri, 'docs', 'logos', TAB_ICON[icon])
+  }
+
   private panelOf(tabId: string): ChatPanel | undefined {
     for (const entry of this.panels) if (entry.tabId === tabId) return entry
     return undefined
@@ -272,7 +292,7 @@ export class ChatViewProvider {
 
   private adopt(panel: vscode.WebviewPanel, tabId: string | undefined): ChatPanel {
     const entry: ChatPanel = { panel, ...(tabId ? { tabId } : {}) }
-    panel.iconPath = vscode.Uri.joinPath(this.extensionUri, 'docs', 'logos', 'head-128.png')
+    this.wearIcon(entry, 'idle')
     this.panels.add(entry)
     this.attach(entry)
     panel.onDidDispose(() => {
@@ -1238,6 +1258,7 @@ export class ChatViewProvider {
       if (entry.tabId && !record) delete entry.tabId
       const tab = record ? this.tab(record) : undefined
       entry.panel.title = tab?.title ?? NEW_SESSION_TITLE
+      this.wearIcon(entry, tab && awaitsUser(tab.status) ? 'waiting' : 'idle')
       const plan = record
         ? await this.planState(record).catch((error: unknown) => {
             void vscode.window.showErrorMessage(`Kiwipow Agent: cannot read spec: ${errorMessage(error)}`)

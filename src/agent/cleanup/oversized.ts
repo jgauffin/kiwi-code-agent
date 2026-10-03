@@ -1,5 +1,6 @@
 import { readFile, stat } from 'node:fs/promises'
 import { matchesGlob, relative } from 'node:path'
+import { languageOf } from '../code-structure/language'
 import { describeBreaches, type Breach } from './breach'
 import { measureUnits, type Unit } from './unit-size'
 
@@ -64,14 +65,16 @@ export function oversized(path: string, units: Unit[], thresholds: Thresholds): 
 /**
  * The oversized units across files, in the order given. A file that is gone,
  * binary, too large or matched by an ignore glob is passed over: nothing to
- * split there, or nothing anyone wants split (generated code).
+ * split there, or nothing anyone wants split (generated code). So is a file
+ * in a language not known here: its length alone says nothing about whether
+ * it should be split (a migration, a schema, data).
  */
 export async function oversizedFiles(cwd: string, files: string[], limits: Limits, ignore: string[]): Promise<Oversized[]> {
   const found: Oversized[] = []
   for (const path of files) {
     const rel = relative(cwd, path).split('\\').join('/')
     const matches = (globs: string[]) => globs.some((glob) => matchesGlob(rel, glob))
-    if (matches(ignore)) continue
+    if (!languageOf(path) || matches(ignore)) continue
     const text = await readText(path)
     if (text === undefined) continue
     found.push(...oversized(path, measureUnits(path, text), isTest(rel, limits.testGlobs) ? limits.tests : limits.source))

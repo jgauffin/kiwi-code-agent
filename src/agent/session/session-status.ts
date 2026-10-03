@@ -26,7 +26,7 @@ export const takesProfile = (status: SessionStatus, current: ModelProfile, resol
 export const appliesModelSwitchNow = (status: SessionStatus): boolean => !underWay(status)
 
 /** Statuses that are the user's turn: engine noise does not take them away. */
-const waiting = (status: SessionStatus): boolean => status === 'needs_human' || status === 'needs_approval' || status === 'needs_answer'
+export const awaitsUser = (status: SessionStatus): boolean => status === 'needs_human' || status === 'needs_approval' || status === 'needs_answer'
 
 /**
  * What a tab of several runs says about itself: the one status of them that
@@ -83,7 +83,7 @@ export function nextStatus(current: SessionStatus, mode: SessionMode, event: Ses
     case 'status':
       // A compaction between turns ends without a turn_done to say the session is free again.
       if (event.status === 'idle' || event.status === 'compacting') return current
-      return waiting(current) ? current : working(mode)
+      return awaitsUser(current) ? current : working(mode)
     case 'permission_request':
       return 'needs_approval'
     case 'permission_resolved':
@@ -102,7 +102,7 @@ export function nextStatus(current: SessionStatus, mode: SessionMode, event: Ses
     case 'error':
       return event.fatal ? 'error' : current
     case 'ended':
-      return current === 'error' || waiting(current) ? current : 'idle'
+      return current === 'error' || awaitsUser(current) ? current : 'idle'
     default:
       return current
   }

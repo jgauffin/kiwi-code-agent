@@ -10,6 +10,7 @@ assets/**
 docs/**
 !docs/logos/kiwipow-agent-logo-128.png
 !docs/logos/head-128.png
+!docs/logos/head-waiting.png
 articles/**
 node_modules/**
 **/*.map

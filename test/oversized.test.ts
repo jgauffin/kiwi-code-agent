@@ -53,17 +53,18 @@ describe('oversized', () => {
     )
   })
 
-  it('files_that_are_gone_binary_or_ignored_are_passed_over', async () => {
+  it('files_that_are_gone_binary_ignored_or_in_an_unknown_language_are_passed_over', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'oversized-'))
     try {
       const body = Array.from({ length: 30 }, (_, i) => `  a${i}()`).join('\n')
       await writeFile(join(cwd, 'big.ts'), `function big() {\n${body}\n}\n`)
       await writeFile(join(cwd, 'big.test.ts'), `function bigTest() {\n${body}\n}\n`)
       await writeFile(join(cwd, 'blob.ts'), 'function x() {\u0000}')
+      await writeFile(join(cwd, 'schema.sql'), Array.from({ length: 60 }, (_, i) => `CREATE TABLE t${i} (id int);`).join('\n'))
       const found = await oversizedFiles(
         cwd,
-        [join(cwd, 'big.ts'), join(cwd, 'big.test.ts'), join(cwd, 'blob.ts'), join(cwd, 'gone.ts')],
-        sourceOnly,
+        [join(cwd, 'big.ts'), join(cwd, 'big.test.ts'), join(cwd, 'blob.ts'), join(cwd, 'gone.ts'), join(cwd, 'schema.sql')],
+        { ...sourceOnly, source: { ...sourceOnly.source, fileLines: 50 } },
         ['**/*.test.*'],
       )
       expect(found).toEqual([{ kind: 'function', name: 'big', line: 1, lines: 32, complexity: 0, path: join(cwd, 'big.ts'), breaches: [lines(32, 25)] }])

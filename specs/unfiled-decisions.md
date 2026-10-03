@@ -2,15 +2,19 @@
 
 ### Optional rules leave the phase instructions and live in rule bundles
 - decided: A phase's instructions hold only what makes the agent work the way it does — blind planning, the spec contract, reading before writing, tests as evidence; rules of practice such as reproducing a bug before fixing it, refactoring towards SOLID or naming conventions are gone from them and reach a session only as a rule bundle the person applied, which no workspace gets pre-applied on upgrade and which the blind planner never carries.
-- affects: agents md rule bundles, instructions and skills, docs/intent/agent.md
+- affects: bundles, instructions and skills, docs/intent/agent.md
 
 ### AGENTS.md is the instruction file the product standardises on
 - decided: Rules are kept in `AGENTS.md` at the workspace and the person's level, and a workspace or person still on `CLAUDE.md` is offered once to move everything it holds there and drop `CLAUDE.md`, after which both engines work from the one file and the person's memories are written to and read from `AGENTS.md`.
-- affects: agents md rule bundles, project and user wide memories, instructions and skills, docs/settings.md, docs/intent/agent.md
+- affects: bundles, moving to this agent, project and user wide memories, instructions and skills, docs/settings.md, docs/intent/agent.md
 
 ### Rule bundles come from git repositories, the product's own and the company's
 - decided: Bundles are fetched from git repositories with the person's existing git credentials — the product's own catalog always, further ones named as repository URLs in the person's and the workspace's settings — each new source accepted by the person before its first fetch, and a source repository may name bundles its workspaces must carry.
-- affects: agents md rule bundles, docs/settings.md
+- affects: bundles, docs/settings.md
+
+### A bundle may declare metadata the agent reads
+- decided: Beside its rule text and skills, a bundle declares metadata about what it is and what it claims: the stack or framework it applies to, and for a test bundle the test surfaces and the test type it owns. The agent reads that metadata to match a bundle to a workspace and to compose the applied bundles into one coherent whole, rejecting two bundles that claim the same ground. The metadata adds no rule text of its own and nothing in it runs.
+- affects: bundles, choosing a test strategy
 
 ### Memories are kept in Claude Code's memory files
 - decided: The agent's project-wide and user-wide memories are kept in Claude Code's memory layout rather than a store of our own, so a session on the Claude Agent SDK reads them natively while a session on an OpenAI-compatible endpoint reaches the same notes through the agent's memory tools; memories stay with the person's own files and are never kept in the workspace's source.
@@ -52,6 +56,14 @@
 - decided: The one maintenance job that works from the docs, beside filing the decisions, goes over the docs against the settled specs, offers to remove the behaviour a spec already defines, then offers to turn the feature descriptions no spec holds into specs, and last tidies how what stays is arranged for a blind planner; it keeps the planner's read scope for its whole life, confirms every doc write, and writing specs from the docs is this job rather than something a chat is asked for.
 - affects: doc migration, starting a new session, docs/plan-sessions.md, docs/intent/agent.md
 
+### A settled feature is developed further by changing its spec
+- decided: Carrying on with a feature whose spec is settled is a change to that one spec rather than a new feature beside it: it is offered on the feature itself once its build has nothing in flight, revises the spec in place keeping every rule's name and marking a dropped rule removed, and takes in any unfiled decision naming that feature, removing the entry once its words stand as rules.
+- affects: change feature, filing unfiled decisions, picking up a plan, starting a new session, docs/intent/agent.md, docs/plan-sessions.md
+
 ### Only a settled spec outranks a doc
 - decided: A doc section is treated as said twice, and offered for removal, only against a spec the person has approved, whatever stage its build has reached; a draft spec is a proposal and never costs a doc anything.
 - affects: doc migration, docs/intent/agent.md
+
+### A tab whose session waits on the user pulses its icon
+- decided: A tab shows that its session is stopped on the person by fading its icon in and out, slowly and for as long as it waits: when a question is open, when a permission prompt is pending, and when a turn has ended with the next move theirs. A tab at work or idle keeps the still icon.
+- affects: sessions and tabs, user question, finishing the build

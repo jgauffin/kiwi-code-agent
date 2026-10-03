@@ -35,14 +35,82 @@ const described = (run: RunRef, runs: RunControls[]): RunControls =>
 const withRun = (runs: RunControls[], run: RunRef): RunControls[] => (runs.some((r) => r.sessionId === run.sessionId) ? runs : [...runs, described(run, runs)])
 
 /**
+ * The runs of one phase and their conversations: the runs as the host
+ * described them, the fold each one speaks in, and the line standing in while
+ * the phase has none. Which run is typed to is the chat's own rule, so it is
+ * asked for; `only` hides every conversation but that one, for a phase that
+ * shows one at a time.
+ */
+class RunConversations {
+  private readonly sections = new RunSections()
+  private readonly empty: HTMLElement
+  private known: RunControls[] = []
+
+  constructor(
+    private readonly chooseTarget: (runs: RunControls[]) => RunControls | undefined,
+    emptyText: string,
+    private readonly only = false,
+  ) {
+    this.sections.className = 'runs'
+    this.empty = el('p', 'empty', emptyText)
+  }
+
+  /** In the order the chat lays them out, around whatever chrome it adds of its own. */
+  get elements(): HTMLElement[] {
+    return [this.empty, this.sections]
+  }
+
+  get runs(): RunControls[] {
+    return this.known
+  }
+
+  get target(): RunControls | undefined {
+    return this.chooseTarget(this.known)
+  }
+
+  get targetHasOpenQuestion(): boolean {
+    const target = this.target
+    return target !== undefined && this.sections.hasOpenQuestion(target.sessionId)
+  }
+
+  openCard(): { sessionId: string; card: HTMLElement } | undefined {
+    return this.sections.openCard()
+  }
+
+  update(runs: RunControls[]): void {
+    this.known = runs
+    this.refresh()
+  }
+
+  reset(runs: RunSection[]): void {
+    this.sections.reset(runs)
+    for (const run of runs) this.known = withRun(this.known, run)
+    this.refresh()
+  }
+
+  apply(run: RunRef, event: SessionEvent): void {
+    this.known = withRun(this.known, run)
+    this.sections.apply(run, event)
+    this.refresh()
+  }
+
+  foldToTarget(): void {
+    this.sections.foldToTarget()
+  }
+
+  refresh(): void {
+    this.sections.point(this.target?.sessionId, this.only)
+    this.empty.hidden = !this.sections.isEmpty
+  }
+}
+
+/**
  * A phase spoken with one run at a time: the planner (the checks folded in
  * beside it), the newest fix run, the cleanup, or a tab's only session.
  * Earlier runs of the phase stay folded above as history.
  */
 export class SingleRunChat extends HTMLElement implements PhaseChat {
-  private readonly sections = new RunSections()
-  private readonly empty: HTMLElement
-  private runs: RunControls[] = []
+  private readonly conversations: RunConversations
 
   /** `head` stands above the conversations: what the phase did that no run says, such as the test run Verify shows. */
   constructor(
@@ -51,66 +119,54 @@ export class SingleRunChat extends HTMLElement implements PhaseChat {
     private readonly head?: HTMLElement,
   ) {
     super()
-    this.empty = el('p', 'empty', emptyText)
+    this.conversations = new RunConversations((runs) => defaultTarget(phase, runs), emptyText)
   }
 
   connectedCallback(): void {
     if (this.childElementCount > 0) return
     this.className = 'phase-chat'
     this.dataset.phase = this.phase
-    this.sections.className = 'runs'
     if (this.head) this.append(this.head)
-    this.append(this.empty, this.sections)
-    this.refresh()
+    this.append(...this.conversations.elements)
+    this.conversations.refresh()
   }
 
   get target(): RunControls | undefined {
-    return defaultTarget(this.phase, this.runs)
+    return this.conversations.target
   }
 
   get targetHasOpenQuestion(): boolean {
-    const target = this.target
-    return target !== undefined && this.sections.hasOpenQuestion(target.sessionId)
+    return this.conversations.targetHasOpenQuestion
   }
 
   get hasOpenCard(): boolean {
-    return this.sections.openCard() !== undefined
+    return this.conversations.openCard() !== undefined
   }
 
   update(runs: RunControls[]): void {
-    this.runs = runs
-    this.refresh()
+    this.conversations.update(runs)
   }
 
   reset(runs: RunSection[]): void {
-    this.sections.reset(runs)
-    for (const run of runs) this.runs = withRun(this.runs, run)
-    this.refresh()
+    this.conversations.reset(runs)
   }
 
   apply(run: RunRef, event: SessionEvent): void {
-    this.runs = withRun(this.runs, run)
-    this.sections.apply(run, event)
-    this.refresh()
+    this.conversations.apply(run, event)
   }
 
   revealOpenCard(): HTMLElement | undefined {
-    const found = this.sections.openCard()
+    const found = this.conversations.openCard()
     const details = found?.card.closest('details')
     if (details) details.open = true
     return found?.card
   }
 
   enter(): void {
-    this.sections.foldToTarget()
+    this.conversations.foldToTarget()
   }
 
   leave(): void {}
-
-  private refresh(): void {
-    this.sections.point(this.target?.sessionId, false)
-    this.empty.hidden = !this.sections.isEmpty
-  }
 }
 
 /**
@@ -123,59 +179,53 @@ export class SingleRunChat extends HTMLElement implements PhaseChat {
 export class TaskRunChat extends HTMLElement implements PhaseChat {
   readonly phase = 'implement'
   private readonly switcher = el('div', 'run-switch')
-  private readonly sections = new RunSections()
-  private readonly empty = el('p', 'empty', 'No task has started.')
-  private runs: RunControls[] = []
+  private readonly conversations = new RunConversations((runs) => runs.find((r) => r.sessionId === this.picked) ?? defaultTarget(this.phase, runs), 'No task has started.', true)
   private picked: string | undefined
 
   connectedCallback(): void {
     if (this.childElementCount > 0) return
     this.className = 'phase-chat task-chat'
     this.dataset.phase = this.phase
-    this.sections.className = 'runs'
-    this.append(this.switcher, this.empty, this.sections)
+    this.append(this.switcher, ...this.conversations.elements)
     this.refresh()
   }
 
   get target(): RunControls | undefined {
-    return this.runs.find((r) => r.sessionId === this.picked) ?? defaultTarget(this.phase, this.runs)
+    return this.conversations.target
   }
 
   get targetHasOpenQuestion(): boolean {
-    const target = this.target
-    return target !== undefined && this.sections.hasOpenQuestion(target.sessionId)
+    return this.conversations.targetHasOpenQuestion
   }
 
   get hasOpenCard(): boolean {
-    return this.sections.openCard() !== undefined
+    return this.conversations.openCard() !== undefined
   }
 
   update(runs: RunControls[]): void {
-    this.runs = runs
-    this.refresh()
+    this.conversations.update(runs)
+    this.drawSwitcher()
   }
 
   reset(runs: RunSection[]): void {
-    this.sections.reset(runs)
-    for (const run of runs) this.runs = withRun(this.runs, run)
-    this.refresh()
+    this.conversations.reset(runs)
+    this.drawSwitcher()
   }
 
   apply(run: RunRef, event: SessionEvent): void {
-    this.runs = withRun(this.runs, run)
-    this.sections.apply(run, event)
-    this.refresh()
+    this.conversations.apply(run, event)
+    this.drawSwitcher()
   }
 
   /** The task whose run asks is picked, so its card is the one in sight. */
   revealOpenCard(): HTMLElement | undefined {
-    const found = this.sections.openCard()
+    const found = this.conversations.openCard()
     if (found && found.sessionId !== this.target?.sessionId) this.pick(found.sessionId)
     return found?.card
   }
 
   enter(): void {
-    this.sections.foldToTarget()
+    this.conversations.foldToTarget()
   }
 
   leave(): void {
@@ -190,11 +240,15 @@ export class TaskRunChat extends HTMLElement implements PhaseChat {
   }
 
   private refresh(): void {
+    this.conversations.refresh()
+    this.drawSwitcher()
+  }
+
+  private drawSwitcher(): void {
     const target = this.target?.sessionId
-    this.sections.point(target, true)
-    this.empty.hidden = !this.sections.isEmpty
-    this.switcher.hidden = this.runs.length === 0
-    this.switcher.replaceChildren(...this.runs.map((run) => this.switchButton(run, run.sessionId === target)))
+    const runs = this.conversations.runs
+    this.switcher.hidden = runs.length === 0
+    this.switcher.replaceChildren(...runs.map((run) => this.switchButton(run, run.sessionId === target)))
   }
 
   private switchButton(run: RunControls, picked: boolean): HTMLButtonElement {
