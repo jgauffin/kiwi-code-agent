@@ -15,6 +15,7 @@ import { AgentsMdOverlay } from './agents-md-overlay'
 import type { ContextUsage } from './context-meter'
 import {
   AllowWritesToggledEvent,
+  ChangeRequestedEvent,
   ChatTargetChangedEvent,
   AgentsMdAnsweredEvent,
   CleanupDecidedEvent,
@@ -125,6 +126,7 @@ export class ChatApp extends HTMLElement {
     this.addEventListener(CleanupDecidedEvent.type, (e) => post({ type: 'cleanup_decision', decision: e.decision, ...(e.paths ? { paths: e.paths } : {}) }))
     this.addEventListener(SweepRequestedEvent.type, () => post({ type: 'sweep_sizes' }))
     this.addEventListener(SpecRepairRequestedEvent.type, () => post({ type: 'repair_spec' }))
+    this.addEventListener(ChangeRequestedEvent.type, () => post({ type: 'start_change' }))
     this.addEventListener(ImplementRequestedEvent.type, () => post({ type: 'implement_spec' }))
     this.addEventListener(VerifyRequestedEvent.type, () => post({ type: 'verify_spec' }))
     this.addEventListener(PlanViewSelectedEvent.type, (e) => this.show(e.view))
@@ -300,7 +302,7 @@ export class ChatApp extends HTMLElement {
     else if (event.type === 'turn_done' && !event.isError) this.show(this.planTab)
   }
 
-  /** A new step opens the tab it works in and picks its chat; while the step holds, the reader's own picks do. */
+  /** A new step picks its chat, and opens the tab it works in for a reader who stayed on the last step's; while the step holds, the reader's own picks do. */
   private followStep(): void {
     if (!this.plan) {
       this.step = undefined
@@ -309,8 +311,11 @@ export class ChatApp extends HTMLElement {
     }
     const step = planStep(this.plan).current
     if (step === this.step) return
+    // A reader who went to another tab is reading it: only one still on the step's own tab is carried to the next step's.
+    const carried = this.step === undefined || this.planTab === tabFor(this.step, this.plan)
     this.step = step
     this.select(step)
+    if (!carried) return
     this.planTab = tabFor(step, this.plan)
     if (this.view !== 'chat') this.view = this.planTab
   }

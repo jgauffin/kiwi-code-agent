@@ -47,6 +47,8 @@ export type PlanState = {
   stale: boolean
   /** The spec is off contract and can be repaired: a plan session is active to do it. */
   repairable: boolean
+  /** A change can be started: the spec is settled, nothing is pending or at work, and the board holds no unfinished task. */
+  changeable: boolean
   /** The check against the code can be started again from here: the approved spec needs one, nothing is pending and no check is live. */
   checkable: boolean
   /** The check against the code under this plan session: what it is doing, or how the last one ended. Absent before the first. */
@@ -273,6 +275,8 @@ export type FromWebview =
   | { type: 'sweep_sizes' }
   /** Migrates the active feature's plan files to the contract: mechanically where possible, through the planner for the rest. */
   | { type: 'repair_spec' }
+  /** Starts a new, blind planning session on the active feature's settled spec, to change it; refused unless the build has nothing in flight. */
+  | { type: 'start_change' }
   /** Starts an implement session on the approved spec and switches to it; refused on a draft. */
   | { type: 'implement_spec' }
   /** Runs the test commands over the tasks' files again, whatever the last record says. */

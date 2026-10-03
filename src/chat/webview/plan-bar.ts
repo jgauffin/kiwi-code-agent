@@ -1,6 +1,7 @@
 import type { PlanState } from '../protocol'
 import { el } from './dom'
 import {
+  ChangeRequestedEvent,
   CleanupStoppedEvent,
   ImplementRequestedEvent,
   PlanFocusRequestedEvent,
@@ -45,7 +46,7 @@ export class PlanBar extends HTMLElement {
       node.classList.toggle('moved', marks.moved.includes(name))
       steps.append(node)
     }
-    this.append(steps, ...this.run(plan), ...this.repair(plan), ...this.next(plan))
+    this.append(steps, ...this.run(plan), ...this.repair(plan), ...this.change(plan), ...this.next(plan))
   }
 
   private stepNode(step: Step, state: string): HTMLElement {
@@ -99,6 +100,19 @@ export class PlanBar extends HTMLElement {
         () => this.dispatchEvent(new SpecRepairRequestedEvent()),
         'repair',
         `The spec is off contract:\n${problems.join('\n')}\n\nRepair moves a task section into the tasks file by rule and hands the rest to the planner, which rearranges the spec without changing its rules.`,
+      ),
+    ]
+  }
+
+  /** Offered once the build has nothing in flight: a new, blind session on the feature's own settled spec. */
+  private change(plan: PlanState): HTMLElement[] {
+    if (!plan.changeable) return []
+    return [
+      button(
+        'Change',
+        () => this.dispatchEvent(new ChangeRequestedEvent()),
+        'change',
+        'Start a new planning session on this feature: blind to the code, carrying none of the conversation that shaped the spec.',
       ),
     ]
   }

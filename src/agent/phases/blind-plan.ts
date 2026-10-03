@@ -134,6 +134,22 @@ export function resumePlanPrompt(feature: string, present: { review: boolean; de
 }
 
 /**
+ * The first message of a session asked to change an already-settled feature:
+ * a new session, carrying none of the conversation that shaped the spec, told
+ * to start from the files rather than invent the feature afresh.
+ */
+export function changePrompt(feature: string): string {
+  const slug = featureSlug(feature)
+  return [
+    `"${feature}" is already settled, at \`${SPECS_DIR}/${slug}.spec.md\`. This is a change to it, not a new feature: start from the spec as it stands, never from an earlier conversation about it.`,
+    '',
+    `Read the spec, and \`${UNFILED_FILE}\` and \`${FUTURE_FILE}\` for an entry naming "${feature}". Then ask what the developer wants changed.`,
+    '',
+    `Once they say, answer in chat, before writing anything: which of the spec's existing rules the change would amend, which it would drop, and what it would add. Fold in an unfiled entry that names this feature; name a future-work entry that names it as something the change could take in, and take it in only if the developer says so. A short message, then stop and wait. Write nothing until they say go.`,
+  ].join('\n')
+}
+
+/**
  * The message the planner gets when a spec is off contract: rearrange, do not
  * re-plan. Written for a spec from before the contract as much as for a slip,
  * so it says where invariants, acceptance criteria and flat edge cases go.

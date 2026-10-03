@@ -12,6 +12,7 @@ export function planState(over: Partial<PlanState> = {}): PlanState {
     spec: { title: 'Orders', goal: '', scenarios: [], questions: [], problems: [] },
     stale: false,
     repairable: false,
+    changeable: false,
     checkable: false,
     implementable: false,
     verifiable: false,

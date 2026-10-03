@@ -321,7 +321,15 @@ export function presentTabs(plan: PlanState): Tab[] {
       case 'tasks':
         return plan.tasks.length > 0
       case 'cleanup':
-        return (plan.cleanupSweep?.units.length ?? 0) > 0 || plan.cleanup !== undefined || plan.cleanupDecision !== undefined || plan.cleanupProgress !== undefined
+        // The tab is there from the moment the tests pass, so the step the build hands over to has a page of its own
+        // before anything is measured; a swept feature has no board left to offer a cleanup from.
+        return (
+          (plan.stage === 'verified' && plan.tasks.length > 0) ||
+          (plan.cleanupSweep?.units.length ?? 0) > 0 ||
+          plan.cleanup !== undefined ||
+          plan.cleanupDecision !== undefined ||
+          plan.cleanupProgress !== undefined
+        )
     }
   })
 }

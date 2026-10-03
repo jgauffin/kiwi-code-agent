@@ -64,6 +64,10 @@
 - decided: A doc section is treated as said twice, and offered for removal, only against a spec the person has approved, whatever stage its build has reached; a draft spec is a proposal and never costs a doc anything.
 - affects: doc migration, docs/intent/agent.md
 
-### A tab whose session waits on the user pulses its icon
-- decided: A tab shows that its session is stopped on the person by fading its icon in and out, slowly and for as long as it waits: when a question is open, when a permission prompt is pending, and when a turn has ended with the next move theirs. A tab at work or idle keeps the still icon.
+### The plan view hands over to the next step's tab unless the reader went elsewhere
+- decided: A feature's Cleanup tab is there from the moment its tests pass, before anything is measured, saying that nothing has been measured yet; when the step moves on, the tab the reader is on moves with it only while it is the tab the step they were watching worked in, so a reader who opened the spec or the review themselves is left reading it and the plan bar alone says where the feature now stands. A feature whose working files are swept has no board left and keeps no Cleanup tab.
+- affects: cleanup phase, finishing the build, sessions and tabs
+
+### A tab stopped mid-turn on the person pulses its icon
+- decided: A tab fades its icon in and out, slowly and for as long as it lasts, only while a run of its session is stopped mid-turn on the person: a question is open, or a permission prompt is pending. A turn that merely ended is not that, even where the next move is the person's: every plan and build turn ends so, and it stands until the next prompt, so a tab wearing it would pulse for good. What a finished turn leaves to do is the plan bar's to say.
 - affects: sessions and tabs, user question, finishing the build

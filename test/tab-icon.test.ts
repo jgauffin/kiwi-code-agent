@@ -1,11 +1,11 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { awaitsUser, type SessionStatus } from '../src/agent/session/session-status'
+import { nextStatus, stoppedOnUser, type SessionStatus } from '../src/agent/session/session-status'
 
 /** The statuses whose tab wears the pulsing icon, and those whose tab stays still. */
-const pulsing: SessionStatus[] = ['needs_human', 'needs_approval', 'needs_answer']
-const still: SessionStatus[] = ['idle', 'planning', 'implementing', 'error']
+const pulsing: SessionStatus[] = ['needs_approval', 'needs_answer']
+const still: SessionStatus[] = ['idle', 'planning', 'implementing', 'error', 'needs_human']
 
 /** The chunk types in file order, each with its payload. */
 function chunks(png: Buffer): { type: string; data: Buffer }[] {
@@ -21,8 +21,14 @@ function chunks(png: Buffer): { type: string; data: Buffer }[] {
 
 describe('waiting tab icon', () => {
   it('a_session_stopped_on_the_user_is_what_makes_the_tab_pulse', () => {
-    expect(pulsing.filter(awaitsUser)).toEqual(pulsing)
-    expect(still.filter(awaitsUser)).toEqual([])
+    expect(pulsing.filter(stoppedOnUser)).toEqual(pulsing)
+    expect(still.filter(stoppedOnUser)).toEqual([])
+  })
+
+  it('a_planning_turn_that_merely_ended_leaves_the_tab_still_since_nothing_is_asked_of_the_user', () => {
+    const ended = nextStatus('planning', 'plan', { type: 'turn_done', isError: false, errors: [] })
+    expect(ended).toBe('needs_human')
+    expect(stoppedOnUser(ended)).toBe(false)
   })
 
   it('the_waiting_icon_is_an_animated_png_that_loops_for_as_long_as_the_session_waits', async () => {

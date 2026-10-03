@@ -177,13 +177,14 @@ export class PlanCleanupTab extends PlanTab {
   }
 }
 
-/** Where a settled cleanup stands: the run in flight, what it did, or the decision that ended it. */
+/** Where a cleanup nobody is deciding on stands: the run in flight, what it did, the decision that ended it, or that there is nothing to decide yet. */
 function settledLine(plan: PlanState): { className: string; text: string } | undefined {
   if (plan.cleanup?.live) return { className: 'running', text: plan.cleanup.text }
   if (plan.cleanupDecision === 'skipped') return { className: 'note', text: 'Cleanup skipped: the feature stands as it is.' }
   if (plan.cleanup) return { className: 'ran', text: plan.cleanup.text }
   if (plan.cleanupDecision === 'done') return { className: 'note', text: 'The split has been made.' }
-  return undefined
+  if (plan.cleanupSweep) return { className: 'note', text: 'Nothing is over the size limits: the feature stands as it is.' }
+  return { className: 'note', text: 'The tests passed. Nothing is measured until Check sizes measures the files this feature touched against the size limits.' }
 }
 
 customElements.define('plan-cleanup-tab', PlanCleanupTab)

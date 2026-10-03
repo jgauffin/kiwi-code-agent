@@ -93,3 +93,12 @@ export function checkDue(spec: SpecState, tasks: TasksState, decisions: Decision
 
 /** The spec may be approved: a draft with no comment open on it. */
 export const isApprovable = (stage: PlanStage, spec: SpecState): boolean => stage === 'created' && spec.exists && spec.status === 'draft'
+
+/**
+ * A change may start: the spec is approved or past it, no decision waits on a
+ * ruling, and the board holds no unfinished task (none derived yet counts as
+ * none unfinished). A run still at work is tracked outside the files, so a
+ * caller with that answers it too before offering the change.
+ */
+export const isChangeable = (spec: SpecState, tasks: TasksState, decisions: Decision[]): boolean =>
+  spec.exists && isSettled(spec.status) && pendingDecisions(decisions).length === 0 && (!tasks.exists || tasksDone(tasks.tasks))

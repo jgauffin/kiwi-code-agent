@@ -25,12 +25,12 @@ Where a change is offered and what the session begins with.
 - **New behaviour where it belongs**: behaviour that belongs to a situation the spec already has becomes rules in that scenario, and behaviour that is a situation of its own becomes a new scenario (docs/intent/agent.md#The spec contract)
 - **Status back to draft**: writing the revision sets the spec's `status` back to `draft`, so the feature stands as a plan being made again until the user approves it (docs/intent/agent.md#Stages)
 - **Reviewed like a draft**: the revised spec goes through the ordinary review, comments and strikes on its rules answered before Approve (docs/plan-sessions.md#The view)
-  - **Striking a built rule**: a strike on a rule that was already built leaves the rule in the spec marked ` [removed]` rather than taking it out, since the behaviour exists and has to be undone
+  - **Striking a built rule**: a strike in review leaves the rule in the spec marked ` [removed]` whether or not anything was ever built from it
 
 ## Building only what changed
 - **Re-check on approval**: approving the revision runs the ordinary check against the code over the whole spec, and every disagreement arrives as a decision to rule (docs/plan-sessions.md#The view)
   - **Removed rule the code still honours**: behaviour the code still has for a rule marked ` [removed]` is reported as a disagreement, which is how dropping a rule reaches the build
-- **Board re-derived by name**: the board is derived again, one task per scenario by its name, keeping what the tasks that finished built and proved, and a new scenario gets a task of its own (docs/intent/agent.md#Phase 2: Check against code)
-  - **Scenario whose rules changed**: a task whose scenario gained, lost or amended a rule is unfinished again and delivers that scenario's rules as they now stand
-- **Task says what changed**: each task names which of the rules it delivers the change added or amended, so its run builds those instead of the scenario anew
+- **Board re-derived by name**: the board is derived again, one task per scenario by its name, keeping what the tasks of a board still there built and proved, and starting every task afresh for a feature whose board is already gone (docs/intent/agent.md#Phase 2: Check against code)
+  - **Scenario whose rules changed**: a task whose scenario gained, lost or amended a rule is unfinished again and keeps the proofs it already named for the rules the change left alone
+- **Task says what changed**: a task that is unfinished again is handed to its run for the rules the change added or amended, so its run builds those instead of the scenario anew
 - **Untouched rule proven by its test**: a rule the change left alone is proven by the test that already covers it, named as that rule's proof, and a rule no existing behaviour satisfies is built (specs/doc-migration.spec.md#Verifying a migrated feature against the code)

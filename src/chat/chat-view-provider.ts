@@ -3,11 +3,12 @@ import { existsSync } from 'node:fs'
 import { actingMode, isBuild, isFeatureless, lastActive, offersAllowWrites, stepOf, type SessionManager, type SessionMode, type SessionRecord } from '../agent/session/session-manager'
 import { atEffort, switchedTo, type ModelOffer, type ModelProfile, type Step } from '../agent/session/model-profile'
 import type { McpServerState, SessionEvent } from '../agent/session/code-session'
-import { appliesModelSwitchNow, awaitsUser, blockOf, lastFailure, mostUrgent, nextStatus, takesProfile, type SessionStatus } from '../agent/session/session-status'
+import { appliesModelSwitchNow, blockOf, lastFailure, mostUrgent, nextStatus, stoppedOnUser, takesProfile, type SessionStatus } from '../agent/session/session-status'
 import { alignSpecStatus, readSpecState, setSpecStatus, type SpecState } from '../agent/phases/spec-file'
 import { isVerified } from '../agent/phases/spec-status'
 import {
   SPECS_DIR,
+  changePrompt,
   decisionsHandoffPrompt,
   docsAfterApprovalPrompt,
   featureSlug,
@@ -22,7 +23,7 @@ import { finished, listPlans } from '../agent/phases/plan-list'
 import { progressLine, reconcileKickoff } from '../agent/phases/reconcile'
 import { assertImplementable, implementationStarts } from '../agent/phases/implement'
 import { codePlanBuildKickoff } from '../agent/phases/code-plan'
-import { checkDue, isApprovable, planStage, statusForStage, tasksStale } from '../agent/phases/plan-stage'
+import { checkDue, isApprovable, isChangeable, planStage, statusForStage, tasksStale } from '../agent/phases/plan-stage'
 import { parseSpec } from '../agent/phases/spec-model'
 import { followRenames, migratePlan, type MigrationReport } from '../agent/phases/migrate-plan'
 import { deriveBoard, readBoard, readTasks, tasksDone, tasksPath, writeBoard, type TasksState } from '../agent/phases/tasks-file'
@@ -372,6 +373,19 @@ export class ChatViewProvider {
     }
     const present = { review: existsSync(reviewPath(this.workspaceRoot, feature)), decisions: existsSync(decisionsPath(this.workspaceRoot, feature)) }
     await this.newSession('plan', feature, resumePlanPrompt(feature, present), into, 'Picking the plan up')
+  }
+
+  /**
+   * Starts a change on the feature shown: a new plan session on its settled
+   * spec, carrying none of the conversation that shaped it. Refused while the
+   * build still has something in flight, whatever the bar last showed.
+   */
+  private async startChange(shown: SessionRecord | undefined, entry: ChatPanel): Promise<void> {
+    const feature = shown?.feature
+    if (!shown || !feature) return
+    const plan = await this.planState(shown)
+    if (!plan?.changeable) throw new Error(`"${feature}" still has work in flight: nothing to change yet.`)
+    await this.newSession('plan', feature, changePrompt(feature), entry, 'Starting a change')
   }
 
   async open(sessionId: string, into?: ChatPanel): Promise<void> {
@@ -881,6 +895,8 @@ export class ChatViewProvider {
         return shown?.feature ? this.cleanup.sweep(shown.feature) : undefined
       case 'repair_spec':
         return shown?.feature ? this.reportMigration(await this.repairPlan(shown.feature), true) : undefined
+      case 'start_change':
+        return this.startChange(shown, entry)
       case 'implement_spec':
         return this.implementSpec(shown)
       case 'verify_spec':
@@ -1134,6 +1150,7 @@ export class ChatViewProvider {
     const failureMessage = lastRun ? this.failures.get(lastRun.id) : undefined
     const failure = lastRun && failureMessage !== undefined ? { mode: lastRun.mode, message: failureMessage } : undefined
     const testPlan = this.build.testPlan(tasks.exists ? tasks.tasks : [])
+    const atWork = runs.some((r) => r.status === 'planning' || r.status === 'implementing') || check?.live === true || verification?.live === true || cleanupState.cleanup?.live === true
     return {
       specPath: relativeTo(path),
       tasksPath: relativeTo(tasksPath(this.workspaceRoot, feature)),
@@ -1144,6 +1161,8 @@ export class ChatViewProvider {
       ...(spec ? { spec } : {}),
       stale: tasksStale(state, tasks),
       repairable: fromPlan && (spec?.problems.length ?? 0) > 0,
+      // Settled, nothing pending or at work, and the board holds no unfinished task: a run still at work, or stopped on the dev, holds it back too.
+      changeable: isChangeable(state, tasks, decisions) && !atWork && !blocked,
       // Offered only as the way back in: approval starts the check itself, so the button is for one that failed or was stopped.
       checkable: fromPlan && checkDue(state, tasks, decisions) && check?.live !== true && !this.applying.has(feature),
       ...(check ? { check } : {}),
@@ -1166,7 +1185,7 @@ export class ChatViewProvider {
       pendingDecisions: pendingDecisions(decisions).length,
       applyingRulings: this.applying.has(feature),
       reviewingDocs: this.reviewingDocs.has(feature),
-      atWork: runs.some((r) => r.status === 'planning' || r.status === 'implementing') || check?.live === true || verification?.live === true || cleanupState.cleanup?.live === true,
+      atWork,
       ...(blocked ? { blocked } : {}),
       ...(failure ? { failure } : {}),
     }
@@ -1258,7 +1277,7 @@ export class ChatViewProvider {
       if (entry.tabId && !record) delete entry.tabId
       const tab = record ? this.tab(record) : undefined
       entry.panel.title = tab?.title ?? NEW_SESSION_TITLE
-      this.wearIcon(entry, tab && awaitsUser(tab.status) ? 'waiting' : 'idle')
+      this.wearIcon(entry, tab && stoppedOnUser(tab.status) ? 'waiting' : 'idle')
       const plan = record
         ? await this.planState(record).catch((error: unknown) => {
             void vscode.window.showErrorMessage(`Kiwipow Agent: cannot read spec: ${errorMessage(error)}`)

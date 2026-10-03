@@ -283,9 +283,12 @@ describe('tabs', () => {
     expect(presentTabs(full).map((t) => tabLabel(t, full))).toEqual(['Spec', 'Review (1)', 'Decisions (1)', 'Tasks (1)'])
   })
 
-  it('the_cleanup_tab_appears_with_the_sweep_and_counts_the_units_on_offer', () => {
+  it('the_cleanup_tab_is_there_from_the_passing_tests_and_counts_the_units_on_offer', () => {
     const verified = { stage: 'verified' as const, status: 'approved' as const, commentable: false, tasks: [task('tested')] }
-    expect(presentTabs(plan(verified))).not.toContain('cleanup')
+    // Nothing measured yet: the step the build hands over to still opens on its own page.
+    expect(presentTabs(plan(verified))).toContain('cleanup')
+    expect(tabFor('cleanup', plan(verified))).toBe('cleanup')
+    expect(tabLabel('cleanup', plan(verified))).toBe('Cleanup')
     const offered = plan({ ...verified, cleanupSweep: { units: [unit(), unit()] } })
     expect(tabLabel('cleanup', offered)).toBe('Cleanup (2)')
     expect(tabFor('cleanup', offered)).toBe('cleanup')

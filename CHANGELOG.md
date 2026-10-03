@@ -2,7 +2,7 @@
 
 ## 0.2.6
 
-- A tab whose session waits on you fades its icon in and out, so a question or a permission prompt shows from another tab.
+- A tab stopped on an open question or a permission prompt fades its icon in and out, so it shows while you are on another tab.
 - A chat session's effort sits beside its model in the composer, switchable between turns the same way: pick how hard the model thinks, or leave it at the model's own default. The switch only appears for a model whose levels are known (Claude, and an OpenAI-compatible model that takes `reasoning_effort`), and a level you picked survives a model switch, brought down to what the new model takes.
 - *Evaluate docs* and *Doc migration* are one job, *Clean up docs*; it can also change the README. A profile's model for *Evaluate docs* is dropped.
 - A task run starts from the files its task names instead of working the surface out again: it opens those and the task's context first, searches only for what they leave open, and no longer sweeps the other features' specs or the docs before writing anything.
@@ -18,6 +18,7 @@
 - A blocked task gets one more look, in its own chat, once every other task is done; if it stays blocked, hand it back or accept it as is from the Tasks tab.
 - Cleanup can put split-out code in a new file in the folder it belongs in, not only beside its source.
 - Cleanup no longer flags long files in languages it can't read, such as SQL migrations, YAML or JSON.
+- The Cleanup tab is there as soon as the tests pass, and the Tasks tab hands over to it when they do; a tab you opened yourself is left where it is.
 
 ## 0.2.5
 

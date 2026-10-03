@@ -157,6 +157,14 @@ export class SpecRepairRequestedEvent extends Event {
   }
 }
 
+/** The plan bar's "Change": start a new, blind planning session on the feature's settled spec. */
+export class ChangeRequestedEvent extends Event {
+  static readonly type = 'change-requested'
+  constructor() {
+    super(ChangeRequestedEvent.type, { bubbles: true })
+  }
+}
+
 /** The plan bar's "Verify again": run the test commands over the tasks' files once more. */
 export class VerifyRequestedEvent extends Event {
   static readonly type = 'verify-requested'
@@ -321,6 +329,7 @@ declare global {
     [CleanupDecidedEvent.type]: CleanupDecidedEvent
     [SweepRequestedEvent.type]: SweepRequestedEvent
     [SpecRepairRequestedEvent.type]: SpecRepairRequestedEvent
+    [ChangeRequestedEvent.type]: ChangeRequestedEvent
     [VerifyRequestedEvent.type]: VerifyRequestedEvent
     [ImplementRequestedEvent.type]: ImplementRequestedEvent
     [PlanViewSelectedEvent.type]: PlanViewSelectedEvent
