@@ -1,5 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises'
-import { parseSpecStatus, type SpecStatus } from './spec-status'
+import { parseAuthorship, parseSpecStatus, type Authorship, type SpecStatus } from './spec-status'
 
 /** `body` is the markdown after the front matter, what a reader should see. `built` is `true` for a spec migrated from a doc about behaviour the code already has, deciding what a clean check against the code means for it. */
 export type SpecState = { exists: false } | { exists: true; status: SpecStatus; body: string; built: boolean }
@@ -52,6 +52,11 @@ export function statusOf(text: string): SpecStatus {
 /** Whether the migration that wrote this spec marked it as behaviour the code already has, `built: true` in the front matter. */
 export function builtOf(text: string): boolean {
   return frontMatterValue(text, 'built') === 'true'
+}
+
+/** How this draft came to be; a spec with nothing recorded reads as hand-written. */
+export function authorshipOf(text: string): Authorship {
+  return parseAuthorship(frontMatterValue(text, 'authored'))
 }
 
 export async function setSpecStatus(path: string, status: SpecStatus): Promise<void> {

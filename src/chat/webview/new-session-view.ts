@@ -18,6 +18,20 @@ const STATUS_HINT: Record<NonNullable<ResumablePlan['status']>, string> = {
   verified: 'verified: done',
 }
 
+/** How a draft came to be, for the pick-up list; nothing recorded reads as hand-written. */
+const AUTHORED_HINT: Record<NonNullable<ResumablePlan['authored']>, string> = {
+  planned: 'planned with you',
+  drafted: 'drafted from the docs',
+  'hand-written': 'hand-written',
+}
+
+/** How far a draft's review has got, for the pick-up list. */
+const REVIEW_HINT: Record<NonNullable<ResumablePlan['review']>, string> = {
+  created: 'never reviewed',
+  under_review: 'review in flight',
+  final_draft: 'every comment answered',
+}
+
 /** The card each conversation was started from, so a pick reads as the session type it is. */
 const CONVERSATION: Partial<Record<SessionMode, { icon: string; label: string }>> = {
   chat: { icon: '🔧', label: 'Chat' },
@@ -30,7 +44,10 @@ const when = (iso: string): string => new Date(iso).toLocaleString(undefined, { 
 
 const planHint = (plan: ResumablePlan): string => {
   const stage = plan.status ? STATUS_HINT[plan.status] : 'no spec yet'
-  return plan.lastActiveAt ? `${stage} · last worked on ${when(plan.lastActiveAt)}` : stage
+  // How a draft came to be and how far its review got matter only while it still is one.
+  const parts = [stage, ...(plan.authored ? [AUTHORED_HINT[plan.authored]] : []), ...(plan.review ? [REVIEW_HINT[plan.review]] : [])]
+  const summary = parts.join(' · ')
+  return plan.lastActiveAt ? `${summary} · last worked on ${when(plan.lastActiveAt)}` : summary
 }
 
 const chatPick = (chat: ResumableChat) => {
@@ -53,6 +70,36 @@ type Screen = 'code' | 'maintenance'
 
 /** The card a tab opens on, so a tab is never a row of cards with nothing under it. */
 const FIRST: Record<Screen, SessionMode> = { code: 'chat', maintenance: 'doc-migration' }
+
+/** The template data for a render: what each card and tab shows, from the screen and mode shown and what is there to pick up. */
+function renderData(screen: Screen, mode: SessionMode, profileDefaults: ProfileDefaults, pickUp: PickUp) {
+  const { names, active } = profileDefaults
+  const { plans, chats, unfiled } = pickUp
+  return {
+    profiles: names.map((name) => ({ name, selected: name === active })),
+    // Plans and chats are code work; what waits to be filed is counted on the maintenance tab instead.
+    any: screen === 'code' && (plans.length > 0 || chats.length > 0),
+    unfiled,
+    nothingUnfiled: unfiled === 0,
+    filingHint: unfiled > 0 ? `${unfiled} decided, not yet in the specs or docs` : 'Nothing waiting to be filed',
+    plans: plans.map((p) => ({ ...p, stage: p.status ?? 'unwritten', hint: planHint(p) })),
+    chats: chats.map(chatPick),
+    onCode: screen === 'code',
+    onMaintenance: screen === 'maintenance',
+    codeScreenState: screen === 'code' ? 'active' : '',
+    maintenanceScreenState: screen === 'maintenance' ? 'active' : '',
+    isChat: mode === 'chat',
+    isCodePlan: mode === 'code-plan',
+    isPlan: mode === 'plan',
+    isFiling: mode === 'file-decisions',
+    isMigration: mode === 'doc-migration',
+    chatState: mode === 'chat' ? 'selected' : '',
+    codePlanState: mode === 'code-plan' ? 'selected' : '',
+    planState: mode === 'plan' ? 'selected' : '',
+    filingState: mode === 'file-decisions' ? 'selected' : '',
+    migrationState: mode === 'doc-migration' ? 'selected' : '',
+  }
+}
 
 /**
  * The "+" screen, in two tabs: Code and Maintenance. One card per session
@@ -198,33 +245,8 @@ export class NewSessionView extends HTMLElement {
   }
 
   private render(): void {
-    const { names, active } = this.profileDefaults
-    const { plans, chats, unfiled } = this.pickUp
     this.template.render(
-      {
-        profiles: names.map((name) => ({ name, selected: name === active })),
-        // Plans and chats are code work; what waits to be filed is counted on the maintenance tab instead.
-        any: this.screen === 'code' && (plans.length > 0 || chats.length > 0),
-        unfiled,
-        nothingUnfiled: unfiled === 0,
-        filingHint: unfiled > 0 ? `${unfiled} decided, not yet in the specs or docs` : 'Nothing waiting to be filed',
-        plans: plans.map((p) => ({ ...p, stage: p.status ?? 'unwritten', hint: planHint(p) })),
-        chats: chats.map(chatPick),
-        onCode: this.screen === 'code',
-        onMaintenance: this.screen === 'maintenance',
-        codeScreenState: this.screen === 'code' ? 'active' : '',
-        maintenanceScreenState: this.screen === 'maintenance' ? 'active' : '',
-        isChat: this.mode === 'chat',
-        isCodePlan: this.mode === 'code-plan',
-        isPlan: this.mode === 'plan',
-        isFiling: this.mode === 'file-decisions',
-        isMigration: this.mode === 'doc-migration',
-        chatState: this.mode === 'chat' ? 'selected' : '',
-        codePlanState: this.mode === 'code-plan' ? 'selected' : '',
-        planState: this.mode === 'plan' ? 'selected' : '',
-        filingState: this.mode === 'file-decisions' ? 'selected' : '',
-        migrationState: this.mode === 'doc-migration' ? 'selected' : '',
-      },
+      renderData(this.screen, this.mode, this.profileDefaults, this.pickUp),
       {
         pick: (event: Event) => this.dispatchEvent(new DefaultProfileChangedEvent((event.target as HTMLSelectElement).value)),
         open: (screen: Screen) => {

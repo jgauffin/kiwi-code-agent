@@ -1,6 +1,6 @@
 ---
 feature: Change feature
-status: approved
+status: verified
 ---
 
 # Change feature

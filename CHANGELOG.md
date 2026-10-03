@@ -2,6 +2,7 @@
 
 ## 0.2.6
 
+- New `spec-writing-from-code` skill: drafts specs by reading the source, for a codebase with nothing written down, and flags what it had to guess.
 - A tab stopped on an open question or a permission prompt fades its icon in and out, so it shows while you are on another tab.
 - A chat session's effort sits beside its model in the composer, switchable between turns the same way: pick how hard the model thinks, or leave it at the model's own default. The switch only appears for a model whose levels are known (Claude, and an OpenAI-compatible model that takes `reasoning_effort`), and a level you picked survives a model switch, brought down to what the new model takes.
 - *Evaluate docs* and *Doc migration* are one job, *Clean up docs*; it can also change the README. A profile's model for *Evaluate docs* is dropped.
@@ -19,6 +20,11 @@
 - Cleanup can put split-out code in a new file in the folder it belongs in, not only beside its source.
 - Cleanup no longer flags long files in languages it can't read, such as SQL migrations, YAML or JSON.
 - The Cleanup tab is there as soon as the tests pass, and the Tasks tab hands over to it when they do; a tab you opened yourself is left where it is.
+- A draft on the pick-up list says how it came to be (planned with you, drafted from the docs, or hand-written) and how far its review got.
+- The Sessions view's *Open Draft Plan* now opens the feature's planning session on a draft with no session of its own yet, instead of opening the spec file in an editor tab.
+- Picking a draft up with no session of its own buys a critique in chat before any write, sized to how the draft was authored, and answers a review already waiting on it before raising anything of its own.
+- A draft's critique names every other draft whose rules describe the same behaviour and proposes which feature should own it; it writes only its own spec, and the user's ruling on ownership is recorded for the other draft to pick up.
+- A draft's critique can propose a different direction than the one the draft takes, leaving the spec untouched until you choose; taking it rewrites the same spec file, keeping the draft's direction carries it on as it stands without raising the same redirect again.
 
 ## 0.2.5
 

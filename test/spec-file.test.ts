@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { bodyOf, builtOf, readSpecState, setSpecStatus, statusOf, withStatus } from '../src/agent/phases/spec-file'
+import { authorshipOf, bodyOf, builtOf, readSpecState, setSpecStatus, statusOf, withStatus } from '../src/agent/phases/spec-file'
 
 const spec = '---\nfeature: Orders\nstatus: draft\n---\n\n# Orders\n\n- B1: rule\n'
 
@@ -62,5 +62,19 @@ describe('spec front-matter built', () => {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe('spec front-matter authored', () => {
+  it('a_draft_records_how_it_was_authored_when_its_front_matter_says_so', () => {
+    expect(authorshipOf('---\nauthored: planned\n---\n')).toBe('planned')
+    expect(authorshipOf('---\nauthored: drafted\n---\n')).toBe('drafted')
+    expect(authorshipOf('---\nauthored: hand-written\n---\n')).toBe('hand-written')
+  })
+
+  it('nothing_recorded_about_how_a_draft_was_authored_counts_as_hand_written', () => {
+    expect(authorshipOf(spec)).toBe('hand-written')
+    expect(authorshipOf('# no front matter')).toBe('hand-written')
+    expect(authorshipOf('---\nauthored: guessed\n---\n')).toBe('hand-written')
   })
 })

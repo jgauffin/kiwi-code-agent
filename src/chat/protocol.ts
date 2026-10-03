@@ -3,7 +3,8 @@ import type { QuestionOutcome } from '../agent/session/user-question'
 import type { Decision } from '../agent/phases/decisions'
 import type { CommentRef, Review } from '../agent/phases/plan-review'
 import type { PlanStage } from '../agent/phases/plan-stage'
-import type { SpecStatus } from '../agent/phases/spec-status'
+import type { Authorship, SpecStatus } from '../agent/phases/spec-status'
+import type { ReviewProgress } from '../agent/phases/plan-list'
 import type { Spec } from '../agent/phases/spec-model'
 import type { CleanupDecision, Task, VerificationRecord } from '../agent/phases/tasks-file'
 import type { UnitKind } from '../agent/cleanup/unit-size'
@@ -149,9 +150,11 @@ export type ModelOption = { name: string; efforts: Effort[] }
 /**
  * A plan the new-session screen offers to pick up, at its stage: absent while
  * its session has not written the spec. A verified one is offered while its
- * plan session is kept. `lastActiveAt` is absent on a spec nobody has opened here.
+ * plan session is kept. `lastActiveAt` is absent on a spec nobody has opened
+ * here. `authored` and `review` say how a draft came to be and how far its
+ * review got; absent once the spec is settled.
  */
-export type ResumablePlan = { feature: string; status: SpecStatus | undefined; lastActiveAt?: string }
+export type ResumablePlan = { feature: string; status: SpecStatus | undefined; lastActiveAt?: string; authored?: Authorship; review?: ReviewProgress }
 
 /** A conversation not shown that the new-session screen offers to reopen; its transcript is the context it comes back with. */
 export type ResumableChat = { sessionId: string; title: string; mode: SessionMode; lastActiveAt: string }

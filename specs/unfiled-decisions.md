@@ -48,8 +48,8 @@
 - decided: The new-session screen is in two tabs. Code holds the session types that work in the code (Chat, Plan, Feature planning) and the work waiting to be picked up; Maintenance holds the jobs that keep the intent in order, one per input — cleaning up the docs and filing the recorded decisions — counting on the tab what waits to be filed. A maintenance job is not a session type among the others, and what waits to be filed is offered there rather than in the pick-up list.
 - affects: starting a new session, sessions and tabs, doc migration, filing unfiled decisions, picking up a plan
 
-### Every session has its own editor tab
-- decided: The chat lives in editor tabs, one per session, captioned by its name (a chat by its first message, a plan by its feature name), so a session at work is never hidden by starting another. The agent icon and "+" always open a new tab on the new-session screen, where work waiting to be picked up (plans on disk, chats not shown, decisions not yet filed) is offered; a session started there takes that tab. Clicking a session in the Sessions list brings up its tab, or opens one. The docs cleanup and the decision filing are listed with the chats, so a closed tab can be reopened. Every run of one feature (planning, checking, implementing, cleanup) shares the feature's one tab.
+### Every session has its own tab, in the right sidebar
+- decided: The chat lives in tabs, one per session, opened in the right sidebar rather than where the person's code opens, so the agent never takes the place a file would. A tab is there to be named and to carry an icon: captioned by its session (a chat by its first message, a plan by its feature name) so the person can tell the sessions apart, and wearing the icon that says this session wants attention. Only one tab is read at a time and a session at work is hidden by whichever tab is up, which costs nothing, since what a hidden session needs is said by its icon. The agent icon and "+" always open a new tab on the new-session screen, where work waiting to be picked up (plans on disk, chats not shown, decisions not yet filed) is offered; a session started there takes that tab. Clicking a session in the Sessions list brings up its tab, or opens one. The docs cleanup and the decision filing are listed with the chats, so a closed tab can be reopened. Every run of one feature (planning, checking, implementing, cleanup) shares the feature's one tab.
 - affects: sessions and tabs, starting a new session, picking up a plan, filing unfiled decisions, doc migration
 
 ### Bringing the docs in line with the specs is a maintenance job of its own
@@ -68,6 +68,14 @@
 - decided: A feature's Cleanup tab is there from the moment its tests pass, before anything is measured, saying that nothing has been measured yet; when the step moves on, the tab the reader is on moves with it only while it is the tab the step they were watching worked in, so a reader who opened the spec or the review themselves is left reading it and the plan bar alone says where the feature now stands. A feature whose working files are swept has no board left and keeps no Cleanup tab.
 - affects: cleanup phase, finishing the build, sessions and tabs
 
+### A draft spec records how it was authored, and is pickable work
+- decided: Every draft spec carries how it came to be — planned with the person, drafted from the docs, or hand-written when nothing records it — and is offered on the new-session screen's Code tab as work waiting to be picked up, showing that beside how far its review got, since how complete a draft is depends on who wrote it and a pickup's critique goes as deep as that warrants.
+- affects: spec drafts, doc migration, picking up a plan, starting a new session, docs/plan-sessions.md
+
 ### A tab stopped mid-turn on the person pulses its icon
 - decided: A tab fades its icon in and out, slowly and for as long as it lasts, only while a run of its session is stopped mid-turn on the person: a question is open, or a permission prompt is pending. A turn that merely ended is not that, even where the next move is the person's: every plan and build turn ends so, and it stands until the next prompt, so a tab wearing it would pulse for good. What a finished turn leaves to do is the plan bar's to say.
 - affects: sessions and tabs, user question, finishing the build
+
+### A question or a permission prompt may be answered from outside the editor
+- decided: Anything that blocks a session from completing — a question asked, a permission prompt pending, a step waiting on the person — can be put to a paired phone and answered there with the same effect as at the desk, the first answer from any device resolving it while every other device is told it was already answered, so a session never stalls for want of someone at the keyboard.
+- affects: remote control, user question, file edit diff, permissions and the Allow writes switch, docs/settings.md

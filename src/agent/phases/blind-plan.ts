@@ -7,6 +7,7 @@ import { EDIT_WRITING } from '../openai-session/tools/edit'
 import SPEC_CONTRACT from '../../../assets/plugin/skills/spec-writing/contract.md'
 import { KEEP_RULING } from './ruling'
 import type { Scope } from './scope-guard'
+import type { Authorship } from './spec-status'
 import { DECISION_FILES, FUTURE_FILE, UNFILED_DECISIONS, UNFILED_FILE } from './unfiled-decisions'
 
 export const DOCS_DIR = 'docs'
@@ -104,7 +105,7 @@ First, direction. In chat, not in a file: the few decisions that shape the featu
 you propose, with the reason) and the questions whose answer would change that, asked in the message itself. A short message, then stop and wait. Write nothing until the user says go:
 a full plan in the wrong direction is wasted, so the user steers first. \`${ASK_USER_TOOL}\` is for what comes up once you write the spec.
 
-Then, the spec. When the user accepts or adjusts the direction, write one file, \`${SPECS_DIR}/${slug}.spec.md\` under ${cwd}, with Write. ${SPEC_CONTRACT.trim().replaceAll('<feature>', feature)}
+Then, the spec. When the user accepts or adjusts the direction, write one file, \`${SPECS_DIR}/${slug}.spec.md\` under ${cwd}, with Write, its front matter carrying \`authored: planned\`: this draft was shaped with the user in conversation, the most complete of the ways a draft comes to be. ${SPEC_CONTRACT.trim().replaceAll('<feature>', feature)}
 - Settle what you can. Where intent is silent but a sensible default exists, take it and say so in the direction; a question is for what only the user can answer, and you put it with the \`${ASK_USER_TOOL}\` tool and carry on with the answer rather than writing it down and stopping.
 - The user's answers become rules in this spec. The part of an answer that reaches features other than this one is recorded for them: ${UNFILED_DECISIONS}
 - Once approved, the spec is checked against the code by a separate run, which writes what stands in its way to \`${WORK_DIR}/${slug}.decisions.md\` for the user to rule on. Those decisions reach you as hand-offs that say what to do, proposing ways to settle them or applying the user's rulings. Change no rule until the user has ruled.
@@ -133,6 +134,46 @@ export function resumePlanPrompt(feature: string, present: { review: boolean; de
   ].join('\n')
 }
 
+/** How deep a pickup's critique goes, by how the draft came to be. */
+const CRITIQUE_DEPTH: Record<Authorship, string> = {
+  planned: 'It was planned with the user in conversation, so take it as complete and critique only what changed around it since: re-read the docs and the other specs it cites and say whether any now disagree, and limit any search for an overlapping draft to the specs and drafts written or changed since you last touched this one.',
+  drafted: "It was drafted from the docs, so critique it for the gaps its source sections left and for overlap with what another spec already claims.",
+  'hand-written': 'Nothing recorded who wrote it, so take it as hand-written, the least complete of the three: critique it whole, missing scenarios, rules no test could prove, and whether the direction holds.',
+}
+
+/**
+ * The first message of a pickup on a draft: the same files as any pickup,
+ * read before anything else, but a draft buys a critique rather than a
+ * status report, since nothing on it is settled yet. `authorship` decides
+ * how deep that critique goes; a review already submitted and waiting on an
+ * answer comes before any critique of the agent's own.
+ */
+export function draftPickupPrompt(feature: string, authorship: Authorship, present: { review: boolean; decisions: boolean }): string {
+  const slug = featureSlug(feature)
+  const spec = `${SPECS_DIR}/${slug}.spec.md`
+  const files = [`\`${spec}\``, ...(present.review ? [`\`${WORK_DIR}/${slug}.review.md\``] : []), ...(present.decisions ? [`\`${WORK_DIR}/${slug}.decisions.md\``] : [])]
+  const read = files.length === 1 ? files[0]! : `${files.slice(0, -1).join(', ')} and ${files.at(-1)!}`
+  return [
+    `The spec for "${feature}" already exists at \`${spec}\`, written in an earlier session that is gone. Do not start over.`,
+    '',
+    `Read ${read} from disk, in one reply.`,
+    '',
+    ...(present.review
+      ? [
+          `If the review has a comment with no resolution yet, or a struck item still standing in the spec: answer that first. Mark every struck item removed by appending \` [removed]\` to its line, repair what referred to it, and under each unanswered comment add exactly one of \`  - addressed: what you changed\` or \`  - disagreed: why you will not\`. Raise nothing of your own until every comment of that round is answered; only once it is closed does a critique of yours belong here.`,
+          '',
+        ]
+      : []),
+    `Otherwise, critique the draft in chat before writing anything: what it settles, which of its rules you would amend, drop or add, and which questions it leaves open. ${CRITIQUE_DEPTH[authorship]}`,
+    `Where you judge the draft's whole shape wrong, not just its rules, say so instead: the direction you would take and why, and leave the spec untouched until the user chooses. If they keep the draft's direction, carry it on as it stands and do not raise this same redirect again in this session. If they take yours, rewrite \`${spec}\` itself to the contract: never a second spec for the same feature.`,
+    `Search ${SPEC_SEARCH} for every other draft whose rules describe behaviour this one also claims; behaviour an approved spec already defines is no question of ownership, so let this draft's own rule stand or cite that spec instead, never name it as an overlap. Name each overlapping draft in the critique and propose which of the two features should own the behaviour. Write only \`${spec}\`, never the other draft's, whatever the overlap; once the user rules which feature owns it, record the ruling as an unfiled decision in \`${UNFILED_FILE}\` naming both features, so the other draft's own pickup takes it in.`,
+    `Name any entry in \`${UNFILED_FILE}\` or \`${FUTURE_FILE}\` whose affects names "${feature}". Fold its words into the rules only once the user says so, and once they stand as rules, delete the entry from its file.`,
+    `A rule here is still a proposal: rename it, drop it, or add one outright, since nothing has been approved, tasked or proved from it yet. The one exception is a rule the review has already commented on: keep its \`(was Old name)\` note when you rename it, so the comment still finds it.`,
+    '',
+    'A short message, then stop and wait. Write nothing until the user says go.',
+  ].join('\n')
+}
+
 /**
  * The first message of a session asked to change an already-settled feature:
  * a new session, carrying none of the conversation that shaped the spec, told
@@ -140,12 +181,15 @@ export function resumePlanPrompt(feature: string, present: { review: boolean; de
  */
 export function changePrompt(feature: string): string {
   const slug = featureSlug(feature)
+  const spec = `${SPECS_DIR}/${slug}.spec.md`
   return [
-    `"${feature}" is already settled, at \`${SPECS_DIR}/${slug}.spec.md\`. This is a change to it, not a new feature: start from the spec as it stands, never from an earlier conversation about it.`,
+    `"${feature}" is already settled, at \`${spec}\`. This is a change to it, not a new feature: start from the spec as it stands, never from an earlier conversation about it.`,
     '',
     `Read the spec, and \`${UNFILED_FILE}\` and \`${FUTURE_FILE}\` for an entry naming "${feature}". Then ask what the developer wants changed.`,
     '',
     `Once they say, answer in chat, before writing anything: which of the spec's existing rules the change would amend, which it would drop, and what it would add. Fold in an unfiled entry that names this feature; name a future-work entry that names it as something the change could take in, and take it in only if the developer says so. A short message, then stop and wait. Write nothing until they say go.`,
+    '',
+    `Once they say go, revise \`${spec}\` itself, to the same contract: never a second spec and never a separate file of changes. Behaviour that belongs to a situation the spec already has becomes rules in that scenario; behaviour that is a situation of its own becomes a new \`##\` scenario. Set the front matter \`status\` back to \`draft\`, so the feature stands as a plan being made again until the user approves it. From there the revision is reviewed like any draft: the developer comments and strikes its rules in \`${WORK_DIR}/${slug}.review.md\`, you answer them, before Approve.`,
   ].join('\n')
 }
 

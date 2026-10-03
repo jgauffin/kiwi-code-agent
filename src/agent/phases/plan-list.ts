@@ -1,14 +1,24 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { SPECS_DIR, WORK_DIR } from './blind-plan'
-import { statusOf } from './spec-file'
-import { isSettled, type SpecStatus } from './spec-status'
+import { draftStage, type PlanStage } from './plan-stage'
+import { readReview, reviewPath } from './plan-review'
+import { authorshipOf, bodyOf, builtOf, statusOf } from './spec-file'
+import { isSettled, type Authorship, type SpecStatus } from './spec-status'
 import { readTasks, TASKS_SUFFIX, tasksDone, type TasksState } from './tasks-file'
 
 /** The spec's own status, with `verified` derived from the board for a spec that has yet to record it. */
 export type PlanStatus = SpecStatus
 
-export type PlanSummary = { feature: string; path: string; status: PlanStatus }
+/** How far a draft's review has got: `draftStage`'s three outcomes short of approval. */
+export type ReviewProgress = Extract<PlanStage, 'created' | 'under_review' | 'final_draft'>
+
+/**
+ * A planned feature, at its stage. `authored` and `review` say how the draft
+ * came to be and how far its review got; they mean nothing once a spec is
+ * settled, so they are left out past `draft`.
+ */
+export type PlanSummary = { feature: string; path: string; status: PlanStatus; authored?: Authorship; review?: ReviewProgress }
 
 const SPEC_SUFFIX = '.spec.md'
 
@@ -27,11 +37,20 @@ export async function listPlans(cwd: string): Promise<PlanSummary[]> {
     const path = join(dir, name)
     const slug = name.slice(0, -SPEC_SUFFIX.length)
     const text = await readFile(path, 'utf8')
-    const status = statusOf(text)
+    const rawStatus = statusOf(text)
     const tasks = await readTasks(join(cwd, WORK_DIR, `${slug}${TASKS_SUFFIX}`))
-    plans.push({ feature: featureOf(text) ?? slug, path, status: finished(status, tasks) ? 'verified' : status })
+    const status = finished(rawStatus, tasks) ? 'verified' : rawStatus
+    const draft = status === 'draft' ? { authored: authorshipOf(text), review: await reviewProgress(cwd, slug, text) } : {}
+    plans.push({ feature: featureOf(text) ?? slug, path, status, ...draft })
   }
   return plans
+}
+
+/** How far a draft's review has got, read from its review file (none yet counts as never reviewed). */
+async function reviewProgress(cwd: string, slug: string, text: string): Promise<ReviewProgress> {
+  const review = await readReview(reviewPath(cwd, slug))
+  const spec = { exists: true as const, status: 'draft' as const, body: bodyOf(text), built: builtOf(text) }
+  return draftStage(spec, review) as ReviewProgress
 }
 
 /** Built and proven: the tests passed. What the cleanup left is the dev's to decide on, so it never holds the feature open. */

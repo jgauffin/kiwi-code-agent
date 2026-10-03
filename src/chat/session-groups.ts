@@ -1,14 +1,23 @@
 import { basename } from 'node:path'
 import { lastActive, type SessionRecord } from '../agent/session/session-manager'
 import { featureSlug } from '../agent/phases/blind-plan'
-import type { PlanStatus, PlanSummary } from '../agent/phases/plan-list'
+import type { PlanStatus, PlanSummary, ReviewProgress } from '../agent/phases/plan-list'
+import type { Authorship } from '../agent/phases/spec-status'
 
 /**
  * A planned feature: its spec's stage (absent while the planner has not written
  * it), the newest plan session on it, if one is kept, and when any run on the
- * feature was last worked in.
+ * feature was last worked in. `authored` and `review` say how a draft came to
+ * be and how far its review got; absent once the spec is settled.
  */
-export type PlanEntry = { feature: string; status: PlanStatus | undefined; record: SessionRecord | undefined; lastActiveAt: string | undefined }
+export type PlanEntry = {
+  feature: string
+  status: PlanStatus | undefined
+  record: SessionRecord | undefined
+  lastActiveAt: string | undefined
+  authored: Authorship | undefined
+  review: ReviewProgress | undefined
+}
 
 /** What the Sessions view offers to open again: the chats, and one entry per planned feature. */
 export type SessionGroups = { chats: SessionRecord[]; plans: PlanEntry[] }
@@ -17,6 +26,18 @@ export type SessionGroups = { chats: SessionRecord[]; plans: PlanEntry[] }
 const CONVERSATIONS: ReadonlySet<SessionRecord['mode']> = new Set(['chat', 'code-plan', 'file-decisions', 'doc-migration'])
 
 const newestFirst = (a: string | undefined, b: string | undefined): number => (b ?? '').localeCompare(a ?? '')
+
+/** When each feature with a record was last worked in, across every run under it. */
+function lastTouchedByFeature(records: SessionRecord[]): Map<string, string> {
+  const touched = new Map<string, string>()
+  for (const r of records) {
+    if (!r.feature) continue
+    const slug = featureSlug(r.feature)
+    const at = lastActive(r)
+    if (at > (touched.get(slug) ?? '')) touched.set(slug, at)
+  }
+  return touched
+}
 
 /**
  * The runs a plan starts (checks, implementers, cleanups) and the docs map
@@ -30,26 +51,20 @@ const newestFirst = (a: string | undefined, b: string | undefined): number => (b
 export function sessionGroups(records: SessionRecord[], specs: PlanSummary[]): SessionGroups {
   const chats = records.filter((r) => CONVERSATIONS.has(r.mode) && !r.parentId).sort((a, b) => newestFirst(lastActive(a), lastActive(b)))
   const bySlug = new Map(specs.map((s) => [basename(s.path, '.spec.md'), s]))
-  const touched = new Map<string, string>()
-  for (const r of records) {
-    if (!r.feature) continue
-    const slug = featureSlug(r.feature)
-    const at = lastActive(r)
-    if (at > (touched.get(slug) ?? '')) touched.set(slug, at)
-  }
+  const touched = lastTouchedByFeature(records)
   const plans = new Map<string, PlanEntry>()
   for (const r of records) {
     if (r.mode !== 'plan' || !r.feature) continue
     const slug = featureSlug(r.feature)
     if (plans.has(slug)) continue
     const spec = bySlug.get(slug)
-    plans.set(slug, { feature: spec?.feature ?? r.feature, status: spec?.status, record: r, lastActiveAt: touched.get(slug) })
+    plans.set(slug, { feature: spec?.feature ?? r.feature, status: spec?.status, record: r, lastActiveAt: touched.get(slug), authored: spec?.authored, review: spec?.review })
   }
   const opened = [...plans.values()].sort((a, b) => newestFirst(a.lastActiveAt, b.lastActiveAt))
   const unopened: PlanEntry[] = []
   for (const [slug, spec] of bySlug) {
     if (spec.status === 'verified' || plans.has(slug)) continue
-    unopened.push({ feature: spec.feature, status: spec.status, record: undefined, lastActiveAt: undefined })
+    unopened.push({ feature: spec.feature, status: spec.status, record: undefined, lastActiveAt: undefined, authored: spec.authored, review: spec.review })
   }
   return { chats, plans: [...opened, ...unopened] }
 }

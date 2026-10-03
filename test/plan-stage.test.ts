@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { checkDue, isApprovable, planStage, tasksStale } from '../src/agent/phases/plan-stage'
+import { checkDue, isApprovable, isChangeable, planStage, tasksStale } from '../src/agent/phases/plan-stage'
 import { decisions } from '../src/agent/phases/decisions'
 import { parseReview } from '../src/agent/phases/plan-review'
 import type { SpecState } from '../src/agent/phases/spec-file'
@@ -123,5 +123,25 @@ describe('plan stage', () => {
     expect(isApprovable('final_draft', draft)).toBe(false)
     expect(isApprovable('under_review', draft)).toBe(false)
     expect(isApprovable('checking', approved)).toBe(false)
+  })
+
+  it('a_change_is_offered_on_a_settled_feature_once_the_board_holds_no_unfinished_task', () => {
+    // Approved with no board yet: nothing is unfinished, so a change may start before the first check even runs.
+    expect(isChangeable(approved, noTasks, [])).toBe(true)
+    expect(isChangeable(approved, tasksState(tested), [])).toBe(true)
+    const verified: SpecState = { exists: true, status: 'verified', body, built: false }
+    expect(isChangeable(verified, noTasks, [])).toBe(true)
+  })
+
+  it('a_draft_offers_no_change_since_it_is_still_being_planned', () => {
+    expect(isChangeable(draft, noTasks, [])).toBe(false)
+    expect(isChangeable({ exists: false }, noTasks, [])).toBe(false)
+  })
+
+  it('a_change_is_held_back_while_a_decision_waits_or_a_task_is_unfinished', () => {
+    const open = decisions('### X\n- on: Cancel command\n- finding: x')
+    expect(isChangeable(approved, noTasks, open)).toBe(false)
+    expect(isChangeable(approved, tasksState(tested, task('B')), [])).toBe(false)
+    expect(isChangeable(approved, tasksState(tested, task('B', { state: 'blocked', blockedReason: 'no API' })), [])).toBe(false)
   })
 })

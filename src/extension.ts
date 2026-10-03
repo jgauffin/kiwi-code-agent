@@ -15,10 +15,10 @@ import { PermissionPolicy, type PermissionRules } from './agent/permissions/perm
 import type { ProjectCommands } from './agent/permissions/project-commands'
 import { readOnlyTools } from './agent/permissions/tool-classes'
 import { SPECS_DIR } from './agent/phases/blind-plan'
-import { sweepPlans } from './agent/phases/plan-housekeeping'
+import { sweepPlans, type SweepReport } from './agent/phases/plan-housekeeping'
 import { FUTURE_FILE, migrateUnfiled } from './agent/phases/unfiled-decisions'
 import { ensureAgentDirIgnored } from './agent/agent-dir-ignore'
-import { KIWI_DIR, migrateLayout } from './agent/kiwi-dir'
+import { KIWI_DIR, migrateLayout, type LayoutReport } from './agent/kiwi-dir'
 import { scratchDir } from './agent/scratch/scratch-folder'
 import type { VerifyRule } from './agent/phases/verification'
 import { CHAT_PANEL_TYPE, ChatViewProvider, type PermissionStore } from './chat/chat-view-provider'
@@ -33,7 +33,15 @@ import { AgentsMdOffers, type OfferKind } from './chat/agents-md-offers'
 import { readOptional } from './agent/workspace-files'
 import { BundleUpkeep } from './settings/bundle-upkeep'
 import { SETTINGS_PANEL_TYPE, SettingsPanel } from './settings/settings-panel'
-import { SettingsStore, readCleanupLimits, readModelSettings, secretKey, type ConfigPort, type MemoryPort } from './settings/settings-store'
+import {
+  SettingsStore,
+  readCleanupLimits,
+  readModelSettings,
+  secretKey,
+  type BundlePort,
+  type ConfigPort,
+  type MemoryPort,
+} from './settings/settings-store'
 import { errorMessage } from './error-message'
 
 /** The `kiwiAgent` section as the settings store and the session factory both read it. */
@@ -50,18 +58,36 @@ function configPort(): ConfigPort {
   }
 }
 
-export function activate(context: vscode.ExtensionContext): void {
-  const output = vscode.window.createOutputChannel('Kiwipow Agent')
-  // Without a folder open the engine still needs a working directory that exists.
-  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? context.globalStorageUri.fsPath
-  mkdirSync(workspaceRoot, { recursive: true })
-  // The housekeeping reads the current layout, so an older one is moved first.
+function logLayoutMigration(report: LayoutReport, output: vscode.OutputChannel): void {
+  for (const move of report.moved) output.appendLine(`layout: moved ${move.from} to ${move.to}`)
+  for (const path of report.blocked) output.appendLine(`layout: left ${path}, its new place already holds one of that name`)
+  for (const failure of report.failed) output.appendLine(`layout: could not move ${failure.path}: ${failure.reason}`)
+}
+
+function logUnfiledSplit(result: { changed: boolean; moved: number }, output: vscode.OutputChannel): void {
+  if (result.changed) {
+    output.appendLine(
+      `unfiled decisions: dropped the built lines, moved ${result.moved} entr${result.moved === 1 ? 'y' : 'ies'} still to build to ${FUTURE_FILE}`,
+    )
+  }
+}
+
+function logPlanHousekeeping(report: SweepReport, output: vscode.OutputChannel): void {
+  for (const path of report.converted) output.appendLine(`plan housekeeping: converted ${path} to JSON`)
+  for (const path of report.moved) output.appendLine(`plan housekeeping: moved ${path} to the working files`)
+  for (const path of report.blocked) output.appendLine(`plan housekeeping: left ${path}, the working files already hold one of that name`)
+  for (const { path, status } of report.recorded) output.appendLine(`plan housekeeping: marked ${path} ${status}`)
+  for (const path of report.removed) output.appendLine(`plan housekeeping: removed ${path}`)
+}
+
+/**
+ * The housekeeping that brings an older layout and its files up to date: it
+ * reads the current layout, so an older one is moved first, and each later
+ * step waits on that before touching what it left behind.
+ */
+function runStartupMigrations(workspaceRoot: string, output: vscode.OutputChannel): void {
   const migrated = migrateLayout(workspaceRoot, homedir()).then(
-    (report) => {
-      for (const move of report.moved) output.appendLine(`layout: moved ${move.from} to ${move.to}`)
-      for (const path of report.blocked) output.appendLine(`layout: left ${path}, its new place already holds one of that name`)
-      for (const failure of report.failed) output.appendLine(`layout: could not move ${failure.path}: ${failure.reason}`)
-    },
+    (report) => logLayoutMigration(report, output),
     (error: unknown) => output.appendLine(`layout migration failed: ${errorMessage(error)}`),
   )
   void migrated.then(() => ensureAgentDirIgnored(workspaceRoot)).then(
@@ -71,29 +97,25 @@ export function activate(context: vscode.ExtensionContext): void {
     (error: unknown) => output.appendLine(`could not add ${KIWI_DIR}/ to .gitignore: ${errorMessage(error)}`),
   )
   void migrated.then(() => migrateUnfiled(workspaceRoot)).then(
-    ({ changed, moved }) => {
-      if (changed) output.appendLine(`unfiled decisions: dropped the built lines, moved ${moved} entr${moved === 1 ? 'y' : 'ies'} still to build to ${FUTURE_FILE}`)
-    },
+    (result) => logUnfiledSplit(result, output),
     (error: unknown) => output.appendLine(`could not split the unfiled decisions: ${errorMessage(error)}`),
   )
   void migrated.then(() => sweepPlans(workspaceRoot, new Date())).then(
-    (report) => {
-      for (const path of report.converted) output.appendLine(`plan housekeeping: converted ${path} to JSON`)
-      for (const path of report.moved) output.appendLine(`plan housekeeping: moved ${path} to the working files`)
-      for (const path of report.blocked) output.appendLine(`plan housekeeping: left ${path}, the working files already hold one of that name`)
-      for (const { path, status } of report.recorded) output.appendLine(`plan housekeeping: marked ${path} ${status}`)
-      for (const path of report.removed) output.appendLine(`plan housekeeping: removed ${path}`)
-    },
+    (report) => logPlanHousekeeping(report, output),
     (error: unknown) => output.appendLine(`plan housekeeping failed: ${errorMessage(error)}`),
   )
+}
 
-  const store: SessionStore = {
+function createSessionStore(context: vscode.ExtensionContext): SessionStore {
+  return {
     list: () => context.workspaceState.get<SessionRecord[]>('sessions', []),
     save: (records) => Promise.resolve(context.workspaceState.update('sessions', records)),
   }
+}
 
-  /** The test run once a feature's board is all tested: the `kiwiAgent.verify` rules, read when the run starts. */
-  const verifier: Verifier = {
+/** The test run once a feature's board is all tested: the `kiwiAgent.verify` rules, read when the run starts. */
+function createVerifier(): Verifier {
+  return {
     rules: () => vscode.workspace.getConfiguration('kiwiAgent').get<VerifyRule[]>('verify', []),
     failureBudget: () => vscode.workspace.getConfiguration('kiwiAgent').get<number>('verifyFailureBudget', 3),
     retrySeconds: () => vscode.workspace.getConfiguration('kiwiAgent').get<number>('verifyRetrySeconds', 30),
@@ -102,38 +124,55 @@ export function activate(context: vscode.ExtensionContext): void {
       return { ok: result.ended === 'exit' && result.exitCode === 0, output: result.output }
     },
   }
+}
 
-  /** The cleanup after a feature's tests pass: the `kiwiAgent.cleanup` limits, read when the sizes are measured. */
-  const sizeLimits: SizeLimits = {
+/** The cleanup after a feature's tests pass: the `kiwiAgent.cleanup` limits, read when the sizes are measured. */
+function createSizeLimits(): SizeLimits {
+  return {
     limits: () => readCleanupLimits(configPort()),
     ignore: () => vscode.workspace.getConfiguration('kiwiAgent').get<string[]>('cleanup.ignore', []),
   }
+}
 
-  // Kept on the session record, so the switch survives a reload and a new thread; the record changes at once, the save follows.
-  const allowWritesControl: SessionSwitch = {
-    isEnabled: (id) => sessions.get(id)?.allowWrites ?? false,
+// Kept on the session record, so the switch survives a reload and a new thread; the record changes at once, the save follows.
+function createAllowWritesControl(getSessions: () => SessionManager, output: vscode.OutputChannel): SessionSwitch {
+  return {
+    isEnabled: (id) => getSessions().get(id)?.allowWrites ?? false,
     setEnabled: (id, enabled) =>
-      void sessions.setAllowWrites(id, enabled).catch((error: unknown) => output.appendLine(`could not save Allow writes: ${errorMessage(error)}`)),
+      void getSessions()
+        .setAllowWrites(id, enabled)
+        .catch((error: unknown) => output.appendLine(`could not save Allow writes: ${errorMessage(error)}`)),
   }
+}
 
-  /** The commands the user has already defined for this project: they run without a prompt. */
-  const projectCommands = (): ProjectCommands => ({
+/** The commands the user has already defined for this project: they run without a prompt. */
+function createProjectCommands(workspaceRoot: string, verifier: Verifier): () => ProjectCommands {
+  return () => ({
     scripts: packageScripts(workspaceRoot),
     verify: verifier.rules().flatMap((rule) => [rule.command, ...(rule.build?.trim() ? [rule.build] : [])]),
   })
-  /** Per session, the rules in force: the project's plus the session's own. */
-  const policies = new Map<string, PermissionPolicy>()
-  const policyFor = (sessionId: string): PermissionPolicy => {
+}
+
+/** Per session, the rules in force: the project's plus the session's own. `engines` and `sessions` are resolved when a policy is actually asked for, well after both exist. */
+function createPolicyFor(
+  workspaceRoot: string,
+  getSessions: () => SessionManager,
+  getEngines: () => SessionEngines,
+  projectCommands: () => ProjectCommands,
+  allowWritesControl: SessionSwitch,
+  policies: Map<string, PermissionPolicy>,
+): (sessionId: string) => PermissionPolicy {
+  return (sessionId) => {
     const existing = policies.get(sessionId)
     if (existing) return existing
     const policy = new PermissionPolicy(
       workspaceRoot,
       () => {
         const rules = permissionRules()
-        return { ...rules, allow: [...rules.allow, ...(sessions.get(sessionId)?.allowed ?? [])] }
+        return { ...rules, allow: [...rules.allow, ...(getSessions().get(sessionId)?.allowed ?? [])] }
       },
       {
-        readOnly: readOnlyTools(() => engines.toolsOf(sessionId)),
+        readOnly: readOnlyTools(() => getEngines().toolsOf(sessionId)),
         project: projectCommands,
         writesAllowed: () => allowWritesControl.isEnabled(sessionId),
         scratch: scratchDir(sessionId),
@@ -142,10 +181,10 @@ export function activate(context: vscode.ExtensionContext): void {
     policies.set(sessionId, policy)
     return policy
   }
+}
 
-  /** Docs the blind planner must not see, so neither the map nor the evaluation may describe them. */
-  const planIgnore = (): string[] => vscode.workspace.getConfiguration('kiwiAgent').get<string[]>('planIgnore', [])
-
+/** The user's and the workspace's `.mcp.json`, read once and again on every change; `sessions` is resolved when a session runs, after it exists. */
+function createMcp(workspaceRoot: string, getSessions: () => SessionManager, output: vscode.OutputChannel): McpServerSet {
   // Claude Code's user-wide servers into `~/.mcp.json`, once. Every read waits for it, so the first one already sees them.
   const mcpMigration = migrateClaudeMcpServers().then(
     (names) => {
@@ -153,35 +192,55 @@ export function activate(context: vscode.ExtensionContext): void {
     },
     (error: unknown) => output.appendLine(`could not read Claude Code's MCP servers: ${errorMessage(error)}`),
   )
-
-  /** The user's and the workspace's `.mcp.json`, read once and again on every change; `sessions` is resolved when a session runs, after it exists. */
-  const mcp: McpServerSet = new McpServerSet(
+  return new McpServerSet(
     async () => {
       await mcpMigration
       return readMcpConfig(workspaceRoot)
     },
-    () => sessions.liveSessions(),
+    () => getSessions().liveSessions(),
     (message) => void vscode.window.showWarningMessage(`Kiwipow Agent: ${message}`),
   )
+}
 
-  let chat: ChatViewProvider
-  const engines: SessionEngines = new SessionEngines({
-    context,
-    output,
+/** `getChat` and `getSessions` are resolved once the engines run a session, well after both are built. */
+function createEngines(params: {
+  context: vscode.ExtensionContext
+  output: vscode.OutputChannel
+  workspaceRoot: string
+  mcp: McpServerSet
+  verifier: Verifier
+  policyFor: (sessionId: string) => PermissionPolicy
+  planIgnore: () => string[]
+  getChat: () => ChatViewProvider
+  getSessions: () => SessionManager
+}): SessionEngines {
+  return new SessionEngines({
+    context: params.context,
+    output: params.output,
     config: configPort(),
-    workspaceRoot,
-    mcp,
-    verifier,
-    policyFor,
-    planIgnore,
-    buildDocsMap: (ignored, onProgress) => chat.buildDocsMap(ignored, onProgress),
-    conversation: (id) => sessions.conversation(id),
+    workspaceRoot: params.workspaceRoot,
+    mcp: params.mcp,
+    verifier: params.verifier,
+    policyFor: params.policyFor,
+    planIgnore: params.planIgnore,
+    buildDocsMap: (ignored, onProgress) => params.getChat().buildDocsMap(ignored, onProgress),
+    conversation: (id) => params.getSessions().conversation(id),
   })
-  const sessions: SessionManager = new SessionManager(
+}
+
+/** `getChat` is resolved only once a session event or tool call actually happens, well after the chat view exists. */
+function createSessions(
+  store: SessionStore,
+  engines: SessionEngines,
+  workspaceRoot: string,
+  policyFor: (sessionId: string) => PermissionPolicy,
+  getChat: () => ChatViewProvider,
+): SessionManager {
+  return new SessionManager(
     store,
     (record, onProgress) => engines.create(record, onProgress),
     (id) => RunLog.forSession(workspaceRoot, id),
-    (id, event) => chat.onSessionEvent(id, event),
+    (id, event) => getChat().onSessionEvent(id, event),
     // The edit diff and the command lines are added once, before the event is logged, so a reload shows the same thing.
     async (id, event) => policyFor(id).decorate((await engines.recorderOf(id)?.decorate(event)) ?? event),
     async (id, call) => {
@@ -189,19 +248,28 @@ export function activate(context: vscode.ExtensionContext): void {
       return outcome !== undefined && 'allow' in outcome && outcome.allow === true
     },
   )
-  const permissionStore: PermissionStore = {
+}
+
+function createPermissionStore(getSessions: () => SessionManager): PermissionStore {
+  return {
     allowForProject: async (rules) => {
       const config = vscode.workspace.getConfiguration('kiwiAgent')
       const current = permissionRules().allow
       const merged = [...current, ...rules.filter((r) => !current.includes(r))]
       await config.update('permissions.allow', merged, vscode.ConfigurationTarget.Workspace)
     },
-    allowForSession: (sessionId, rules) => sessions.allowForSession(sessionId, rules),
+    allowForSession: (sessionId, rules) => getSessions().allowForSession(sessionId, rules),
   }
-  const memoryPort: MemoryPort = {
+}
+
+function createMemoryPort(workspaceRoot: string): MemoryPort {
+  return {
     list: () => listMemories(workspaceRoot),
     forget: (scope, title) => forgetMemory(scope, title, workspaceRoot),
   }
+}
+
+function createBundles(output: vscode.OutputChannel, workspaceRoot: string): BundleUpkeep {
   const bundles = new BundleUpkeep({
     config: configPort(),
     ask: (text, ...choices) => Promise.resolve(vscode.window.showInformationMessage(`Kiwipow Agent: ${text}`, ...choices)),
@@ -209,7 +277,21 @@ export function activate(context: vscode.ExtensionContext): void {
     workspaceRoot,
   })
   bundles.onActivate().catch((error: unknown) => output.appendLine(`bundle sources: ${errorMessage(error)}`))
-  // The workspace's AGENTS.md and the person's own are each offered over the chat what they still need: a CLAUDE.md moved in, a tidy-up once long. An answer is remembered so it is not raised again.
+  return bundles
+}
+
+/**
+ * The workspace's AGENTS.md and the person's own are each offered over the
+ * chat what they still need: a CLAUDE.md moved in, a tidy-up once long. An
+ * answer is remembered so it is not raised again. `getChat` is resolved only
+ * once an offer actually changes, well after the chat view exists.
+ */
+function createAgentsMdOffers(
+  context: vscode.ExtensionContext,
+  workspaceRoot: string,
+  output: vscode.OutputChannel,
+  getChat: () => ChatViewProvider,
+): AgentsMdOffers {
   const answered = (scope: BundleScope) => (scope === 'project' ? context.workspaceState : context.globalState)
   const answeredKey = (kind: OfferKind) => `agentsMd.${kind}Settled`
   const agentsMd = new AgentsMdOffers(
@@ -226,12 +308,16 @@ export function activate(context: vscode.ExtensionContext): void {
         output.appendLine(`CLAUDE.md: moved ${move.claudePath} into ${move.agentsPath}`)
       },
     },
-    () => chat.refresh(),
+    () => getChat().refresh(),
   )
   agentsMd
     .load(vscode.workspace.workspaceFolders?.length ? ['project', 'user'] : ['user'])
     .catch((error: unknown) => output.appendLine(`AGENTS.md offers: ${errorMessage(error)}`))
-  const settings = new SettingsStore(
+  return agentsMd
+}
+
+function createSettings(context: vscode.ExtensionContext, memoryPort: MemoryPort, bundlesPort: BundlePort): SettingsStore {
+  return new SettingsStore(
     configPort(),
     {
       has: async (name) => (await context.secrets.get(secretKey(name))) !== undefined,
@@ -245,9 +331,12 @@ export function activate(context: vscode.ExtensionContext): void {
       delete: (name) => Promise.resolve(context.secrets.delete(secretKey(name))),
     },
     memoryPort,
-    bundles.port,
+    bundlesPort,
   )
-  const settingsPanel = new SettingsPanel(
+}
+
+function createSettingsPanel(context: vscode.ExtensionContext, settings: SettingsStore, workspaceRoot: string): SettingsPanel {
+  return new SettingsPanel(
     context.extensionUri,
     settings,
     async ({ name, baseUrl, apiKeyValue }) => {
@@ -258,7 +347,20 @@ export function activate(context: vscode.ExtensionContext): void {
     },
     (scope, file) => memoryPath(scope, file, workspaceRoot),
   )
-  chat = new ChatViewProvider(
+}
+
+function createChat(
+  context: vscode.ExtensionContext,
+  sessions: SessionManager,
+  settings: SettingsStore,
+  verifier: Verifier,
+  sizeLimits: SizeLimits,
+  allowWritesControl: SessionSwitch,
+  permissionStore: PermissionStore,
+  workspaceRoot: string,
+  agentsMd: AgentsMdOffers,
+): ChatViewProvider {
+  return new ChatViewProvider(
     context.extensionUri,
     sessions,
     profileFor,
@@ -274,13 +376,29 @@ export function activate(context: vscode.ExtensionContext): void {
     workspaceRoot,
     agentsMd,
   )
-  const tree = new SessionsTree(
+}
+
+function createSessionsTree(sessions: SessionManager, workspaceRoot: string, chat: ChatViewProvider): SessionsTree {
+  return new SessionsTree(
     sessions,
     workspaceRoot,
     (id) => chat.isOpen(id),
     (id) => chat.statusOf(id),
   )
+}
 
+/** Every command and watcher the extension offers, and the panel serializers that let a reload pick its tabs up again. */
+function registerSubscriptions(
+  context: vscode.ExtensionContext,
+  output: vscode.OutputChannel,
+  chat: ChatViewProvider,
+  tree: SessionsTree,
+  sessions: SessionManager,
+  settingsPanel: SettingsPanel,
+  mcp: McpServerSet,
+  workspaceRoot: string,
+  planIgnore: () => string[],
+): void {
   context.subscriptions.push(
     output,
     vscode.window.registerWebviewPanelSerializer(CHAT_PANEL_TYPE, {
@@ -321,9 +439,46 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('kiwiAgent.buildRepoMap', () => chat.buildRepoMap()),
     vscode.commands.registerCommand('kiwiAgent.buildDocsMap', () => chat.buildDocsMapCommand(planIgnore())),
     watchMcpConfig(workspaceRoot, () => mcp.refresh()),
-    openDraftPlanAction(chat, sessions, workspaceRoot, output),
+    openDraftPlanAction(chat, workspaceRoot, output),
     watchOwnBundle(context),
   )
+}
+
+export function activate(context: vscode.ExtensionContext): void {
+  const output = vscode.window.createOutputChannel('Kiwipow Agent')
+  // Without a folder open the engine still needs a working directory that exists.
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? context.globalStorageUri.fsPath
+  mkdirSync(workspaceRoot, { recursive: true })
+  runStartupMigrations(workspaceRoot, output)
+
+  const store = createSessionStore(context)
+  const verifier = createVerifier()
+  const sizeLimits = createSizeLimits()
+
+  const policies = new Map<string, PermissionPolicy>()
+  // Forward-referenced by the closures below, which only run well after all three are built.
+  let chat: ChatViewProvider
+  let engines: SessionEngines
+  let sessions: SessionManager
+  const allowWritesControl = createAllowWritesControl(() => sessions, output)
+  const projectCommands = createProjectCommands(workspaceRoot, verifier)
+  const policyFor = createPolicyFor(workspaceRoot, () => sessions, () => engines, projectCommands, allowWritesControl, policies)
+  /** Docs the blind planner must not see, so neither the map nor the evaluation may describe them. */
+  const planIgnore = (): string[] => vscode.workspace.getConfiguration('kiwiAgent').get<string[]>('planIgnore', [])
+
+  const mcp = createMcp(workspaceRoot, () => sessions, output)
+  engines = createEngines({ context, output, workspaceRoot, mcp, verifier, policyFor, planIgnore, getChat: () => chat, getSessions: () => sessions })
+  sessions = createSessions(store, engines, workspaceRoot, policyFor, () => chat)
+  const permissionStore = createPermissionStore(() => sessions)
+  const memoryPort = createMemoryPort(workspaceRoot)
+  const bundles = createBundles(output, workspaceRoot)
+  const agentsMd = createAgentsMdOffers(context, workspaceRoot, output, () => chat)
+  const settings = createSettings(context, memoryPort, bundles.port)
+  const settingsPanel = createSettingsPanel(context, settings, workspaceRoot)
+  chat = createChat(context, sessions, settings, verifier, sizeLimits, allowWritesControl, permissionStore, workspaceRoot, agentsMd)
+  const tree = createSessionsTree(sessions, workspaceRoot, chat)
+
+  registerSubscriptions(context, output, chat, tree, sessions, settingsPanel, mcp, workspaceRoot, planIgnore)
   stopSessions = () => sessions.disposeAll()
   // A build the last window cut off mid-turn carries on without a prompt.
   chat.resumeCutOffBuilds().catch((error: unknown) => output.appendLine(`resuming cut-off builds failed: ${errorMessage(error)}`))

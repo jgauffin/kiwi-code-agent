@@ -1,7 +1,6 @@
 import * as vscode from 'vscode'
 import { listDraftPlans, type PlanSummary } from '../agent/phases/plan-list'
-import { SPECS_DIR, specPath } from '../agent/phases/blind-plan'
-import type { SessionManager } from '../agent/session/session-manager'
+import { SPECS_DIR } from '../agent/phases/blind-plan'
 import type { ChatViewProvider } from './chat-view-provider'
 import { errorMessage } from '../error-message'
 
@@ -9,15 +8,10 @@ const HAS_DRAFTS = 'kiwiAgent.hasDraftPlans'
 
 /**
  * The Sessions view's "open draft plan" action: shown while a spec under
- * `specs/` is still a draft, it opens the plan session behind the spec, or
- * the spec itself when no session for it remains.
+ * `specs/` is still a draft, it picks the draft up the same way the
+ * new-session screen's pick-up list does, feature already open included.
  */
-export function openDraftPlanAction(
-  chat: ChatViewProvider,
-  sessions: SessionManager,
-  workspaceRoot: string,
-  output: vscode.OutputChannel,
-): vscode.Disposable {
+export function openDraftPlanAction(chat: ChatViewProvider, workspaceRoot: string, output: vscode.OutputChannel): vscode.Disposable {
   const refresh = async (): Promise<void> => {
     const drafts = await listDraftPlans(workspaceRoot)
     output.appendLine(`draft plans under ${workspaceRoot}/${SPECS_DIR}: ${drafts.map((d) => d.feature).join(', ') || 'none'}`)
@@ -31,9 +25,7 @@ export function openDraftPlanAction(
     const drafts = await listDraftPlans(workspaceRoot)
     const draft = drafts.length === 1 ? drafts[0] : await pick(drafts)
     if (!draft) return
-    const session = sessions.list().find((r) => r.mode === 'plan' && r.feature && specPath(workspaceRoot, r.feature) === draft.path)
-    if (session) await chat.open(session.id)
-    else await vscode.window.showTextDocument(vscode.Uri.file(draft.path))
+    await chat.resumePlan(draft.feature)
   }
 
   return vscode.Disposable.from(

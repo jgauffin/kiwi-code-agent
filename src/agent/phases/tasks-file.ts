@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { readOptional, replaceFile } from '../workspace-files'
 import { WORK_DIR, featureSlug } from './blind-plan'
 import type { Decision } from './decisions'
-import { specFingerprint, type Scenario, type Spec } from './spec-model'
+import { specFingerprint, type Item, type Scenario, type Spec } from './spec-model'
 
 /**
  * The feature's task board, `.kiwi/specs/<slug>.tasks.json`: derived from the
@@ -27,6 +27,8 @@ export type Task = {
   text: string
   /** Names of the spec rules the task delivers. */
   delivers: string[]
+  /** Text of each live rule the task delivered, last time the board was derived from the scenario: what a later derivation diffs against to tell a gained, lost or amended rule from one the change left alone. Absent on a task derived before this was tracked. */
+  rulesText?: Record<string, string>
   /** The scenario the task delivers, as the board groups it; absent on a flat board. */
   group?: string
   /** Workspace-relative paths the task touched, as the implementer names them; what verification runs over. */
@@ -120,6 +122,7 @@ const boardSchema = z.object({
       name: z.string().min(1),
       text: z.string(),
       delivers: z.array(z.string()),
+      rulesText: z.record(z.string(), z.string()).optional(),
       group: z.string().optional(),
       files: z.array(z.string()),
       newFiles: z.array(z.string()).default([]),
@@ -158,8 +161,9 @@ export function parseBoard(text: string, path = 'tasks board'): TaskBoard {
   return {
     ...(spec !== undefined ? { spec } : {}),
     ...(cleanup !== undefined ? { cleanup } : {}),
-    tasks: tasks.map(({ group, blockedReason, accepted, reassessed, ...task }) => ({
+    tasks: tasks.map(({ rulesText, group, blockedReason, accepted, reassessed, ...task }) => ({
       ...task,
+      ...(rulesText !== undefined ? { rulesText } : {}),
       ...(group !== undefined ? { group } : {}),
       ...(blockedReason !== undefined ? { blockedReason } : {}),
       ...(accepted !== undefined ? { accepted } : {}),
@@ -356,6 +360,13 @@ export const TESTS_ONLY_HOW =
  * spec check found each scenario is built, by scenario title: the newest check
  * replaces a task's, and a scenario it left out keeps what the task had.
  *
+ * A finished task whose scenario gained, lost or amended a rule since it was
+ * last derived is unfinished again: its proofs for the rules the change left
+ * alone stand, the rest drop, and its `how` says which rules are new or
+ * amended, so the run it is handed to builds those rather than the scenario
+ * anew. A task derived before rule changes were tracked this way is read as
+ * unchanged the first time, so an older board is not reopened wholesale.
+ *
  * `built` and `decisions` carry what the check found for a spec migrated from
  * a doc about behaviour the code already has: a brand-new task whose rules the
  * check raised no decision on is told to add tests only, since nothing
@@ -372,20 +383,44 @@ export function deriveBoard(spec: Spec, board: TaskBoard = emptyBoard(), context
   )
   const scenarioTask = (t: Task) => sameName(t.group ?? '', t.name) || spec.scenarios.some((s) => sameName(s.title, t.name))
   const kept = board.tasks.filter((t) => !t.removed && !scenarioTask(t) && t.state !== 'open')
-  const derived = new Map<string, { scenario: Scenario; delivers: string[] }>()
+  const derived = scenariosToDerive(spec, kept)
+  const tasks = reconcileExistingTasks(board, kept, derived, found)
+  tasks.push(...newTasksFromDerived(derived, found, built, drift))
+  return { ...board, tasks, spec: specFingerprint(spec) }
+}
+
+type DerivedScenario = { scenario: Scenario; delivers: string[]; items: Item[] }
+
+/** Every scenario the board has nothing live for yet, by its title; a scenario whose rules are already all delivered has nothing to derive. */
+function scenariosToDerive(spec: Spec, kept: Task[]): Map<string, DerivedScenario> {
+  const derived = new Map<string, DerivedScenario>()
   for (const scenario of spec.scenarios) {
     const items = scenario.behaviours.flatMap((b) => [b, ...b.edges]).filter((i) => !i.removed)
     const delivers = items.map((i) => i.name).filter((name) => deliveredBy(kept, name) === undefined)
-    if (delivers.length > 0) derived.set(scenario.title.trim().toLowerCase(), { scenario, delivers })
+    if (delivers.length > 0) derived.set(scenario.title.trim().toLowerCase(), { scenario, delivers, items })
   }
-  const tasks: Task[] = board.tasks.map((t) => {
+  return derived
+}
+
+/** Every task the board already had, reconciled against what is still derived for its scenario; a scenario matched here is spent, taken out of `derived` for the caller. */
+function reconcileExistingTasks(board: TaskBoard, kept: Task[], derived: Map<string, DerivedScenario>, found: Map<string, string[]>): Task[] {
+  return board.tasks.map((t) => {
     if (kept.includes(t)) return t
     const entry = derived.get(t.name.trim().toLowerCase())
     if (!entry) return t.removed ? t : { ...t, removed: true }
     derived.delete(t.name.trim().toLowerCase())
-    return { ...t, ...fromScenario(entry.scenario, entry.delivers), context: found.get(t.name.trim().toLowerCase()) ?? t.context, removed: false }
+    const override = reconciledScenario(t, entry)
+    const { accepted: _accepted, ...withoutAccepted } = t
+    // Reopened by the scenario change rather than left as the implementer settled it: no longer the accepted word on a blocked task.
+    const base = override.state === 'open' && t.state === 'tested' ? withoutAccepted : t
+    return { ...base, ...override, context: found.get(t.name.trim().toLowerCase()) ?? t.context, removed: false }
   })
-  for (const [key, { scenario, delivers }] of derived) {
+}
+
+/** A brand-new task for every scenario nothing existing claimed. */
+function newTasksFromDerived(derived: Map<string, DerivedScenario>, found: Map<string, string[]>, built: boolean, drift: Set<string>): Task[] {
+  const tasks: Task[] = []
+  for (const [key, { scenario, delivers, items }] of derived) {
     const testsOnly = built && delivers.every((name) => !drift.has(name.trim().toLowerCase()))
     tasks.push({
       ...fromScenario(scenario, delivers),
@@ -399,9 +434,10 @@ export function deriveBoard(spec: Spec, board: TaskBoard = emptyBoard(), context
       built: '',
       state: 'open',
       removed: false,
+      rulesText: textsOf(items),
     })
   }
-  return { ...board, tasks, spec: specFingerprint(spec) }
+  return tasks
 }
 
 const fromScenario = (scenario: Scenario, delivers: string[]) => ({
@@ -410,6 +446,43 @@ const fromScenario = (scenario: Scenario, delivers: string[]) => ({
   text: scenario.intro.trim() || scenario.title,
   delivers,
 })
+
+/** Each item's text by its name, the snapshot a later derivation diffs against. */
+const textsOf = (items: Item[]): Record<string, string> => Object.fromEntries(items.map((i) => [i.name, i.text]))
+
+const textOf = (texts: Record<string, string>, name: string): string | undefined => {
+  const key = Object.keys(texts).find((k) => sameName(k, name))
+  return key === undefined ? undefined : texts[key]
+}
+
+/**
+ * An existing scenario task merged with what the scenario now holds: gained,
+ * lost and amended rules reopen a tested task, with its proofs for the rules
+ * the change left alone kept and the rest dropped, and its `how` naming what
+ * is new or amended for the run to build. A task with no snapshot to diff
+ * against (derived before this was tracked) is taken as unchanged.
+ */
+function reconciledScenario(t: Task, entry: { scenario: Scenario; delivers: string[]; items: Item[] }): Partial<Task> {
+  const base = fromScenario(entry.scenario, entry.delivers)
+  const rulesText = textsOf(entry.items)
+  const prior = t.rulesText
+  if (!prior) return { ...base, rulesText }
+  const added = entry.items.filter((i) => textOf(prior, i.name) === undefined)
+  const amended = entry.items.filter((i) => textOf(prior, i.name) !== undefined && textOf(prior, i.name) !== i.text)
+  const lost = Object.keys(prior).filter((name) => !entry.items.some((i) => sameName(i.name, name)))
+  if (added.length === 0 && amended.length === 0 && lost.length === 0) return { ...base, rulesText }
+  const touched = [...added, ...amended].map((i) => i.name).concat(lost)
+  const proves = t.proves.filter((p) => !touched.some((name) => sameName(p.item, name)))
+  if (t.state !== 'tested') return { ...base, rulesText, proves }
+  const changedNames = [...added, ...amended].map((i) => i.name)
+  return { ...base, rulesText, proves, state: 'open', how: changedNames.length > 0 ? changedRulesHow(changedNames) : '' }
+}
+
+/** Told to whichever run picks the reopened task back up: builds the rules the change touched, not the scenario anew. */
+function changedRulesHow(names: string[]): string {
+  const quoted = names.map((n) => `"${n}"`).join(', ')
+  return `The spec changed since this task was last built: ${quoted} ${names.length === 1 ? 'is' : 'are'} new or amended. Its other rules already stand as they are: build ${names.length === 1 ? 'this one' : 'these'} rather than the scenario anew.`
+}
 
 export const withSpecFingerprint = (board: TaskBoard, fingerprint: string): TaskBoard => ({ ...board, spec: fingerprint })
 

@@ -273,11 +273,12 @@ describe('the board derived from the spec', () => {
 
   it('deriving_again_keeps_the_implementers_progress_and_files', () => {
     const worked = updateTask(deriveBoard(two), 'Refunding', { state: 'tested', files: ['src/refund.ts'], built: 'Refund type', note: 'n' })
-    const revised = spec('## Refunding\n- **Refund on cancel**: refunded\n- **Partial refund**: partly refunded')
+    const revised = spec('## Refunding\n- **Refund on cancel**: a cancelled order is refunded\n- **Partial refund**: partly refunded')
     const again = deriveBoard(revised, worked)
     expect(again.tasks.find((t) => t.name === 'Refunding')).toMatchObject({
       delivers: ['Refund on cancel', 'Partial refund'],
-      state: 'tested',
+      // A rule was added to an already-tested scenario: unfinished again, but its files and what it built are kept.
+      state: 'open',
       files: ['src/refund.ts'],
       built: 'Refund type',
       removed: false,
@@ -342,6 +343,49 @@ describe('the board derived from the spec', () => {
     const withdrawn = decisions('### Cancel keeps a shipped order [withdrawn]\n- on: Cancel command\n- finding: f')
     const settled = deriveBoard(two, undefined, undefined, true, withdrawn)
     expect(settled.tasks.find((t) => t.name === 'Cancelling an order')?.how).toBe(TESTS_ONLY_HOW)
+  })
+
+  it('a_scenario_whose_rules_changed_is_unfinished_again_but_keeps_the_proofs_the_change_left_alone', () => {
+    const before = spec(
+      ['## Cancelling an order', '- **Cancel command**: an open order can be cancelled', '- **Refund timing**: refunded within a day', '- **Old guard**: a legacy rule'].join('\n'),
+    )
+    const worked = updateTask(deriveBoard(before), 'Cancelling an order', {
+      state: 'tested',
+      files: ['src/orders/cancel.ts'],
+      proves: [
+        { item: 'Cancel command', file: 'test/cancel.test.ts', test: 'an_open_order_can_be_cancelled' },
+        { item: 'Refund timing', file: 'test/cancel.test.ts', test: 'refunds_within_a_day' },
+        { item: 'Old guard', file: 'test/cancel.test.ts', test: 'the_legacy_rule_holds' },
+      ],
+    })
+    const after = spec(
+      ['## Cancelling an order', '- **Cancel command**: an open order can be cancelled', '- **Refund timing**: refunded within two days', '- **New guard**: a new rule'].join('\n'),
+    )
+    const changed = deriveBoard(after, worked).tasks.find((t) => t.name === 'Cancelling an order')!
+    // Gained "New guard", lost "Old guard" and amended "Refund timing": unfinished again, files kept.
+    expect(changed.state).toBe('open')
+    expect(changed.files).toEqual(['src/orders/cancel.ts'])
+    // The untouched rule keeps the test that already proves it; the rest drop with it.
+    expect(changed.proves).toEqual([{ item: 'Cancel command', file: 'test/cancel.test.ts', test: 'an_open_order_can_be_cancelled' }])
+    // Its run is told what is new or amended, to build those rather than the scenario anew.
+    expect(changed.how).toContain('Refund timing')
+    expect(changed.how).toContain('New guard')
+    expect(changed.how).not.toContain('Old guard')
+  })
+
+  it('nothing_changed_under_a_scenario_leaves_an_already_tested_task_as_it_was', () => {
+    const proof = { item: 'Refund on cancel', file: 'test/refund.test.ts', test: 'a_cancelled_order_is_refunded' }
+    const worked = updateTask(deriveBoard(two), 'Refunding', { state: 'tested', files: ['src/refund.ts'], proves: [proof] })
+    const again = deriveBoard(two, worked)
+    expect(again.tasks.find((t) => t.name === 'Refunding')).toMatchObject({ state: 'tested', files: ['src/refund.ts'], proves: [proof] })
+  })
+
+  it('a_task_derived_before_rule_changes_were_tracked_is_read_as_unchanged_the_first_time', () => {
+    const legacy = board(task('Refunding', { group: 'Refunding', delivers: ['Refund on cancel'], state: 'tested', files: ['src/refund.ts'] }))
+    const again = deriveBoard(two, legacy)
+    expect(again.tasks.find((t) => t.name === 'Refunding')).toMatchObject({ state: 'tested', files: ['src/refund.ts'] })
+    // From here on the scenario's rule text is tracked, so a later change can be told apart from one already built.
+    expect(again.tasks.find((t) => t.name === 'Refunding')?.rulesText).toEqual({ 'Refund on cancel': 'a cancelled order is refunded' })
   })
 })
 

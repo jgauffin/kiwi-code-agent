@@ -176,6 +176,24 @@ describe('NewSessionView pick-up list', () => {
     node.remove()
   })
 
+  it('a_drafts_entry_says_how_it_came_to_be_and_how_far_its_review_got', () => {
+    const node = view(undefined, { ...waiting, plans: [{ feature: 'Orders', status: 'draft' as const, authored: 'drafted' as const, review: 'under_review' as const }] })
+    expect(picks(node)[0]!.querySelector('.hint')!.textContent).toBe('draft: review, check or approve · drafted from the docs · review in flight')
+    node.remove()
+  })
+
+  it('a_draft_with_nothing_recorded_about_how_it_was_written_reads_as_hand_written', () => {
+    const node = view(undefined, { ...waiting, plans: [{ feature: 'Orders', status: 'draft' as const, authored: 'hand-written' as const, review: 'created' as const }] })
+    expect(picks(node)[0]!.querySelector('.hint')!.textContent).toBe('draft: review, check or approve · hand-written · never reviewed')
+    node.remove()
+  })
+
+  it('a_drafts_every_comment_answered_shows_so', () => {
+    const node = view(undefined, { ...waiting, plans: [{ feature: 'Orders', status: 'draft' as const, authored: 'planned' as const, review: 'final_draft' as const }] })
+    expect(picks(node)[0]!.querySelector('.hint')!.textContent).toBe('draft: review, check or approve · planned with you · every comment answered')
+    node.remove()
+  })
+
   it('a_conversation_other_than_a_chat_is_offered_as_the_session_type_it_is', () => {
     const node = view(undefined, { ...waiting, chats: [{ sessionId: 's1', title: 'Widget framework', mode: 'code-plan', lastActiveAt: '2026-10-03T09:00:00.000Z' }] })
     const pick = picks(node)[1]!

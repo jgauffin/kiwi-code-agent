@@ -14,7 +14,7 @@ Planning decides what gets built. A wrong rule there is inherited by every task 
 
 A profile in settings, with a model and an effort level per step.
 
-![Profiles: a model and effort chosen per step](https://raw.githubusercontent.com/jgauffin/kiwi-code-agent/main/articles/images/profiles.png)
+![Profiles: a model and effort chosen per step](https://raw.githubusercontent.com/jgauffin/kiwi-code-agent/main/articles/images/profiles-list.png)
 
 In JSON it is this:
 

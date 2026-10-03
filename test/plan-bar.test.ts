@@ -105,6 +105,20 @@ describe('PlanBar next step', () => {
     expect(next(node)).not.toBeNull()
   })
 
+  it('change_is_offered_beside_the_next_step_once_the_build_has_nothing_in_flight', () => {
+    const node = bar(plan({ stage: 'verified', status: 'approved', changeable: true }))
+    const button = node.querySelector<HTMLElement>('.change')!
+    expect(button.textContent).toBe('Change')
+    expect(dispatched(node, events.ChangeRequestedEvent.type, () => button.click())).toBe(true)
+  })
+
+  it('change_is_not_offered_while_the_build_still_has_an_unfinished_task', () => {
+    // The build's own next step is offered as usual; Change sits beside it only once nothing is left in flight.
+    const node = bar(plan({ stage: 'under_development', status: 'approved', implementable: true, changeable: false }))
+    expect(node.querySelector('.change')).toBeNull()
+    expect(next(node)!.textContent).toBe('Implement')
+  })
+
   it('a_stopped_check_is_offered_again_and_a_live_one_can_be_stopped', () => {
     const idle = bar(plan({ stage: 'checking', status: 'approved', atWork: false, checkable: true }))
     const again = idle.querySelector<HTMLElement>('.next.check')!

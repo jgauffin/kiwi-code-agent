@@ -18,6 +18,15 @@ Files are numbered in publishing order.
 | 7 | One workflow, a different model per step | Profiles per step, Claude and any OpenAI-compatible endpoint | [07-engine-per-step.md](07-engine-per-step.md) |
 | 8 | Permissions as a workflow, not a dialog | Read-only classification, shell parsing, project commands, per-phase scope | [08-permissions-as-workflow.md](08-permissions-as-workflow.md) |
 
+## Outside the series
+
+For engineering leaders, not dev.to: no series frontmatter, no workflow mechanics they would not act on, and they may repeat what the series says since their readers do not read it.
+
+| Title | Argument | File |
+|---|---|---|
+| The expensive part of AI coding is not the tokens | Where intent lives, what counts as done, what stops it drifting; what the workflow costs and what you need before starting | [cto-why-this-costs-less.md](cto-why-this-costs-less.md) |
+| How do you know the agent isn't quietly rotting your codebase? | Intent outside the code, rules rechecked by every session, tests from rules, size measured once; what it does not fix | [cto-no-silent-decay.md](cto-no-silent-decay.md) |
+
 Links between articles point at the GitHub copies; replace each with its dev.to URL once that article is published.
 
 Screenshots: [screenshots.md](screenshots.md).

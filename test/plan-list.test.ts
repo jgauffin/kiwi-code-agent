@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { listDraftPlans, listPlans } from '../src/agent/phases/plan-list'
 import { renderBoard, withCleanupDecision, withRecord, type TaskBoard } from '../src/agent/phases/tasks-file'
+import { addComment, emptyReview, resolveComment, submitRound, writeReview } from '../src/agent/phases/plan-review'
 import { board, task } from './task-board-fixture'
 
 const allTested = (name: string): TaskBoard => board(task(name, { state: 'tested' }))
@@ -35,7 +36,8 @@ describe('plan list', () => {
         { feature: 'Audit', path: join(dir, 'specs', 'audit.spec.md'), status: 'verified' },
         // All tested but not yet passed the test run: still in play.
         { feature: 'Billing', path: join(dir, 'specs', 'billing.spec.md'), status: 'approved' },
-        { feature: 'Orders', path: join(dir, 'specs', 'orders.spec.md'), status: 'draft' },
+        // Nothing recorded about how it was authored, and its review file is not a review round: hand-written, never reviewed.
+        { feature: 'Orders', path: join(dir, 'specs', 'orders.spec.md'), status: 'draft', authored: 'hand-written', review: 'created' },
       ])
       expect(await listDraftPlans(dir)).toMatchObject([{ feature: 'Orders' }])
     } finally {
@@ -82,6 +84,92 @@ describe('plan list', () => {
     const dir = await mkdtemp(join(tmpdir(), 'plans-'))
     try {
       expect(await listPlans(dir)).toEqual([])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('a_draft_records_how_it_was_planned_or_drafted_when_its_front_matter_says_so', async () => {
+    const dir = await workspace({
+      'orders.spec.md': '---\nfeature: Orders\nstatus: draft\nauthored: planned\n---\n# Orders\n',
+      'billing.spec.md': '---\nfeature: Billing\nstatus: draft\nauthored: drafted\n---\n# Billing\n',
+    })
+    try {
+      expect(await listPlans(dir)).toMatchObject([
+        { feature: 'Billing', authored: 'drafted' },
+        { feature: 'Orders', authored: 'planned' },
+      ])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('nothing_recorded_about_how_a_draft_was_authored_counts_as_hand_written', async () => {
+    const dir = await workspace({ 'orders.spec.md': '---\nfeature: Orders\nstatus: draft\n---\n# Orders\n' })
+    try {
+      expect(await listPlans(dir)).toMatchObject([{ feature: 'Orders', authored: 'hand-written' }])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('a_settled_spec_carries_neither_authorship_nor_a_review_stage', async () => {
+    const dir = await workspace({ 'orders.spec.md': '---\nfeature: Orders\nstatus: approved\nauthored: planned\n---\n# Orders\n' })
+    try {
+      const [orders] = await listPlans(dir)
+      expect(orders).not.toHaveProperty('authored')
+      expect(orders).not.toHaveProperty('review')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('a_draft_with_no_review_file_has_never_been_reviewed', async () => {
+    const dir = await workspace({ 'orders.spec.md': '---\nfeature: Orders\nstatus: draft\n---\n# Orders\n' })
+    try {
+      expect(await listPlans(dir)).toMatchObject([{ feature: 'Orders', review: 'created' }])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('a_draft_with_a_round_the_planner_has_yet_to_answer_is_a_review_in_flight', async () => {
+    const dir = await workspace({ 'orders.spec.md': '---\nfeature: Orders\nstatus: draft\n---\n# Orders\n\n## Goal\nOrders.\n' })
+    try {
+      const review = emptyReview()
+      addComment(review, 'plan', 'needs a second look')
+      submitRound(review, '2026-01-01T00:00:00.000Z')
+      await writeReview(join(dir, '.kiwi', 'specs', 'orders.review.md'), review, 'specs/orders.spec.md')
+      expect(await listPlans(dir)).toMatchObject([{ feature: 'Orders', review: 'under_review' }])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('a_draft_whose_planner_has_answered_every_comment_shows_so_until_the_human_closes_the_round', async () => {
+    const dir = await workspace({ 'orders.spec.md': '---\nfeature: Orders\nstatus: draft\n---\n# Orders\n\n## Goal\nOrders.\n' })
+    try {
+      const review = emptyReview()
+      addComment(review, 'plan', 'needs a second look')
+      submitRound(review, '2026-01-01T00:00:00.000Z')
+      review.rounds[0]!.comments[0]!.resolution = { kind: 'addressed', text: 'reworded the goal' }
+      await writeReview(join(dir, '.kiwi', 'specs', 'orders.review.md'), review, 'specs/orders.spec.md')
+      expect(await listPlans(dir)).toMatchObject([{ feature: 'Orders', review: 'final_draft' }])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('a_draft_whose_round_the_human_closed_is_ready_again_rather_than_still_mid_review', async () => {
+    const dir = await workspace({ 'orders.spec.md': '---\nfeature: Orders\nstatus: draft\n---\n# Orders\n\n## Goal\nOrders.\n' })
+    try {
+      const review = emptyReview()
+      addComment(review, 'plan', 'needs a second look')
+      submitRound(review, '2026-01-01T00:00:00.000Z')
+      review.rounds[0]!.comments[0]!.resolution = { kind: 'addressed', text: 'reworded the goal' }
+      resolveComment(review, { round: 1, index: 0 })
+      await writeReview(join(dir, '.kiwi', 'specs', 'orders.review.md'), review, 'specs/orders.spec.md')
+      expect(await listPlans(dir)).toMatchObject([{ feature: 'Orders', review: 'created' }])
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

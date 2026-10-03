@@ -32,22 +32,28 @@ export type PlanStage =
 
 export function planStage(spec: SpecState, review: Review, tasks: TasksState, decisions: Decision[] = []): PlanStage {
   if (!spec.exists) return 'missing'
-  if (spec.status === 'draft') {
-    const comments = review.rounds.flatMap((r) => r.comments)
-    if (comments.some((c) => !c.resolution)) return 'under_review'
-    if (standingStrikes(spec.body, struckItems(review)).length > 0) return 'under_review'
-    if (comments.some((c) => !c.closed)) return 'final_draft'
-    return 'created'
-  }
+  if (spec.status === 'draft') return draftStage(spec, review)
   // The board is the live word while it exists, so a reopened task or a failed re-run outranks the status the spec carries.
-  if (tasks.exists) {
-    if (!tasksDone(tasks.tasks)) return 'under_development'
-    return tasks.verification?.ok ? 'verified' : 'verification'
-  }
+  if (tasks.exists) return boardStage(tasks)
   // The working files are swept once a feature is verified; the spec alone says where it stands.
   if (spec.status === 'verified') return 'verified'
   if (spec.status === 'implemented') return 'verification'
   return pendingDecisions(decisions).length > 0 ? 'ruling' : 'checking'
+}
+
+/** Where a draft stands with the review: a round still open on it, else how far its comments are answered. */
+export function draftStage(spec: Extract<SpecState, { exists: true }>, review: Review): PlanStage {
+  const comments = review.rounds.flatMap((r) => r.comments)
+  if (comments.some((c) => !c.resolution)) return 'under_review'
+  if (standingStrikes(spec.body, struckItems(review)).length > 0) return 'under_review'
+  if (comments.some((c) => !c.closed)) return 'final_draft'
+  return 'created'
+}
+
+/** Where a feature with a derived board stands: unfinished work outranks a passed or missing test run. */
+function boardStage(tasks: Extract<TasksState, { exists: true }>): PlanStage {
+  if (!tasksDone(tasks.tasks)) return 'under_development'
+  return tasks.verification?.ok ? 'verified' : 'verification'
 }
 
 /**

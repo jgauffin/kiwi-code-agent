@@ -26,11 +26,11 @@ So the feature planner is not allowed to read the code. It reads your docs, the 
 
 The code gets its say afterwards. Once you approve the spec, a separate check reads the code and reports only where the two disagree. Each disagreement becomes a decision with proposed rewordings and a recommendation. You rule: change the rule, or keep it and let the code change.
 
-![The Decisions tab: one disagreement between spec and code, with the ways to settle it](https://raw.githubusercontent.com/jgauffin/kiwi-code-agent/main/articles/images/decision-lists.png)
+![The Decisions tab: a disagreement between spec and code, with the ways to settle it](https://raw.githubusercontent.com/jgauffin/kiwi-code-agent/main/articles/images/decisions.png)
 
 The 500 limit still surfaces. It surfaces as a question with your name on it, not as a line in a spec.
 
-## 2. Approved rules stay approved
+## 2. Approved rules stay approved, so the codebase settles instead of drifting
 
 A spec you approved in March is worth little if a chat in June quietly undoes it.
 
@@ -38,17 +38,21 @@ Every session that changes code (a chat, a code plan, an implementation run) is 
 
 This is the model's own reasoning, not a hard block, so it is as good as the model you run. I tried a mechanical version first, with file watchers and rule-to-test indexes, and threw it away: the session that changes the code is the one best placed to notice a rule, and a broken test is caught by the test run anyway.
 
+The effect compounds, and this is the part I undersold for a long time. Every approved spec is a constraint on every feature planned after it: the planner reads the settled ones before it writes a rule, so the twentieth feature cannot quietly redefine what the third one promised. Most agents start each task from a blank slate, and the only memory of past decisions is the code itself, which is the one memory that carries every workaround as if it were a requirement. Here the memory is a set of named rules in your product's language, and it grows with the product instead of eroding with it. The practical difference is that the system gets more stable as it gets bigger, which is the opposite of what agent-written code usually does.
+
 ## 3. "Done" comes with evidence
 
 An agent saying "done" is not evidence. A passing test is.
 
 Every task on the board names the test that proves each rule it delivers. The spec view shows, per rule, the task that built it and the test that proves it, or the gap.
 
+That the tests come from the rules rather than from the implementation matters more than the bookkeeping. A test written from code asserts what the code already does, which is why agent-written suites pass the moment they are written and break the moment anyone refactors. A test written from a rule asserts the promise: `Refund on cancel` fails when cancelling stops refunding, not when a service is split in two. So the suite is a regression net rather than a snapshot, it survives the restructuring you will do later, and a red test names the promise that broke instead of the line that changed.
+
 ![The spec view: each rule with the task that delivers it and the test that proves it](https://raw.githubusercontent.com/jgauffin/kiwi-code-agent/main/articles/images/spec-coverage.png)
 
 When every task is tested, the extension runs your test commands with no model involved, over just the projects the feature touched. A backend-only feature runs the backend tests, not the frontend bundle. A failure goes back to an implementer with the output, up to a budget you set, and only then to you.
 
-One honest gap: a task marked tested without a named test is flagged on the board, not refused. You see it, but nothing stops it.
+A task marked tested without a named test is flagged on the board, not refused. You see it, but nothing stops it.
 
 ## 4. One script, one diff
 
@@ -58,8 +62,6 @@ Kiwipow Agent lets the model write one JavaScript program instead. It runs in a 
 
 Nothing is written while the script runs. When it ends, you get every changed file as one diff and approve or decline the whole set.
 
-![RunScript's staged edits, shown as one diff to approve](https://raw.githubusercontent.com/jgauffin/kiwi-code-agent/main/articles/images/runscript-diff.png)
-
 Only what the script returns enters the conversation, so the cost of "look at every file and tell me X" scales with the answer, not with the number of files.
 
 ## 5. Safe to run several agents at once
@@ -68,7 +70,7 @@ I run several sessions in one workspace. Agents that share files overwrite each 
 
 A session cannot write a file it has not read, or one that changed since it read it. The refusal says which session changed it, so the model knows to read again rather than retry blindly.
 
-![A write refused because another session changed the file](https://raw.githubusercontent.com/jgauffin/kiwi-code-agent/main/articles/images/stale-write.png)
+![A write refused because another session changed the file, naming the session that changed it](https://raw.githubusercontent.com/jgauffin/kiwi-code-agent/main/articles/images/stale-write.png)
 
 Verification knows who wrote what, too. When a test fails only in code another session changed, the run waits, retries once, and then holds the failure for you instead of handing it to your implementer to "fix".
 
@@ -76,7 +78,7 @@ Verification knows who wrote what, too. When a test fails only in code another s
 
 Planning wants the strongest reasoner you can afford. Implementation wants throughput. A profile sets the model per step, and Claude and any OpenAI-compatible endpoint run the same workflow with the same MCP servers, instruction files (`CLAUDE.md`, `AGENTS.md`), skills and permission rules.
 
-![Profiles: a model chosen per step](https://raw.githubusercontent.com/jgauffin/kiwi-code-agent/main/articles/images/profiles.png)
+![Profiles: a model chosen per step](https://raw.githubusercontent.com/jgauffin/kiwi-code-agent/main/articles/images/profiles-list.png)
 
 ## It costs more, on purpose
 
@@ -90,11 +92,12 @@ A fast agent hands you code in a minute and sends the bill later, in a review, a
 
 It is for teams whose intent lives somewhere other than the code: docs, specs, tickets, a README that says what the product is. The more that is written down, the better the planner plans, and the more a forgotten workaround stands out against it.
 
-It is not for a weekend prototype where the code is the only spec there is. For that, use its plain chat session, or any other agent.
+It is not for a weekend prototype, where writing the intent down costs more than the code it would guard. For that, use its plain chat session, or any other agent.
 
-## The price
+## What it asks of you
 
-- **Your docs have to be worth reading.** A planner that can't read the code, pointed at an empty `docs/` folder, can only ask you. That is the most useful thing it can tell you.
+- **Something about the product has to be written down.** The planner can't read the code, so it reads what you wrote. You don't have to write the specs first: the *Clean up docs* job reads the docs you already have, proposes which of their feature descriptions become specs, checks each one against the code and builds a board that adds the tests proving its rules. You start from where you are.
+- **If nothing is written down, start from the code and know what that costs.** A skill ships for exactly that: ask a chat session to read the source and draft specs from it. It is honest, because what comes out is what the code actually does, workarounds included, and it says so. A constant with no reason behind it is written as a question for you rather than as a rule. Then let the tests get written, and ask a session to read the specs back: rules that contradict each other, rules nobody would ask for, gaps nobody filled. I have yet to see that pass come back empty.
 - **It is opinionated.** Plan, check, rule, implement, verify. For a one-line fix, use a plain chat session; it is there.
 - **It is early.** Windows only for now (x64 and arm64), and you will hit bugs. They get fixed fast.
 

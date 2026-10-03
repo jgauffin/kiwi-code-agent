@@ -14,7 +14,12 @@ const record = (id: string, mode: SessionMode, extra: Partial<SessionRecord> = {
   ...extra,
 })
 
-const spec = (feature: string, status: PlanSummary['status'] = 'draft'): PlanSummary => ({ feature, path: join('/ws', 'specs', `${featureSlug(feature)}.spec.md`), status })
+const spec = (feature: string, status: PlanSummary['status'] = 'draft', draft: Pick<PlanSummary, 'authored' | 'review'> = {}): PlanSummary => ({
+  feature,
+  path: join('/ws', 'specs', `${featureSlug(feature)}.spec.md`),
+  status,
+  ...draft,
+})
 
 describe('sessionGroups', () => {
   it('lists_chats_and_plans_but_none_of_the_runs_that_serve_a_plan', () => {
@@ -104,6 +109,18 @@ describe('sessionGroups', () => {
       ['login', '2026-10-03T11:00:00.000Z'],
       ['search', '2026-10-02T00:00:00.000Z'],
       ['unopened', undefined],
+    ])
+  })
+
+  it('carries_a_drafts_authorship_and_review_stage_onto_its_entry_whether_or_not_a_session_has_opened_it', () => {
+    const groups = sessionGroups(
+      [record('plan', 'plan', { feature: 'login' })],
+      [spec('login', 'draft', { authored: 'drafted', review: 'under_review' }), spec('search', 'draft', { authored: 'hand-written', review: 'created' })],
+    )
+
+    expect(groups.plans.map((p) => [p.feature, p.authored, p.review])).toEqual([
+      ['login', 'drafted', 'under_review'],
+      ['search', 'hand-written', 'created'],
     ])
   })
 
