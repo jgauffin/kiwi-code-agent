@@ -25,8 +25,7 @@ import { projectScriptsInstruction } from '../permissions/package-scripts'
 export async function buildSystemPrompt(cwd: string, profilePromptFile?: string, home = homedir()): Promise<string> {
   const parts = [
     'You are a coding agent.',
-    // Which tool finds what is the fragments' to say; this line keeps only what none of them does.
-    'Work through the tools: Read a file before you Edit or Write it, and use Bash for builds, tests and git.',
+    // No read-before-edit line: Edit, MultiEdit and Write refuse an unread or changed file and say to Read it.
     DOC_READING,
     CODE_READING,
     SCRIPT_WRITING,

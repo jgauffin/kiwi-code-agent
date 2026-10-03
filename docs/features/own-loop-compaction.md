@@ -14,9 +14,11 @@ The own agent loop over an OpenAI-compatible model keeps working when a conversa
 
 The turns kept verbatim are whole turns from the end, taken until they would fill a third of the size compaction happens at — not a fixed count, so a turn of one small tool call does not cost as much as a turn that read half the repo. The last turn is kept whatever it costs.
 
-Everything between the system prompt and the kept tail is folded into a summary written by the same model from a fixed prompt (what was asked, what was done, what is still open, files touched). The summariser is given the folded turns as a transcript with tool results left out, since they are the bulk; what the calls were for is what the summary carries. It is given no tools.
+Everything between the first user message and the kept tail is folded into a summary written by the same model from a fixed prompt (what was asked, what was done, what is still open, files touched). The prompt adds what the session's phase must not lose (`src/agent/session/compaction-focus.ts`): a task run's rules word for word, a check's findings not yet written down, a cleanup's units still over their limits. The summariser is given the folded turns as a transcript with tool results left out, since they are the bulk; what the calls were for is what the summary carries. It is given no tools.
 
-The compacted conversation is `[system, summary, ledger, ...kept turns]`.
+The first user message is kept as it was: for a run it is the assignment (the task, the exact text of its rules), for any other session the request it started on, and a summary would paraphrase either. One larger than 4,000 tokens is folded like the rest, since that is a pasted log rather than an assignment, and so is a summary an earlier compaction left in its place.
+
+The compacted conversation is `[system, first user message, summary, ledger, ...kept turns]`.
 
 ## The ledger
 
@@ -50,6 +52,7 @@ Claude Code's own auto-compaction is switched off (`DISABLE_AUTO_COMPACT=1`): it
 
 - The window is what the engine budgets against (`getContextUsage().maxTokens`), not the model's; usage comes from each main-conversation reply.
 - At 75% of that window, or at the model's compaction limit when that comes first, a turn in flight is interrupted, `/compact` is sent, and the turn is carried on with a prompt to continue. The host sees one turn; the interrupted one and the compaction's never reach it.
+- The `/compact` instruction and the prompt to continue are the session's phase's (`src/agent/session/compaction-focus.ts`): what the summary must keep, and where to pick up, such as the task board for a task run. The prompt to continue says to read again only the files it will change or check next.
 - A failed compaction ends the turn as failed with the engine's reason, rather than carrying on into a full window.
 - The engine's `compact_boundary` maps to `compacted`, with sizes but no summary.
 

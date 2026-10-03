@@ -117,6 +117,23 @@ describe('SessionManager', () => {
     }
   })
 
+  it('a_prompt_records_when_the_session_was_last_worked_in', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+    try {
+      const store = memoryStore()
+      const manager = new SessionManager(store, async (r) => new FakeSession(r.id, r.profile, r.engineSessionId), (id) => RunLog.forSession(dir, id), () => {})
+      const chat = await manager.create(profile)
+      expect(chat.lastActiveAt).toBeUndefined()
+      await manager.send(chat.id, 'hello')
+      const stamped = store.saved.at(-1)?.find((r) => r.id === chat.id)?.lastActiveAt
+      expect(stamped).toBeDefined()
+      expect(stamped! >= chat.createdAt).toBe(true)
+      await manager.disposeAll()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('what_the_person_allowed_for_a_session_is_kept_with_it_and_outlives_its_engine_and_the_host', async () => {
     const store = memoryStore()
     const noEngine = async (): Promise<CodeSession> => {
@@ -141,8 +158,7 @@ describe('SessionManager', () => {
 
   it('allow_writes_is_offered_where_editing_docs_is_the_job_and_not_to_a_planner_writing_blind', () => {
     for (const mode of ['chat', 'implement', 'file-decisions', 'doc-migration'] as const) expect(offersAllowWrites(mode), mode).toBe(true)
-    // A docs evaluation gets it with full access, once its findings are delivered and it acts as a chat.
-    for (const mode of ['plan', 'reconcile', 'code-plan', 'docs'] as const) expect(offersAllowWrites(mode), mode).toBe(false)
+    for (const mode of ['plan', 'reconcile', 'code-plan'] as const) expect(offersAllowWrites(mode), mode).toBe(false)
   })
 
   it('engine_starts_on_first_prompt_not_on_creation', async () => {
@@ -715,7 +731,7 @@ describe('SessionManager', () => {
     }
   })
 
-  it('a_docs_session_and_a_docs_map_build_are_named_without_a_feature_because_neither_stands_on_one', async () => {
+  it('a_docs_cleanup_and_a_docs_map_build_are_named_without_a_feature_because_neither_stands_on_one', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'sm-'))
     try {
       const manager = new SessionManager(
@@ -724,9 +740,9 @@ describe('SessionManager', () => {
         (id) => RunLog.forSession(dir, id),
         () => {},
       )
-      const evaluation = await manager.create(profile, 'docs')
-      expect(evaluation).toMatchObject({ title: 'Docs evaluation' })
-      expect(evaluation.feature).toBeUndefined()
+      const cleanup = await manager.create(profile, 'doc-migration')
+      expect(cleanup).toMatchObject({ title: 'Docs cleanup' })
+      expect(cleanup.feature).toBeUndefined()
       // The build is handed the docs it may read, the way a cleanup is handed the files it may split.
       const build = await manager.create(profile, 'docs-map', undefined, { files: ['docs/intent/agent.md'] })
       expect(build).toMatchObject({ title: 'Docs map', files: ['docs/intent/agent.md'] })
@@ -875,34 +891,47 @@ describe('SessionManager', () => {
       const dir = await mkdtemp(join(tmpdir(), 'sm-'))
       try {
         const store = memoryStore()
-        const stored = { id: 'd1', title: 'Docs evaluation', profile, mode: 'docs', opened: true, createdAt: '2026-01-01T00:00:00.000Z' }
+        const stored = { id: 'c1', title: 'Plan', profile, mode: 'code-plan', opened: true, createdAt: '2026-01-01T00:00:00.000Z' }
         await store.save([stored as unknown as SessionRecord])
         const manager = new SessionManager(store, async (r) => new FakeSession(r.id, r.profile, r.engineSessionId), (id) => RunLog.forSession(dir, id), () => {})
-        expect(manager.get('d1')).toMatchObject({ access: 'full' })
-        expect(manager.get('d1')).not.toHaveProperty('opened')
+        expect(manager.get('c1')).toMatchObject({ access: 'full' })
+        expect(manager.get('c1')).not.toHaveProperty('opened')
       } finally {
         await rm(dir, { recursive: true, force: true })
       }
     })
 
-    it('a_docs_evaluation_granted_full_access_keeps_its_own_tab_and_conversation_and_waits_for_the_next_prompt', async () => {
+    it('a_saved_docs_evaluation_a_session_type_that_is_gone_loads_as_the_chat_it_became', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+      try {
+        const store = memoryStore()
+        const stored = { id: 'd1', title: 'Docs evaluation', profile, mode: 'docs', access: 'full', createdAt: '2026-01-01T00:00:00.000Z' }
+        await store.save([stored as unknown as SessionRecord])
+        const manager = new SessionManager(store, async (r) => new FakeSession(r.id, r.profile, r.engineSessionId), (id) => RunLog.forSession(dir, id), () => {})
+        expect(manager.get('d1')).toMatchObject({ mode: 'chat', title: 'Docs evaluation', access: 'full' })
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
+
+    it('a_code_plan_granted_full_access_keeps_its_own_tab_and_conversation_and_waits_for_the_next_prompt', async () => {
       const dir = await mkdtemp(join(tmpdir(), 'sm-'))
       try {
         const { manager, engines } = setup(dir)
-        const docs = await manager.create(berget, 'docs')
-        await manager.send(docs.id, 'evaluate')
+        const docs = await manager.create(berget, 'code-plan')
+        await manager.send(docs.id, 'plan a filter')
         engines[0]!.out.push({ type: 'session_started', engineSessionId: docs.id, model: 'glm' })
         await tick()
 
         await manager.grantFullAccess(docs.id)
-        expect(manager.get(docs.id)).toMatchObject({ mode: 'docs', access: 'full' })
+        expect(manager.get(docs.id)).toMatchObject({ mode: 'code-plan', access: 'full' })
         // The engine stops so the next prompt brings one up on the wider setup, in the session the person is reading.
         expect(manager.isLive(docs.id)).toBe(false)
-        await manager.send(docs.id, 'move docs/external out')
+        await manager.send(docs.id, 'build it')
         await tick()
         expect((await manager.conversation(docs.id)).filter((e) => e.type === 'user_message').map((e) => e.text)).toEqual([
-          'evaluate',
-          'move docs/external out',
+          'plan a filter',
+          'build it',
         ])
         await manager.disposeAll()
       } finally {

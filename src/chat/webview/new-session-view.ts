@@ -22,9 +22,8 @@ const STATUS_HINT: Record<NonNullable<ResumablePlan['status']>, string> = {
 const CONVERSATION: Partial<Record<SessionMode, { icon: string; label: string }>> = {
   chat: { icon: '🔧', label: 'Chat' },
   'code-plan': { icon: '🗺', label: 'Plan' },
-  docs: { icon: '🧭', label: 'Docs evaluation' },
   'file-decisions': { icon: '🗂', label: 'Filing decisions' },
-  'doc-migration': { icon: '🧹', label: 'Doc migration' },
+  'doc-migration': { icon: '🧹', label: 'Docs cleanup' },
 }
 
 const when = (iso: string): string => new Date(iso).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
@@ -53,7 +52,7 @@ type TextField = HTMLInputElement | HTMLTextAreaElement
 type Screen = 'code' | 'maintenance'
 
 /** The card a tab opens on, so a tab is never a row of cards with nothing under it. */
-const FIRST: Record<Screen, SessionMode> = { code: 'chat', maintenance: 'docs' }
+const FIRST: Record<Screen, SessionMode> = { code: 'chat', maintenance: 'doc-migration' }
 
 /**
  * The "+" screen, in two tabs: Code and Maintenance. One card per session
@@ -101,20 +100,15 @@ export class NewSessionView extends HTMLElement {
       </button>
     </div>
     <div class="types" if="onMaintenance">
-      <button type="button" class="type {{docsState}}" r-click="choose('docs')">
-        <span class="icon">🧭</span>
-        <strong>Evaluate docs</strong>
-        <span class="hint">Say where the docs would cost a planner, and change them.</span>
+      <button type="button" class="type {{migrationState}}" r-click="choose('doc-migration')">
+        <span class="icon">🧹</span>
+        <strong>Clean up docs</strong>
+        <span class="hint">Move behaviour into specs, drop what the specs already say, and make the rest easy to find.</span>
       </button>
       <button type="button" class="type {{filingState}}" r-click="choose('file-decisions')">
         <span class="icon">🗂</span>
         <strong>File decisions</strong>
         <span class="hint">{{filingHint}}</span>
-      </button>
-      <button type="button" class="type {{migrationState}}" r-click="choose('doc-migration')">
-        <span class="icon">🧹</span>
-        <strong>Doc migration</strong>
-        <span class="hint">Prune what the settled specs already say from the docs, then offer the rest as specs.</span>
       </button>
     </div>
     <form class="chat-fields" if="isChat" r-submit="create(event)">
@@ -149,18 +143,14 @@ export class NewSessionView extends HTMLElement {
         <linked-files-row class="linked-files"></linked-files-row>
       </div>
     </form>
-    <form class="docs-fields" if="isDocs" r-submit="create(event)">
-      <p class="hint">Reads docs/**, the README and the specs, and says in chat where their arrangement would cost a planner: what it has to read whole, what it cannot cite. It changes a doc only when you ask, one confirmed write at a time. Once the findings are said it carries on with the full tool set, so work past the docs is answered in the same conversation.</p>
-      <button type="submit">Evaluate the docs</button>
-    </form>
     <form class="filing-fields" if="isFiling" r-submit="create(event)">
       <p class="hint">Reads the unfiled decisions with the docs and the specs, says where each one belongs, and moves it there one confirmed write at a time. An entry leaves the file once it stands where a planner looks for it.</p>
       <p class="hint" if="nothingUnfiled">Nothing is waiting. An entry lands there when a chat or an implement run settles something that reaches features other than the one at hand.</p>
       <button type="submit" if="unfiled">File the decisions</button>
     </form>
     <form class="migration-fields" if="isMigration" r-submit="create(event)">
-      <p class="hint">Reads docs/**, the README and the specs, offers to cut what a settled spec already says, then offers to turn what no spec holds yet into a draft spec. Never reads the code. Each cut is one confirmed write, asked for by you.</p>
-      <button type="submit">Start the migration</button>
+      <p class="hint">Reads docs/**, the README and the specs, never the code, in three stages: cut what a settled spec already says, turn behaviour no spec holds into draft specs, then fix what makes the rest hard to find or cite. Each stage proposes first, and you can stop after any of them. Each change to a doc is one confirmed write, asked for by you.</p>
+      <button type="submit">Clean up the docs</button>
     </form>
     <section class="pick-up" if="any">
       <h3>Pick up where you left off</h3>
@@ -227,13 +217,11 @@ export class NewSessionView extends HTMLElement {
         isChat: this.mode === 'chat',
         isCodePlan: this.mode === 'code-plan',
         isPlan: this.mode === 'plan',
-        isDocs: this.mode === 'docs',
         isFiling: this.mode === 'file-decisions',
         isMigration: this.mode === 'doc-migration',
         chatState: this.mode === 'chat' ? 'selected' : '',
         codePlanState: this.mode === 'code-plan' ? 'selected' : '',
         planState: this.mode === 'plan' ? 'selected' : '',
-        docsState: this.mode === 'docs' ? 'selected' : '',
         filingState: this.mode === 'file-decisions' ? 'selected' : '',
         migrationState: this.mode === 'doc-migration' ? 'selected' : '',
       },

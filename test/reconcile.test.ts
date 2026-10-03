@@ -85,12 +85,15 @@ describe('reconcile prompt', () => {
 
   it('a_finding_is_the_disagreement_at_one_symbol_and_leaves_the_remedy_to_the_proposal', () => {
     expect(prompt).toContain('The finding is one or two sentences')
-    expect(prompt).toContain('at the one path and symbol that shows it')
+    expect(prompt).toContain('as behaviour a user or another system would observe')
+    // The planner proposes on findings blind, so a finding never names where in the code it is.
+    expect(prompt).toContain('No file path, type, function or other name from the code')
     expect(prompt).toContain('not what the spec should say instead, not how to build it')
     // The decision card shows the rule verbatim beside the finding, so restating it is duplication.
     expect(prompt).toContain('Do not quote or restate a rule')
     // The example is at the target length, since the example is what gets copied.
-    expect(prompt).toContain('- finding: `Order.cancel` in src/orders/order.ts refuses a shipped order outright, so neither rule can hold as written.')
+    expect(prompt).toContain('- finding: a shipped order is refused outright when its customer cancels it, so neither rule can hold as written.')
+    expect(prompt).not.toMatch(/- finding: .*src\//)
     expect(prompt).not.toContain('what the task would be')
     expect(prompt).not.toContain('what the spec should say instead)')
   })
@@ -151,7 +154,6 @@ describe('the handoffs to the planner', () => {
     expect(prompt).toContain("the rule's new text as it would stand in the spec, one sentence")
     // A rule says what the feature does; how it is stored or transacted is the task's, or it ends up in the contract.
     expect(prompt).toContain('observable behaviour, not how it is built')
-    expect(blindPlanPrompt('Order cancellation', cwd)).toContain('observable behaviour, not how it is built')
     // Keeping the rule is the wizard's own option, so the planner does not spend one on it.
     expect(prompt).toContain('do not propose it')
     // The user weighs the options first and meets the argument for one underneath them.
@@ -182,7 +184,7 @@ describe('the handoffs to the planner', () => {
     const prompt = docsReviewPrompt('Order cancellation')
     expect(prompt).toContain('specs/order-cancellation.spec.md')
     expect(prompt).toContain('is approved')
-    expect(prompt).toContain('one line per doc section')
+    expect(prompt).toContain('one line per section')
     expect(prompt).toContain('Edit nothing')
     expect(prompt).toContain('asks you to')
   })
@@ -208,8 +210,10 @@ describe('the handoffs to the planner', () => {
 
   it('a_contradiction_the_user_rules_on_is_recorded_as_an_unfiled_decision_naming_the_feature', () => {
     for (const prompt of [docsReviewPrompt('Order cancellation'), docsCutPrompt('Order cancellation')]) {
-      expect(prompt).toContain('record the ruling as an unfiled decision naming "Order cancellation"')
-      expect(prompt).toContain(UNFILED_DECISIONS)
+      expect(prompt).toContain('record the ruling as an unfiled decision naming "Order cancellation" in `specs/unfiled-decisions.md`')
+      // The planner's system prompt already carries how an entry is written; the hand-off points back to it.
+      expect(prompt).not.toContain(UNFILED_DECISIONS)
+      expect(prompt).toContain("the spec's rules cite, each by its line range in the docs map")
     }
   })
 })

@@ -28,10 +28,10 @@ const tab = (node: HTMLElement, name: 'code' | 'maintenance') =>
   [...node.querySelectorAll<HTMLButtonElement>('.screens .tab')][name === 'code' ? 0 : 1]!
 
 /** The maintenance cards are on the other tab, so reaching one opens it first. */
-function card(node: HTMLElement, name: 'chat' | 'code-plan' | 'plan' | 'docs' | 'file-decisions' | 'doc-migration'): HTMLButtonElement {
-  const maintenance = name === 'docs' || name === 'file-decisions' || name === 'doc-migration'
+function card(node: HTMLElement, name: 'chat' | 'code-plan' | 'plan' | 'file-decisions' | 'doc-migration'): HTMLButtonElement {
+  const maintenance = name === 'file-decisions' || name === 'doc-migration'
   tab(node, maintenance ? 'maintenance' : 'code').click()
-  const at = maintenance ? { docs: 0, 'file-decisions': 1, 'doc-migration': 2 }[name] : { chat: 0, 'code-plan': 1, plan: 2 }[name]
+  const at = maintenance ? { 'doc-migration': 0, 'file-decisions': 1 }[name] : { chat: 0, 'code-plan': 1, plan: 2 }[name]
   return [...node.querySelectorAll<HTMLButtonElement>('.types button')][at]!
 }
 
@@ -120,22 +120,10 @@ describe('NewSessionView fields across cards', () => {
     node.remove()
   })
 
-  it('the_docs_card_starts_a_session_that_belongs_to_no_feature_and_takes_no_prompt', () => {
+  it('the_docs_cleanup_card_links_no_files_because_the_job_is_not_aimed_at_one', () => {
     const node = view()
-    card(node, 'docs').click()
-    // Nothing to fill in: the evaluation sweeps the docs, it is not aimed at anything.
-    expect(node.querySelector('.docs-fields input, .docs-fields textarea')).toBeNull()
-    let seen: unknown
-    node.addEventListener(events.NewSessionRequestedEvent.type, (e) => (seen = [e.mode, e.feature, e.prompt, e.files]))
-    node.querySelector('.docs-fields')!.dispatchEvent(new Event('submit', { cancelable: true }))
-    expect(seen).toEqual(['docs', undefined, undefined, []])
-    node.remove()
-  })
-
-  it('the_docs_card_links_no_files_because_the_evaluation_may_not_read_one', () => {
-    const node = view()
-    card(node, 'docs').click()
-    expect(node.querySelector('.docs-fields linked-files-row')).toBeNull()
+    card(node, 'doc-migration').click()
+    expect(node.querySelector('.migration-fields linked-files-row')).toBeNull()
     node.remove()
   })
 
@@ -246,14 +234,14 @@ describe('NewSessionView tabs', () => {
     node.remove()
   })
 
-  it('the_maintenance_tab_offers_the_jobs_that_keep_the_intent_in_order', () => {
+  it('the_maintenance_tab_offers_one_job_per_input_the_docs_and_the_recorded_decisions', () => {
     const node = view()
     tab(node, 'maintenance').click()
-    expect(cards(node)).toEqual(['Evaluate docs', 'File decisions', 'Doc migration'])
+    expect(cards(node)).toEqual(['Clean up docs', 'File decisions'])
     node.remove()
   })
 
-  it('the_migration_card_starts_the_session_that_brings_the_docs_and_the_specs_back_into_line', () => {
+  it('the_docs_cleanup_card_starts_the_session_that_brings_the_docs_and_the_specs_back_into_line', () => {
     const node = view()
     card(node, 'doc-migration').click()
     // Nothing to fill in: the job is picked for its own sake, never aimed at anything.
@@ -277,7 +265,7 @@ describe('NewSessionView tabs', () => {
   it('a_tab_opens_on_its_first_job_so_it_is_never_cards_with_nothing_under_them', () => {
     const node = view()
     tab(node, 'maintenance').click()
-    expect(node.querySelector('.docs-fields')).not.toBeNull()
+    expect(node.querySelector('.migration-fields')).not.toBeNull()
     tab(node, 'code').click()
     expect(node.querySelector('.chat-fields')).not.toBeNull()
     node.remove()

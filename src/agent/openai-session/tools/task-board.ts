@@ -23,6 +23,7 @@ const STATES = ['open', 'in_progress', 'done', 'tested', 'blocked'] as const
 export function marker(task: Task): string {
   if (task.removed) return 'removed'
   if (task.state === 'blocked') return task.blockedReason ? `blocked: ${task.blockedReason}` : 'blocked'
+  if (task.accepted !== undefined) return `accepted untested by the user, blocked on: ${task.accepted}`
   return task.state.replace('_', ' ')
 }
 

@@ -67,10 +67,9 @@ const RUN_NOUN: Record<SessionMode, string> = {
   implement: 'the implementer',
   cleanup: 'the cleanup',
   'code-plan': 'the planner',
-  docs: 'the docs session',
   'docs-map': 'the docs map',
   'file-decisions': 'the filing session',
-  'doc-migration': 'the migration session',
+  'doc-migration': 'the docs cleanup',
 }
 
 /** Who a step waits on while it is not the person's. */

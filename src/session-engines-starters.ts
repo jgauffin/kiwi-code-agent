@@ -1,6 +1,7 @@
 import * as vscode from 'vscode'
 import { query } from '@anthropic-ai/claude-agent-sdk'
-import type { SessionRecord } from './agent/session/session-manager'
+import { actingMode, type SessionRecord } from './agent/session/session-manager'
+import { compactionFocus, type CompactionFocus } from './agent/session/compaction-focus'
 import type { CodeSession, SessionEvent } from './agent/session/code-session'
 import type { ModelProfile } from './agent/session/model-profile'
 import { reasoningEffortFor } from './agent/session/effort'
@@ -63,6 +64,9 @@ export type EngineStarterDeps = {
   tracedFetch: (record: SessionRecord) => typeof fetch
   compactAtTokens: (profile: ModelProfile) => number
 }
+
+/** What a compaction keeps for the phase the session acts as now: one granted full access compacts as a chat. */
+const focusOf = (record: SessionRecord): CompactionFocus => compactionFocus(actingMode(record), record.fixAttempt !== undefined)
 
 /** The tools the mode's tool set names, or all of them when it names none. */
 function allowed(setup: ModeSetup, tools: Tool[]): Tool[] {
@@ -132,6 +136,7 @@ export class EngineStarters {
           }),
       ...(setup.toolNames ? { tools: setup.toolNames } : {}),
       compactAtTokens: this.deps.compactAtTokens(profile),
+      compactionFocus: focusOf(record),
       query,
       onStderr: (chunk) => output.append(chunk),
       ...(vscode.workspace.getConfiguration('kiwiAgent').get<boolean>('traceEngine', false)
@@ -170,6 +175,7 @@ export class EngineStarters {
       ...(resume ? { resume } : {}),
       ...(contextWindow ? { contextWindow } : {}),
       compactAtTokens: this.deps.compactAtTokens(profile),
+      compactionFocus: focusOf(record),
       ...(reasoningEffort ? { reasoningEffort } : {}),
       ...(setup.hooks ? { hooks: setup.hooks } : {}),
       ...(mcpServers

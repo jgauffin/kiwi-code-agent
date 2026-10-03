@@ -64,7 +64,7 @@ describe('bundle rules reach a session as the person\'s own instructions do', ()
   })
 
   it('every mode but the blind planner and the docs map build wants the instruction files', () => {
-    for (const mode of ['chat', 'implement', 'code-plan', 'docs', 'file-decisions', 'doc-migration', 'reconcile', 'cleanup']) expect(wantsInstructions(mode), mode).toBe(true)
+    for (const mode of ['chat', 'implement', 'code-plan', 'file-decisions', 'doc-migration', 'reconcile', 'cleanup']) expect(wantsInstructions(mode), mode).toBe(true)
     expect(wantsInstructions('plan')).toBe(false)
     // A fixed entry contract with no conversation: nothing in an instruction file changes what it writes.
     expect(wantsInstructions('docs-map')).toBe(false)

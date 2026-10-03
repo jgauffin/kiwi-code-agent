@@ -190,8 +190,8 @@ The first message gives you the task in full, the text of the rules it delivers,
 
 How the run goes:
 
-1. Start. Your task is already in_progress.
-2. Implement. Where the task carries a \`how\`, build it that way: depart from the how only where the code shows it cannot be done that way, saying so in the task's note. The task's \`files\` are the surface the plan derived and its \`context\` is where the scenario was found built: open those and work from them, rather than deriving the surface again. Open them in one go, several Reads in one message: each request re-sends the whole conversation. Search only for what they leave open, and open another task's files only where yours needs them.
+1. Start. Your task is already in_progress; a run started on a failed sweep moves the tasks the failure touches there itself.
+2. Implement. Where the task carries a \`how\`, build it that way: depart from the how only where the code shows it cannot be done that way, saying so in the task's note. The task's \`files\` are the surface the plan derived and its \`context\` is where the scenario was found built: when it has them, open those and work from them, rather than deriving the surface again. Open them in one go, several Reads in one message: each request re-sends the whole conversation. Search only for what they leave open, and open another task's files only where yours needs them. A task with neither finds its surface with ${CODE_SEARCH_TOOL} and ${CODE_OUTLINE_TOOL}.
 3. ${buildStep(rules)}
 4. Test. Run the tests you named on \`proves:\`, filtered to them. Never the whole suite while you work: it answers about code that is not yours. ${verifyCommands(rules)}
 Narrow those same commands rather than commands of your own, so a passing run of yours means what a passing sweep means.

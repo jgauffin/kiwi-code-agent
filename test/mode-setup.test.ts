@@ -40,7 +40,6 @@ describe('modeSetup', () => {
 
   it.each([
     ['plan', { feature: 'f' }],
-    ['docs', {}],
     ['file-decisions', {}],
     ['doc-migration', {}],
   ] as const)('the %s phase limits search results to what its scope may read', async (mode, extra) => {
@@ -49,7 +48,7 @@ describe('modeSetup', () => {
     expect(setup.toolNames?.length).toBeGreaterThan(0)
   })
 
-  it.each(['docs', 'code-plan'] as const)('a %s session granted full access works with the full tool set and no scope', async (mode) => {
+  it.each(['code-plan'] as const)('a %s session granted full access works with the full tool set and no scope', async (mode) => {
     const setup = await modeSetup(record(mode, { access: 'full' }), ctx)
     expect(setup.toolNames).toBeUndefined()
     expect(setup.readable).toBeUndefined()
@@ -97,7 +96,7 @@ describe('modeSetup', () => {
     expect(setup.toolNames).toBeUndefined()
   })
 
-  it.each(['implement', 'code-plan', 'docs', 'file-decisions', 'doc-migration', 'docs-map', 'reconcile', 'cleanup'] as const)(
+  it.each(['implement', 'code-plan', 'file-decisions', 'doc-migration', 'docs-map', 'reconcile', 'cleanup'] as const)(
     'every session that may read the code starts with the memories: %s',
     async (mode) => {
       const setup = await modeSetup(record(mode, { feature: 'f', files: ['a.ts'] }), ctx)
@@ -110,7 +109,7 @@ describe('modeSetup', () => {
     expect(setup.systemPrompt).not.toContain('[memories]')
   })
 
-  it.each(['implement', 'code-plan', 'docs', 'file-decisions', 'doc-migration', 'docs-map', 'reconcile', 'cleanup'] as const)(
+  it.each(['implement', 'code-plan', 'file-decisions', 'doc-migration', 'docs-map', 'reconcile', 'cleanup'] as const)(
     'bundle rules reach a session as the person\'s own instructions do: %s',
     async (mode) => {
       const setup = await modeSetup(record(mode, { feature: 'f', files: ['a.ts'] }), ctx)

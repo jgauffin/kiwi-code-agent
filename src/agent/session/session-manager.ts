@@ -11,18 +11,18 @@ import { errorMessage } from '../../error-message'
  * (together: feature planning), `implement` builds the approved spec, `cleanup`
  * splits what the implementation left oversized. `code-plan` agrees on intent
  * and then plans against the code, with no spec, and is built in the same
- * session once the plan is approved. `docs` judges how the docs a blind planner reads are
- * arranged, `docs-map` describes them so it can find its way,
- * `file-decisions` files the user's unfiled decisions into the specs and docs,
- * and `doc-migration` prunes what a settled spec already says from the docs
- * and offers the rest as specs of their own; none of those belongs to a
- * feature.
+ * session once the plan is approved. `docs-map` describes the docs so a blind
+ * planner can find its way, `file-decisions` files the user's unfiled
+ * decisions into the specs and docs, and `doc-migration` cleans up the docs:
+ * prunes what a settled spec already says, offers the behaviour no spec holds
+ * as specs of their own, and tidies how the rest is arranged. None of those
+ * belongs to a feature.
  */
-export type SessionMode = 'chat' | 'plan' | 'reconcile' | 'implement' | 'cleanup' | 'code-plan' | 'docs' | 'docs-map' | 'file-decisions' | 'doc-migration'
+export type SessionMode = 'chat' | 'plan' | 'reconcile' | 'implement' | 'cleanup' | 'code-plan' | 'docs-map' | 'file-decisions' | 'doc-migration'
 
 /** Planning rather than building: no blanket allow for writes. */
 export const isPlanning = (mode: Step): boolean =>
-  mode === 'plan' || mode === 'reconcile' || mode === 'code-plan' || mode === 'docs' || mode === 'file-decisions' || mode === 'doc-migration'
+  mode === 'plan' || mode === 'reconcile' || mode === 'code-plan' || mode === 'file-decisions' || mode === 'doc-migration'
 
 /**
  * Whether the composer offers "Allow writes". A planning mode's writes are the
@@ -45,10 +45,9 @@ export const STEPS: { step: Step; group: StepGroup; label: string; hint: string 
   { step: 'implement', group: 'Feature planning', label: 'Implement', hint: 'Build the approved spec, task by task, with a test per rule.' },
   { step: 'fix', group: 'Feature planning', label: 'Fix', hint: 'Mend what a failed test run names; one effort level harder each time it fails again.' },
   { step: 'cleanup', group: 'Feature planning', label: 'Cleanup', hint: 'Split what the implementation left oversized.' },
-  { step: 'docs', group: 'Maintenance', label: 'Evaluate docs', hint: 'Judge how the docs a blind planner reads are arranged.' },
   { step: 'docs-map', group: 'Maintenance', label: 'Docs map', hint: 'Describe the docs so a blind planner can find its way.' },
   { step: 'file-decisions', group: 'Maintenance', label: 'File decisions', hint: "File the user's unfiled decisions into the specs and docs they belong in." },
-  { step: 'doc-migration', group: 'Maintenance', label: 'Doc migration', hint: 'Prune what the settled specs already say from the docs, and offer the rest as specs.' },
+  { step: 'doc-migration', group: 'Maintenance', label: 'Clean up docs', hint: 'Move behaviour into specs, drop what the specs already say, and make the rest easy to find.' },
 ]
 
 /** The kind of session a step belongs to: the settings page shows one group at a time. */
@@ -65,7 +64,7 @@ export function stepTitle(step: Step): string {
 
 /** The modes that stand on their own rather than on a feature's plan files. */
 export const isFeatureless = (mode: Step): boolean =>
-  mode === 'chat' || mode === 'code-plan' || mode === 'docs' || mode === 'docs-map' || mode === 'file-decisions' || mode === 'doc-migration'
+  mode === 'chat' || mode === 'code-plan' || mode === 'docs-map' || mode === 'file-decisions' || mode === 'doc-migration'
 
 /** A build, not a conversation: it has no tab and no entry of its own, and nobody prompts it. */
 export const isBuild = (mode: SessionMode): boolean => mode === 'docs-map'
@@ -89,8 +88,8 @@ export type SessionRecord = {
   settled?: true
   /**
    * What the session may do: `scoped` (the default) by its mode, `full` with the
-   * chat's tool set. Granted one way and in place, once a plan is approved or an
-   * evaluation delivered: the scope had that work to protect, and there is none left.
+   * chat's tool set. Granted one way and in place, once a code plan is approved:
+   * the scope had that work to protect, and there is none left.
    */
   access?: 'scoped' | 'full'
   /**
@@ -127,10 +126,9 @@ export interface SessionStore {
 
 function titleFor(mode: SessionMode, feature: string | undefined): string {
   // Named before the feature is looked at: neither stands on one.
-  if (mode === 'docs') return 'Docs evaluation'
   if (mode === 'docs-map') return 'Docs map'
   if (mode === 'file-decisions') return 'Filing decisions'
-  if (mode === 'doc-migration') return 'Doc migration'
+  if (mode === 'doc-migration') return 'Docs cleanup'
   if (!feature) return 'New session'
   switch (mode) {
     case 'plan':
@@ -194,10 +192,13 @@ export type CallPasses = (sessionId: string, call: ToolUse) => Promise<boolean>
 
 const nothingPasses: CallPasses = async () => false
 
-/** A stored record in today's shape: one written before modes existed is a chat, one stored as `opened` has full access. */
-function fromStore(stored: SessionRecord & { opened?: true }): SessionRecord {
-  const { opened, ...record } = stored
-  return { ...record, mode: record.mode ?? 'chat', ...(opened ? { access: 'full' as const } : {}) }
+/**
+ * A stored record in today's shape: one written before modes existed is a chat, one stored as `opened` has full access,
+ * and a docs evaluation, a session type that is gone, is the chat it became once it had reported.
+ */
+function fromStore(stored: Omit<SessionRecord, 'mode'> & { mode?: SessionMode | 'docs'; opened?: true }): SessionRecord {
+  const { opened, mode, ...record } = stored
+  return { ...record, mode: mode === undefined || mode === 'docs' ? 'chat' : mode, ...(opened ? { access: 'full' as const } : {}) }
 }
 
 /**

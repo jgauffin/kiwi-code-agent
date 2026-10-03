@@ -2,6 +2,7 @@ import type { Query, SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { SessionEvent } from '../session/code-session'
 import { compactionPoint } from '../session/compaction-point'
 import { errorMessage } from '../../error-message'
+import { NO_FOCUS, type CompactionFocus } from '../session/compaction-focus'
 
 /**
  * The share of the engine's window at which a turn is stopped to compact.
@@ -14,8 +15,8 @@ export const COMPACT_AT = 0.75
 export const COMPACT_COMMAND =
   '/compact Keep the summary under 5,000 words: the task, the decisions made, the files touched and what remains. Leave out file contents and tool output; they can be read again.'
 
-export const CARRY_ON =
-  'The conversation was compacted to make room. Carry on with the task where you stopped; read again any file whose contents you need.'
+/** The compact command with what this session's phase must not lose. */
+export const compactCommand = (keep: string): string => (keep ? `${COMPACT_COMMAND} ${keep}` : COMPACT_COMMAND)
 
 type Engine = {
   query: Pick<Query, 'interrupt' | 'getContextUsage'>
@@ -43,16 +44,19 @@ export class SdkCompaction {
   private lastPrompt = ''
   /** The engine refused the prompt as too long; once the turn ends, it is compacted and sent again. */
   private refused = false
-  /** What the turn carries on with after this compaction: the refused prompt, or the default nudge. */
-  private carryOn = CARRY_ON
+  /** What the turn carries on with after this compaction: the refused prompt, or the phase's nudge. */
+  private carryOn: string
   /** The host's prompt was already sent again once; a second refusal ends the turn. */
   private resent = false
 
-  /** `ceilingTokens` compacts sooner than the window's share when it comes first; 0 means none. */
+  /** `ceilingTokens` compacts sooner than the window's share when it comes first; 0 means none. `focus` is what the session's phase must keep. */
   constructor(
     private readonly engine: Engine,
     private readonly ceilingTokens = 0,
-  ) {}
+    private readonly focus: CompactionFocus = NO_FOCUS,
+  ) {
+    this.carryOn = focus.carryOn
+  }
 
   /** The host sent a prompt to the engine. */
   sent(text: string): void {
@@ -125,7 +129,7 @@ export class SdkCompaction {
   private startCompacting(): void {
     this.stage = 'compacting'
     this.busy++
-    this.engine.send(COMPACT_COMMAND)
+    this.engine.send(compactCommand(this.focus.keep))
   }
 
   private finish(events: SessionEvent[]): SessionEvent[] {
@@ -150,7 +154,7 @@ export class SdkCompaction {
     this.owesTurn = false
     this.stopped = false
     this.failure = undefined
-    this.carryOn = CARRY_ON
+    this.carryOn = this.focus.carryOn
   }
 
   /** What the request behind a reply carried is how full the window is now. */

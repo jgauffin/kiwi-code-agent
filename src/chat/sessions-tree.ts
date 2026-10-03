@@ -11,10 +11,9 @@ const MODE_LABEL: Record<SessionMode, string> = {
   implement: 'Implement',
   cleanup: 'Cleanup',
   'code-plan': 'Plan',
-  docs: 'Evaluate docs',
   'docs-map': 'Docs map',
   'file-decisions': 'File decisions',
-  'doc-migration': 'Doc migration',
+  'doc-migration': 'Clean up docs',
 }
 
 const STATUS_ICON: Record<SessionStatus, { icon: string; color?: string }> = {

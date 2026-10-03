@@ -277,7 +277,7 @@ export class ChatApp extends HTMLElement {
           : target && this.plan
             ? { current: target.profileName, ...(target.effort ? { effort: target.effort } : {}) }
             : undefined,
-      // Only a code plan waits on an approval: the docs evaluation is granted full access once it has said its findings.
+      // Only a code plan waits on an approval, and it is the only session that is granted full access.
       approvePlan: tab?.mode === 'code-plan' && tab.access === 'scoped',
       compactable: target?.live ?? false,
     })

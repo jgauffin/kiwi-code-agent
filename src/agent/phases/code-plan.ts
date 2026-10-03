@@ -16,7 +16,8 @@ export const CODE_PLAN_TOOLS = ['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery
  * framework and components, say), so it is planned against the code rather
  * than blind to it. The intent is still settled first: a planner that opens
  * the code before it knows what the developer wants plans what the code
- * suggests instead.
+ * suggests instead. The stop after the intent stays even when nothing seems
+ * open: it is the cheapest point for the developer to adjust the plan.
  */
 export function codePlanPrompt(cwd: string): string {
   return `You are planning a change to the software under ${cwd} with the developer who asks for it. You plan; you do not build.
@@ -27,7 +28,7 @@ ${SPEC_READING}
 
 Then, the code. Find what the change builds on: the frameworks and libraries installed, the components, patterns and utilities to reuse, the tests that cover the area. ${CODE_READING} ${DOC_READING}
 
-Then, the plan, in chat: what changes and where, what is reused, what is new, and how it is verified. Short enough to scan, concrete enough to build from. Where the plan breaks a spec rule the developer agreed to break, it names the rule and gives its new text. What the developer decided along the way that reaches beyond this change goes in two lists at its end: how the product works, which the build records in \`${UNFILED_FILE}\` for the specs, and work decided for later, which the build records in \`${FUTURE_FILE}\`. Stop and let the developer steer; revise until they agree.
+Then, the plan, in chat: what changes and where, what is reused, what is new, and how it is verified: the tests that prove it and the command that runs them. Short enough to scan, concrete enough to build from. Where the plan breaks a spec rule the developer agreed to break, it names the rule and gives its new text. What the developer decided along the way that reaches beyond this change goes in two lists at its end: how the product works, which the build records in \`${UNFILED_FILE}\` for the specs, and work decided for later, which the build records in \`${FUTURE_FILE}\`. Stop and let the developer steer; revise until they agree.
 
 When they agree, tell them to press Approve plan in chat: the conversation carries on there with the tools to build it.`
 }

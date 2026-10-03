@@ -44,21 +44,24 @@ export function cleanupKickoff(report: string, continued: boolean): string {
   return `These units exceed the limits${wrote}:\n\n${report}\n\nSplit them.`
 }
 
-const describe = (thresholds: Thresholds): string =>
-  [
-    thresholds.functionComplexity > 0 ? `a function a cognitive complexity of ${thresholds.functionComplexity}` : '',
-    thresholds.functionLines > 0 ? `a function ${thresholds.functionLines} code lines` : '',
-    thresholds.typeLines > 0 ? `a type ${thresholds.typeLines}` : '',
-    thresholds.fileLines > 0 ? `a file ${thresholds.fileLines}` : '',
+/** One bullet per limit in force, each named with its unit; a limit of 0 is off and says nothing. `test` names a test file's limits. */
+const describe = (thresholds: Thresholds, test: boolean): string[] => {
+  const label = (name: string): string => (test ? `Test ${name.toLowerCase()}` : name)
+  return [
+    thresholds.functionComplexity > 0 ? `${label('Function cognitive complexity')}: ${thresholds.functionComplexity}` : '',
+    thresholds.functionLines > 0 ? `${label('Function length')}: ${thresholds.functionLines} code lines` : '',
+    thresholds.typeLines > 0 ? `${label('Type length')}: ${thresholds.typeLines} lines` : '',
+    thresholds.fileLines > 0 ? `${label('File length')}: ${thresholds.fileLines} lines` : '',
   ]
     .filter((l) => l.length > 0)
-    .join(', ')
+    .map((l) => `- ${l}`)
+}
 
 export function cleanupPrompt(feature: string, cwd: string, limits: Limits): string {
-  const source = describe(limits.source)
-  const tests = describe(limits.tests)
-  const stated = [source, tests ? `in tests ${tests}` : ''].filter((l) => l.length > 0).join('; ')
-  return `You are cleaning up after the implementation of the feature "${feature}" under ${cwd}: the units listed in the first message grew past the limits (${stated}), and you split them.
+  const stated = [...describe(limits.source, false), ...describe(limits.tests, true)].join('\n')
+  return `You are cleaning up after the implementation of the feature "${feature}" under ${cwd}: the units listed in the first message grew past these limits, and you split them.
+
+${stated}
 
 The feature is built and its tests pass. Nothing about what the code does changes here: same behaviour, same public API, same test outcomes. The only change is shape.
 

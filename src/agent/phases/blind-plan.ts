@@ -94,22 +94,22 @@ workspace root (what the product is, in its own words), every feature's spec und
 feature's definition, as settled as a doc; a draft is a proposal still being planned), \`${UNFILED_FILE}\` (decisions the user made while building
 or in chat, not yet filed into the specs and docs they reach: the user's latest word, so an entry outweighs a doc or a spec that says otherwise),
 \`${FUTURE_FILE}\` (work the user decided on for later, not yet built or planned) and your own plan files. Nothing else exists for you; do not try.
-Use Glob with path \`${DOCS_DIR}\` and with path \`${SPECS_DIR}\` to see what is there, then search the docs with \`${MARKDOWN_SEARCH_TOOL}\` and the specs
-with ${SPEC_SEARCH} for the feature's terms rather than reading file after file. ${DOC_READING} ${EDIT_WRITING}A rule in another spec is what the product does; its Decisions, if any, are history 
-and say nothing you need. Where a doc and an approved spec disagree, ask: the user knows which is current, you do not.
+The docs map in this prompt shows every doc; use Glob with path \`${SPECS_DIR}\` to see which features have a spec. Search the docs with \`${MARKDOWN_SEARCH_TOOL}\` and the specs
+with ${SPEC_SEARCH} for the feature's terms rather than reading file after file. ${DOC_READING} ${EDIT_WRITING}
+Where a doc and an approved spec disagree, ask: the user knows which is current, you do not.
 
 Your input: the user's first message describes the feature or user story. Later messages steer, answer your questions or ask for changes.
 
 First, direction. In chat, not in a file: the few decisions that shape the feature (what it is, what it is not, where it could go two ways and which way 
-you propose, with the reason) and the questions whose answer would change that. A short message, then stop and wait. Write nothing until the user says go: 
-a full plan in the wrong direction is wasted, so the user steers first.
+you propose, with the reason) and the questions whose answer would change that, asked in the message itself. A short message, then stop and wait. Write nothing until the user says go:
+a full plan in the wrong direction is wasted, so the user steers first. \`${ASK_USER_TOOL}\` is for what comes up once you write the spec.
 
 Then, the spec. When the user accepts or adjusts the direction, write one file, \`${SPECS_DIR}/${slug}.spec.md\` under ${cwd}, with Write. ${SPEC_CONTRACT.trim().replaceAll('<feature>', feature)}
 - Settle what you can. Where intent is silent but a sensible default exists, take it and say so in the direction; a question is for what only the user can answer, and you put it with the \`${ASK_USER_TOOL}\` tool and carry on with the answer rather than writing it down and stopping.
 - The user's answers become rules in this spec. The part of an answer that reaches features other than this one is recorded for them: ${UNFILED_DECISIONS}
-- Decisions live apart from the spec in \`${WORK_DIR}/${slug}.decisions.md\`, written by a separate check of the approved spec against the code: one \`###\` per decision, with an \`on\` line naming the rules it concerns and a \`finding\` line saying what the code does and what the spec says. Each is something the user rules on. When asked, add one to three \`- proposed: ...\` lines under each decision that has none, with Edit: each a distinct way to settle it, written as the rule's new text as it would stand in the spec (one sentence, no argument, no reference to the decision; observable behaviour, not how it is built). Keeping the rule as it stands is always offered to the user, so do not propose it. With them goes your own pick: \`- recommended: <n>\` naming a \`proposed\` line by its number, or \`${KEEP_RULING}\`, and \`- because: <one sentence>\` saying why. A proposal is not a ruling: change no rule until the user has ruled. The \`- ruling: ...\` line is the user's, written for you: \`${KEEP_RULING}\` means the rule stands and the code will change, so nothing in the spec moves; the text of a proposal means it replaces the rule verbatim; anything else is the user's own decision, which you work into the rules as it says (revise the rule, or add an edge case). When rulings are handed to you, revise the rules each decision names per its ruling, append \` [applied]\` to that decision's heading in the decisions file, and touch nothing else there.
+- Once approved, the spec is checked against the code by a separate run, which writes what stands in its way to \`${WORK_DIR}/${slug}.decisions.md\` for the user to rule on. Those decisions reach you as hand-offs that say what to do, proposing ways to settle them or applying the user's rulings. Change no rule until the user has ruled.
 - \`${DOCS_DIR}/\` is the user's. You edit it only when the user asks you to, and each write is confirmed by them.
-- The user reviews the draft by commenting on its rules and striking the ones that should not be built; comments, strikes and your answers to them live in \`${WORK_DIR}/${slug}.review.md\`. A submitted review is direction, not a question: revise the spec as it asks, mark every struck rule removed without renaming anything, never bring a struck rule back on your own, and answer every comment in that file as addressed or disagreed with a reason.
+- The user reviews a draft by commenting on its rules and striking the ones that should not be built, in \`${WORK_DIR}/${slug}.review.md\`. A submitted review reaches you as a hand-off that says what to do; a struck rule never comes back on your own.
 - If neither the docs nor the specs have anything on this feature, or the description is too thin to derive a direction, do not invent: ask with \`${ASK_USER_TOOL}\` and work from the answer.
 - After each write, summarise what changed in a few sentences and stop.`
 }
@@ -119,12 +119,15 @@ Then, the spec. When the user accepts or adjusts the direction, write one file, 
  * wrote: the files are the state, so the planner reads them and reports where
  * the plan stands instead of starting the feature over.
  */
-export function resumePlanPrompt(feature: string): string {
+export function resumePlanPrompt(feature: string, present: { review: boolean; decisions: boolean }): string {
   const slug = featureSlug(feature)
+  // Only the files that exist are named, so no Read is spent on one that is not there.
+  const files = [`\`${SPECS_DIR}/${slug}.spec.md\``, ...(present.review ? [`\`${WORK_DIR}/${slug}.review.md\``] : []), ...(present.decisions ? [`\`${WORK_DIR}/${slug}.decisions.md\``] : [])]
+  const read = files.length === 1 ? files[0]! : `${files.slice(0, -1).join(', ')} and ${files.at(-1)!}`
   return [
     `The spec for "${feature}" already exists at \`${SPECS_DIR}/${slug}.spec.md\`, written in an earlier session that is gone. Do not start over.`,
     '',
-    `Read it from disk, and \`${WORK_DIR}/${slug}.review.md\` and \`${WORK_DIR}/${slug}.decisions.md\` where they exist. Then, in chat, where the plan stands in a few sentences: its status, open questions, decisions without a ruling or with one not yet applied, comments not yet answered. A spec the user has approved is settled: change nothing in it unless the user asks.`,
+    `Read ${read} from disk, in one reply. Then, in chat, where the plan stands in a few sentences: its status, open questions${present.decisions ? ', decisions without a ruling or with one not yet applied' : ''}${present.review ? ', comments not yet answered' : ''}. A spec the user has approved is settled: change nothing in it unless the user asks.`,
     '',
     'Then stop; the user says what happens next.',
   ].join('\n')
@@ -160,7 +163,7 @@ export function decisionsHandoffPrompt(feature: string, titles: string[]): strin
     `The check of the spec against the code wrote decisions into \`${decisions}\`:`,
     ...titles.map((t) => `- ${t}`),
     '',
-    `Read that file and the spec from disk. Under each of these decisions, add one to three \`- proposed: ...\` lines with Edit, each a distinct way to settle it written as the rule's new text as it would stand in the spec, one sentence: observable behaviour, not how it is built, since storage and structure are the task's. Keeping the rule is offered to the user by itself; do not propose it.`,
+    `Read that file and the spec from disk. Under each of these decisions, add one to three \`- proposed: ...\` lines with Edit, each a distinct way to settle it written as the rule's new text as it would stand in the spec, one sentence with no argument and no reference to the decision: observable behaviour, not how it is built, since storage and structure are the task's. Keeping the rule is offered to the user by itself; do not propose it.`,
     '',
     `Then say which way you would settle it: \`- recommended: <n>\`, the number of the \`proposed\` line counting from 1, or \`${KEEP_RULING}\` when the rule should stand and the code change instead, and \`- because: <one sentence>\` saying what makes it the best of them. Recommend on every decision; the user reads it under the options, once they have read them, and is free to rule otherwise.`,
     '',
@@ -200,9 +203,9 @@ export function docsReviewPrompt(feature: string): string {
   return [
     `The spec at \`${spec}\` is approved and is now the definition of "${feature}".`,
     '',
-    `Read again the docs under \`${DOCS_DIR}/\` you cited or built on, and list in chat, one line per doc section: what the spec now covers, naming the rules, and can go; and, separately, what now reads otherwise than the spec, reported but never offered to go, since which side is current is the user's to say. Edit nothing. If nothing needs to change, say so in one line.`,
+    `Read again the doc sections the spec's rules cite, each by its line range in the docs map, and list in chat, one line per section: what the spec now covers, naming the rules, and can go; and, separately, what now reads otherwise than the spec, reported but never offered to go, since which side is current is the user's to say. Edit nothing. If nothing needs to change, say so in one line.`,
     '',
-    `The user updates the docs, or asks you to: then edit only what you listed, and each write is confirmed by them. If they say a section that reads otherwise is current, record the ruling as an unfiled decision naming "${feature}" with Edit on \`${UNFILED_FILE}\`: ${UNFILED_DECISIONS}`,
+    `The user updates the docs, or asks you to: then edit only what you listed, and each write is confirmed by them. If they say a section that reads otherwise is current, record the ruling as an unfiled decision naming "${feature}" in \`${UNFILED_FILE}\`, as your instructions on unfiled decisions say.`,
   ].join('\n')
 }
 
@@ -219,9 +222,9 @@ export function docsCutPrompt(feature: string): string {
   return [
     `The spec at \`${spec}\` is approved and is now the definition of "${feature}".`,
     '',
-    `Read again the docs under \`${DOCS_DIR}/\` you cited or built on, and cut each section the spec now covers down to what no spec holds: the domain brief, constraints every feature has to respect, features not yet planned. Delete a section left with nothing. Leave the spec as it is: a citation into a cut section stays as the record of where the rule came from.`,
+    `Read again the doc sections the spec's rules cite, each by its line range in the docs map, and cut each section the spec now covers down to what no spec holds: the domain brief, constraints every feature has to respect, features not yet planned. Delete a section left with nothing. Leave the spec as it is: a citation into a cut section stays as the record of where the rule came from.`,
     '',
-    `A section that now reads otherwise than the spec is never cut: report it in chat instead, since which side is current is the user's to say. If they say the doc is current, record the ruling as an unfiled decision naming "${feature}" with Edit on \`${UNFILED_FILE}\`: ${UNFILED_DECISIONS}`,
+    `A section that now reads otherwise than the spec is never cut: report it in chat instead, since which side is current is the user's to say. If they say the doc is current, record the ruling as an unfiled decision naming "${feature}" in \`${UNFILED_FILE}\`, as your instructions on unfiled decisions say.`,
     '',
     'Each edit is confirmed by the user. Then, in chat, one line per doc section you cut, and stop.',
   ].join('\n')

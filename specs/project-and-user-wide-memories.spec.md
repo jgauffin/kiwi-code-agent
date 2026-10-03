@@ -23,9 +23,11 @@ During a session the agent notices something that will matter again and writes i
 - **Index cap**: a scope holds at most fifty memories; a write past the cap drops the oldest note of that scope and says so in the chat line.
 
 ## Starting a session with what is already known
-- **Every session that may read the code starts with the memories**: every session but the blind planner begins with the project's and the person's memory index in hand.
+- **Every session that may read the code starts with the memories**: every session that works in the code begins with the project's and the person's memory index in hand.
 - **The blind planner gets none**: a feature-planning session is given no memories (docs/intent/agent.md#Phase 1: Feature planning).
+- **Blind maintenance gets none**: the docs cleanup, the filing of decisions and the docs map build read what a planner reads and are given no memories either, since a memory is about the codebase (docs/prompts.md#Assembly).
 - **Index first and note on demand**: a session starts with the one-line index only and reads a note's body when the work touches it.
+  - **A note opens past a narrow scope**: the check against the code and the cleanup run may open a note although their scope otherwise keeps them inside the workspace.
   - **Memory written mid-session**: a memory written during a session is in hand for the rest of that session through the write itself, which says what was remembered, while the memory index the session started with stays as it was.
 - **Project over user on a clash**: where a project memory and a user memory say different things about the same subject, the project memory holds (docs/settings.md#Instruction files and skills).
 - **Same memories on both engines**: a session on the Claude Agent SDK and a session on the own loop work from the same memory notes (docs/intent/agent.md#Engines).

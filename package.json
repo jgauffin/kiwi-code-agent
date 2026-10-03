@@ -206,7 +206,7 @@
             "Headings with line ranges and each doc's opening paragraph, read at session start at no model cost."
           ],
           "default": "described",
-          "description": "The docs map Plan and Docs sessions start with."
+          "description": "The docs map feature planning and Clean up docs sessions start with."
         },
         "kiwiAgent.permissions.allow": {
           "type": "array",
@@ -489,7 +489,7 @@
               },
               "steps": {
                 "type": "object",
-                "description": "One entry per step with a model or an effort of its own: chat, plan, reconcile, implement, fix, cleanup, docs, docs-map, file-decisions. Provider and model go together; an entry may hold only an effort.",
+                "description": "One entry per step with a model or an effort of its own: chat, code-plan, code-build, plan, reconcile, implement, fix, cleanup, docs-map, file-decisions, doc-migration (Clean up docs). Provider and model go together; an entry may hold only an effort.",
                 "additionalProperties": {
                   "type": "object",
                   "properties": {

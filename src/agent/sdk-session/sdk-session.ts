@@ -23,6 +23,7 @@ import { fail, folded, type Tool, type ToolContext } from '../openai-session/too
 import { confirmReason, denyReason, gateCall, reviewEdits, type AskPermission, type PermissionShown } from '../permissions/gate'
 import type { QuestionOutcome, UserQuestionRequest } from '../session/user-question'
 import { errorMessage } from '../../error-message'
+import type { CompactionFocus } from '../session/compaction-focus'
 
 type QueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>; options?: Options }) => Query
 
@@ -48,6 +49,8 @@ export type SdkSessionOptions = {
   tools?: string[]
   /** Compacts once the conversation is this large, when that comes before the window's share; absent or 0 means the share alone. */
   compactAtTokens?: number
+  /** What a compaction must keep for this session's phase, and what the turn carries on with after it. */
+  compactionFocus?: CompactionFocus
   /** Tools this extension owns, served to the engine in-process on top of the built-ins. */
   ownTools?: Tool[]
   /** The built-ins a script may call, as our own implementations run in this process; a script reaches the own tools too. */
@@ -117,7 +120,7 @@ export class SdkSession implements CodeSession {
       emit: (event) => {
         if (!this.output.isEnded) this.output.push(event)
       },
-    }, options.compactAtTokens)
+    }, options.compactAtTokens, options.compactionFocus)
     this.pumping = this.pump()
   }
 

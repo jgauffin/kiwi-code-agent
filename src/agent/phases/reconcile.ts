@@ -58,13 +58,13 @@ The spec at \`${spec}\` under ${cwd} was written blind, from product intent alon
 
 Read the spec first. Every rule has a name, the bold lead-in of its line; that name is how you refer to it everywhere. Then search the code for what the spec touches: the rules it changes, the behaviour it adds to, the places its terms already live. ${CODE_READING}
 
-The spec is the intent for this feature; it was distilled from \`${DOCS_DIR}/**\` and the other features' specs under \`${SPECS_GLOB}\` by a session that read all of them, so do not browse those. A rule may end with a citation of the section it came from, as \`(${DOCS_DIR}/intent/orders.md#Cancellation)\`; open that section only to quote it in a contradiction. ${DOC_READING} A rule without a citation is the planner's own default, the weaker side in a contradiction. ${EDIT_WRITING}
+The spec is the intent for this feature; it was distilled from \`${DOCS_DIR}/**\` and the other features' specs under \`${SPECS_GLOB}\` by a session that read all of them, so do not browse those. A rule may end with a citation of the section it came from, as \`(${DOCS_DIR}/intent/orders.md#Cancellation)\`; open that section only when the rule's one sentence leaves open whether the code contradicts it. ${DOC_READING} A rule without a citation is the planner's own default, the weaker side in a contradiction. ${EDIT_WRITING}
 
 What you look for, each of them a decision the user has to make: a business rule in the code that says otherwise (the human decides which side is right; you present both); existing behaviour the feature would change or break that the spec does not mention; something the spec assumes that the code shows to be wrong.
 
 Only in code the feature will change or build on. Behaviour in code the feature leaves alone is not a finding, even where it disagrees with the spec. When where the feature is built is itself open (the behaviour already lives in code the feature may replace rather than change), that is one decision, and the findings in that code wait for its ruling. A constraint that changes how a rule is built but not what it does is not a decision: the implementer reads the same code.
 
-Authority order, when sources disagree: the docs and the approved specs, then the code. The code is the presumed-wrong party, but it is also where the users' current reality lives, so a contradiction is reported, not resolved.
+Authority order, when sources disagree: the spec, which speaks here for the docs and the approved specs it was planned from, then the code. The code is the presumed-wrong party, but it is also where the users' current reality lives, so a contradiction is reported, not resolved.
 
 A spec whose front matter marks \`built: true\` was migrated from a doc about behaviour the code already has, not planned ahead of it: ask the stricter question of each of its rules, not only whether the code accommodates it but whether the code already does it. A rule none of the existing behaviour satisfies is a decision like any other, named in \`on\` the same way; it is not built here. With every rule already satisfied, report no decisions, the same clean result as any other feature.
 
@@ -75,15 +75,15 @@ Your output: the decisions file, \`${decisions}\`, one \`###\` per decision. Str
 
 ### Shipped orders cannot be cancelled
 - on: Cancel command, Shipped order
-- finding: \`Order.cancel\` in src/orders/order.ts refuses a shipped order outright, so neither rule can hold as written.
+- finding: a shipped order is refused outright when its customer cancels it, so neither rule can hold as written.
 
 ### The daily report counts cancelled orders
 - on: Cancel command
-- finding: \`dailyReport\` in src/reports/daily.ts counts every order whatever its state, and the rule is silent on what a cancelled one does to the report.
+- finding: the daily report counts every order whatever its state, and the rule is silent on what a cancelled one does to the report.
 \`\`\`
 
 Rules:
-- The title names the disagreement. The finding is one or two sentences, as in the example: what the code does today, at the one path and symbol that shows it, and how that stands against the rules in \`on\`: it contradicts them, or they are silent on it. Do not quote or restate a rule; the user reads it verbatim beside your finding. Not how you found it, not what the spec should say instead, not how to build it: the planner's proposals and the implementer carry those.
+- The title names the disagreement. The finding is one or two sentences, as in the example: what the product does today, as behaviour a user or another system would observe, and how that stands against the rules in \`on\`: it contradicts them, or they are silent on it. No file path, type, function or other name from the code: the planner who proposes on a finding never sees the code, and the user rules on what the product does, not on where. Where it lives goes in the context file below. Do not quote or restate a rule; the user reads it verbatim beside your finding. Not how you found it, not what the spec should say instead, not how to build it: the planner's proposals and the implementer carry those.
 - \`on\` names the rules the decision concerns, as they are named in the spec.
 - The \`proposed\`, \`recommended\` and \`because\` lines are the planner's and the \`ruling\` line is the user's: never write, change or remove any of them.
 - Titles are stable. On a re-run, keep a decision that still holds, append \` [withdrawn]\` to the heading of one that no longer applies, and add new ones. A decision marked \` [applied]\` is settled: one ruled \`${KEEP_RULING}\` means the spec stands and the code changes, and its finding reaches the implementer as it is; do not report it again.
@@ -91,7 +91,7 @@ Rules:
 - The spec is not yours to write: its rules are the planner's and the user's.
 - With no decision to report, write no file.
 
-Also, every run, the context file \`${context}\`: under each scenario of the spec, the files its work will change or build on, as you found them while checking, most important first. Each scenario becomes a task whose implementer starts from these files instead of searching the code again. A scenario that builds something new names where it goes and what it builds on.
+Also, every run, the context file \`${context}\`: under each scenario of the spec, the files its work will change or build on, as you found them while checking, most important first, the files behind a decision's finding among them. Each scenario becomes a task whose implementer starts from these files instead of searching the code again. A scenario that builds something new names where it goes and what it builds on.
 
 \`\`\`markdown
 # Where ${feature} is built

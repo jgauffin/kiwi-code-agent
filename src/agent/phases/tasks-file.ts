@@ -14,7 +14,7 @@ import { specFingerprint, type Scenario, type Spec } from './spec-model'
  * fresh session and the plan view reads it as it is.
  */
 
-/** `blocked` is unfinished work with a reason; only `tested` is a finish. */
+/** `blocked` is unfinished work with a reason; only `tested` is a finish, the developer's acceptance of a blocked task included. */
 export type TaskState = 'open' | 'in_progress' | 'done' | 'tested' | 'blocked'
 
 /** The test that proves one delivered rule: the evidence shown on the spec. */
@@ -48,12 +48,28 @@ export type Task = {
   state: TaskState
   /** Why a blocked task cannot be finished; present only while it is blocked. */
   blockedReason?: string
+  /** The reason it was blocked when the developer accepted it as it is: finished by their word, not by a test. Present only while it stays tested. */
+  accepted?: string
+  /** The build has handed it back once, blocked, after every other task was finished; it is not handed back again by itself. */
+  reassessed?: true
   /** Its scenario is gone from the spec; kept for the implementer's record. */
   removed: boolean
 }
 
-/** One run of the test commands. `foreign`, present only when the run ended in failures that were foreign both times, names the files and the hand behind each: what `Held rather than verified` shows on the board. */
-export type VerificationRecord = { at: string; ok: boolean; text: string; foreign?: { command: string; files: string[]; hand: string }[] }
+/** One command of a test run, described as `describeCommand` does; a failure keeps the tail of its output. */
+export type CommandOutcome = { command: string; ok: boolean; output?: string }
+
+/**
+ * One run of the test commands. `foreign`, present only when the run ended in
+ * failures that were foreign both times, names the files and the hand behind
+ * each: what `Held rather than verified` shows on the board. `runs` is each
+ * command and how it ended, empty when no command applied; absent on a record
+ * written before it was kept.
+ */
+export type VerificationRecord = { at: string; ok: boolean; text: string; foreign?: { command: string; files: string[]; hand: string }[]; runs?: CommandOutcome[] }
+
+/** The run had nothing to run: no test command applies to the tasks' files, so its pass proves nothing. */
+export const nothingRan = (record: VerificationRecord): boolean => record.runs?.length === 0
 
 /**
  * What the user said about the cleanup the size sweep offered: put off until
@@ -115,6 +131,8 @@ const boardSchema = z.object({
       built: z.string().default(''),
       state: z.enum(TASK_STATES),
       blockedReason: z.string().optional(),
+      accepted: z.string().optional(),
+      reassessed: z.literal(true).optional(),
       removed: z.boolean(),
     }),
   ),
@@ -124,6 +142,7 @@ const boardSchema = z.object({
       ok: z.boolean(),
       text: z.string(),
       foreign: z.array(z.object({ command: z.string(), files: z.array(z.string()), hand: z.string() })).optional(),
+      runs: z.array(z.object({ command: z.string(), ok: z.boolean(), output: z.string().optional() })).optional(),
     }),
   ),
 })
@@ -139,12 +158,18 @@ export function parseBoard(text: string, path = 'tasks board'): TaskBoard {
   return {
     ...(spec !== undefined ? { spec } : {}),
     ...(cleanup !== undefined ? { cleanup } : {}),
-    tasks: tasks.map(({ group, blockedReason, ...task }) => ({
+    tasks: tasks.map(({ group, blockedReason, accepted, reassessed, ...task }) => ({
       ...task,
       ...(group !== undefined ? { group } : {}),
       ...(blockedReason !== undefined ? { blockedReason } : {}),
+      ...(accepted !== undefined ? { accepted } : {}),
+      ...(reassessed ? { reassessed } : {}),
     })),
-    verification: verification.map(({ foreign, ...record }) => ({ ...record, ...(foreign !== undefined ? { foreign } : {}) })),
+    verification: verification.map(({ foreign, runs, ...record }) => ({
+      ...record,
+      ...(foreign !== undefined ? { foreign } : {}),
+      ...(runs !== undefined ? { runs: runs.map(({ output, ...run }) => ({ ...run, ...(output !== undefined ? { output } : {}) })) } : {}),
+    })),
   }
 }
 
@@ -196,8 +221,18 @@ export const liveTasks = (tasks: Task[]): Task[] => tasks.filter((t) => !t.remov
 export const nextTask = (board: TaskBoard): Task | undefined =>
   liveTasks(board.tasks).find((t) => t.state !== 'tested' && t.state !== 'blocked')
 
-/** The first live blocked task: unfinished work, handed back when the person asks for the build again. */
-export const blockedTask = (board: TaskBoard): Task | undefined => liveTasks(board.tasks).find((t) => t.state === 'blocked')
+/** The first live blocked task, or the one named: unfinished work, handed back when the person asks for the build again. */
+export const blockedTask = (board: TaskBoard, name?: string): Task | undefined =>
+  liveTasks(board.tasks).find((t) => t.state === 'blocked' && (name === undefined || sameName(t.name, name)))
+
+/** A blocked task the build has not yet handed back by itself: once nothing else is left to build, it gets another look. */
+export const blockedToReassess = (board: TaskBoard): Task | undefined => liveTasks(board.tasks).find((t) => t.state === 'blocked' && !t.reassessed)
+
+/** Nothing is left to build but tasks that stayed blocked: the build stands still until the person hands one back or accepts it. */
+export const onlyBlockedLeft = (tasks: Task[]): boolean => {
+  const unfinished = liveTasks(tasks).filter((t) => t.state !== 'tested')
+  return unfinished.length > 0 && unfinished.every((t) => t.state === 'blocked')
+}
 
 /** Work has started: some task has moved from open. */
 export const started = (tasks: Task[]): boolean => liveTasks(tasks).some((t) => t.state !== 'open')
@@ -266,7 +301,7 @@ export function updateTask(board: TaskBoard, name: string, change: TaskProgress)
   const state = change.state ?? current.state
   const reason = change.blockedReason?.trim() || (change.state === undefined ? current.blockedReason : undefined)
   if (state === 'blocked' && !reason) throw new Error(`A blocked task needs a reason: say what stands in the way of "${current.name}".`)
-  const { blockedReason: _, ...rest } = current
+  const { blockedReason: _, accepted, reassessed, ...rest } = current
   const files = change.files ?? current.files
   // The test sweep runs over the files the tasks name: a tested task naming none would pass it with nothing run.
   if (state === 'tested' && files.length === 0) throw new Error(`"${current.name}" names no file: give files, every file the task touched, with its tests.`)
@@ -274,6 +309,9 @@ export function updateTask(board: TaskBoard, name: string, change: TaskProgress)
     ...rest,
     state,
     ...(state === 'blocked' ? { blockedReason: reason! } : {}),
+    // Acceptance stands only while nothing moves the task again; another look holds through the look itself, so a task blocked again is not handed back once more.
+    ...(accepted !== undefined && change.state === undefined ? { accepted } : {}),
+    ...(reassessed && (state === 'blocked' || state === 'in_progress') ? { reassessed } : {}),
     files,
     newFiles: current.newFiles.filter((f) => files.includes(f)),
     // Not counted as the task's own work by staying silent: a foreign change to a named file is recorded here instead, and drops off once the task no longer names the file.
@@ -283,6 +321,24 @@ export function updateTask(board: TaskBoard, name: string, change: TaskProgress)
     built: change.built ?? current.built,
   }
   return { ...board, tasks: board.tasks.map((t, i) => (i === index ? next : t)) }
+}
+
+/** The build hands a blocked task back by itself once: marked so it is not handed back again. */
+export function markReassessed(board: TaskBoard, name: string): TaskBoard {
+  return { ...board, tasks: board.tasks.map((t) => (sameName(t.name, name) ? { ...t, reassessed: true as const } : t)) }
+}
+
+/**
+ * The developer accepts a blocked task as it is: it counts as finished, and
+ * the board keeps why it was blocked rather than claiming a test proved it.
+ * Its rules stay without proof, so the view goes on saying so.
+ */
+export function acceptTask(board: TaskBoard, name: string): TaskBoard {
+  const task = blockedTask(board, name)
+  if (!task) throw new Error(`"${name}" is not a blocked task on the board: only a blocked task can be accepted as it is.`)
+  const { blockedReason, reassessed: _, ...rest } = task
+  const accepted: Task = { ...rest, state: 'tested', accepted: blockedReason ?? 'blocked' }
+  return { ...board, tasks: board.tasks.map((t) => (t === task ? accepted : t)) }
 }
 
 /**
@@ -364,8 +420,14 @@ export const withSpecFingerprint = (board: TaskBoard, fingerprint: string): Task
 
 export const withCleanupDecision = (board: TaskBoard, decision: CleanupDecision): TaskBoard => ({ ...board, cleanup: decision })
 
-/** The newest record goes first. */
-export const withRecord = (board: TaskBoard, record: VerificationRecord): TaskBoard => ({ ...board, verification: [record, ...board.verification] })
+/** The newest record goes first; only it keeps its failures' output, which the Verify step shows, so the board does not grow with every failed run. */
+export const withRecord = (board: TaskBoard, record: VerificationRecord): TaskBoard => ({
+  ...board,
+  verification: [record, ...board.verification.map(withoutOutput)],
+})
+
+const withoutOutput = (record: VerificationRecord): VerificationRecord =>
+  record.runs ? { ...record, runs: record.runs.map(({ output: _, ...run }) => run) } : record
 
 /** Reads, changes and writes the board in one go, so a change never lands on a copy another writer has since replaced. */
 export function changeBoard(path: string, change: (board: TaskBoard) => TaskBoard): Promise<TaskBoard> {

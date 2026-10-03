@@ -19,7 +19,6 @@ export const STEP_EFFORT: Partial<Record<Step, Effort>> = {
   'code-plan': 'high',
   'code-build': 'medium',
   'docs-map': 'low',
-  docs: 'medium',
   'file-decisions': 'medium',
   'doc-migration': 'medium',
 }

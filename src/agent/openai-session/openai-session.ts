@@ -11,7 +11,8 @@ import { ReadTracker } from './tools/read-tracker'
 import { folded, modelText, toDefinition, type Tool, type ToolContext, type ToolOutput } from './tools/tool'
 import { UNANSWERED_TOOL_RESULT } from './history'
 import { isAbsolute, resolve } from 'node:path'
-import { COMPACT_AT, compact, DEFAULT_CONTEXT_WINDOW, estimateTokens, isContextTooLong, KEEP_SHARE, pathsReadIn, SUMMARY_MAX_TOKENS, SUMMARY_PROMPT } from './compaction'
+import { COMPACT_AT, compact, DEFAULT_CONTEXT_WINDOW, estimateTokens, isContextTooLong, KEEP_SHARE, pathsReadIn, SUMMARY_MAX_TOKENS, summaryPrompt } from './compaction'
+import type { CompactionFocus } from '../session/compaction-focus'
 import { FileLedger } from './file-ledger'
 import { compactionPoint } from '../session/compaction-point'
 import { errorMessage } from '../../error-message'
@@ -42,6 +43,8 @@ export type OpenAiSessionOptions = {
   contextWindow?: number
   /** Compacts once the prompt is this large, when that comes before the window's share; absent or 0 means the share alone. */
   compactAtTokens?: number
+  /** What a compaction must keep for this session's phase; absent for the general summary. */
+  compactionFocus?: CompactionFocus
   /** The profile's effort as this endpoint takes it; absent where it takes none. */
   reasoningEffort?: CompletionRequest['reasoningEffort']
   /** The workspace's MCP servers and the host that connects to them; absent on a session that takes none. */
@@ -356,7 +359,7 @@ export class OpenAiSession implements CodeSession {
     for await (const delta of this.options.client.stream({
       model: this.options.profile.model,
       messages: [
-        { role: 'system', content: SUMMARY_PROMPT },
+        { role: 'system', content: summaryPrompt(this.options.compactionFocus?.keep ?? '') },
         { role: 'user', content: transcript },
       ],
       tools: [],

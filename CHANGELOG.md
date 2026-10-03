@@ -3,13 +3,16 @@
 ## 0.2.6
 
 - A chat session's effort sits beside its model in the composer, switchable between turns the same way: pick how hard the model thinks, or leave it at the model's own default. The switch only appears for a model whose levels are known (Claude, and an OpenAI-compatible model that takes `reasoning_effort`), and a level you picked survives a model switch, brought down to what the new model takes.
-- A docs evaluation can change the README once you ask it to, as a confirmed write like any other doc. It judged the README all along, but every edit to it was denied.
+- *Evaluate docs* and *Doc migration* are one job, *Clean up docs*; it can also change the README. A profile's model for *Evaluate docs* is dropped.
 - A task run starts from the files its task names instead of working the surface out again: it opens those and the task's context first, searches only for what they leave open, and no longer sweeps the other features' specs or the docs before writing anything.
 - New `SpecSearch` tool: finds spec rules and returns them whole.
 - Future work moves to `specs/future-work.md`; entries marked `built: false` are moved there on startup.
 - An approved code plan records its spec changes and decisions before building.
 - Writes to the root `package.json`, `.vscode/settings.json` and `.mcp.json` always ask, even with Allow writes on.
 - Verify rules take an optional build command, which the implementer runs without a prompt.
+- Decision findings describe what the product does, without file or code names.
+- Compaction keeps what each session type needs; a task run keeps its task and rules word for word.
+- *Pick up where you left off* lists finished plans (marked done), code plans and docs sessions, newest worked in first, and opens a finished plan in its planning session.
 - *Continue implementing* on a board where only blocked tasks are left hands the first one back to its implementer, told why it was blocked. Before, the button did nothing and the chat stayed locked on the settled task.
 
 ## 0.2.5

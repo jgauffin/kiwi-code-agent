@@ -1,4 +1,5 @@
 import * as vscode from 'vscode'
+import { existsSync } from 'node:fs'
 import { actingMode, isBuild, isFeatureless, lastActive, offersAllowWrites, stepOf, type SessionManager, type SessionMode, type SessionRecord } from '../agent/session/session-manager'
 import { atEffort, switchedTo, type ModelOffer, type ModelProfile, type Step } from '../agent/session/model-profile'
 import type { McpServerState, SessionEvent } from '../agent/session/code-session'
@@ -49,7 +50,6 @@ import { buildRepoMap } from '../agent/repo-map/build-map'
 import { finishDocsMap, planDocsMap, readDocsSummary, startDocsMap, type DocsMapResult } from '../agent/docs-map/build'
 import { docsMapKickoff } from '../agent/phases/docs-map'
 import { docMigrationKickoff } from '../agent/phases/doc-migration'
-import { deliversEvaluation, docsEvaluationKickoff } from '../agent/phases/docs-evaluation'
 import { fileDecisionsKickoff } from '../agent/phases/file-decisions'
 import { readUnfiled } from '../agent/phases/unfiled-decisions'
 import { sharedBuild } from '../agent/session/generated-context'
@@ -129,8 +129,6 @@ export class ChatViewProvider {
   private readonly applying = new Set<string>()
   /** Features whose planner is listing what the docs should now say, right after approval; Implement waits for that turn. */
   private readonly reviewingDocs = new Set<string>()
-  /** Docs evaluations whose findings were delivered in the turn under way; full access is granted when it ends. */
-  private readonly evaluationsDelivered = new Set<string>()
   /** Per running session, its MCP servers as the engine last reported them. */
   private readonly mcpServers = new Map<string, McpServerState[]>()
   /**
@@ -352,7 +350,8 @@ export class ChatViewProvider {
     if (isVerified(state.status) || finished(state.status, tasks)) {
       throw new Error(`"${feature}" is verified: plan the next change as its own feature.`)
     }
-    await this.newSession('plan', feature, resumePlanPrompt(feature), into, 'Picking the plan up')
+    const present = { review: existsSync(reviewPath(this.workspaceRoot, feature)), decisions: existsSync(decisionsPath(this.workspaceRoot, feature)) }
+    await this.newSession('plan', feature, resumePlanPrompt(feature, present), into, 'Picking the plan up')
   }
 
   async open(sessionId: string, into?: ChatPanel): Promise<void> {
@@ -457,20 +456,7 @@ export class ChatViewProvider {
       const feature = record.feature
       void this.build.followAmendment(feature).then(() => this.build.followBoard(feature))
     }
-    this.followDocsEvaluation(record, event)
     if (event.type === 'turn_done' && record.mode === 'plan' && record.feature) this.followPlanTurn(record, record.feature, event.isError)
-  }
-
-  /**
-   * The evaluation has been said: the session goes on with the full tool set, so what it found is worked on where it was read.
-   * The model marks the reply that says it; the grant waits for the turn to end, since it stops the engine.
-   */
-  private followDocsEvaluation(record: SessionRecord, event: SessionEvent): void {
-    if (record.mode !== 'docs') return
-    if (event.type === 'assistant_message' && deliversEvaluation(event.text)) this.evaluationsDelivered.add(record.id)
-    if (event.type === 'turn_done' && !event.isError && record.access !== 'full' && this.evaluationsDelivered.delete(record.id)) {
-      void this.sessions.grantFullAccess(record.id).then(() => this.sendState())
-    }
   }
 
   private followPlanTurn(record: SessionRecord, feature: string, isError: boolean): void {
@@ -929,15 +915,13 @@ export class ChatViewProvider {
     const filing = message.mode === 'file-decisions' ? this.sessions.list().find((r) => r.mode === 'file-decisions' && this.sessions.isLive(r.id)) : undefined
     if (filing) return this.open(filing.id, entry)
     const prompt = withLinkedFiles(message.prompt ?? '', message.files ?? [])
-    // The docs card, the filing and the migration have nothing to fill in, so their sessions start on the job rather than waiting for a prompt.
+    // The filing and the docs cleanup have nothing to fill in, so their sessions start on the job rather than waiting for a prompt.
     const kickoff =
-      message.mode === 'docs'
-        ? { text: docsEvaluationKickoff(), label: 'Evaluating the docs' }
-        : message.mode === 'file-decisions'
-          ? { text: fileDecisionsKickoff(), label: 'Filing the decisions' }
-          : message.mode === 'doc-migration'
-            ? { text: docMigrationKickoff(), label: 'Migrating the docs' }
-            : undefined
+      message.mode === 'file-decisions'
+        ? { text: fileDecisionsKickoff(), label: 'Filing the decisions' }
+        : message.mode === 'doc-migration'
+          ? { text: docMigrationKickoff(), label: 'Cleaning up the docs' }
+          : undefined
     if (prompt !== '' || !kickoff) await this.newSession(message.mode, message.feature, prompt, entry)
     else await this.newSession(message.mode, message.feature, kickoff.text, entry, kickoff.label)
   }

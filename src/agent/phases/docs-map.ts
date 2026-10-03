@@ -25,7 +25,7 @@ export function docsMapKickoff(docs: string[]): string {
     'Describe these docs, one entry each:',
     ...docs.map((doc) => `- \`${doc}\` → \`${entryFile(doc)}\``),
     '',
-    'Read each doc, write its entry, and stop when all of them are written.',
+    'Read the docs in batches, several Reads in one reply, then write their entries, several Writes in the next; stop when all of them are written.',
   ].join('\n')
 }
 
@@ -36,7 +36,7 @@ export function docsMapKickoff(docs: string[]): string {
 export function docsMapPrompt(cwd: string): string {
   return `You are writing the docs map for a software product: an index of its product documentation, so that a planner who may read the docs and nothing else can open the one doc that answers its question instead of reading all of them.
 
-Under ${cwd}. You are handed a list of docs and the entry file each one's description goes in. Read a doc, write its entry, move on. You judge nothing, you change no doc, and you write nothing but the entries you were given.
+Under ${cwd}. You are handed a list of docs and the entry file each one's description goes in. Work in batches of about five: read the batch's docs with several Reads in one reply, then write their entries with several Writes in the next. Every tool call in a reply runs before your next turn, and each turn re-sends the whole conversation, so a doc at a time costs a round trip per doc. You judge nothing, you change no doc, and you write nothing but the entries you were given.
 
 An entry:
 

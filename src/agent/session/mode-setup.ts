@@ -5,7 +5,6 @@ import { BLIND_PLAN_TOOLS, blindPlanPrompt, blindPlanScope } from '../phases/bli
 import { CLEANUP_TOOLS, cleanupPrompt, cleanupScope } from '../phases/cleanup'
 import { CODE_PLAN_TOOLS, codePlanPrompt } from '../phases/code-plan'
 import { DOC_MIGRATION_TOOLS, docMigrationPrompt, docMigrationScope } from '../phases/doc-migration'
-import { DOCS_EVALUATION_TOOLS, docsEvaluationPrompt, docsEvaluationScope } from '../phases/docs-evaluation'
 import { DOCS_MAP_TOOLS, docsMapPrompt, docsMapScope } from '../phases/docs-map'
 import { FILE_DECISIONS_TOOLS, fileDecisionsPrompt, fileDecisionsScope } from '../phases/file-decisions'
 import { IMPLEMENT_TOOLS, implementPrompt } from '../phases/implement'
@@ -70,15 +69,6 @@ export async function modeSetup(record: SessionRecord, ctx: ModeContext): Promis
         systemPrompt: await ctx.withInstructions(record, await ctx.withMemories(record, await ctx.withMap(record, codePlanPrompt(workspaceRoot)))),
         toolNames: CODE_PLAN_TOOLS,
       }
-    case 'docs': {
-      const scope = docsEvaluationScope(ctx.planIgnore())
-      return {
-        hooks: new ScopeGuard(workspaceRoot, scope),
-        systemPrompt: await ctx.withInstructions(record, await ctx.withMemories(record, await ctx.withDocs(record, docsEvaluationPrompt(workspaceRoot)))),
-        toolNames: DOCS_EVALUATION_TOOLS,
-        readable: readableIn(scope),
-      }
-    }
     case 'file-decisions': {
       const scope = fileDecisionsScope(ctx.planIgnore())
       return {
@@ -89,7 +79,7 @@ export async function modeSetup(record: SessionRecord, ctx: ModeContext): Promis
       }
     }
     case 'doc-migration': {
-      // Never promoted to full access, unlike the docs evaluation: the job never reads code, for its whole life.
+      // Never promoted to full access: the job never reads code, for its whole life.
       const scope = docMigrationScope(ctx.planIgnore())
       return {
         // The migrated drafts it writes are held to the contract like the planner's.

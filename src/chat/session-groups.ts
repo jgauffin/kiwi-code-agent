@@ -13,8 +13,8 @@ export type PlanEntry = { feature: string; status: PlanStatus | undefined; recor
 /** What the Sessions view offers to open again: the chats, and one entry per planned feature. */
 export type SessionGroups = { chats: SessionRecord[]; plans: PlanEntry[] }
 
-/** Conversations the person talks to that belong to no feature: a code plan ends in a chat, and the docs evaluation, the filing and the doc migration go on once they have reported. */
-const CONVERSATIONS: ReadonlySet<SessionRecord['mode']> = new Set(['chat', 'code-plan', 'docs', 'file-decisions', 'doc-migration'])
+/** Conversations the person talks to that belong to no feature: a code plan ends in a chat, and the filing and the docs cleanup go on once they have reported. */
+const CONVERSATIONS: ReadonlySet<SessionRecord['mode']> = new Set(['chat', 'code-plan', 'file-decisions', 'doc-migration'])
 
 const newestFirst = (a: string | undefined, b: string | undefined): number => (b ?? '').localeCompare(a ?? '')
 

@@ -30,7 +30,14 @@ describe('what a doc migration may touch', () => {
     // undefined is the ordinary prompt; the user confirms each cut to their own docs.
     expect(await use('Edit', { file_path: 'docs/intent/agent.md' })).toBeUndefined()
     expect(await use('Write', { file_path: 'docs/intent/new-area.md' })).toBeUndefined()
+    // The README is among the docs tidied in stage three, so a fix picked there can be made where it was found.
+    expect(await use('Edit', { file_path: 'ReadMe.md' })).toBeUndefined()
     expect(await use('Write', { file_path: 'src/orders/cancel.ts' })).toMatchObject({ deny: expect.stringContaining('limited to') })
+  })
+
+  it('the_mappers_files_are_denied_so_nothing_that_read_the_code_reaches_the_cleanup', async () => {
+    expect(await use('Read', { file_path: '.kiwi/specs/order-cancellation.decisions.md' })).toMatchObject({ deny: expect.any(String) })
+    expect(await use('Read', { file_path: '.kiwi/specs/order-cancellation.context.md' })).toMatchObject({ deny: expect.any(String) })
   })
 
   it('a_migrated_draft_is_written_straight_through_like_the_unfiled_file_since_it_is_the_jobs_own_deliverable', async () => {
@@ -78,19 +85,64 @@ describe('what a doc migration is told to judge', () => {
   })
 
   it('confirmed_doc_writes_every_write_is_put_to_the_user_first_one_at_a_time', () => {
-    expect(prompt).toContain('Every write into `docs/**` is put to the user first')
+    expect(prompt).toContain('Every write into `docs/**` or the README, in any stage, is put to the user first')
     expect(prompt).toContain('made only once they say so, one write at a time')
   })
 
-  it('setting_not_consulted_the_prompt_never_asks_about_cutCoveredDocs', () => {
-    expect(prompt).toContain('kiwiAgent.cutCoveredDocs')
-    expect(prompt).toContain('is not consulted here')
+  it('a_setting_the_model_cannot_read_is_not_explained_to_it', () => {
+    expect(prompt).not.toContain('kiwiAgent.cutCoveredDocs')
     // No parameter to switch behaviour on it, unlike the planner's own doc review after approval.
     expect(docMigrationPrompt).toHaveLength(1)
   })
 
-  it('the_job_never_reads_code_at_any_point_not_even_once_it_moves_on_to_checking_a_spec', () => {
+  it('the_job_never_reads_code_at_any_point', () => {
     expect(prompt).toContain('you never read the code, at any point in the job')
+  })
+
+  it('the_goal_is_behaviour_in_specs_and_everything_else_in_findable_docs', () => {
+    expect(prompt).toContain('every piece of product behaviour lives in a spec, and the docs hold everything else')
+  })
+
+  it('three_stages_in_order_each_proposing_before_writing_and_any_of_them_skippable', () => {
+    const prune = prompt.indexOf('**Stage one, prune.**')
+    const draft = prompt.indexOf('**Stage two, draft specs.**')
+    const tidy = prompt.indexOf('**Stage three, tidy what stays.**')
+    expect(prune).toBeGreaterThan(-1)
+    expect(draft).toBeGreaterThan(prune)
+    expect(tidy).toBeGreaterThan(draft)
+    expect(prompt).toContain('Each stage proposes in chat and waits for the user\'s answer before anything is written')
+    expect(prompt).toContain('The user may skip a stage or stop after any of them')
+  })
+})
+
+describe('tidying what stays', () => {
+  const prompt = docMigrationPrompt(cwd)
+
+  it('the_measure_is_what_a_planner_can_find_and_cite_not_completeness_or_prose', () => {
+    expect(prompt).toContain('how much it has to read before it finds an answer, and whether it can cite what it found')
+    expect(prompt).toContain('not the prose, not whether the docs are right, not whether they are complete')
+  })
+
+  it('every_finding_kind_a_planner_pays_for_is_named', () => {
+    for (const kind of ['a heading that does not say what is under it', 'a folder with no way in', 'a term the docs lean on but define nowhere', 'a passage a rule would want to cite that sits under no heading of its own']) {
+      expect(prompt, kind).toContain(kind)
+    }
+  })
+
+  it('a_heading_a_spec_cites_is_load_bearing_and_its_citations_are_found_with_spec_search', () => {
+    // The one failure here that no build, test or view would report.
+    expect(prompt).toContain('**Cited headings are load-bearing.**')
+    expect(prompt).toContain('search the specs for it with SpecSearch')
+    expect(prompt).toContain('name every citation that would have to follow')
+  })
+
+  it('the_editing_rules_sit_where_the_edit_is_made_so_a_split_keeps_its_headings', () => {
+    expect(prompt).toContain('keep every cited heading as it stands unless the user said to change it knowing what it costs')
+    expect(prompt).toContain('a doc that is split keeps its headings in its parts')
+  })
+
+  it('an_empty_list_is_a_good_result', () => {
+    expect(prompt).toContain('which is a good result, not a failure')
   })
 })
 
@@ -129,9 +181,9 @@ describe('pruning what a spec already says', () => {
     expect(prompt).toContain('do not offer the section without naming every citation that would have to change with it')
   })
 
-  it('nothing_covered_says_so_and_goes_on_to_the_migration_offer', () => {
+  it('nothing_covered_says_so_and_goes_on_to_stage_two', () => {
     expect(prompt).toContain('**Nothing covered.**')
-    expect(prompt).toContain('say so in chat and go on to the migration offer')
+    expect(prompt).toContain('say so in chat and go on to stage two')
   })
 })
 
@@ -140,7 +192,7 @@ describe('migrating the remaining feature docs into specs', () => {
 
   it('offered_when_pruning_is_settled_the_migration_waits_on_every_reported_cut_having_an_answer', () => {
     expect(prompt).toContain('**Offered when pruning is settled.**')
-    expect(prompt).toContain('Do not raise the migration while a covered section you reported is still waiting on the user')
+    expect(prompt).toContain('Do not raise stage two while a covered section you reported is still waiting on the user')
   })
 
   it('feature_list_first_proposes_features_from_the_sections_left_standing_naming_where_each_comes_from', () => {

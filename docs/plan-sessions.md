@@ -1,6 +1,6 @@
 # Plan sessions
 
-The new-session screen is in two tabs: **Code**, the session types that work in the code, and **Maintenance**, the jobs that keep the intent the code is planned from in order (*Evaluate docs*, *File decisions*), which are nobody's errand of the day and so wait apart from the work.
+The new-session screen is in two tabs: **Code**, the session types that work in the code, and **Maintenance**, the jobs that keep the intent the code is planned from in order, one per input: *Clean up docs* works from the docs, *File decisions* from the decisions you recorded. They are nobody's errand of the day, so they wait apart from the work.
 
 Two modes on the Code tab:
 
@@ -17,7 +17,7 @@ Blind planning of one feature. The session can read `docs/**`, the root README a
 
 The session starts with the docs map: every doc it may read with its length, what that doc is for, and one line per heading with the section's line range. It reads one section instead of the tree, and cites a section as `path#Heading` with the heading spelled as the map spells it. The map is built from the docs alone, so a blind session reading it stays blind, and a rebuild re-reads only the docs whose content changed. *Kiwipow Agent: Build Docs Map* builds it on demand; a plan session builds it first when it is behind.
 
-*Evaluate docs*, on the new-session screen's Maintenance tab, is the other side of that: a session with the planner's own read scope that says in chat where the docs' arrangement costs a planner (what has to be read whole, what cannot be cited, what nothing links to) and changes what you pick, one confirmed write at a time. It never proposes renaming a heading an approved spec cites without naming the citations that would have to follow. Once it has said its findings the session opens up — full tool set, same conversation — so you answer it where you read it, and work past the docs needs no second session.
+*Clean up docs*, on the new-session screen's Maintenance tab, is the other side of that: a session with the planner's own read scope that leaves behaviour in the specs and everything else in docs a planner can find and cite. It works in three stages, each proposed in chat before anything is written, and you can stop after any of them: it cuts what a settled spec already says, turns behaviour no spec holds into draft specs, and then fixes what makes the rest hard to find or cite (what has to be read whole, what cannot be cited, what nothing links to). Each change to a doc is one confirmed write. It never proposes renaming a heading an approved spec cites without naming the citations that would have to follow. It never reads the code, so work past the docs belongs in a chat.
 
 ### The view
 
@@ -36,7 +36,7 @@ The spec is committed; the review, decisions and tasks are working files under `
 
 ### From a chat
 
-A chat, or a docs evaluation once it has opened up, answers where a feature stands from its files, and writes draft specs from the docs when asked: it proposes the feature list first, and each spec is held to the same contract. This is the way into a project with docs but no specs yet. Each draft then appears in the Sessions view to review and approve as usual.
+A chat answers where a feature stands from its files, and writes draft specs from the docs when asked: it proposes the feature list first, and each spec is held to the same contract. This is the way into a project with docs but no specs yet. Each draft then appears in the Sessions view to review and approve as usual.
 
 ### Unfiled decisions
 

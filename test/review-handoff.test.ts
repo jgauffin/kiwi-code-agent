@@ -18,7 +18,7 @@ import {
   type Review,
 } from '../src/agent/phases/plan-review'
 import { emptied, reviewPrompt, standingStrikes, submitReview, type ReviewCourier } from '../src/agent/phases/review-handoff'
-import { resumePlanPrompt, blindPlanPrompt, specPath } from '../src/agent/phases/blind-plan'
+import { resumePlanPrompt, blindPlanPrompt, decisionsHandoffPrompt, rulingsHandoffPrompt, specPath } from '../src/agent/phases/blind-plan'
 import { reconcilePrompt } from '../src/agent/phases/reconcile'
 
 const spec = `---
@@ -214,37 +214,48 @@ describe('closing a round', () => {
 
 describe('the plan session knows what a review asks of it', () => {
   it('the_conduct_is_in_the_system_prompt_too_so_a_fresh_session_does_not_wait_for_direction', () => {
+    // The planner knows where reviews live and that a strike holds; the hand-off says how to answer one.
     const prompt = blindPlanPrompt('Order cancellation', '/work/repo')
     expect(prompt).toContain('.kiwi/specs/order-cancellation.review.md')
-    expect(prompt).toContain('without renaming')
-    expect(prompt).toContain('never bring a struck')
-    expect(prompt).toContain('disagreed with a reason')
+    expect(prompt).toContain('a struck rule never comes back on your own')
+    expect(prompt).not.toContain('addressed or disagreed')
   })
 
   it('the_check_is_a_run_not_a_reviewer_so_rulings_on_decisions_never_go_to_it', () => {
     const prompt = reconcilePrompt('Order cancellation', '/work/repo')
     expect(prompt).not.toContain('review.md')
     expect(prompt).toContain('never write, change or remove any of them')
-    expect(blindPlanPrompt('Order cancellation', '/work/repo')).toContain('[applied]')
+    expect(rulingsHandoffPrompt('Order cancellation', [{ title: 't', ruling: 'keep' }])).toContain('[applied]')
   })
 
   it('a_rule_is_one_sentence_and_each_proposal_is_a_replacement_text_the_ruling_picks_keeps_or_overrides', () => {
-    const prompt = blindPlanPrompt('Order cancellation', '/work/repo')
-    expect(prompt).toContain('each one sentence: what the rule has to survive is an edge case, and why it holds is not written in the spec')
-    expect(prompt).toContain("written as the rule's new text as it would stand in the spec (one sentence, no argument, no reference to the decision; observable behaviour, not how it is built)")
-    expect(prompt).toContain('`keep` means the rule stands and the code will change')
-    expect(prompt).toContain('the text of a proposal means it replaces the rule verbatim')
-    expect(prompt).toContain('Keeping the rule as it stands is always offered to the user, so do not propose it')
+    expect(blindPlanPrompt('Order cancellation', '/work/repo')).toContain('each one sentence: what the rule has to survive is an edge case, and why it holds is not written in the spec')
+    // The detail of proposing and applying lives in the hand-offs that ask for it, not in every plan request.
+    expect(blindPlanPrompt('Order cancellation', '/work/repo')).toContain('Change no rule until the user has ruled')
+    const proposing = decisionsHandoffPrompt('Order cancellation', ['t'])
+    expect(proposing).toContain("the rule's new text as it would stand in the spec, one sentence with no argument and no reference to the decision: observable behaviour, not how it is built")
+    expect(proposing).toContain('Keeping the rule is offered to the user by itself; do not propose it')
+    const applying = rulingsHandoffPrompt('Order cancellation', [{ title: 't', ruling: 'keep' }])
+    expect(applying).toContain('`keep` keeps the rule as it stands')
+    expect(applying).toContain('the text of a proposal replaces the rule verbatim')
   })
 
   it('a_session_picking_up_a_spec_reads_the_files_reports_where_it_stands_and_leaves_an_approved_spec_alone', () => {
-    const prompt = resumePlanPrompt('Order cancellation')
+    const prompt = resumePlanPrompt('Order cancellation', { review: true, decisions: true })
     expect(prompt).toContain('specs/order-cancellation.spec.md')
     expect(prompt).toContain('.kiwi/specs/order-cancellation.review.md')
     expect(prompt).toContain('.kiwi/specs/order-cancellation.decisions.md')
     expect(prompt).toContain('Do not start over')
     expect(prompt).toContain('A spec the user has approved is settled')
     expect(prompt).toContain('Then stop')
+  })
+
+  it('a_session_picking_up_a_spec_is_sent_only_to_the_files_that_exist', () => {
+    const prompt = resumePlanPrompt('Order cancellation', { review: false, decisions: false })
+    expect(prompt).toContain('Read `specs/order-cancellation.spec.md` from disk')
+    expect(prompt).not.toContain('review.md')
+    expect(prompt).not.toContain('decisions.md')
+    expect(prompt).not.toContain('decisions without a ruling')
   })
 })
 

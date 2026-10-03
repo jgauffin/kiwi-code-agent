@@ -334,8 +334,10 @@ describe('OpenAiSession', () => {
     const summarising = model.requests[1]!
     const afterwards = model.requests[2]!
     expect(summarising.tools).toEqual([])
-    expect(summarising.messages.at(-1)!.content).toContain('old ask')
-    expect(afterwards.messages[1]!.content).toContain('the story so far')
+    // The first ask is the session's assignment: kept as it was rather than handed to the summariser.
+    expect(summarising.messages.at(-1)!.content).not.toContain('old ask')
+    expect(afterwards.messages[1]!.content).toBe('old ask')
+    expect(afterwards.messages[2]!.content).toContain('the story so far')
     expect(JSON.stringify(afterwards.messages)).not.toContain('xxxx')
     await s.dispose()
   })
@@ -369,7 +371,7 @@ describe('OpenAiSession', () => {
     const events = await untilTurnDone(s)
     expect(events).toContainEqual({ type: 'context_usage', usedTokens: 60, windowTokens: 100_000, compactAtTokens: 50 })
     expect(model.requests[1]!.tools).toEqual([])
-    expect(model.requests[2]!.messages[1]!.content).toContain('the story so far')
+    expect(model.requests[2]!.messages[2]!.content).toContain('the story so far')
     await s.dispose()
   })
 
@@ -388,7 +390,7 @@ describe('OpenAiSession', () => {
     expect(model.requests[1]!.tools).toEqual([])
     s.send('next')
     await untilTurnDone(s)
-    expect(model.requests[2]!.messages[1]!.content).toContain('the story so far')
+    expect(model.requests[2]!.messages[2]!.content).toContain('the story so far')
     await s.dispose()
   })
 
@@ -399,7 +401,7 @@ describe('OpenAiSession', () => {
     s.compact()
     const events = await untilTurnDone(s)
     expect(model.requests[0]!.tools).toEqual([])
-    expect(model.requests[1]!.messages[1]!.content).toContain('the story so far')
+    expect(model.requests[1]!.messages[2]!.content).toContain('the story so far')
     expect(events.at(-1)).toMatchObject({ type: 'turn_done', isError: false })
     await s.dispose()
   })
@@ -411,7 +413,7 @@ describe('OpenAiSession', () => {
     const events = await untilTurnDone(s)
     expect(events.filter((e) => e.type === 'error')).toEqual([])
     expect(events.at(-1)).toMatchObject({ type: 'turn_done', isError: false })
-    expect(model.requests[2]!.messages[1]!.content).toContain('the story so far')
+    expect(model.requests[2]!.messages[2]!.content).toContain('the story so far')
     await s.dispose()
   })
 

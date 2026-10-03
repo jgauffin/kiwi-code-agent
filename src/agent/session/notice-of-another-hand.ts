@@ -7,6 +7,9 @@ import type { PostToolUseOutcome, SessionHooks, ToolUse } from './hooks'
 
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
 
+/** Files named one by one in a notice; past this the rest are counted. */
+const NAMED_FILES = 5
+
 /**
  * Tells a session, as a one-line tail on its next tool result, when another
  * hand changed a file this session has written or read: the file may never
@@ -35,7 +38,10 @@ export class NoticeOfAnotherHand implements SessionHooks {
       const hand = await this.hands.handFor(path, mtimeMs)
       return { additionalContext: `Notice: ${this.rel(path)} changed since you last saw it. ${describeHand(hand)}` }
     }
-    return { additionalContext: `Notice: ${changed.length} files changed since you last saw them.` }
+    // Named, so the model re-reads the files that moved rather than everything it has touched.
+    const named = await Promise.all(changed.slice(0, NAMED_FILES).map(async ([path, mtimeMs]) => `- ${this.rel(path)}: ${describeHand(await this.hands.handFor(path, mtimeMs))}`))
+    const more = changed.length > NAMED_FILES ? [`- and ${changed.length - NAMED_FILES} more.`] : []
+    return { additionalContext: [`Notice: ${changed.length} files changed since you last saw them:`, ...named, ...more].join('\n') }
   }
 
   /** A read, or (per "Own writes are seeing") this session's own write, counts as seeing the file: tracking starts fresh and any pending notice on it is cleared. */

@@ -20,7 +20,7 @@ Every session that writes — plan, implement, cleanup, chat — is held to the 
 
 ## Being told while the work is in play
 - **Notice of another hand**: a session whose turn is in play is told, as a one-line tail on its next tool result, that another hand changed a file this session has written or read (docs/features/coordination.md#Channels).
-  - **One notice per file**: a file is reported once until this session sees it again, and a change sweeping many files at once is reported as a single line naming the count rather than one line per file.
+  - **One notice per file**: a file is reported once until this session sees it again, and a change sweeping several files at once is reported as one notice naming up to five of them with who changed each and counting the rest, so the session reads again only those.
 - **The task's work is its own**: the files a task names as touched are the ones its own runs wrote, and a foreign change to one of them is recorded on the task instead of counted as the task's work (docs/intent/agent.md#Phase 3: Implement).
 
 ## A verification failure that is not ours

@@ -100,7 +100,7 @@ describe('the blind sessions get none', () => {
 
   it('every session that reads what a planner reads stays as blind to the notes as the planner', async () => {
     await withNotes()
-    for (const mode of ['docs', 'file-decisions', 'doc-migration', 'docs-map']) expect(await withMemories(mode, 'BASE', cwd, home), mode).toBe('BASE')
+    for (const mode of ['file-decisions', 'doc-migration', 'docs-map']) expect(await withMemories(mode, 'BASE', cwd, home), mode).toBe('BASE')
     for (const mode of ['chat', 'implement', 'code-plan', 'reconcile', 'cleanup']) expect(wantsMemories(mode), mode).toBe(true)
   })
 

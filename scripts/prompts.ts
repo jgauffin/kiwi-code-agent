@@ -18,7 +18,7 @@ import {
 } from '../src/agent/phases/blind-plan'
 import { CLEANUP_TOOLS, cleanupKickoff, cleanupPrompt } from '../src/agent/phases/cleanup'
 import { agentsMdTidyKickoff } from '../src/agent/instructions/agents-md-tidy'
-import { DOCS_EVALUATION_TOOLS, docsEvaluationKickoff, docsEvaluationPrompt } from '../src/agent/phases/docs-evaluation'
+import { DOC_MIGRATION_TOOLS, docMigrationKickoff, docMigrationPrompt } from '../src/agent/phases/doc-migration'
 import { FILE_DECISIONS_TOOLS, fileDecisionsKickoff, fileDecisionsPrompt } from '../src/agent/phases/file-decisions'
 import { DOCS_MAP_TOOLS, docsMapKickoff, docsMapPrompt } from '../src/agent/phases/docs-map'
 import { IMPLEMENT_TOOLS, implementKickoff, implementPrompt } from '../src/agent/phases/implement'
@@ -105,9 +105,9 @@ async function main(): Promise<void> {
     `| chat (Claude SDK) | Claude Code's own default prompt; the workspace's CLAUDE.md and .claude/ apply (\`settingSources: project, local\`) | none | engine default + own tools + workspace MCP |`,
     '| chat (OpenAI-compatible) | [Default system prompt](#default-system-prompt-openai-compatible-engine) + instruction files + profile prompt file | none | all own tools + skills + workspace MCP |',
     `| plan | [blindPlanPrompt](#blindplanprompt) | docs map | ${BLIND_PLAN_TOOLS.join(', ')} |`,
-    `| docs | [docsEvaluationPrompt](#docsevaluationprompt) | docs map | ${DOCS_EVALUATION_TOOLS.join(', ')} |`,
+    `| doc-migration (Clean up docs) | [docMigrationPrompt](#docmigrationprompt) | docs map | ${DOC_MIGRATION_TOOLS.join(', ')} |`,
     `| docs-map | [docsMapPrompt](#docsmapprompt) | none | ${DOCS_MAP_TOOLS.join(', ')} |`,
-    `| file-decisions | [fileDecisionsPrompt](#filedecisionsprompt) | docs map | ${FILE_DECISIONS_TOOLS.join(', ')} |`,
+    `| file-decisions | [fileDecisionsPrompt](#filedecisionsprompt) | none | ${FILE_DECISIONS_TOOLS.join(', ')} |`,
     `| reconcile | [reconcilePrompt](#reconcileprompt) | repo map | ${RECONCILE_TOOLS.join(', ')} |`,
     `| implement | [implementPrompt](#implementprompt) | repo map | ${IMPLEMENT_TOOLS.join(', ')} |`,
     `| cleanup | [cleanupPrompt](#cleanupprompt) | none | ${CLEANUP_TOOLS.join(', ')} |`,
@@ -116,7 +116,7 @@ async function main(): Promise<void> {
   const systemPrompts: Entry[] = [
     { title: 'Default system prompt (OpenAI-compatible engine)', source: at('src/agent/openai-session/system-prompt.ts', 'export async function buildSystemPrompt'), note: 'Instruction files (CLAUDE.md, AGENTS.md; global then workspace, see src/agent/instructions/instruction-files.ts) and the profile prompt file are appended at run time', text: await buildSystemPrompt(CWD, undefined, '<home>') },
     { title: 'blindPlanPrompt', source: at(`${phases}/blind-plan.ts`, 'export function blindPlanPrompt'), text: blindPlanPrompt(F, CWD) },
-    { title: 'docsEvaluationPrompt', source: at(`${phases}/docs-evaluation.ts`, 'export function docsEvaluationPrompt'), text: docsEvaluationPrompt(CWD) },
+    { title: 'docMigrationPrompt', source: at(`${phases}/doc-migration.ts`, 'export function docMigrationPrompt'), text: docMigrationPrompt(CWD) },
     { title: 'docsMapPrompt', source: at(`${phases}/docs-map.ts`, 'export function docsMapPrompt'), text: docsMapPrompt(CWD) },
     { title: 'fileDecisionsPrompt', source: at(`${phases}/file-decisions.ts`, 'export function fileDecisionsPrompt'), text: fileDecisionsPrompt(CWD) },
     { title: 'reconcilePrompt', source: at(`${phases}/reconcile.ts`, 'export function reconcilePrompt'), text: reconcilePrompt(F, CWD) },
@@ -130,12 +130,12 @@ async function main(): Promise<void> {
   ]
 
   const messages: Entry[] = [
-    { title: 'docsEvaluationKickoff', source: at(`${phases}/docs-evaluation.ts`, 'export function docsEvaluationKickoff'), text: docsEvaluationKickoff() },
+    { title: 'docMigrationKickoff', source: at(`${phases}/doc-migration.ts`, 'export function docMigrationKickoff'), text: docMigrationKickoff() },
     { title: 'fileDecisionsKickoff', source: at(`${phases}/file-decisions.ts`, 'export function fileDecisionsKickoff'), text: fileDecisionsKickoff() },
     { title: 'agentsMdTidyKickoff (workspace)', source: at('src/agent/instructions/agents-md-tidy.ts', 'export function agentsMdTidyKickoff'), text: agentsMdTidyKickoff('project', `${CWD}/AGENTS.md`, ['<bundle name>']) },
     { title: 'agentsMdTidyKickoff (person)', source: at('src/agent/instructions/agents-md-tidy.ts', 'export function agentsMdTidyKickoff'), text: agentsMdTidyKickoff('user', '<home>/AGENTS.md', []) },
     { title: 'docsMapKickoff', source: at(`${phases}/docs-map.ts`, 'export function docsMapKickoff'), text: docsMapKickoff(['docs/<doc>.md']) },
-    { title: 'resumePlanPrompt', source: at(`${phases}/blind-plan.ts`, 'export function resumePlanPrompt'), text: resumePlanPrompt(F) },
+    { title: 'resumePlanPrompt', source: at(`${phases}/blind-plan.ts`, 'export function resumePlanPrompt'), text: resumePlanPrompt(F, { review: true, decisions: true }) },
     { title: 'migrateSpecPrompt', source: at(`${phases}/blind-plan.ts`, 'export function migrateSpecPrompt'), text: migrateSpecPrompt(F, ['<problem>']) },
     { title: 'reviewPrompt', source: at(`${phases}/review-handoff.ts`, 'export function reviewPrompt'), text: reviewPrompt({ feature: F, round: { number: 1, comments: [{ target: '<rule name>', text: '<comment>' }], strikes: ['<struck rule>'] }, body: reviewBody, struck: ['<struck rule>'] }) },
     { title: 'decisionsHandoffPrompt', source: at(`${phases}/blind-plan.ts`, 'export function decisionsHandoffPrompt'), text: decisionsHandoffPrompt(F, ['<decision title>']) },

@@ -20,9 +20,9 @@ const DOCS_MAP = 'docs map'
  * The modes that start with the map: the ones that need to know what the docs
  * hold before they know what to search for. The blind planner, which has
  * nothing but the docs to work from and meets them in the request's words,
- * not theirs; the docs evaluation, which judges how they are arranged; and the
- * doc migration, whose first pass goes through every section. The map is
- * derived from the docs alone, so a blind session reading it stays blind.
+ * not theirs; and the docs cleanup, which goes through every section and
+ * judges how they are arranged. The map is derived from the docs alone, so a
+ * blind session reading it stays blind.
  *
  * A code plan and the filing of decisions start from a concrete request or
  * entry, so they know what to look for: MarkdownSearch and SpecSearch find it,
@@ -31,7 +31,7 @@ const DOCS_MAP = 'docs map'
  * The mode is taken as a plain string: this module is host-side and mechanical,
  * and reaches for nothing in the session layer.
  */
-export const wantsDocsMap = (mode: string): boolean => mode === 'plan' || mode === 'docs' || mode === 'doc-migration'
+export const wantsDocsMap = (mode: string): boolean => mode === 'plan' || mode === 'doc-migration'
 
 export type DocsMapSource = GeneratedSource
 export type DocsMapContext = GeneratedContext

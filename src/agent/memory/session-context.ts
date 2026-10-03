@@ -14,11 +14,11 @@ import { projectMemoryDir } from './memories'
  */
 
 /**
- * The modes that work in the intent and read what a planner reads: the blind planner, the docs evaluation,
- * the filing of decisions, the doc migration and the docs map build. A memory is about the codebase and how
- * it is run, so they stay as blind to the notes as to the code they describe.
+ * The modes that work in the intent and read what a planner reads: the blind planner, the filing of decisions,
+ * the docs cleanup and the docs map build. A memory is about the codebase and how it is run, so they stay as
+ * blind to the notes as to the code they describe.
  */
-const BLIND_MODES: ReadonlySet<string> = new Set(['plan', 'docs', 'file-decisions', 'doc-migration', 'docs-map'])
+const BLIND_MODES: ReadonlySet<string> = new Set(['plan', 'file-decisions', 'doc-migration', 'docs-map'])
 
 /** The modes that start with memories: every mode that works in the code. */
 export const wantsMemories = (mode: string): boolean => !BLIND_MODES.has(mode)

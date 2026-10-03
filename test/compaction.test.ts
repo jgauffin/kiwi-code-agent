@@ -67,15 +67,36 @@ describe('compact', () => {
     const messages = conversation(4000)
     const result = await compact(messages, async () => 'what happened', 2500)
     expect(result!.messages[0]).toMatchObject({ role: 'system', content: 'sys' })
-    expect(result!.messages[1]!.content).toContain('what happened')
-    expect(result!.messages.slice(2)).toEqual(messages.slice(5))
+    // The first message is the session's assignment: kept as it was, never paraphrased.
+    expect(result!.messages[1]).toEqual(user('ask 1'))
+    expect(result!.messages[2]!.content).toContain('what happened')
+    expect(result!.messages.slice(3)).toEqual(messages.slice(5))
   })
 
-  it('hands_the_summariser_only_the_folded_turns', async () => {
+  it('hands_the_summariser_only_the_folded_turns_after_the_kept_first_message', async () => {
     let seen = ''
     await compact(conversation(4000), async (t) => ((seen = t), 'done'), 2500)
-    expect(seen).toContain('ask 1')
+    expect(seen).toContain('answer 1')
+    expect(seen).not.toContain('ask 1')
     expect(seen).not.toContain('ask 2')
+  })
+
+  it('a_first_message_too_large_to_be_an_assignment_is_folded_like_any_other', async () => {
+    const messages = conversation(4000)
+    messages[1] = user('log '.repeat(5000))
+    let seen = ''
+    const result = await compact(messages, async (t) => ((seen = t), 'done'), 2500)
+    expect(seen).toContain('log log')
+    expect(result!.messages[1]!.content).toContain('Summary of the conversation so far')
+  })
+
+  it('a_summary_an_earlier_compaction_left_first_is_summarised_again_not_kept', async () => {
+    const messages = conversation(4000)
+    messages[1] = user('Summary of the conversation so far:\n\nearlier')
+    let seen = ''
+    const result = await compact(messages, async (t) => ((seen = t), 'done'), 2500)
+    expect(seen).toContain('earlier')
+    expect(result!.messages.filter((m) => m.content.startsWith('Summary of the conversation so far'))).toHaveLength(1)
   })
 
   it('gives_up_when_there_is_nothing_older_to_fold', async () => {
@@ -108,13 +129,13 @@ describe('pathsReadIn', () => {
 describe('compact with a ledger', () => {
   it('carries_the_ledger_as_its_own_message_so_the_summariser_cannot_erode_it', async () => {
     const result = await compact(conversation(4000), async () => 'summary', 2500, '- src/a.ts: read 1-40')
-    expect(result!.messages[2]!.content).toBe('- src/a.ts: read 1-40')
+    expect(result!.messages[3]!.content).toBe('- src/a.ts: read 1-40')
     expect(result!.kept).toEqual(conversation(4000).slice(5))
   })
 
   it('adds_no_ledger_message_when_nothing_has_been_touched', async () => {
     const result = await compact(conversation(4000), async () => 'summary', 2500)
-    expect(result!.messages).toHaveLength(2 + result!.kept.length)
+    expect(result!.messages).toHaveLength(3 + result!.kept.length)
   })
 })
 

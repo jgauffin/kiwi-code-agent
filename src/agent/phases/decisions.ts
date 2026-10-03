@@ -29,7 +29,7 @@ export type Decision = {
   title: string
   /** Names of the rules the decision concerns. */
   on: string[]
-  /** What the code does, where, and what the spec says. */
+  /** What the product does today, as behaviour, and how it stands against the rules; never where in the code. */
   finding: string
   /** The planner's change options, each a rule text as it would stand in the spec; empty until it has been asked. */
   proposals: string[]

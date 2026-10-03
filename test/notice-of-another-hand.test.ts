@@ -60,7 +60,7 @@ describe('NoticeOfAnotherHand', () => {
     expect(third?.additionalContext).toContain('a.txt')
   })
 
-  it('a_change_sweeping_many_files_at_once_is_reported_as_a_single_line_naming_the_count', async () => {
+  it('a_change_sweeping_several_files_names_each_so_only_those_are_read_again', async () => {
     const paths = ['a.txt', 'b.txt', 'c.txt'].map((f) => join(dir, f))
     for (const p of paths) await writeFile(p, 'hello')
     const notice = noticeFor()
@@ -69,7 +69,27 @@ describe('NoticeOfAnotherHand', () => {
     for (const p of paths) await changeFromAnotherHand(p, 'changed by a branch switch')
 
     const result = await notice.postToolUse(written('Bash', { command: 'echo hi' }))
-    expect(result?.additionalContext).toBe('Notice: 3 files changed since you last saw them.')
+    expect(result?.additionalContext).toBe(
+      [
+        'Notice: 3 files changed since you last saw them:',
+        '- a.txt: It was changed from outside Kiwipow Agent.',
+        '- b.txt: It was changed from outside Kiwipow Agent.',
+        '- c.txt: It was changed from outside Kiwipow Agent.',
+      ].join('\n'),
+    )
+  })
+
+  it('a_sweep_past_five_files_names_five_and_counts_the_rest', async () => {
+    const paths = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((f) => join(dir, `${f}.txt`))
+    for (const p of paths) await writeFile(p, 'hello')
+    const notice = noticeFor()
+    for (const p of paths) await notice.postToolUse(written('Read', { file_path: p }))
+    for (const p of paths) await changeFromAnotherHand(p, 'changed')
+
+    const lines = (await notice.postToolUse(written('Bash', { command: 'echo hi' })))!.additionalContext!.split('\n')
+    expect(lines[0]).toBe('Notice: 7 files changed since you last saw them:')
+    expect(lines.filter((l) => l.startsWith('- ') && l.includes('.txt'))).toHaveLength(5)
+    expect(lines.at(-1)).toBe('- and 2 more.')
   })
 
   it('says_who_changed_it_when_another_kiwiagent_session_made_the_change', async () => {

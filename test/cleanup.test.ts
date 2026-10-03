@@ -50,9 +50,8 @@ describe('cleanup prompt', () => {
   it('names_the_limits_the_scope_and_that_behaviour_stays', () => {
     const off = { functionLines: 0, functionComplexity: 0, typeLines: 0, fileLines: 0 }
     const prompt = cleanupPrompt('Order cancellation', cwd, { source: { ...off, functionLines: 25, typeLines: 200 }, tests: off, testGlobs: [] })
-    expect(prompt).not.toContain('a file 0')
-    expect(prompt).not.toContain('complexity of 0')
-    expect(prompt).toContain('(a function 25 code lines, a type 200)')
+    expect(prompt).not.toContain(': 0')
+    expect(prompt).toContain('grew past these limits, and you split them.\n\n- Function length: 25 code lines\n- Type length: 200 lines\n\n')
     expect(prompt).toContain('Edit only the files listed, new files in their folders')
     expect(prompt).toContain('Keep behaviour')
     expect(prompt).toContain('the tests are run for you')
@@ -66,14 +65,14 @@ describe('cleanup prompt', () => {
       tests: { functionLines: 60, functionComplexity: 0, typeLines: 0, fileLines: 1200 },
       testGlobs: ['**/*.test.*'],
     })
-    expect(prompt).toContain('(a function 25 code lines, a file 400; in tests a function 60 code lines, a file 1200)')
+    expect(prompt).toContain('- Function length: 25 code lines\n- File length: 400 lines\n- Test function length: 60 code lines\n- Test file length: 1200 lines')
     expect(prompt).toContain('A test file stays one file per tested file')
   })
 
   it('a_complexity_limit_is_named_with_how_a_function_comes_back_under_it', () => {
     const off = { functionLines: 0, functionComplexity: 0, typeLines: 0, fileLines: 0 }
     const prompt = cleanupPrompt('Order cancellation', cwd, { source: { ...off, functionComplexity: 15, functionLines: 60 }, tests: off, testGlobs: [] })
-    expect(prompt).toContain('(a function a cognitive complexity of 15, a function 60 code lines)')
+    expect(prompt).toContain('- Function cognitive complexity: 15\n- Function length: 60 code lines')
     expect(prompt).toContain('a nested condition becomes an early return')
   })
 
