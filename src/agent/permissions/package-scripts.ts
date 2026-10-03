@@ -2,15 +2,18 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
- * Said to a session in a project with a `package.json`: its scripts run without
- * a permission prompt, where npx, tsc or a binary under node_modules asks every
- * time, and a script the user can read is safer than an ad-hoc command. Empty
- * when the workspace has no `package.json`.
+ * Said to a session in a project with a root `package.json`: its scripts run
+ * without a permission prompt, where npx, tsc, a binary under node_modules or a
+ * nested package's script asks every time, and a script the user can read is
+ * safer than an ad-hoc command. The root file is the one trusted place: a repo
+ * split into parts delegates to them from there. Adding a script is asked once,
+ * since the file is a trust file, and every later run is free. Empty when the
+ * workspace has no root `package.json`.
  */
 export function projectScriptsInstruction(cwd: string): string {
   if (!existsSync(join(cwd, 'package.json'))) return ''
   const runner = existsSync(join(cwd, 'bun.lock')) || existsSync(join(cwd, 'bun.lockb')) ? 'bun run' : 'npm run'
-  return `Run builds, tests and tools through the package.json scripts with \`${runner} <script>\`, passing arguments after \`--\`, rather than npx, tsc or other binaries directly: a script runs without a permission prompt. When no script fits a command you will run more than once, add one.`
+  return `Run builds, tests and tools through the root package.json's scripts with \`${runner} <script>\`, passing arguments after \`--\`, rather than npx, tsc or other binaries directly: a root script runs without a permission prompt, where a binary or a nested package's script asks every time. In a repo split into parts, a root script delegates, such as \`"test:web": "npm --prefix web test"\`. When no script fits a command you will run more than once, add one to the root package.json: the user is asked once, and every later run is free.`
 }
 
 /**

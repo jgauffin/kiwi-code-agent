@@ -2,7 +2,7 @@
   "name": "kiwipow-agent",
   "displayName": "Kiwipow Agent",
   "description": "Coding sessions in VS Code with a choice of model engine per session.",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "publisher": "CoderrAB",
   "icon": "docs/logos/kiwipow-agent-logo-128.png",
   "galleryBanner": {
@@ -258,17 +258,19 @@
         },
         "kiwiAgent.verify": {
           "type": "array",
-          "description": "Test commands run once every task of a feature is marked tested, over the files its tasks name: a matching file runs its rule's command once per project. {project} is the nearest file matching 'project' above the file, {projectDir} its directory, {file} the file itself. A failure is handed to the implement session, up to the failure budget. The implement session is told these commands, so it narrows the same ones while it works, and may run them without a prompt.",
+          "description": "Test commands run once every task of a feature is marked tested, over the files its tasks name: a matching file runs its rule's command once per project. {project} is the nearest file matching 'project' above the file, {projectDir} its directory, {file} the file itself. A failure is handed to the implement session, up to the failure budget. The implement session is told these commands and each rule's build command, so it narrows the same ones while it works, and may run them without a prompt.",
           "default": [
             {
               "match": "**/*.cs",
               "project": "*.csproj",
-              "command": "dotnet test \"{project}\" --nologo"
+              "command": "dotnet test \"{project}\" --nologo",
+              "build": "dotnet build \"{project}\" --nologo"
             },
             {
               "match": "src/**/*.{ts,tsx,js}",
               "project": "package.json",
-              "command": "npm test"
+              "command": "npm test",
+              "build": "npx tsc --noEmit -p \"{projectDir}\""
             }
           ],
           "items": {
@@ -288,6 +290,10 @@
               },
               "command": {
                 "type": "string"
+              },
+              "build": {
+                "type": "string",
+                "description": "How the implement session builds the project of a matching file, with the same placeholders. Never run by the test run; the implement session runs it without a prompt."
               }
             }
           }

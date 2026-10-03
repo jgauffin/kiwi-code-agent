@@ -24,6 +24,7 @@ const TOOL_FUNCTIONS: Record<string, string> = {
   grep: 'Grep',
   codeSearch: CODE_SEARCH_TOOL,
   markdownSearch: MARKDOWN_SEARCH_TOOL,
+  specSearch: 'SpecSearch',
   codeOutline: 'CodeOutline',
   jsonQuery: 'JsonQuery',
   jsonSchema: 'JsonSchema',
@@ -60,7 +61,7 @@ export function runScriptTool(): Tool<typeof schema> {
   return {
     name: 'RunScript',
     description:
-      'Runs a JavaScript program (the body of an async function) that reads and analyses files, or changes many files, in one step: the tool for the same change across files, for reading many files to answer one question, and for what you would otherwise write in python, node or powershell through the shell. Its functions: read(path), readdir(path), exists(path); staged changes write(path, content), edit({ file_path, old_string, new_string, replace_all }), replace(path, regex, replacement, flags), move(source, destination), copy(source, destination), remove(path), preview(); and the tools glob({ pattern, path }), grep({ pattern, path, include, output_mode }), codeSearch({ query, path, regex }), markdownSearch({ query, path, regex }), codeOutline({ path, symbol }), jsonQuery(args), jsonSchema(args). glob, grep, codeSearch and markdownSearch return arrays with every match. String, RegExp, JSON and the rest of plain JavaScript work; shell commands, Node modules and the network do not. It returns only what the program returns or logs, and changes are shown to the user together and applied only once approved. The run-script skill has the details and examples.',
+      'Runs a JavaScript program (the body of an async function) that reads and analyses files, or changes many files, in one step: the tool for the same change across files, for reading many files to answer one question, and for what you would otherwise write in python, node or powershell through the shell. Its functions: read(path), readdir(path), exists(path); staged changes write(path, content), edit({ file_path, old_string, new_string, replace_all }), replace(path, regex, replacement, flags), move(source, destination), copy(source, destination), remove(path), preview(); and the tools glob({ pattern, path }), grep({ pattern, path, include, output_mode }), codeSearch({ query, path, regex }), markdownSearch({ query, path, regex }), specSearch({ query, regex }), codeOutline({ path, symbol }), jsonQuery(args), jsonSchema(args). glob, grep, codeSearch, markdownSearch and specSearch return arrays with every match. String, RegExp, JSON and the rest of plain JavaScript work; shell commands, Node modules and the network do not. It returns only what the program returns or logs, and changes are shown to the user together and applied only once approved. The run-script skill has the details and examples.',
     schema,
     // A script can do nothing on its own; every call it makes is gated when made.
     readOnly: true,

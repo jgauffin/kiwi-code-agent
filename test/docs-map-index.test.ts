@@ -117,8 +117,9 @@ describe('what a docs map build has to do', () => {
     withWorkspace(FILES, async (dir) => {
       await buildWith(dir, { 'docs/intent/orders.md': ORDERS_ENTRY })
       const summary = (await readDocsSummary(dir))!
-      expect(summary).toContain('### docs/intent/orders.md')
-      expect(summary).toContain('- `#Cancellation`: when an order may be cancelled')
+      expect(summary).toMatch(/### docs\/intent\/orders\.md \(\d+ lines\)/)
+      // The range lets a planner read just the section the line describes.
+      expect(summary).toMatch(/- `#Cancellation` \(\d+-\d+\): when an order may be cancelled/)
       expect(summary).toContain('Not described yet, so read them if the map does not answer: ReadMe.md.')
     }))
 

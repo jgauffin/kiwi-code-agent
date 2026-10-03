@@ -10,8 +10,12 @@ import { renderFiles } from './render'
 /** A file this short costs less to read whole than to take in two calls. */
 export const OUTLINE_THRESHOLD_LINES = 200
 
-/** Said in every prompt, so the outline is the model's first move rather than the gate's correction. */
-export const CODE_READING = `Find before you read code: ${CODE_OUTLINE_TOOL} outlines a file, folder or glob with line ranges (the tests of test files; the types, functions and doc summaries of other source files; its symbol parameter finds a declaration by name), ${CODE_SEARCH_TOOL} finds text and names the declaration each match sits in, and Read of a long source or test file answers with its outline first; then Read only the line ranges you need. Read every file or range you already know you need in one reply, not one per turn.`
+/**
+ * Said in every prompt that reads code, so the ranged read is the model's first move rather than the
+ * gate's correction. Outline and search are offered as the cheap way to find code, not a step before
+ * every read: a file the model can already name is read directly, and the gate outlines it when long.
+ */
+export const CODE_READING = `${CODE_OUTLINE_TOOL} and ${CODE_SEARCH_TOOL} are the cheap way to find where code lives: ${CODE_OUTLINE_TOOL} lists a file, folder or glob with line ranges, and its symbol parameter finds a declaration by name; ${CODE_SEARCH_TOOL} finds text and names the declaration each match sits in, with its line range. A file you already know you need, Read directly: a long one answers with its outline first, then Read only the line ranges you need. Read every file or range you already know you need in one reply, not one per turn.`
 
 const SUITE_HINT = `${CODE_OUTLINE_TOOL} lists the tests of a file, folder or glob without reading them: use it to see what the rest of the suite already covers.`
 

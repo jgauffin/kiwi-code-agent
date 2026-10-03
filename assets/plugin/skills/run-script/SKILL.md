@@ -28,6 +28,9 @@ Reading and searching, no prompt:
   of what the line sits in (`Cart.total`, null outside any) and `start`-`end` its lines.
 - `markdownSearch({ query, path?, regex?, case_sensitive? })`: every match as
   `{ file, line, text, heading, start, end }`, `heading` being the section it sits in (null before the first).
+- `specSearch({ query, regex?, case_sensitive? })`: every matching rule, open question or goal in
+  `specs/*.spec.md` as `{ file, feature, status, kind, scenario, name, text, citation, edges }`,
+  `kind` being `rule`, `question` or `goal` and `edges` a rule's edge cases as `{ name, text, citation }`.
 - `jsonQuery(args)`, `jsonSchema(args)`, `codeOutline({ path, symbol })`: the same as the tools of that name.
 - A denied or failing call throws; catch it to carry on.
 

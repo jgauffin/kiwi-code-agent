@@ -59,9 +59,11 @@ describe('modeSetup', () => {
   it('the builder works from the repo map and the planner from the docs map', async () => {
     expect((await modeSetup(record('implement', { feature: 'f' }), ctx)).systemPrompt).toContain('[repo map]')
     expect((await modeSetup(record('plan', { feature: 'f' }), ctx)).systemPrompt).toContain('[docs map]')
+    // A code plan starts from a concrete request: it searches the docs rather than carrying their map.
     const codePlan = (await modeSetup(record('code-plan'), ctx)).systemPrompt
     expect(codePlan).toContain('[repo map]')
-    expect(codePlan).toContain('[docs map]')
+    expect(codePlan).not.toContain('[docs map]')
+    expect((await modeSetup(record('file-decisions'), ctx)).systemPrompt).not.toContain('[docs map]')
   })
 
   it('the doc migration judges from the docs map, never the repo map, since it reads no code', async () => {

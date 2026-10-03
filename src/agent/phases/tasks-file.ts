@@ -196,6 +196,9 @@ export const liveTasks = (tasks: Task[]): Task[] => tasks.filter((t) => !t.remov
 export const nextTask = (board: TaskBoard): Task | undefined =>
   liveTasks(board.tasks).find((t) => t.state !== 'tested' && t.state !== 'blocked')
 
+/** The first live blocked task: unfinished work, handed back when the person asks for the build again. */
+export const blockedTask = (board: TaskBoard): Task | undefined => liveTasks(board.tasks).find((t) => t.state === 'blocked')
+
 /** Work has started: some task has moved from open. */
 export const started = (tasks: Task[]): boolean => liveTasks(tasks).some((t) => t.state !== 'open')
 

@@ -26,7 +26,7 @@ So the feature planner is not allowed to read the code. It reads your docs, the 
 
 The code gets its say afterwards. Once you approve the spec, a separate check reads the code and reports only where the two disagree. Each disagreement becomes a decision with proposed rewordings and a recommendation. You rule: change the rule, or keep it and let the code change.
 
-![The Decisions tab: one disagreement between spec and code, with the ways to settle it](https://raw.githubusercontent.com/jgauffin/kiwi-code-agent/main/articles/images/decisions.png)
+![The Decisions tab: one disagreement between spec and code, with the ways to settle it](https://raw.githubusercontent.com/jgauffin/kiwi-code-agent/main/articles/images/decision-lists.png)
 
 The 500 limit still surfaces. It surfaces as a question with your name on it, not as a line in a spec.
 

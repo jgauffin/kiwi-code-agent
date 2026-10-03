@@ -23,14 +23,15 @@ export const CLEANUP_TOOLS = ['Read', 'Glob', 'Grep', 'CodeOutline', 'CodeSearch
  */
 export const MOVES_FILE = 'specs/unfiled-moves.md'
 
-export function cleanupScope(files: string[]): Scope {
+/** `memoryDir` is the project's memory folder, outside the workspace: the run starts with its index and opens a note there. */
+export function cleanupScope(files: string[], memoryDir?: string): Scope {
   const writable = new Set<string>()
   for (const file of files) {
     writable.add(file)
     const dir = dirname(file)
     writable.add(dir === '.' ? '*' : `${dir}/*`)
   }
-  return { readable: ['**'], writable: [...writable, MOVES_FILE] }
+  return { readable: ['**'], writable: [...writable, MOVES_FILE], ...(memoryDir ? { readableOutside: [memoryDir] } : {}) }
 }
 
 /**

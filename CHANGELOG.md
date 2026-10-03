@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.6
+
+- A chat session's effort sits beside its model in the composer, switchable between turns the same way: pick how hard the model thinks, or leave it at the model's own default. The switch only appears for a model whose levels are known (Claude, and an OpenAI-compatible model that takes `reasoning_effort`), and a level you picked survives a model switch, brought down to what the new model takes.
+- A docs evaluation can change the README once you ask it to, as a confirmed write like any other doc. It judged the README all along, but every edit to it was denied.
+- A task run starts from the files its task names instead of working the surface out again: it opens those and the task's context first, searches only for what they leave open, and no longer sweeps the other features' specs or the docs before writing anything.
+- New `SpecSearch` tool: finds spec rules and returns them whole.
+- Future work moves to `specs/future-work.md`; entries marked `built: false` are moved there on startup.
+- An approved code plan records its spec changes and decisions before building.
+- Writes to the root `package.json`, `.vscode/settings.json` and `.mcp.json` always ask, even with Allow writes on.
+- Verify rules take an optional build command, which the implementer runs without a prompt.
+- *Continue implementing* on a board where only blocked tasks are left hands the first one back to its implementer, told why it was blocked. Before, the button did nothing and the chat stayed locked on the settled task.
+
 ## 0.2.5
 
 - Accepting a newer version of a bundle replaces the skills it installed whole, dropping any file the new version no longer carries; removing a bundle removes its skills the same way. A required bundle's skills are reinstalled if you delete them, and a skill file you edited by hand is called out before an update would overwrite it. A source that can't be reached never touches a skill already installed.

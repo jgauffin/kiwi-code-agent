@@ -50,7 +50,7 @@ describe('what a doc migration may touch', () => {
   })
 
   it('the_session_gets_the_tools_a_reader_and_a_confirmed_edit_need_and_no_others', () => {
-    expect(DOC_MIGRATION_TOOLS).toEqual(['Read', 'Glob', 'MarkdownSearch', 'Write', 'Edit', 'MultiEdit', ASK_USER_TOOL])
+    expect(DOC_MIGRATION_TOOLS).toEqual(['Read', 'Glob', 'MarkdownSearch', 'SpecSearch', 'Write', 'Edit', 'MultiEdit', ASK_USER_TOOL])
   })
 })
 
@@ -65,7 +65,9 @@ describe('what a doc migration is told to judge', () => {
 
   it('outline_before_judgment_the_first_pass_is_the_docs_map_and_judgment_is_per_section', () => {
     expect(prompt).toContain('Outline first, judge after.')
-    expect(prompt).toContain('docs map above already outlines every doc')
+    // The map is appended after the prompt, so the prompt never says it is above.
+    expect(prompt).toContain('docs map in this prompt outlines every doc')
+    expect(prompt).not.toContain('map above')
     expect(prompt).toContain('never about a doc as a whole')
   })
 

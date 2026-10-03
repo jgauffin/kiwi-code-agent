@@ -178,9 +178,23 @@ const picks = (node: HTMLElement) => [...node.querySelectorAll<HTMLButtonElement
 describe('NewSessionView pick-up list', () => {
   const waiting = {
     plans: [{ feature: 'Orders', status: 'approved' as const }],
-    chats: [{ sessionId: 's9', title: 'Why does the cart double-count?', startedAt: '2026-01-02T10:00:00.000Z' }],
+    chats: [{ sessionId: 's9', title: 'Why does the cart double-count?', mode: 'chat' as const, lastActiveAt: '2026-01-02T10:00:00.000Z' }],
     unfiled: 2,
   }
+
+  it('a_finished_plan_stays_on_the_list_saying_it_is_done', () => {
+    const node = view(undefined, { ...waiting, plans: [{ feature: 'Dashboards', status: 'verified', lastActiveAt: '2026-10-03T11:20:00.000Z' }] })
+    expect(picks(node)[0]!.querySelector('.hint')!.textContent).toMatch(/^verified: done · last worked on /)
+    node.remove()
+  })
+
+  it('a_conversation_other_than_a_chat_is_offered_as_the_session_type_it_is', () => {
+    const node = view(undefined, { ...waiting, chats: [{ sessionId: 's1', title: 'Widget framework', mode: 'code-plan', lastActiveAt: '2026-10-03T09:00:00.000Z' }] })
+    const pick = picks(node)[1]!
+    expect(pick.querySelector('.icon')!.textContent).toBe('🗺')
+    expect(pick.querySelector('.hint')!.textContent).toMatch(/^Plan · last worked on /)
+    node.remove()
+  })
 
   it('nothing_to_pick_up_leaves_the_screen_to_the_cards_alone', () => {
     const node = view()

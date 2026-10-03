@@ -15,6 +15,8 @@ The extension only sees `CodeSession`: send a prompt, stream events, answer perm
 
 A session's engine can change while it is in play: it carries on with the conversation it has and loses only what the previous engine alone held.
 
+How hard a chat session thinks is the person's to set alongside its model, turn by turn, but only where the levels the model takes are known: a guessed level is a parameter the endpoint rejects, so an unknown model is left at its own default.
+
 Both take the user's `~/.mcp.json` and the workspace's `.mcp.json` over it: Claude through its own MCP client, the own loop through a client per server. The tools carry the same names and fall under the same permission rules on either engine, so a project's servers work the same whichever model runs.
 
 ## Shape
@@ -45,18 +47,18 @@ Where a feature stands is derived from its files, so the stage and the files can
 | verification | every task tested; the test commands have yet to pass |
 | verified | every task tested and the last recorded run passed, or the spec is `verified` with no board left |
 
-Approve is offered on a draft with no open comment. Approving starts the check against the code by itself.
+Approving starts the check against the code by itself.
 
 A session that is picked up after its engine stopped is set up afresh: it carries the conversation it had, and the instructions and generated context a session starting now would get.
 
 ## Phase 1: Feature planning
 
-Sees: feature description, domain brief (ubiquitous language, stack, constraints), `docs/**`, the workspace README, every feature's spec under `specs/*.spec.md`, the unfiled decisions, the docs map, one work item closure when ADO is connected.
+Sees: feature description, domain brief (ubiquitous language, stack, constraints), `docs/**`, the workspace README, every feature's spec under `specs/*.spec.md`, the unfiled decisions and the future work, the docs map, one work item closure when ADO is connected.
 Never sees: source, PRs, build output, generated context drawn from the code such as the repo map, another feature's review, tasks or decisions. The docs map is the exception that proves the rule: generated, but from the docs alone, so it carries nothing the planner could not read itself.
 
 Until ADO is connected the feature description is typed by the user or picked from the docs. The agent plans the user story itself; the tasks file is the source for the ADO tasks created under the story once ADO is connected (write-back, not read-only).
 
-Tools: Read/Glob/MarkdownSearch scoped to `docs/**`, the workspace README, the specs and the feature's own plan files, `get_work_item(id)`, AskUserQuestion, optionally WebSearch. Bash denied by bare name (allow-lists only auto-approve; a bare-name deny removes the tool from context). A write into `docs/**` is neither the phase's deliverable nor off limits: it goes through the permission prompt, and the planner makes one only when the user asks.
+Tools: Read/Glob/MarkdownSearch/SpecSearch scoped to `docs/**`, the workspace README, the specs and the feature's own plan files, `get_work_item(id)`, AskUserQuestion, optionally WebSearch. Bash denied by bare name (allow-lists only auto-approve; a bare-name deny removes the tool from context). A write into `docs/**` is neither the phase's deliverable nor off limits: it goes through the permission prompt, and the planner makes one only when the user asks.
 
 First a direction in chat (the decisions that shape the feature, the questions that would change them); nothing is written until the user says go. Then `specs/<feature>.spec.md`, to the contract below. A rule derived from a doc or another spec ends with a citation of its section (`(docs/intent/orders.md#Cancellation)`, `(specs/orders.spec.md#Cancelling an order)`); an uncited rule is the planner's default. An approved spec weighs as a doc; a draft is a proposal still being planned. Where a doc and an approved spec disagree, the planner asks: the user knows which is current. To the point, not complete: a rule earns its place by changing what gets built or how it is tested. No code paths. If neither the docs nor the specs have anything on the feature, ask and stop.
 
@@ -95,7 +97,7 @@ The whole of `docs/**` and every spec is phase 1 scope. What phase 1 is kept fro
 
 ### Finding the way in
 
-Scope is not the same as access. A planner that may read everything under `docs/**` still has to guess which file holds the answer, and reads whole documents to find a paragraph. So it starts with the docs map: every doc, what it is for, and one line per heading. Generated context, like the repo map, and blind-safe because it is derived from the docs and nothing else. It also fixes the citations: a rule cites `path#Heading`, and the map spells every heading out, so the planner cites what exists rather than what it remembers reading.
+Scope is not the same as access. A planner that may read everything under `docs/**` still has to guess which file holds the answer, and reads whole documents to find a paragraph. So it starts with the docs map: every doc with its length, what it is for, and one line per heading with the section's line range, so the planner reads the section rather than the doc. The map is for sessions that need to know what the docs hold before they know what to search for: the planner, the docs evaluation and the doc migration. A session that starts from a concrete request searches instead. Generated context, like the repo map, and blind-safe because it is derived from the docs and nothing else. It also fixes the citations: a rule cites `path#Heading`, and the map spells every heading out, so the planner cites what exists rather than what it remembers reading.
 
 Inside a doc, every session reads by section. The first whole-file Read of a markdown doc over 200 lines in a session answers with its outline (headings with line spans) instead; a second whole-file Read goes through. MarkdownSearch returns each match with its closest heading as `path#Heading` and that section's span, and returns nothing from a file the session may not read. Plan files are exempt from the outline, and so is the docs-map run, which describes every section.
 
@@ -158,7 +160,7 @@ Tools: Read, Write, Edit, Glob, Grep, JsonSchema, JsonQuery, MarkdownSearch, Bas
 
 ## Unfiled decisions
 
-A decision the user makes outside planning, one a blind planner could otherwise decide differently, is intent the planner cannot see. The session that hears it records it where the planner reads. Within the task being built, it amends the spec. Reaching further, from an implement run, a plan session or a chat, it becomes an entry in `specs/unfiled-decisions.md`: committed, readable in phase 1, and outweighing a doc or spec that says otherwise. Written in the product's language, never a path or a symbol, and with a `built` line saying whether the product already works that way. *File decisions* is a session with the planner's read scope that moves each entry into the specs and docs it names, each write confirmed, and deletes it once filed; a verified spec is not amended, since the change is a feature to plan. What is still to build is never a rule in a spec, since a spec's rules are what its build delivers and a planner would read it as already there: it goes to the docs as what the product should do, named as a feature to plan. The new-session screen's Maintenance tab counts how many entries wait.
+A decision the user makes outside planning, one a blind planner could otherwise decide differently, is intent the planner cannot see. The session that hears it records it where the planner reads. Within the task being built, it amends the spec. Reaching further, from an implement run, a plan session, a code plan or a chat, it becomes an entry in one of two files, both committed, readable in phase 1, and outweighing a doc or spec that says otherwise. How the product works goes in `specs/unfiled-decisions.md`; work decided for later goes in `specs/future-work.md`. Two files rather than a flag on the entry, because the two are filed differently and a session writing one should not have to remember a line that decides which. Written in the product's language, never a path or a symbol. *File decisions* is a session with the planner's read scope that moves each entry into the specs and docs it names, each write confirmed, and deletes it once filed; a verified spec is not amended, since the change is a feature to plan. Future work is never a rule in a spec, since a spec's rules are what its build delivers and a planner would read it as already there: it goes to the docs as what the product should do, named as a feature to plan. A code plan cannot write, so it lists both kinds at the end of the plan and the build records them before it starts. The new-session screen's Maintenance tab counts how many entries wait in both.
 
 ## Migration
 
@@ -168,14 +170,13 @@ A decision the user makes outside planning, one a blind planner could otherwise 
 
 Mechanical, no model: once every task is tested, the extension runs the `kiwiAgent.verify` rules over the files the tasks name. A rule is a file glob, a project marker and a command (`**/*.cs` with `*.csproj` runs `dotnet test` in that project; `src/**/*.ts` with `package.json` runs `npm test` there), so a feature that touched only the backend runs only the backend's tests, and a repo with a backend and a frontend bundle runs each once. The outcome is recorded on the board, newest first; the output tail goes to the run log. A failure is handed to the implement session (the live one for the feature, or a fresh one) with the command and its output; the run repeats when the board is all tested again, up to `kiwiAgent.verifyFailureBudget` consecutive failures, after which the failed record stays for the user. Verify again is offered from the plan bar.
 
-Parked: build scoped to the project owning the edited file; read-before-edit staleness enforced in a hook rather than by prompt.
+A rule may also carry a build command for the project owning a matching file. The test run never runs it; the implementer is told it at its build step and runs it without a prompt, so a build is per project rather than the repository's, with no package.json needed.
 
 ## Instructions
 
 Small shared core plus a per-phase file. Per-type rules inject via PreToolUse hook matched on the path at edit time. The user's and the workspace's instruction files (`CLAUDE.md`, `AGENTS.md`; `docs/features/instructions-and-skills.md` lists the paths) follow the core on the own loop, global first, so the same rules reach every engine and every workspace.
 
 - Checkable rules (no `#region`, no AutoMapper/MediatR, nullable on, no `Any`) go to analyzers, `.editorconfig`, BannedApiAnalyzers, grep in the verification hook.
-- Judgment rules (rule of three, earned abstraction) go to the prompt.
 - A phase file over a page means the excess is checkable or is spec. Remove alternatives instead of instructing tool preference.
 
 ### Skills
@@ -202,10 +203,6 @@ Run id, per-phase transcript, tool calls, token spend, checkpoint reasons under 
 
 Phase 1 wants the strongest reasoner, phase 3 wants throughput. Profiles carry engine, model and effort.
 
-Which model a phase runs on is set in the active profile alone, one entry per step, never per feature or from the plan view: the way of working is the user's, not the feature's. A profile changed in settings reaches a feature's runs on their next turn.
-
-What a chat session runs on and what a feature's phases run on say nothing about each other.
-
 ## Waiting for the person
 
 A plan, check or implement session hands back to the person whenever its turn ends: having stopped is itself needing the person. The status says the session is waiting; what it is waiting for is read from the session itself.
@@ -216,12 +213,11 @@ A session's phase decides what its model can do: a capability outside the phase 
 
 ## Approved rules bind every session
 
-Every session that changes code (chat, code plan, implement) is told where the approved specs are, checks those that cover what it changes, and asks the user before it breaks a rule. A rule kept honest by the session's own reasoning beats a control layer watching edits behind its back; a broken test is already caught by the test runs.
+Every session that changes code (chat, code plan, implement) is told where the approved specs are, checks those that cover what it changes, and asks the user before it breaks a rule. It finds them with SpecSearch, which answers with the rules themselves, so checking costs no reading of whole specs. The instruction is there even before the first spec exists: a project is without specs only once. A rule kept honest by the session's own reasoning beats a control layer watching edits behind its back; a broken test is already caught by the test runs.
 
 ## Parked
 
 - ADO: `get_work_item` and creating tasks under the user story from the spec's task list. No work items exist yet.
-- Repo map for phases 2 and 3 (project list, public type index, folder conventions).
 - Anthropic Messages API adapter under API key in the own-loop engine.
 - Compaction in the own-loop engine.
 - Retrieval in phase 1 (large intent tree, work-item graph, WebSearch).

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { projectMemoryDir, rebuildProjectIndex, userMemoryFile } from '../src/agent/memory/memories'
-import { chatMemorySection, memorySection, readMemorySources, withMemories } from '../src/agent/memory/session-context'
+import { chatMemorySection, memorySection, readMemorySources, wantsMemories, withMemories } from '../src/agent/memory/session-context'
 import { readInstructionFiles, instructionsText } from '../src/agent/instructions/instruction-files'
 import { buildSystemPrompt } from '../src/agent/openai-session/system-prompt'
 
@@ -92,10 +92,16 @@ describe('no second copy on the Claude engine', () => {
   })
 })
 
-describe('the blind planner gets none', () => {
+describe('the blind sessions get none', () => {
   it('a plan session is handed its prompt back untouched', async () => {
     await withNotes()
     expect(await withMemories('plan', 'BASE', cwd, home)).toBe('BASE')
+  })
+
+  it('every session that reads what a planner reads stays as blind to the notes as the planner', async () => {
+    await withNotes()
+    for (const mode of ['docs', 'file-decisions', 'doc-migration', 'docs-map']) expect(await withMemories(mode, 'BASE', cwd, home), mode).toBe('BASE')
+    for (const mode of ['chat', 'implement', 'code-plan', 'reconcile', 'cleanup']) expect(wantsMemories(mode), mode).toBe(true)
   })
 
   it('nothing on disk reads to nothing added, for any other mode', async () => {

@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { SessionManager, type SessionRecord, type SessionStore } from './agent/session/session-manager'
 import { recordOf, SessionsTree, type SessionNode } from './chat/sessions-tree'
-import { providerModel, resolveStep, type ModelProfile, type Step } from './agent/session/model-profile'
+import { offeredModels, resolveStep, type ModelOffer, type ModelProfile, type Step } from './agent/session/model-profile'
 import { RunLog } from './agent/runs/run-log'
 import { OpenAiClient } from './agent/openai-session/openai-client'
 import { MCP_CONFIG_FILE, readMcpConfig } from './agent/mcp/mcp-config'
@@ -16,6 +16,7 @@ import type { ProjectCommands } from './agent/permissions/project-commands'
 import { readOnlyTools } from './agent/permissions/tool-classes'
 import { SPECS_DIR } from './agent/phases/blind-plan'
 import { sweepPlans } from './agent/phases/plan-housekeeping'
+import { FUTURE_FILE, migrateUnfiled } from './agent/phases/unfiled-decisions'
 import { ensureAgentDirIgnored } from './agent/agent-dir-ignore'
 import { KIWI_DIR, migrateLayout } from './agent/kiwi-dir'
 import { scratchDir } from './agent/scratch/scratch-folder'
@@ -69,6 +70,12 @@ export function activate(context: vscode.ExtensionContext): void {
     },
     (error: unknown) => output.appendLine(`could not add ${KIWI_DIR}/ to .gitignore: ${errorMessage(error)}`),
   )
+  void migrated.then(() => migrateUnfiled(workspaceRoot)).then(
+    ({ changed, moved }) => {
+      if (changed) output.appendLine(`unfiled decisions: dropped the built lines, moved ${moved} entr${moved === 1 ? 'y' : 'ies'} still to build to ${FUTURE_FILE}`)
+    },
+    (error: unknown) => output.appendLine(`could not split the unfiled decisions: ${errorMessage(error)}`),
+  )
   void migrated.then(() => sweepPlans(workspaceRoot, new Date())).then(
     (report) => {
       for (const path of report.converted) output.appendLine(`plan housekeeping: converted ${path} to JSON`)
@@ -110,7 +117,10 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 
   /** The commands the user has already defined for this project: they run without a prompt. */
-  const projectCommands = (): ProjectCommands => ({ scripts: packageScripts(workspaceRoot), verify: verifier.rules().map((rule) => rule.command) })
+  const projectCommands = (): ProjectCommands => ({
+    scripts: packageScripts(workspaceRoot),
+    verify: verifier.rules().flatMap((rule) => [rule.command, ...(rule.build?.trim() ? [rule.build] : [])]),
+  })
   /** Per session, the rules in force: the project's plus the session's own. */
   const policies = new Map<string, PermissionPolicy>()
   const policyFor = (sessionId: string): PermissionPolicy => {
@@ -351,9 +361,8 @@ function profileFor(step: Step, attempt?: number): ModelProfile {
 }
 
 /** Every model the providers serve, as the chat picker offers them. */
-function registeredModels(): ModelProfile[] {
-  const { providers } = readModelSettings(configPort())
-  return providers.flatMap((provider) => provider.models.map((model) => providerModel(provider, model)))
+function registeredModels(): ModelOffer[] {
+  return offeredModels(readModelSettings(configPort()).providers)
 }
 
 /** Read on every tool call, so a rule just written applies at once. */

@@ -1,5 +1,6 @@
 import { compileTemplate } from '@relax.js/core/html'
 import type { McpServerState } from '../../agent/session/code-session'
+import type { Effort } from '../../agent/session/model-profile'
 import { LinkedFilesRow } from './linked-files-row'
 import './context-meter'
 import type { ContextMeter, ContextUsage } from './context-meter'
@@ -9,6 +10,7 @@ import {
   McpReconnectRequestedEvent,
   PlanApprovedEvent,
   PromptSubmittedEvent,
+  SessionEffortChangedEvent,
   SessionModelChangedEvent,
 } from './events'
 
@@ -17,8 +19,12 @@ import {
  * model on offer to switch to (B9); a plan session's phase names its profile
  * with no way to change it here — its model is chosen per phase, from the
  * plan bar (E2), so `options` is left out.
+ *
+ * `efforts` are the levels the current model takes: empty where they are not
+ * known, and then no effort is offered (B14). `effort` is the level picked,
+ * absent while the session runs at the model's own default.
  */
-type ModelSwitch = { current: string; options?: string[] }
+type ModelSwitch = { current: string; options?: string[]; effort?: Effort; efforts?: readonly Effort[] }
 
 /**
  * The composer's per-session switches; `undefined` hides a switch the session has no use for.
@@ -58,7 +64,14 @@ export class ChatComposer extends HTMLElement {
               <option loop="m in models" value="{{m.name}}" selected="{{m.selected}}">{{m.name}}</option>
             </select>
           </label>
+          <label class="effort" if="effortSwitchable" title="How hard the model thinks on this session's next turn. Default leaves it to the model.">
+            <select name="effort" r-change="changeEffort(event)">
+              <option value="" selected="{{effortIsDefault}}">default effort</option>
+              <option loop="e in efforts" value="{{e.name}}" selected="{{e.selected}}">{{e.name}} effort</option>
+            </select>
+          </label>
           <span class="model-current" if="modelReadOnly" title="This session's phase runs on the profile chosen for it, from the plan bar.">{{modelCurrent}}</span>
+          <span class="effort-current" if="effortReadOnly" title="How hard the model thinks on this phase, as its profile sets it.">{{effortCurrent}} effort</span>
           <button type="button" class="approve-plan" if="approvePlan" title="Approve the plan and build it here, with the full tool set." r-click="approvePlan()">Approve plan</button>
           <linked-files-row class="linked-files"></linked-files-row>
         </span>
@@ -140,6 +153,12 @@ export class ChatComposer extends HTMLElement {
         modelReadOnly: model !== undefined && model.options === undefined,
         modelCurrent: model?.current ?? '',
         models: (model?.options ?? []).map((name) => ({ name, selected: name === model?.current })),
+        // Effort is offered where the model's levels are known and the model itself is switchable; a phase shows its level as text.
+        effortSwitchable: model?.options !== undefined && (model.efforts ?? []).length > 0,
+        effortIsDefault: model?.effort === undefined,
+        efforts: (model?.efforts ?? []).map((name) => ({ name, selected: name === model?.effort })),
+        effortReadOnly: model !== undefined && model.options === undefined && model.effort !== undefined,
+        effortCurrent: model?.effort ?? '',
         approvePlan: approvePlan ?? false,
       },
       {
@@ -159,6 +178,10 @@ export class ChatComposer extends HTMLElement {
           }
         },
         changeModel: (event: Event) => this.dispatchEvent(new SessionModelChangedEvent((event.target as HTMLSelectElement).value)),
+        changeEffort: (event: Event) => {
+          const picked = (event.target as HTMLSelectElement).value
+          this.dispatchEvent(new SessionEffortChangedEvent(picked === '' ? undefined : (picked as Effort)))
+        },
         approvePlan: () => this.dispatchEvent(new PlanApprovedEvent()),
         stop: () => this.dispatchEvent(new InterruptRequestedEvent()),
         toggleAllowWrites: (event: Event) => {

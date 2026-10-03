@@ -1,4 +1,5 @@
 import type { Limits } from '../cleanup/oversized'
+import { projectMemoryDir } from '../memory/memories'
 import { DocsMapContract } from '../docs-map/entry'
 import { BLIND_PLAN_TOOLS, blindPlanPrompt, blindPlanScope } from '../phases/blind-plan'
 import { CLEANUP_TOOLS, cleanupPrompt, cleanupScope } from '../phases/cleanup'
@@ -66,7 +67,7 @@ export async function modeSetup(record: SessionRecord, ctx: ModeContext): Promis
     case 'code-plan':
       // Read-only by its tool set: nothing to scope, and the build happens once the plan is approved.
       return {
-        systemPrompt: await ctx.withInstructions(record, await ctx.withMemories(record, await ctx.withMap(record, await ctx.withDocs(record, codePlanPrompt(workspaceRoot))))),
+        systemPrompt: await ctx.withInstructions(record, await ctx.withMemories(record, await ctx.withMap(record, codePlanPrompt(workspaceRoot)))),
         toolNames: CODE_PLAN_TOOLS,
       }
     case 'docs': {
@@ -82,7 +83,7 @@ export async function modeSetup(record: SessionRecord, ctx: ModeContext): Promis
       const scope = fileDecisionsScope(ctx.planIgnore())
       return {
         hooks: composeHooks(new ScopeGuard(workspaceRoot, scope), new SpecContract(workspaceRoot)),
-        systemPrompt: await ctx.withInstructions(record, await ctx.withMemories(record, await ctx.withDocs(record, fileDecisionsPrompt(workspaceRoot)))),
+        systemPrompt: await ctx.withInstructions(record, await ctx.withMemories(record, fileDecisionsPrompt(workspaceRoot))),
         toolNames: FILE_DECISIONS_TOOLS,
         readable: readableIn(scope),
       }
@@ -110,7 +111,7 @@ export async function modeSetup(record: SessionRecord, ctx: ModeContext): Promis
       if (!record.feature) throw new Error('A reconcile session needs a feature name')
       return {
         hooks: composeHooks(
-          new ScopeGuard(workspaceRoot, reconcileScope(record.feature)),
+          new ScopeGuard(workspaceRoot, reconcileScope(record.feature, projectMemoryDir(workspaceRoot))),
           new SpecContract(workspaceRoot),
           new ScenarioContextContract(workspaceRoot, record.feature),
         ),
@@ -121,7 +122,7 @@ export async function modeSetup(record: SessionRecord, ctx: ModeContext): Promis
     case 'cleanup': {
       if (!record.feature || !record.files) throw new Error('A cleanup session needs a feature name and the files to split')
       return {
-        hooks: new ScopeGuard(workspaceRoot, cleanupScope(record.files)),
+        hooks: new ScopeGuard(workspaceRoot, cleanupScope(record.files, projectMemoryDir(workspaceRoot))),
         systemPrompt: await ctx.withInstructions(record, await ctx.withMemories(record, cleanupPrompt(record.feature, workspaceRoot, ctx.cleanupLimits()))),
         toolNames: CLEANUP_TOOLS,
       }

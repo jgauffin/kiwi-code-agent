@@ -43,6 +43,7 @@ import { askUserTool } from '../src/agent/openai-session/tools/ask-user'
 import { copyTool, moveTool } from '../src/agent/openai-session/tools/move-copy'
 import { runScriptTool } from '../src/agent/openai-session/tools/run-script'
 import { markdownSearchTool } from '../src/agent/openai-session/tools/markdown-search'
+import { specSearchTool } from '../src/agent/phases/spec-search'
 import { skillTool } from '../src/agent/openai-session/tools/skill'
 
 const OUT = 'PROMPTS.md'
@@ -164,6 +165,7 @@ async function main(): Promise<void> {
     toolEntry(globTool, `${tools}/glob.ts`),
     toolEntry(grepTool, `${tools}/grep.ts`),
     toolEntry(markdownSearchTool(), `${tools}/markdown-search.ts`),
+    toolEntry(specSearchTool(), 'src/agent/phases/spec-search.ts'),
     toolEntry(jsonSchemaTool, `${tools}/json.ts`),
     toolEntry(jsonQueryTool, `${tools}/json.ts`),
     toolEntry(bashTool('bash'), `${tools}/bash.ts`),

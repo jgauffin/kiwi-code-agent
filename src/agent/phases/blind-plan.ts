@@ -7,7 +7,7 @@ import { EDIT_WRITING } from '../openai-session/tools/edit'
 import SPEC_CONTRACT from '../../../assets/plugin/skills/spec-writing/contract.md'
 import { KEEP_RULING } from './ruling'
 import type { Scope } from './scope-guard'
-import { UNFILED_DECISIONS, UNFILED_FILE } from './unfiled-decisions'
+import { DECISION_FILES, FUTURE_FILE, UNFILED_DECISIONS, UNFILED_FILE } from './unfiled-decisions'
 
 export const DOCS_DIR = 'docs'
 export const SPECS_DIR = 'specs'
@@ -37,8 +37,21 @@ export const README_GLOB = '{README,ReadMe,Readme,readme}.md'
 /** Every feature's spec: an approved one is that feature's definition, so a later planner reads it as it reads the docs. */
 export const SPECS_GLOB = `${SPECS_DIR}/*.spec.md`
 
-/** Said to every session that changes code, so a rule the user approved is not broken by one that never knew it was there. */
-export const SPEC_READING = `The approved specs under \`${SPECS_GLOB}\` define what the product does, one named rule per line; a draft is still a proposal. Before you change how something behaves, find the specs that cover it and keep to their rules. Breaking a rule is the user's call: ask first, and once they agree, amend the rule in its spec, or record the decision as unfiled when it reaches further.`
+/**
+ * The spec search tool by name. Spelled here rather than imported: the tool reads specs through the
+ * spec model, which reads this module, and a constant taken back from it would be read before it is set.
+ */
+const SPEC_SEARCH = 'SpecSearch'
+
+/**
+ * Said to every session that changes code or plans a change, so a rule the user approved is not broken by
+ * one that never knew it was there. Said even before the first spec exists: the specs are what blind
+ * planning builds up, and a project has none only once.
+ */
+export const SPEC_READING = `The approved specs under \`${SPECS_GLOB}\` define what the product does, one named rule per line; a draft is still a proposal. Before you change how something behaves, or plan to, find the rules that cover it with ${SPEC_SEARCH}: it returns each matching rule whole, with its edge cases, its scenario and its spec's status, so a spec needs reading only for what its rules leave out. Keep to those rules. Breaking one is the user's call: ask first.`
+
+/** Said to a session that can write the specs, after SPEC_READING: what follows once the user agrees. */
+export const SPEC_AMENDING = `Once the user agrees to break a rule, amend it in its spec, keeping its name, or record the decision as unfiled when it reaches features beyond the one you are changing.`
 
 /** `ignored` comes from the `kiwiAgent.planIgnore` setting: docs the planner must not see. */
 export function blindPlanScope(feature: string, ignored: string[] = []): Scope {
@@ -47,9 +60,9 @@ export function blindPlanScope(feature: string, ignored: string[] = []): Scope {
   // The decisions file holds what the mapping found; the planner proposes on it and reads the rulings from it.
   const own = [`${SPECS_DIR}/${slug}.spec.md`, `${WORK_DIR}/${slug}.review.md`, `${WORK_DIR}/${slug}.decisions.md`]
   return {
-    readable: [`${DOCS_DIR}/**`, README_GLOB, SPECS_GLOB, UNFILED_FILE, ...own],
-    // An answer that reaches beyond this feature is recorded for the features it reaches.
-    writable: [...own, UNFILED_FILE],
+    readable: [`${DOCS_DIR}/**`, README_GLOB, SPECS_GLOB, ...DECISION_FILES, ...own],
+    // An answer that reaches beyond this feature is recorded for the features it reaches, or as work for later.
+    writable: [...own, ...DECISION_FILES],
     // The docs are the user's: the planner edits them only when asked, one confirmed write at a time.
     askable: [`${DOCS_DIR}/**`],
     ignored,
@@ -61,7 +74,7 @@ export function blindPlanScope(feature: string, ignored: string[] = []): Scope {
  * a comment in place; AskUser is how a gap in intent is settled by the user
  * mid-session instead of being written down and waited on.
  */
-export const BLIND_PLAN_TOOLS = ['Read', 'Glob', MARKDOWN_SEARCH_TOOL, 'JsonSchema', 'JsonQuery', 'Write', 'Edit', 'MultiEdit', ASK_USER_TOOL]
+export const BLIND_PLAN_TOOLS = ['Read', 'Glob', MARKDOWN_SEARCH_TOOL, SPEC_SEARCH, 'JsonSchema', 'JsonQuery', 'Write', 'Edit', 'MultiEdit', ASK_USER_TOOL]
 
 /**
  * Phase 1 system prompt. Short on purpose: it states the job and the output
@@ -72,17 +85,17 @@ export function blindPlanPrompt(feature: string, cwd: string): string {
   const slug = featureSlug(feature)
   return `You are planning the feature "${feature}" for a software product, blind to its source code.
 
-Why blind: a planner that reads the code inherits the code's mistakes as constraints, and the feature gets shaped to fit the defects. 
+A planner that reads the code inherits the code's mistakes as constraints, and the feature gets shaped to fit the defects. 
 You derive what the feature should do from intent alone, so that a later phase can compare intent with the code and name every 
 disagreement instead of silently absorbing it.
 
 What you may read: \`${DOCS_DIR}/**\` (product intent: goals, ubiquitous language, rules, constraints, feature descriptions), the README in the 
 workspace root (what the product is, in its own words), every feature's spec under \`${SPECS_GLOB}\` (a spec the user has approved is that
 feature's definition, as settled as a doc; a draft is a proposal still being planned), \`${UNFILED_FILE}\` (decisions the user made while building
-or in chat, not yet filed into the specs and docs they reach: the user's latest word, so an entry outweighs a doc or a spec that says otherwise)
-and your own plan files. Nothing else exists for you; do not try.
-Use Glob with path \`${DOCS_DIR}\` and with path \`${SPECS_DIR}\` to see what is there, then search them with \`${MARKDOWN_SEARCH_TOOL}\` for the 
-feature's terms rather than reading doc after doc. ${DOC_READING} ${EDIT_WRITING}A rule in another spec is what the product does; its Decisions, if any, are history 
+or in chat, not yet filed into the specs and docs they reach: the user's latest word, so an entry outweighs a doc or a spec that says otherwise),
+\`${FUTURE_FILE}\` (work the user decided on for later, not yet built or planned) and your own plan files. Nothing else exists for you; do not try.
+Use Glob with path \`${DOCS_DIR}\` and with path \`${SPECS_DIR}\` to see what is there, then search the docs with \`${MARKDOWN_SEARCH_TOOL}\` and the specs
+with ${SPEC_SEARCH} for the feature's terms rather than reading file after file. ${DOC_READING} ${EDIT_WRITING}A rule in another spec is what the product does; its Decisions, if any, are history 
 and say nothing you need. Where a doc and an approved spec disagree, ask: the user knows which is current, you do not.
 
 Your input: the user's first message describes the feature or user story. Later messages steer, answer your questions or ask for changes.

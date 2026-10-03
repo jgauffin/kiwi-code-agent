@@ -2,9 +2,10 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { isHeading, markdownLines, parseSections, structuralLines } from '../openai-session/tools/markdown/outline'
 import { docPaths } from './doc-index'
+import { docHeading } from './summary'
 
 /**
- * The docs map with no model in it: every doc with its opening paragraph and
+ * The docs map with no model in it: every doc with its length, its opening paragraph and
  * its `##`/`###` sections with their line ranges, read from the docs as they
  * stand at session start. It costs nothing to build and is never behind; it
  * says less than the described map where a heading says little.
@@ -23,7 +24,7 @@ export async function renderOutlineMap(cwd: string, ignored: string[] = []): Pro
 }
 
 export function outlineEntry(path: string, text: string): string {
-  const lines = [`### ${path}`]
+  const lines = [docHeading(path, text)]
   const opening = openingParagraph(text)
   if (opening) lines.push(opening)
   for (const section of parseSections(text)) {

@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import { reasoningEffortFor } from '../src/agent/session/effort'
-import { choiceFor, providerModel, resolveStep, sameModelProfile, type ModelProfile, type Profile, type Provider } from '../src/agent/session/model-profile'
+import {
+  atEffort,
+  choiceFor,
+  offeredModels,
+  providerModel,
+  resolveStep,
+  sameModelProfile,
+  switchedTo,
+  type ModelProfile,
+  type Profile,
+  type Provider,
+} from '../src/agent/session/model-profile'
 
 const claude: Provider = { name: 'Claude', engine: 'claude-sdk', models: ['claude-opus-5', 'claude-sonnet-5'] }
 const berget: Provider = { name: 'berget', engine: 'openai-compatible', baseUrl: 'https://api.berget.ai/v1', models: ['moonshotai/Kimi-K3'] }
@@ -133,5 +144,39 @@ describe('providerModel', () => {
       baseUrl: 'https://api.berget.ai/v1',
       apiKeySecret: 'berget',
     })
+  })
+})
+
+describe('the models the chat offers, with the effort levels each takes', () => {
+  const gpt: Provider = { name: 'OpenAI', engine: 'openai-compatible', baseUrl: 'https://api.openai.com/v1', models: ['gpt-5', 'gpt-4o'] }
+
+  it('B14_a_claude_model_offers_every_level_and_an_openai_compatible_one_only_what_its_endpoint_takes', () => {
+    expect(offeredModels([claude, gpt]).map((m) => [m.profile.name, m.efforts])).toEqual([
+      ['Claude · claude-opus-5', ['low', 'medium', 'high', 'xhigh', 'max']],
+      ['Claude · claude-sonnet-5', ['low', 'medium', 'high', 'xhigh', 'max']],
+      ['OpenAI · gpt-5', ['low', 'medium', 'high']],
+      ['OpenAI · gpt-4o', []],
+    ])
+  })
+
+  it('B15_a_session_left_at_the_models_own_default_names_no_effort_at_all', () => {
+    const picked = atEffort(providerModel(claude, 'claude-opus-5'), 'max')
+    expect(picked.effort).toBe('max')
+    expect('effort' in atEffort(picked, undefined)).toBe(false)
+  })
+
+  it('B16_the_effort_picked_survives_a_model_switch_brought_down_to_the_highest_level_the_new_model_takes', () => {
+    const on = atEffort(providerModel(claude, 'claude-opus-5'), 'max')
+    const offers = offeredModels([claude, gpt])
+
+    expect(switchedTo(on, offers.find((m) => m.profile.model === 'gpt-5')!).effort).toBe('high')
+    expect(switchedTo(on, offers.find((m) => m.profile.model === 'claude-sonnet-5')!).effort).toBe('max')
+  })
+
+  it('B16_a_switch_to_a_model_that_takes_no_effort_leaves_it_to_the_model', () => {
+    const on = atEffort(providerModel(claude, 'claude-opus-5'), 'high')
+    const plain = offeredModels([gpt]).find((m) => m.profile.model === 'gpt-4o')!
+
+    expect('effort' in switchedTo(on, plain)).toBe(false)
   })
 })

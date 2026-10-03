@@ -60,11 +60,17 @@ describe('sessionGroups', () => {
   it('lists_a_planned_feature_whose_plan_session_is_gone', () => {
     const groups = sessionGroups([], [spec('Order cancellation', 'approved')])
 
-    expect(groups.plans).toEqual([{ feature: 'Order cancellation', status: 'approved', record: undefined }])
+    expect(groups.plans).toEqual([{ feature: 'Order cancellation', status: 'approved', record: undefined, lastActiveAt: undefined }])
   })
 
-  it('leaves_out_a_verified_feature_even_with_its_plan_session_kept', () => {
+  it('lists_a_verified_feature_at_its_stage_while_its_plan_session_is_kept', () => {
     const groups = sessionGroups([record('plan', 'plan', { feature: 'login' })], [spec('login', 'verified')])
+
+    expect(groups.plans.map((p) => [p.record?.id, p.status])).toEqual([['plan', 'verified']])
+  })
+
+  it('leaves_out_a_verified_spec_nobody_has_a_session_on', () => {
+    const groups = sessionGroups([], [spec('login', 'verified')])
 
     expect(groups.plans).toEqual([])
   })
@@ -72,7 +78,33 @@ describe('sessionGroups', () => {
   it('lists_a_plan_session_whose_spec_is_not_written_yet', () => {
     const groups = sessionGroups([record('plan', 'plan', { feature: 'login' })], [])
 
-    expect(groups.plans).toEqual([{ feature: 'login', status: undefined, record: expect.objectContaining({ id: 'plan' }) }])
+    expect(groups.plans).toEqual([{ feature: 'login', status: undefined, record: expect.objectContaining({ id: 'plan' }), lastActiveAt: '2026-09-29T00:00:00.000Z' }])
+  })
+
+  it('orders_the_conversations_by_when_they_were_last_worked_in_not_by_when_they_started', () => {
+    const groups = sessionGroups(
+      [record('new-idle', 'chat', { createdAt: '2026-10-02T00:00:00.000Z' }), record('old-busy', 'code-plan', { lastActiveAt: '2026-10-03T09:00:00.000Z' })],
+      [],
+    )
+
+    expect(groups.chats.map((r) => r.id)).toEqual(['old-busy', 'new-idle'])
+  })
+
+  it('dates_a_plan_by_the_newest_run_on_its_feature_so_a_build_today_brings_it_up', () => {
+    const groups = sessionGroups(
+      [
+        record('build', 'implement', { feature: 'login', parentId: 'login-plan', lastActiveAt: '2026-10-03T11:00:00.000Z' }),
+        record('search-plan', 'plan', { feature: 'search', createdAt: '2026-10-02T00:00:00.000Z' }),
+        record('login-plan', 'plan', { feature: 'login' }),
+      ],
+      [spec('login', 'verified'), spec('search'), spec('unopened')],
+    )
+
+    expect(groups.plans.map((p) => [p.feature, p.lastActiveAt])).toEqual([
+      ['login', '2026-10-03T11:00:00.000Z'],
+      ['search', '2026-10-02T00:00:00.000Z'],
+      ['unopened', undefined],
+    ])
   })
 
   it('matches_a_session_to_its_spec_by_the_file_name_the_feature_gets', () => {

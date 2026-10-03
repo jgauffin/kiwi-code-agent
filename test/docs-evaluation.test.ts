@@ -36,6 +36,8 @@ describe('what a docs evaluation may touch', () => {
     // undefined is the ordinary prompt; the user confirms each change to their own docs.
     expect(await use('Edit', { file_path: 'docs/intent/agent.md' })).toBeUndefined()
     expect(await use('Write', { file_path: 'docs/intent/new-area.md' })).toBeUndefined()
+    // The README is one of the docs it judges, so a fix it proposed there can be made where it was found.
+    expect(await use('Edit', { file_path: 'ReadMe.md' })).toBeUndefined()
     expect(await use('Write', { file_path: 'specs/order-cancellation.spec.md' })).toMatchObject({ deny: expect.stringContaining('writes nothing') })
     expect(await use('Write', { file_path: 'src/orders/cancel.ts' })).toMatchObject({ deny: expect.stringContaining('writes nothing') })
   })
@@ -45,7 +47,7 @@ describe('what a docs evaluation may touch', () => {
   })
 
   it('the_session_gets_the_tools_a_reader_and_an_asked_for_edit_need_and_no_others', () => {
-    expect(DOCS_EVALUATION_TOOLS).toEqual(['Read', 'Glob', 'MarkdownSearch', 'Write', 'Edit', 'MultiEdit', ASK_USER_TOOL])
+    expect(DOCS_EVALUATION_TOOLS).toEqual(['Read', 'Glob', 'MarkdownSearch', 'SpecSearch', 'Write', 'Edit', 'MultiEdit', ASK_USER_TOOL])
   })
 })
 

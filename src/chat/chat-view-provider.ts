@@ -1,6 +1,6 @@
 import * as vscode from 'vscode'
-import { actingMode, isBuild, isFeatureless, offersAllowWrites, stepOf, type SessionManager, type SessionMode, type SessionRecord } from '../agent/session/session-manager'
-import type { ModelProfile, Step } from '../agent/session/model-profile'
+import { actingMode, isBuild, isFeatureless, lastActive, offersAllowWrites, stepOf, type SessionManager, type SessionMode, type SessionRecord } from '../agent/session/session-manager'
+import { atEffort, switchedTo, type ModelOffer, type ModelProfile, type Step } from '../agent/session/model-profile'
 import type { McpServerState, SessionEvent } from '../agent/session/code-session'
 import { appliesModelSwitchNow, blockOf, lastFailure, mostUrgent, nextStatus, takesProfile, type SessionStatus } from '../agent/session/session-status'
 import { alignSpecStatus, readSpecState, setSpecStatus, type SpecState } from '../agent/phases/spec-file'
@@ -57,6 +57,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative } from 'node:path'
 import { linkedFilePath, withLinkedFiles } from './linked-files'
 import { refusal } from './phase-runs'
+import { sessionGroups } from './session-groups'
 import type {
   FromWebview,
   PlanState,
@@ -133,12 +134,12 @@ export class ChatViewProvider {
   /** Per running session, its MCP servers as the engine last reported them. */
   private readonly mcpServers = new Map<string, McpServerState[]>()
   /**
-   * A chat session's model switch, picked while its turn was still in
-   * flight: held here rather than applied at once, so that turn finishes on
-   * the model it started on and the switch takes hold on the next prompt
-   * instead (B10).
+   * A chat session's model or effort switch, picked while its turn was still
+   * in flight: held here rather than applied at once, so that turn finishes
+   * on the model and effort it started on and the switch takes hold on the
+   * next prompt instead (B10).
    */
-  private readonly pendingModelSwitch = new Map<string, ModelProfile>()
+  private readonly pendingProfileSwitch = new Map<string, ModelProfile>()
   /** The docs map build in flight: the run's session, where its progress goes, and the turn its caller waits on. */
   private docsMapRun: { sessionId: string; progress: (line: string) => void; done: (errors: string[]) => void } | undefined
   /** The last state sent, settled either way: the next one waits on it. */
@@ -155,7 +156,7 @@ export class ChatViewProvider {
     /** What a step runs on: the active profile's model for it. `attempt` counts the fixes of a failed test run. */
     private readonly profileFor: (step: Step, attempt?: number) => ModelProfile,
     private readonly profileDefaults: ProfileDefaultsStore,
-    private readonly registeredModels: () => ModelProfile[],
+    private readonly registeredModels: () => ModelOffer[],
     verifier: Verifier,
     sizeLimits: SizeLimits,
     private readonly allowWrites: SessionSwitch,
@@ -202,26 +203,31 @@ export class ChatViewProvider {
   }
 
   /**
-   * A chat session's own model switch (B9): applied at once when nothing is
-   * in flight, held for the next prompt when the session is `underWay`, so a
-   * turn already running finishes on the model it started on (B10) instead of
-   * having its engine torn down under it.
+   * A chat session's own model or effort switch (B9, B14): applied at once
+   * when nothing is in flight, held for the next prompt when the session is
+   * `underWay`, so a turn already running finishes on the model it started on
+   * (B10) instead of having its engine torn down under it.
    */
-  private async switchModel(id: string, profile: ModelProfile): Promise<void> {
+  private async switchProfile(id: string, profile: ModelProfile): Promise<void> {
     if (!appliesModelSwitchNow(this.statusOf(id))) {
-      this.pendingModelSwitch.set(id, profile)
+      this.pendingProfileSwitch.set(id, profile)
       return
     }
-    this.pendingModelSwitch.delete(id)
+    this.pendingProfileSwitch.delete(id)
     await this.sessions.setProfile(id, profile)
   }
 
-  /** A model switch picked mid-turn, applied now that the next prompt is about to go out (B10). */
-  private async applyPendingModelSwitch(run: SessionRecord): Promise<void> {
-    const pending = this.pendingModelSwitch.get(run.id)
+  /** A switch picked mid-turn, applied now that the next prompt is about to go out (B10). */
+  private async applyPendingProfileSwitch(run: SessionRecord): Promise<void> {
+    const pending = this.pendingProfileSwitch.get(run.id)
     if (!pending) return
-    this.pendingModelSwitch.delete(run.id)
+    this.pendingProfileSwitch.delete(run.id)
     await this.sessions.setProfile(run.id, pending)
+  }
+
+  /** What a switch changes: one already picked and waiting on the next prompt, else what the session runs on now. */
+  private switchingFrom(record: SessionRecord): ModelProfile {
+    return this.pendingProfileSwitch.get(record.id) ?? record.profile
   }
 
   /** Whether a tab shows the session, its own or its feature's. */
@@ -329,23 +335,24 @@ export class ChatViewProvider {
 
   /**
    * Picks a plan up where its spec leaves it: the plan session that wrote it
-   * when one remains (its transcript is the context; the engine resumes on the
-   * next prompt), else a fresh plan session told to read the files. The plan
-   * bar then offers what the stage allows: review and mapping on a draft,
-   * implement on an approved one, the test run on a tested board.
+   * when one remains, at any stage, verified included (its transcript is the
+   * context; the engine resumes on the next prompt), else a fresh plan session
+   * told to read the files. The plan bar then offers what the stage allows:
+   * review and mapping on a draft, implement on an approved one, the test run
+   * on a tested board.
    */
   async resumePlan(feature: string, into?: ChatPanel): Promise<void> {
     const path = specPath(this.workspaceRoot, feature)
+    // The list is newest first; the latest session on the spec is the one that knows it best.
+    const owner = this.sessions.list().find((r) => r.mode === 'plan' && r.feature && specPath(this.workspaceRoot, r.feature) === path)
+    if (owner) return this.open(owner.id, into)
     const state = await readSpecState(path)
     if (!state.exists) throw new Error(`No spec for "${feature}" under ${SPECS_DIR}/.`)
     const tasks = await readTasks(tasksPath(this.workspaceRoot, feature))
     if (isVerified(state.status) || finished(state.status, tasks)) {
       throw new Error(`"${feature}" is verified: plan the next change as its own feature.`)
     }
-    // The list is newest first; the latest session on the spec is the one that knows it best.
-    const owner = this.sessions.list().find((r) => r.mode === 'plan' && r.feature && specPath(this.workspaceRoot, r.feature) === path)
-    if (owner) await this.open(owner.id, into)
-    else await this.newSession('plan', feature, resumePlanPrompt(feature), into, 'Picking the plan up')
+    await this.newSession('plan', feature, resumePlanPrompt(feature), into, 'Picking the plan up')
   }
 
   async open(sessionId: string, into?: ChatPanel): Promise<void> {
@@ -801,11 +808,15 @@ export class ChatViewProvider {
         void this.sendState()
         return
       case 'set_session_model': {
-        const profile = this.registeredModels().find((m) => m.name === message.name)
-        if (shown && profile) await this.switchModel(shown.id, profile)
+        const offer = this.registeredModels().find((m) => m.profile.name === message.name)
+        if (shown && offer) await this.switchProfile(shown.id, switchedTo(this.switchingFrom(shown), offer))
         void this.sendState()
         return
       }
+      case 'set_session_effort':
+        if (shown) await this.switchProfile(shown.id, atEffort(this.switchingFrom(shown), message.effort))
+        void this.sendState()
+        return
       case 'approve_plan':
         // The approval is the go-ahead, so the build starts at once rather than waiting on another prompt.
         if (shown?.mode === 'code-plan' && shown.access !== 'full') {
@@ -887,7 +898,7 @@ export class ChatViewProvider {
     if (run.mode === 'cleanup') await this.cleanup.reengage(run)
     await this.followProfile(run)
     // A model switch picked while a turn of this chat session was in flight takes effect now (B10).
-    await this.applyPendingModelSwitch(run)
+    await this.applyPendingProfileSwitch(run)
     await this.sessions.send(run.id, text)
   }
 
@@ -999,7 +1010,7 @@ export class ChatViewProvider {
     const path = this.specPathOf(shown)
     if (record?.mode !== 'plan' || !record.feature || !path) return
     assertImplementable(await readSpecState(path), await readTasks(tasksPath(this.workspaceRoot, record.feature)))
-    await this.build.startImplementing(record)
+    await this.build.startImplementing(record, true)
   }
 
   private async openFile(message: WebviewMessage<'open_file'>): Promise<void> {
@@ -1162,6 +1173,7 @@ export class ChatViewProvider {
       mode: record.mode,
       access: record.access ?? 'scoped',
       profileName: record.profile.name,
+      ...(record.profile.effort ? { effort: record.profile.effort } : {}),
       status: mostUrgent(this.runsOf(record).map((r) => this.statusOf(r.id))),
     }
   }
@@ -1219,12 +1231,13 @@ export class ChatViewProvider {
       return []
     })
     const agentsMd = this.agentsMd.current()
+    const groups = sessionGroups(this.sessions.list(), plans)
     const shared = {
-      plans: plans.flatMap((p) => (p.status === 'verified' ? [] : [{ feature: p.feature, status: p.status }])),
-      chats: this.pastChats(),
+      plans: groups.plans.map((p) => ({ feature: p.feature, status: p.status, ...(p.lastActiveAt ? { lastActiveAt: p.lastActiveAt } : {}) })),
+      chats: this.pastChats(groups.chats),
       unfiled: unfiled.length,
       profiles: this.profileDefaults.read(),
-      models: this.registeredModels(),
+      models: this.registeredModels().map((m) => ({ name: m.profile.name, efforts: [...m.efforts] })),
       ...(agentsMd ? { agentsMd } : {}),
     }
     for (const entry of this.panels) {
@@ -1251,17 +1264,16 @@ export class ChatViewProvider {
   }
 
   /**
-   * The chats no tab is showing: closing one keeps the record and the
-   * transcript, so the chat is offered back rather than lost. Only so many,
-   * newest first: the state goes out on every status change, and a workspace's
-   * whole history would ride along with it.
+   * The conversations no tab is showing: closing one keeps the record and the
+   * transcript, so it is offered back rather than lost. Only so many, newest
+   * worked in first: the state goes out on every status change, and a
+   * workspace's whole history would ride along with it.
    */
-  private pastChats(): ResumableChat[] {
-    return this.sessions
-      .list()
-      .filter((r) => r.mode === 'chat' && !this.panelOf(r.id))
+  private pastChats(conversations: SessionRecord[]): ResumableChat[] {
+    return conversations
+      .filter((r) => !this.panelOf(r.id))
       .slice(0, 20)
-      .map((r) => ({ sessionId: r.id, title: r.title, startedAt: r.createdAt }))
+      .map((r) => ({ sessionId: r.id, title: r.title, mode: r.mode, lastActiveAt: lastActive(r) }))
   }
 
   /** The tab's history: every run under it, oldest first, each its own conversation. */
@@ -1292,6 +1304,7 @@ export class ChatViewProvider {
     return {
       ...this.runRef(run),
       profileName: run.profile.name,
+      ...(run.profile.effort ? { effort: run.profile.effort } : {}),
       live: this.sessions.isLive(run.id),
       settled: run.settled === true,
       // A session granted full access writes wherever the rules let it, and the switch is its own again.

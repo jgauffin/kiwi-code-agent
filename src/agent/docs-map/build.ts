@@ -1,9 +1,9 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { diffDocs, readDocsIndex, scanDocs, writeDocsIndex, type DocsDiff, type DocsIndex } from './doc-index'
-import { checkEntry, docHeadings, parseEntry, type DocsMapEntry } from './entry'
+import { checkEntry, docHeadings, parseEntry } from './entry'
 import { SUMMARY_FILE, byPath, entryPath, listEntries, readMapFile, removeEntry, writeMapFile } from './map-files'
-import { renderDocsSummary } from './summary'
+import { renderDocsSummary, type DescribedDoc } from './summary'
 
 /**
  * The build in two halves, because the middle of it is a model turn.
@@ -64,32 +64,32 @@ export async function finishDocsMap(cwd: string, ignored: string[] = []): Promis
   for (const doc of await listEntries(cwd)) {
     if (!covered.has(doc)) await removeEntry(cwd, doc)
   }
-  const entries: DocsMapEntry[] = []
+  const described: DescribedDoc[] = []
   const undescribed: string[] = []
   const index: DocsIndex = {}
   for (const doc of scanned) {
-    const entry = await readEntry(cwd, doc.path)
-    if (entry === undefined) {
+    const read = await readEntry(cwd, doc.path)
+    if (read === undefined) {
       undescribed.push(doc.path)
       continue
     }
-    entries.push(entry)
+    described.push(read)
     index[doc.path] = doc.hash
   }
-  const summary = renderDocsSummary(entries, undescribed.sort(byPath))
+  const summary = renderDocsSummary(described, undescribed.sort(byPath))
   await writeMapFile(cwd, SUMMARY_FILE, summary)
   // The index is written last: a hash that outlives its entry would keep the next build from repairing it.
   await writeDocsIndex(cwd, index)
-  return { summary, described: entries.map((e) => e.doc), undescribed }
+  return { summary, described: described.map((d) => d.entry.doc), undescribed }
 }
 
-/** An entry that is there, parses and matches the doc's headings; undefined for anything else. */
-async function readEntry(cwd: string, doc: string): Promise<DocsMapEntry | undefined> {
+/** An entry that is there, parses and matches the doc's headings, with the doc it describes; undefined for anything else. */
+async function readEntry(cwd: string, doc: string): Promise<DescribedDoc | undefined> {
   const text = await readMapFile(cwd, entryPath(doc)).catch(() => undefined)
   if (text === undefined) return undefined
   const entry = parseEntry(text)
   if (entry.problems.length > 0 || entry.doc !== doc) return undefined
   const source = await readFile(join(cwd, ...doc.split('/')), 'utf8').catch(() => undefined)
   if (source === undefined) return undefined
-  return checkEntry(entry, docHeadings(source)).length === 0 ? entry : undefined
+  return checkEntry(entry, docHeadings(source)).length === 0 ? { entry, source } : undefined
 }

@@ -18,6 +18,12 @@ export type VerifyRule = {
   match: string
   command: string
   project?: string
+  /**
+   * How the implementer builds the project a matching file belongs to, with the
+   * same placeholders. The sweep never runs it; the implementer is told it, and
+   * runs it without a prompt, so a build is per project and costs no question.
+   */
+  build?: string
 }
 
 export type CommandRunner = (command: string, cwd: string) => Promise<{ ok: boolean; output: string }>

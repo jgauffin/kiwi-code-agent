@@ -16,13 +16,15 @@ const fixedSource = (summary: string | undefined): DocsMapSource => ({
 })
 
 describe('the docs map at session start', () => {
-  it('a_feature_plan_a_code_plan_and_a_docs_session_get_the_map_while_a_chat_or_implement_session_does_not', async () => {
-    for (const mode of ['plan', 'code-plan', 'docs']) {
+  it('the_sessions_that_need_to_know_what_the_docs_hold_get_the_map_and_the_ones_that_search_do_not', async () => {
+    for (const mode of ['plan', 'docs', 'doc-migration']) {
       const prompt = await withDocsMap(mode, BASE, fixedSource(SUMMARY))
       expect(prompt.startsWith(BASE), mode).toBe(true)
       expect(prompt, mode).toContain('- `#Cancellation`: when an order may be cancelled')
+      expect(prompt, mode).toContain('Read just those with offset and limit')
+      expect(prompt, mode).toContain('Specs are not in the map: SpecSearch finds their rules.')
     }
-    for (const mode of ['chat', 'reconcile', 'implement', 'cleanup']) {
+    for (const mode of ['chat', 'reconcile', 'implement', 'cleanup', 'code-plan', 'file-decisions']) {
       expect(await withDocsMap(mode, BASE, fixedSource(SUMMARY)), mode).toBe(BASE)
     }
   })

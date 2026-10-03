@@ -8,7 +8,7 @@ import type { Spec } from '../agent/phases/spec-model'
 import type { CleanupDecision, Task, VerificationRecord } from '../agent/phases/tasks-file'
 import type { UnitKind } from '../agent/cleanup/unit-size'
 import type { Breach } from '../agent/cleanup/breach'
-import type { ModelProfile } from '../agent/session/model-profile'
+import type { Effort } from '../agent/session/model-profile'
 import type { SessionMode } from '../agent/session/session-manager'
 import type { RunBlock, SessionStatus } from '../agent/session/session-status'
 import type { ProfileDefaults } from '../settings/settings-store'
@@ -22,6 +22,8 @@ export type SessionTab = {
   mode: SessionMode
   access: 'scoped' | 'full'
   profileName: string
+  /** How hard its next turn thinks; absent while it runs at the model's own default. */
+  effort?: Effort
   status: SessionStatus
 }
 
@@ -119,6 +121,8 @@ export type RunRef = {
 export type RunControls = RunRef & {
   /** The profile its next turn runs on. */
   profileName: string
+  /** How hard that turn thinks; absent while it runs at the model's own default. */
+  effort?: Effort
   live: boolean
   /** Its job is done: a settled task or fix run is history and takes no input. */
   settled: boolean
@@ -130,11 +134,21 @@ export type RunControls = RunRef & {
 
 export type RunSection = RunRef & { events: SessionEvent[] }
 
-/** A plan on disk the new-session screen offers to pick up; verified ones are finished and not offered. */
-export type ResumablePlan = { feature: string; status: 'draft' | 'approved' | 'implemented' }
+/**
+ * A model the composer's switch offers, and the effort levels it takes, so
+ * the effort switch is only shown where the levels are known.
+ */
+export type ModelOption = { name: string; efforts: Effort[] }
 
-/** A chat not shown that the new-session screen offers to reopen; its transcript is the context it comes back with. */
-export type ResumableChat = { sessionId: string; title: string; startedAt: string }
+/**
+ * A plan the new-session screen offers to pick up, at its stage: absent while
+ * its session has not written the spec. A verified one is offered while its
+ * plan session is kept. `lastActiveAt` is absent on a spec nobody has opened here.
+ */
+export type ResumablePlan = { feature: string; status: SpecStatus | undefined; lastActiveAt?: string }
+
+/** A conversation not shown that the new-session screen offers to reopen; its transcript is the context it comes back with. */
+export type ResumableChat = { sessionId: string; title: string; mode: SessionMode; lastActiveAt: string }
 
 /**
  * What is put to the person about one scope's `AGENTS.md`, over the chat:
@@ -166,16 +180,16 @@ export type ToWebview =
       runs: RunControls[]
       /** Present when the active session is a plan session. */
       plan?: PlanState
-      /** Plans under `specs/` still in progress, for the new-session screen's pick-up list. */
+      /** Planned features, newest worked in first, for the new-session screen's pick-up list. */
       plans: ResumablePlan[]
-      /** Chats no tab is showing, newest first, for the same list. */
+      /** Conversations no tab is showing, newest worked in first, for the same list. */
       chats: ResumableChat[]
-      /** Decisions in `specs/unfiled-decisions.md` waiting to be filed into the specs and docs, for the same list. */
+      /** Entries in `specs/unfiled-decisions.md` and `specs/future-work.md` waiting to be filed into the specs and docs, for the same list. */
       unfiled: number
       /** The profiles by name and which of them new sessions get, for the new-session screen's pickers. */
       profiles: ProfileDefaults
       /** Every model a provider serves, for the composer's model switch on a chat session. */
-      models: ModelProfile[]
+      models: ModelOption[]
       /** An `AGENTS.md` offer waiting on the person, shown over whatever the tab shows; absent when none is. */
       agentsMd?: AgentsMdOffer
     }
@@ -224,6 +238,8 @@ export type FromWebview =
   | { type: 'set_allow_writes'; sessionId: string; enabled: boolean }
   /** Switches the active chat session to a model named as `models` on `state` lists it. */
   | { type: 'set_session_model'; name: string }
+  /** How hard the active chat session thinks from its next turn; no `effort` leaves it to the model's own default. */
+  | { type: 'set_session_effort'; effort?: Effort }
   /** Approves the shown code plan: the session goes on to build it with the full tool set. */
   | { type: 'approve_plan' }
   /** Tries one of the run's MCP servers again. */

@@ -9,6 +9,7 @@ import type { SpecState } from '../src/agent/phases/spec-file'
 import { parseSpecText } from '../src/agent/phases/spec-model'
 import { UNFILED_DECISIONS } from '../src/agent/phases/unfiled-decisions'
 import { SPEC_READING } from '../src/agent/phases/blind-plan'
+import { DOC_READING } from '../src/agent/openai-session/tools/markdown/outline-gate'
 import { board as boardOf, task, tasksState as board } from './task-board-fixture'
 
 const cwd = process.platform === 'win32' ? 'D:\\work\\repo' : '/work/repo'
@@ -58,11 +59,9 @@ describe('implement phase', () => {
     expect(prompt).toContain('already in_progress')
     // Tested is backed by evidence the user reads on the spec: a test named per delivered rule.
     expect(prompt).toContain('one entry per delivered rule')
-    // A board carried over from a mapping run hands on its reading, and that is the starting point.
-    expect(prompt).toContain('search only for what they do not answer')
     expect(prompt).toContain('docs/')
     expect(IMPLEMENT_TOOLS).toEqual([
-      'Read', 'Write', 'Edit', 'MultiEdit', 'Move', 'Copy', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'MarkdownSearch', 'CodeOutline', 'CodeSearch', 'Bash', 'RunScript', 'Skill', 'AskUser',
+      'Read', 'Write', 'Edit', 'MultiEdit', 'Move', 'Copy', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'MarkdownSearch', 'SpecSearch', 'CodeOutline', 'CodeSearch', 'Bash', 'RunScript', 'Skill', 'AskUser',
       'ReadTasks', 'UpdateTask',
     ])
   })
@@ -109,6 +108,21 @@ describe('implement phase', () => {
     expect(prompt).toContain('Narrow those same commands')
   })
 
+  it('a_rule_with_a_build_command_is_how_step_three_builds_the_files_project', () => {
+    const prompt = implementPrompt('Order cancellation', cwd, [
+      { match: '**/*.cs', project: '*.csproj', command: 'dotnet test "{project}"', build: 'dotnet build "{project}"' },
+      { match: 'src/**/*.ts', command: 'npm test' },
+    ])
+    expect(prompt).toContain('3. Build the project the file belongs to, not the repository, with the command for its files; it runs without a prompt:\n- `**/*.cs` (project `*.csproj`): `dotnet build "{project}"`\n4. Test.')
+    expect(prompt).toContain('`{project}` is the nearest file matching the project glob above the file')
+  })
+
+  it('without_a_build_command_step_three_still_builds_only_the_files_project', () => {
+    const prompt = implementPrompt('Order cancellation', cwd, [{ match: 'src/**/*.ts', command: 'npm test' }])
+    expect(prompt).toContain('3. Build the project the file belongs to, not the repository.\n')
+    expect(prompt).not.toContain('`{project}` is')
+  })
+
   it('a_project_with_no_configured_test_command_is_told_to_find_its_own', () => {
     expect(implementPrompt('Order cancellation', cwd)).toContain('No test command is configured')
   })
@@ -141,13 +155,25 @@ describe('implement phase', () => {
   })
 
   it('other_features_approved_specs_bind_the_implementer_too', () => {
-    expect(implementPrompt('Order cancellation', cwd)).toContain(SPEC_READING)
+    const prompt = implementPrompt('Order cancellation', cwd)
+    expect(prompt).toContain("Other features' approved specs bind you")
+    expect(prompt).toContain('where your change touches a behaviour another feature covers, find its rules with SpecSearch')
+    // The planner's sweep of every spec that covers the change: the implementer's rules already arrived with its task.
+    expect(prompt).not.toContain(SPEC_READING)
+  })
+
+  it('the_tasks_own_files_are_the_surface_instead_of_one_the_run_derives_again', () => {
+    const prompt = implementPrompt('Order cancellation', cwd)
+    expect(prompt).toContain('the surface the plan derived')
+    expect(prompt).toContain('Search only for what they leave open')
+    // A reading ritual for docs invites doc reading in a run that may not even edit them.
+    expect(prompt).not.toContain(DOC_READING)
   })
 
   it('an_implementer_in_a_node_project_runs_its_tools_through_package_json_scripts', async () => {
     const root = await mkdtemp(join(tmpdir(), 'implement-'))
     try {
-      expect(implementPrompt('Order cancellation', root)).not.toContain('package.json scripts')
+      expect(implementPrompt('Order cancellation', root)).not.toContain('root package.json')
       await writeFile(join(root, 'package.json'), '{}')
       expect(implementPrompt('Order cancellation', root)).toContain(`- ${projectScriptsInstruction(root)}`)
     } finally {

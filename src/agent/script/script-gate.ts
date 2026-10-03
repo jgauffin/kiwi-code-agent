@@ -1,9 +1,13 @@
 import { splitShellCommand } from '../permissions/shell-split'
 import type { PreToolUseOutcome, SessionHooks, ToolUse } from '../session/hooks'
 
-/** Said in every prompt, so RunScript is the model's first move rather than the gate's correction. */
+/**
+ * Said in every prompt with RunScript, so it is the model's first move rather than the gate's correction.
+ * It draws the line against batched Reads: a script for an answer that is computed, a Read for code the
+ * model has to see, and always a Read before a hand edit, since a script's read does not mark the file read.
+ */
 export const SCRIPT_WRITING =
-  'The same change in more than two files, or reading several files to answer one question about them, is one RunScript, not a tool call per file. Use it too for what you would write in python, node or powershell through the shell (a regex rewrite, parsing JSON, XML or HTML): its JavaScript reads, greps, globs and searches code, and its changes reach the user as one diff.'
+  'The same change in more than two files is one RunScript, not a tool call per file, and so is a question about several files whose answer is computed (a count, which files match, what refers to what) rather than read: its JavaScript reads, greps, globs and searches code, returns only what you ask for, and its changes reach the user as one diff. Use it too for what you would write in python, node or powershell through the shell, such as a regex rewrite or parsing XML or HTML; to look inside JSON, JsonQuery and JsonSchema are cheaper. When you need to see the code itself, Read it, and Read a file before you edit it by hand: a read inside a script does not count for Edit.'
 
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell'])
 

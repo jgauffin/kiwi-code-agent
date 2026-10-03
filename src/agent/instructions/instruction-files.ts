@@ -50,8 +50,13 @@ export function instructionsText(files: InstructionFile[]): string {
   return [CLASH_WITH_CORE, ...files.map((file) => `\n# Instructions from ${file.path}\n\n${file.text}`)].join('\n')
 }
 
-/** Every mode but the blind planner: a bundle describes how code is written, and the planner never sees code, same as it never sees memories. */
-export const wantsInstructions = (mode: string): boolean => mode !== 'plan'
+/**
+ * Every mode but two. The blind planner: a bundle describes how code is written, and the planner never sees
+ * code, same as it never sees memories. The docs map build: it writes entries to a fixed contract, with no
+ * conversation and nothing a rule could change, so the files would only cost tokens on every rebuild. The
+ * other doc sessions keep them, since they write into the docs and a writing rule applies there.
+ */
+export const wantsInstructions = (mode: string): boolean => mode !== 'plan' && mode !== 'docs-map'
 
 /**
  * The workspace's and the person's instruction files, joined after a phase's

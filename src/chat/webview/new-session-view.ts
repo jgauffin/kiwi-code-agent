@@ -11,13 +11,33 @@ type NewSessionForm = { mode: SessionMode; feature?: string; prompt?: string }
 /** Work already on disk this screen offers to pick up rather than start over. */
 export type PickUp = { plans: ResumablePlan[]; chats: ResumableChat[]; unfiled: number }
 
-const STATUS_HINT: Record<ResumablePlan['status'], string> = {
+const STATUS_HINT: Record<NonNullable<ResumablePlan['status']>, string> = {
   draft: 'draft: review, check or approve',
   approved: 'approved: ready to implement',
   implemented: 'implemented: ready to verify',
+  verified: 'verified: done',
+}
+
+/** The card each conversation was started from, so a pick reads as the session type it is. */
+const CONVERSATION: Partial<Record<SessionMode, { icon: string; label: string }>> = {
+  chat: { icon: '🔧', label: 'Chat' },
+  'code-plan': { icon: '🗺', label: 'Plan' },
+  docs: { icon: '🧭', label: 'Docs evaluation' },
+  'file-decisions': { icon: '🗂', label: 'Filing decisions' },
+  'doc-migration': { icon: '🧹', label: 'Doc migration' },
 }
 
 const when = (iso: string): string => new Date(iso).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
+
+const planHint = (plan: ResumablePlan): string => {
+  const stage = plan.status ? STATUS_HINT[plan.status] : 'no spec yet'
+  return plan.lastActiveAt ? `${stage} · last worked on ${when(plan.lastActiveAt)}` : stage
+}
+
+const chatPick = (chat: ResumableChat) => {
+  const kind = CONVERSATION[chat.mode] ?? CONVERSATION.chat!
+  return { ...chat, icon: kind.icon, hint: `${kind.label} · last worked on ${when(chat.lastActiveAt)}` }
+}
 
 /** The text fields, held by the view rather than by the form that happens to show them. */
 type Draft = { feature: string; prompt: string }
@@ -146,14 +166,14 @@ export class NewSessionView extends HTMLElement {
       <h3>Pick up where you left off</h3>
       <ul class="picks">
         <li loop="p in plans">
-          <button type="button" class="pick plan {{p.status}}" r-click="resume(p)">
+          <button type="button" class="pick plan {{p.stage}}" r-click="resume(p)">
             <span class="icon">📐</span>
             <span class="what"><strong>{{p.feature}}</strong><span class="hint">{{p.hint}}</span></span>
           </button>
         </li>
         <li loop="c in chats">
           <button type="button" class="pick chat" r-click="reopen(c)">
-            <span class="icon">🔧</span>
+            <span class="icon">{{c.icon}}</span>
             <span class="what"><strong>{{c.title}}</strong><span class="hint">{{c.hint}}</span></span>
           </button>
         </li>
@@ -198,8 +218,8 @@ export class NewSessionView extends HTMLElement {
         unfiled,
         nothingUnfiled: unfiled === 0,
         filingHint: unfiled > 0 ? `${unfiled} decided, not yet in the specs or docs` : 'Nothing waiting to be filed',
-        plans: plans.map((p) => ({ ...p, hint: STATUS_HINT[p.status] })),
-        chats: chats.map((c) => ({ ...c, hint: `last worked on ${when(c.startedAt)}` })),
+        plans: plans.map((p) => ({ ...p, stage: p.status ?? 'unwritten', hint: planHint(p) })),
+        chats: chats.map(chatPick),
         onCode: this.screen === 'code',
         onMaintenance: this.screen === 'maintenance',
         codeScreenState: this.screen === 'code' ? 'active' : '',

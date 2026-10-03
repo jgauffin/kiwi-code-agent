@@ -8,6 +8,7 @@ import { projectPaths, type ProjectPaths } from './project-paths'
 import { splitShellCommand, type ShellSegment } from './shell-split'
 import { FILE_TOOLS, isShellTool, readOnlyTools, TRANSFER_TOOLS, WITHIN_PROJECT_TOOLS, WRITE_TOOLS, type ReadOnlyTools } from './tool-classes'
 import { commandWriteTargets, toolWriteTargets, writesWithin, type WritableArea } from './write-targets'
+import { isTrustFile } from './trust-files'
 
 export type PermissionRules = {
   allow: string[]
@@ -30,7 +31,8 @@ export type PolicyContext = {
 
 /**
  * Decides tool calls before any permission prompt, on every engine: a deny
- * rule blocks, a read-only call, a write the session's switch or its scratch
+ * rule blocks, a write to a file that decides what runs unasked (`trust-files`)
+ * is always asked, a read-only call, a write the session's switch or its scratch
  * folder covers, a command the project defines for itself or one covered by the project's allow
  * rules goes through, everything else is asked. Everything it consults is read
  * on each call, so a rule allowed for the session or the project, a script just
@@ -68,6 +70,8 @@ export class PermissionPolicy implements SessionHooks {
     if (denied) return { deny: `Blocked by the project's permission rule ${denied} (kiwiAgent.permissions.deny).` }
     if (denyGitWrites && isShellTool(tool.toolName) && splitShellCommand(this.command(tool)).segments.some(isGitWrite))
       return { deny: 'Git commands that change the repository are turned off for this project (kiwiAgent.permissions.denyGitWrites). Read-only git (status, log, diff, show) still runs.' }
+    // Asked whatever the switch or an allow rule says: what lands in one of these runs unasked later.
+    if (this.writesTrustFile(tool)) return undefined
     const context = this.enterContext(tool.toolName, allow)
     if (this.isReadOnly(tool, context)) return { allow: true }
     if (this.writableCovers(tool)) return { allow: true }
@@ -127,6 +131,14 @@ export class PermissionPolicy implements SessionHooks {
   private writableCovers(tool: ToolUse): boolean {
     const area = this.writable()
     return area !== undefined && writesWithin(toolWriteTargets(tool.toolName, tool.input), area)
+  }
+
+  /** Does the call write a file that decides what runs without a prompt? A move or copy counts at either end. */
+  private writesTrustFile(tool: ToolUse): boolean {
+    const targets = isShellTool(tool.toolName)
+      ? splitShellCommand(this.command(tool)).segments.flatMap((s) => commandWriteTargets(s) ?? [])
+      : (toolWriteTargets(tool.toolName, tool.input) ?? [])
+    return targets.some((path) => isTrustFile(this.paths.relative(path)))
   }
 
   /** One part is enough: a segment of a shell call, or either end of a move. */

@@ -14,6 +14,8 @@ export type Scope = {
   askable?: string[]
   /** Globs carved out of `readable`; a match is denied even when readable allows it. */
   ignored?: string[]
+  /** Absolute folders outside the workspace whose files Read may open, such as the project's memory notes. Nothing is searched or written there. */
+  readableOutside?: string[]
 }
 
 /**
@@ -46,6 +48,7 @@ export class ScopeGuard implements SessionHooks {
     const input = (typeof tool.input === 'object' && tool.input !== null ? tool.input : {}) as Record<string, unknown>
     switch (tool.toolName) {
       case 'Read':
+        if (this.readableOutside(input['file_path'])) return undefined
         return this.check(input['file_path'], this.scope.readable, 'read')
       case 'Glob':
       case 'Grep':
@@ -65,6 +68,12 @@ export class ScopeGuard implements SessionHooks {
       default:
         return undefined
     }
+  }
+
+  /** A file in one of the folders outside the workspace the phase may read. */
+  private readableOutside(raw: unknown): boolean {
+    if (typeof raw !== 'string' || this.paths.inside(raw)) return false
+    return (this.scope.readableOutside ?? []).some((dir) => this.paths.under(dir, raw))
   }
 
   /** A deliverable is allowed outright; an askable path is left to the permission prompt; anything else is denied. */

@@ -12,8 +12,8 @@ result, fix it before you stop.
 
 ## Where intent comes from
 
-A later planner reads `docs/**`, the root README, every `specs/*.spec.md` and
-`specs/unfiled-decisions.md`, never the code. Write the rules from those alone, even though you can
+A later planner reads `docs/**`, the root README, every `specs/*.spec.md`,
+`specs/unfiled-decisions.md` and `specs/future-work.md`, never the code. Write the rules from those alone, even though you can
 read the code: approval compares the spec with the code and reports each disagreement for the
 user to rule on, and a rule copied from the code hides the disagreement it would have found.
 

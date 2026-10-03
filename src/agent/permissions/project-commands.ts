@@ -3,16 +3,17 @@ import type { ShellSegment } from './shell-split'
 
 /**
  * Commands the project itself defines, which run without a prompt: a script in
- * the root `package.json`, and the test commands `kiwiAgent.verify` names. The
- * user wrote both, and the extension already runs the verify commands itself
- * when a board is all tested, so asking whether a session may run the same
- * command adds nothing. A deny rule still wins, because it is answered first.
+ * the root `package.json`, and the test and build commands `kiwiAgent.verify`
+ * names. The user wrote both, and the extension already runs the test commands
+ * itself when a board is all tested, so asking whether a session may run the
+ * same command adds nothing. A deny rule still wins, because it is answered
+ * first, and the files that hold these are trust files, so adding one is asked.
  * Pure, so the webview can say what let a command through.
  */
 export type ProjectCommands = {
   /** The script names of the workspace root's `package.json`. */
   scripts: ReadonlySet<string>
-  /** The `command` of each verify rule, placeholders and all. */
+  /** The `command` and the `build` of each verify rule, placeholders and all. */
   verify: readonly string[]
 }
 

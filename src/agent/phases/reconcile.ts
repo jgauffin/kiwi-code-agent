@@ -12,13 +12,17 @@ import { READ_TASKS_TOOL, UPDATE_TASK_TOOL } from '../openai-session/tools/task-
 import { MAP_ROOT } from '../repo-map/map-files'
 import type { SessionEvent } from '../session/code-session'
 
-/** The check sees everything and may change nothing but its decisions file; the spec is the planner's and the user's. */
-export function reconcileScope(feature: string): Scope {
+/**
+ * The check sees everything and may change nothing but its decisions file; the spec is the planner's and the user's.
+ * `memoryDir` is the project's memory folder, outside the workspace: the run starts with its index and opens a note there.
+ */
+export function reconcileScope(feature: string, memoryDir?: string): Scope {
   return {
     // `**` does not match a dot-prefixed segment, so the map's root is named:
     // the run is given the type indexes the summary points it at.
     readable: ['**', `${MAP_ROOT}/**`],
     writable: [decisionsFile(feature), contextFile(feature)],
+    ...(memoryDir ? { readableOutside: [memoryDir] } : {}),
   }
 }
 

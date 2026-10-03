@@ -5,7 +5,8 @@ import { EDIT_WRITING } from '../openai-session/tools/edit'
 import SPEC_CONTRACT from '../../../assets/plugin/skills/spec-writing/contract.md'
 import { DOCS_DIR, SPECS_DIR, README_GLOB, SPECS_GLOB } from './blind-plan'
 import type { Scope } from './scope-guard'
-import { UNFILED_DECISIONS, UNFILED_FILE } from './unfiled-decisions'
+import { DECISION_FILES, UNFILED_DECISIONS, UNFILED_FILE } from './unfiled-decisions'
+import { SPEC_SEARCH_TOOL } from './spec-search'
 
 /**
  * The maintenance job that brings the docs and the specs back into line: it
@@ -19,12 +20,12 @@ import { UNFILED_DECISIONS, UNFILED_FILE } from './unfiled-decisions'
 /** `ignored` comes from the `kiwiAgent.planIgnore` setting: docs the planner must not see are not this job's either. */
 export function docMigrationScope(ignored: string[] = []): Scope {
   return {
-    readable: [`${DOCS_DIR}/**`, README_GLOB, SPECS_GLOB, UNFILED_FILE],
+    readable: [`${DOCS_DIR}/**`, README_GLOB, SPECS_GLOB, ...DECISION_FILES],
     // A doc cut is offered, never made, until the user agrees. A ruling that a
     // doc is current, and a migrated draft once its features are picked, are
     // already the user's word, not a new write to confirm: writing them is
     // this job's own bookkeeping and deliverable, like a planner's.
-    writable: [UNFILED_FILE, SPECS_GLOB],
+    writable: [...DECISION_FILES, SPECS_GLOB],
     // The docs are the user's: each cut or rewrite is one confirmed write.
     askable: [`${DOCS_DIR}/**`],
     ignored,
@@ -35,7 +36,7 @@ export function docMigrationScope(ignored: string[] = []): Scope {
  * Write and Edit are here for the docs cuts the user confirms and for the
  * migrated drafts the job writes outright.
  */
-export const DOC_MIGRATION_TOOLS = ['Read', 'Glob', MARKDOWN_SEARCH_TOOL, 'Write', 'Edit', 'MultiEdit', ASK_USER_TOOL]
+export const DOC_MIGRATION_TOOLS = ['Read', 'Glob', MARKDOWN_SEARCH_TOOL, SPEC_SEARCH_TOOL, 'Write', 'Edit', 'MultiEdit', ASK_USER_TOOL]
 
 /** The first message: there is nothing to configure, so the session starts on the job. */
 export function docMigrationKickoff(): string {
@@ -56,7 +57,7 @@ What you may read: \`${DOCS_DIR}/**\`, the README, and every spec under \`${SPEC
 
 **Only a settled spec counts.** A spec the user has approved is what the product says, whatever stage its build has reached; a draft is still a proposal, and a doc section is never reported as covered by one.
 
-**Outline first, judge after.** The docs map above already outlines every doc you may read, section by section. Start from that outline rather than opening a doc cold, and make every later judgment, covered or contradicting, in scope or out, about one section at a time, never about a doc as a whole.
+**Outline first, judge after.** The docs map in this prompt outlines every doc you may read, section by section, with each section's line range. Start from that outline rather than opening a doc cold, and make every later judgment, covered or contradicting, in scope or out, about one section at a time, never about a doc as a whole.
 
 **A section is in scope only when its content describes product behaviour.** Architecture, rationale, guidelines, a settings reference, how a thing is built: out of scope, whatever file or folder it happens to sit in. Judge a section by what it says, not by where it lives.
 
@@ -67,7 +68,7 @@ The first stage is pruning: sort every in-scope section against the settled spec
 **Doc left empty.** A doc left with nothing but its title is offered for deletion too, together with the index entries and the links that point at it.
 **Contradicting section.** A section that says otherwise than a settled spec is reported in chat, naming the spec and the rule it disagrees with, and never offered for removal: which side is current is the user's to say, not yours.
 **Contradiction the person rules on.** When the user says the doc is current, record the ruling as an unfiled decision naming the feature whose spec it reaches, with Edit on \`${UNFILED_FILE}\`: ${UNFILED_DECISIONS} The spec is not edited here.
-**Cited section kept whole.** Before you offer a section for removal, check whether an approved spec's rule cites it as \`path#Heading\`. If one does, do not offer the section without naming every citation that would have to change with it.
+**Cited section kept whole.** Before you offer a section for removal, check with ${SPEC_SEARCH_TOOL} whether an approved spec's rule cites it as \`path#Heading\`. If one does, do not offer the section without naming every citation that would have to change with it.
 **Nothing covered.** If you go through the docs and find no covered section, say so in chat and go on to the migration offer.
 
 Every write into \`${DOCS_DIR}/**\` is put to the user first and made only once they say so, one write at a time; nothing is cut or rewritten on your own say-so. This holds whether or not \`kiwiAgent.cutCoveredDocs\` is on: that setting shapes the docs review after one feature's spec is approved, while offering cuts across every settled spec is this job's whole purpose, so it is not consulted here.

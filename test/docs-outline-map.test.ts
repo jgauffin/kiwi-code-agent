@@ -33,7 +33,7 @@ describe('the outline docs map', () => {
   it('every_section_is_listed_with_its_line_range_so_a_planner_can_read_just_that_section', () => {
     expect(outlineEntry('docs/intent/orders.md', ORDERS)).toBe(
       [
-        '### docs/intent/orders.md',
+        '### docs/intent/orders.md (21 lines)',
         'How an order is placed and cancelled.',
         '- `#Placing` (11-18)',
         '- `#Payment` (15-18)',
@@ -44,7 +44,7 @@ describe('the outline docs map', () => {
 
   it('the_opening_is_prose_not_the_front_matter_the_title_or_a_quoted_example', () => {
     const text = '# Title\n\n```markdown\n## Not a heading\nquoted\n```\n\nThe real opening.\n\n## Section\n'
-    expect(outlineEntry('docs/a.md', text)).toBe('### docs/a.md\nThe real opening.\n- `#Section` (10-10)')
+    expect(outlineEntry('docs/a.md', text)).toBe('### docs/a.md (10 lines)\nThe real opening.\n- `#Section` (10-10)')
   })
 
   it('a_long_opening_is_clipped_so_one_doc_cannot_crowd_the_prompt', () => {
@@ -54,7 +54,7 @@ describe('the outline docs map', () => {
   })
 
   it('a_doc_with_no_prose_and_no_sections_is_still_listed_so_the_planner_knows_it_exists', () => {
-    expect(outlineEntry('docs/empty.md', '# Empty\n')).toBe('### docs/empty.md')
+    expect(outlineEntry('docs/empty.md', '# Empty\n')).toBe('### docs/empty.md (1 line)')
   })
 
   it('the_map_covers_the_readme_and_the_docs_but_not_what_plan_ignore_hides', async () => {
@@ -69,8 +69,8 @@ describe('the outline docs map', () => {
         await writeFile(join(dir, ...path.split('/')), text, 'utf8')
       }
       const map = await renderOutlineMap(dir, ['docs/api/**'])
-      expect(map).toContain('### ReadMe.md\nWhat it is.')
-      expect(map).toContain('### docs/intent/orders.md')
+      expect(map).toMatch(/### ReadMe\.md \(\d+ lines?\)\nWhat it is\./)
+      expect(map).toContain('### docs/intent/orders.md (')
       expect(map).not.toContain('generated')
     } finally {
       await rm(dir, { recursive: true, force: true })

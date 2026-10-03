@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { tasksPath, writeBoard } from '../src/agent/phases/tasks-file'
+import { readBoard, tasksPath, writeBoard } from '../src/agent/phases/tasks-file'
 import type { Classification } from '../src/agent/phases/verification-attribution'
 import { FeatureBuild } from '../src/chat/feature-build'
 import { board, task } from './task-board-fixture'
@@ -95,5 +95,32 @@ describe('FeatureBuild.verify', () => {
     testsPass = true
     expect(await build().verify(FEATURE, false)).toBe(true)
     expect(events).toEqual([`starting ${FEATURE}`, `passed ${FEATURE}`])
+  })
+})
+
+describe('FeatureBuild.startImplementing', () => {
+  const stuck = () =>
+    writeBoard(
+      tasksPath(dir, FEATURE),
+      board(task('Cancel', { state: 'tested', files: ['src/order.ts'] }), task('Refund', { state: 'blocked', blockedReason: 'no e2e setup' })),
+    )
+
+  it('a_task_that_just_blocked_is_not_picked_up_again_by_the_build_itself', async () => {
+    await stuck()
+    const plan = await sessions.create(profile, 'plan', FEATURE)
+    await sessions.create(profile, 'implement', FEATURE, { parentId: plan.id, task: 'Refund' })
+    await build().startImplementing(plan)
+    expect(sessions.sent).toEqual([])
+  })
+
+  it('the_person_asking_again_hands_a_blocked_task_back_to_its_run_with_the_reason', async () => {
+    await stuck()
+    const plan = await sessions.create(profile, 'plan', FEATURE)
+    const run = await sessions.create(profile, 'implement', FEATURE, { parentId: plan.id, task: 'Refund' })
+    await build().startImplementing(plan, true)
+    expect(sessions.sent.map((s) => s.id)).toEqual([run.id])
+    expect(sessions.sent[0]!.text).toContain('no e2e setup')
+    const refund = (await readBoard(tasksPath(dir, FEATURE)))!.tasks.find((t) => t.name === 'Refund')!
+    expect(refund.state).toBe('in_progress')
   })
 })

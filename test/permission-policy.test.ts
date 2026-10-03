@@ -397,6 +397,24 @@ describe('the Allow writes switch', () => {
     expect(await use(p, 'Bash', { command: 'echo hi > f' })).toBeUndefined()
   })
 
+  it('a_write_to_a_file_that_decides_what_runs_unasked_is_always_asked', async () => {
+    const p = switched(() => true, { allow: ['Edit', 'Write', 'Bash(cp:*)'] })
+    for (const file of ['package.json', '.vscode/settings.json', '.mcp.json', 'repo.code-workspace']) {
+      expect(await use(p, 'Edit', { file_path: file }), file).toBeUndefined()
+    }
+    expect(await use(p, 'RunScript', { files: ['src/a.ts', 'package.json'] })).toBeUndefined()
+    expect(await use(p, 'Move', { source: 'package.json', destination: 'old.json' })).toBeUndefined()
+    expect(await use(p, 'Bash', { command: 'cp template.json package.json' })).toBeUndefined()
+    // Only the root package.json's scripts run unasked, so a nested one is an ordinary file.
+    expect(await use(p, 'Edit', { file_path: 'frontend/package.json' })).toEqual({ allow: true })
+    expect(await use(p, 'Edit', { file_path: 'src/a.ts' })).toEqual({ allow: true })
+  })
+
+  it('a_deny_rule_still_blocks_a_write_to_a_trust_file', async () => {
+    const p = switched(() => true, { deny: ['Edit(package.json)'] })
+    expect(await use(p, 'Edit', { file_path: 'package.json' })).toMatchObject({ deny: expect.stringContaining('Edit(package.json)') })
+  })
+
   it('the_changes_a_script_staged_pass_under_the_switch_like_any_other_write', async () => {
     let on = false
     const p = switched(() => on)

@@ -36,7 +36,7 @@ export class ProjectTab extends HTMLElement {
     verify.append(
       el('h3', '', 'Verification'),
       rules,
-      note('Every rule whose match covers a task’s file runs, once per project; {project} is the nearest file matching the project glob, {projectDir} its folder, {file} the file itself. The implementer is told these commands and narrows them while it works, so it may run them without a prompt.'),
+      note('Every rule whose match covers a task’s file runs its test command, once per project; {project} is the nearest file matching the project glob, {projectDir} its folder, {file} the file itself. The implementer is told the test and build commands and narrows them while it works, so it may run them without a prompt. The test run never runs the build command.'),
       this.number('Failure budget', 'verifyFailureBudget', snapshot.verifyFailureBudget, disabled, 'Consecutive failed test runs handed back to the implementer before the feature waits for you.'),
     )
 
@@ -99,12 +99,12 @@ export class ProjectTab extends HTMLElement {
   }
 }
 
-/** The verify rules as rows: what files, the project file to find, the command to run. */
+/** The verify rules as rows: what files, the project file to find, the test command to run, the build command the implementer runs. */
 class VerifyRules extends HTMLElement {
   update(rules: VerifyRule[], disabled: boolean): void {
     this.replaceChildren()
     const head = el('div', 'row head')
-    head.append(el('span', '', 'Files'), el('span', '', 'Project file'), el('span', '', 'Command'), el('span', ''))
+    head.append(el('span', '', 'Files'), el('span', '', 'Project file'), el('span', '', 'Test command'), el('span', '', 'Build command'), el('span', ''))
     this.append(head)
     for (const rule of rules) this.append(this.row(rule, disabled))
     const add = button('Add rule', () => {
@@ -122,7 +122,8 @@ class VerifyRules extends HTMLElement {
     const match = textInput('match', rule.match, { placeholder: 'src/**/*.ts', disabled })
     const project = textInput('project', rule.project ?? '', { placeholder: 'package.json', disabled })
     const command = textInput('command', rule.command, { placeholder: 'npm test', disabled })
-    for (const input of [match, project, command]) input.addEventListener('change', () => this.report())
+    const build = textInput('build', rule.build ?? '', { placeholder: 'npx tsc --noEmit -p "{projectDir}"', disabled })
+    for (const input of [match, project, command, build]) input.addEventListener('change', () => this.report())
     const remove = button('×', () => {
       row.remove()
       this.report()
@@ -130,14 +131,19 @@ class VerifyRules extends HTMLElement {
     remove.className = 'remove'
     remove.title = 'Remove'
     remove.disabled = disabled
-    row.append(match, project, command, remove)
+    row.append(match, project, command, build, remove)
     return row
   }
 
   private report(): void {
     const rules = [...this.querySelectorAll<HTMLElement>('.row:not(.head)')].flatMap((row) => {
       const value = (name: string) => row.querySelector<HTMLInputElement>(`input[name=${name}]`)?.value.trim() ?? ''
-      const rule: VerifyRule = { match: value('match'), command: value('command'), ...(value('project') ? { project: value('project') } : {}) }
+      const rule: VerifyRule = {
+        match: value('match'),
+        command: value('command'),
+        ...(value('project') ? { project: value('project') } : {}),
+        ...(value('build') ? { build: value('build') } : {}),
+      }
       return rule.match && rule.command ? [rule] : []
     })
     this.dispatchEvent(new SettingSavedEvent('verify', rules))

@@ -5,11 +5,11 @@ import { underWay, type SessionStatus } from '../agent/session/session-status'
 import { specPath } from '../agent/phases/blind-plan'
 import { decisionsPath, readDecisions } from '../agent/phases/decisions'
 import { contextPath, readScenarioContext } from '../agent/phases/scenario-context'
-import { TASK_CARRY_ON, fixKickoff, fixRetry, implementationStarts, taskKickoff, taskSettled } from '../agent/phases/implement'
+import { TASK_CARRY_ON, fixKickoff, fixRetry, implementationStarts, taskKickoff, taskRetry, taskSettled } from '../agent/phases/implement'
 import { tasksStale } from '../agent/phases/plan-stage'
 import { readSpecState } from '../agent/phases/spec-file'
 import { parseSpec } from '../agent/phases/spec-model'
-import { changeBoard, deriveBoard, nextTask, readBoard, readTasks, recordVerification, sameName, tasksPath, updateTask, writeBoard } from '../agent/phases/tasks-file'
+import { blockedTask, changeBoard, deriveBoard, nextTask, readBoard, readTasks, recordVerification, sameName, tasksPath, updateTask, writeBoard } from '../agent/phases/tasks-file'
 import {
   countsAgainstBudget,
   describeCommand,
@@ -184,20 +184,30 @@ export class FeatureBuild {
    * started on the board's hand-off rather than on a conversation grown
    * through every task before it; the run that stopped on that task picks it
    * up again instead. With no task left the board goes to the test sweep.
+   *
+   * A blocked task is skipped while the build moves on by itself, or it would
+   * be picked up again the moment it blocked. `handBack` is the person asking
+   * for the build: once nothing open is left, a blocked task goes back to an
+   * implementer, told what blocked it.
    */
-  async startImplementing(plan: SessionRecord): Promise<void> {
+  async startImplementing(plan: SessionRecord, handBack = false): Promise<void> {
     const { workspaceRoot, sessions, allowWrites } = this.deps
     const feature = plan.feature!
     const path = tasksPath(workspaceRoot, feature)
     const board = await readBoard(path)
-    const task = board ? nextTask(board) : undefined
+    const task = board ? (nextTask(board) ?? (handBack ? blockedTask(board) : undefined)) : undefined
     if (!board || !task) return this.followBoard(feature)
+    const blockedOn = task.state === 'blocked' ? task.blockedReason : undefined
     const previous = sessions.list().find((r) => r.mode === 'implement' && r.feature === feature && r.task !== undefined && sameName(r.task, task.name))
     if (previous) {
       if (this.deps.statusOf(previous.id) === 'implementing') return
+      if (blockedOn !== undefined) {
+        await changeBoard(path, (b) => updateTask(b, task.name, { state: 'in_progress' }))
+        await this.deps.refresh.sendState()
+      }
       // The switch does not outlive the window, and the approval that turned it on still stands.
       allowWrites.setEnabled(previous.id, true)
-      await sessions.send(previous.id, TASK_CARRY_ON, `Carrying on with ${task.name}`)
+      await sessions.send(previous.id, blockedOn !== undefined ? taskRetry(blockedOn) : TASK_CARRY_ON, `Carrying on with ${task.name}`)
       return
     }
     const spec = await readSpecState(specPath(workspaceRoot, feature))
@@ -209,7 +219,8 @@ export class FeatureBuild {
     allowWrites.setEnabled(run.id, true)
     await this.deps.refresh.sendState()
     const decisions = await readDecisions(decisionsPath(workspaceRoot, feature))
-    await sessions.send(run.id, taskKickoff(started, task.name, parseSpec(spec.body), decisions), `Started ${task.name}`)
+    const kickoff = taskKickoff(started, task.name, parseSpec(spec.body), decisions)
+    await sessions.send(run.id, blockedOn !== undefined ? `${kickoff}\n\n${taskRetry(blockedOn)}` : kickoff, `Started ${task.name}`)
   }
 
   /**

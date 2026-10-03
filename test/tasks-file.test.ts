@@ -9,6 +9,7 @@ import {
   deliveredBy,
   deriveBoard,
   nextTask,
+  blockedTask,
   parseBoard,
   provenBy,
   readBoard,
@@ -179,6 +180,12 @@ describe('the next task to build', () => {
     )
     expect(nextTask(b)?.name).toBe('D')
     expect(nextTask(board(task('A', { state: 'tested' })))).toBeUndefined()
+  })
+
+  it('a_blocked_task_is_the_first_live_one_that_is_blocked', () => {
+    const b = board(task('A', { state: 'blocked', blockedReason: 'gone', removed: true }), task('B', { state: 'tested' }), task('C', { state: 'blocked', blockedReason: 'no db' }))
+    expect(blockedTask(b)?.name).toBe('C')
+    expect(blockedTask(board(task('A', { state: 'tested' })))).toBeUndefined()
   })
 
   it('a_board_written_before_the_hand_off_existed_reads_with_none', () => {

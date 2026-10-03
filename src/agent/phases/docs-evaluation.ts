@@ -4,6 +4,7 @@ import { DOC_READING } from '../openai-session/tools/markdown/outline-gate'
 import { EDIT_WRITING } from '../openai-session/tools/edit'
 import { DOCS_DIR, SPECS_DIR, README_GLOB, SPECS_GLOB } from './blind-plan'
 import type { Scope } from './scope-guard'
+import { SPEC_SEARCH_TOOL } from './spec-search'
 
 /**
  * The docs judged as a planner's way in. A blind planner has the docs and
@@ -22,8 +23,8 @@ export function docsEvaluationScope(ignored: string[] = []): Scope {
     readable: [`${DOCS_DIR}/**`, README_GLOB, SPECS_GLOB],
     // Nothing is the evaluation's deliverable: the findings are said in chat.
     writable: [],
-    // The docs are the user's. Each change is one confirmed write, asked for by them.
-    askable: [`${DOCS_DIR}/**`],
+    // The docs are the user's, the README among them. Each change is one confirmed write, asked for by them.
+    askable: [`${DOCS_DIR}/**`, README_GLOB],
     ignored,
   }
 }
@@ -32,7 +33,7 @@ export function docsEvaluationScope(ignored: string[] = []): Scope {
  * Write and Edit are here for the changes the user asks for, not for the
  * evaluation itself: the scope leaves both to the permission prompt.
  */
-export const DOCS_EVALUATION_TOOLS = ['Read', 'Glob', MARKDOWN_SEARCH_TOOL, 'Write', 'Edit', 'MultiEdit', ASK_USER_TOOL]
+export const DOCS_EVALUATION_TOOLS = ['Read', 'Glob', MARKDOWN_SEARCH_TOOL, SPEC_SEARCH_TOOL, 'Write', 'Edit', 'MultiEdit', ASK_USER_TOOL]
 
 /**
  * Ends the reply that presents the findings. It hands the session to the
@@ -60,7 +61,7 @@ Why this matters: a feature here is planned blind. The planner reads \`${DOCS_DI
 
 You judge that arrangement. Not the prose, not whether the docs are right, not whether they are complete: they are meant to be to the point, not complete. Only what a planner cannot find, or finds in a place it cannot point at.
 
-What you may read: \`${DOCS_DIR}/**\`, the README, and every spec under \`${SPECS_GLOB}\`. The docs map above already gives you every doc and every section, so read a doc only when the map does not tell you enough. ${DOC_READING} Nothing else exists for you; do not try.
+What you may read: \`${DOCS_DIR}/**\`, the README, and every spec under \`${SPECS_GLOB}\`. The docs map in this prompt gives you every doc with its length and every section with its line range, so read a section only when the map does not tell you enough. ${DOC_READING} Nothing else exists for you; do not try.
 
 What counts as a finding:
 - a doc long enough that answering one question means reading all of it, where the sections would stand on their own
@@ -70,7 +71,7 @@ What counts as a finding:
 - a term the docs lean on but define nowhere, or define in passing under a heading about something else, so no rule can cite its definition
 - a passage a rule would want to cite that sits under no heading of its own
 
-**A heading an approved spec already cites is load-bearing.** Renaming or moving it breaks that citation, and nothing in this product would report it: no build, no test, no view. Before you propose a change to a heading, look for it in the specs. If a spec cites it, say so on the same line and name every citation that would have to follow, so the user is choosing with that in front of them.
+**A heading an approved spec already cites is load-bearing.** Renaming or moving it breaks that citation, and nothing in this product would report it: no build, no test, no view. Before you propose a change to a heading, search the specs for it with ${SPEC_SEARCH_TOOL}: a rule that cites it comes back with the citation. If a spec cites it, say so on the same line and name every citation that would have to follow, so the user is choosing with that in front of them.
 
 Say it in chat, one line per finding: the section as \`path#Heading\` (or the doc, when it is the whole file), what it costs a planner today, and the change in one sentence. Strongest first: what saves the most reading, or fixes the most citations. A finding earns its place only if a planner is measurably better off. If the docs already navigate well, say that in one line and stop; an empty list is a good result, not a failure.
 

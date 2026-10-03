@@ -114,6 +114,34 @@ export function resolveStep(profile: Profile, providers: Provider[], step: Step,
   }
 }
 
+/**
+ * A model on offer in the chat: what a session switched to it would run on,
+ * and the effort levels it takes. Empty levels mean the model is not asked
+ * for an effort, so there is nothing to offer.
+ */
+export type ModelOffer = { profile: ModelProfile; efforts: readonly Effort[] }
+
+/** Every model the providers serve, as the chat offers them. */
+export function offeredModels(providers: Provider[]): ModelOffer[] {
+  return providers.flatMap((provider) => provider.models.map((model) => ({ profile: providerModel(provider, model), efforts: effortLevels(provider, model) })))
+}
+
+/**
+ * What a session on `current` runs on once it switches to `offer`: the effort
+ * it was on stays picked, brought down to the highest level the new model
+ * takes, and a model that takes none leaves it at its own default.
+ */
+export function switchedTo(current: ModelProfile, offer: ModelOffer): ModelProfile {
+  return atEffort(offer.profile, current.effort && fitEffort(current.effort, 0, offer.efforts))
+}
+
+/** The same profile at another effort, or at none: the model's own default, as a profile that never named one. */
+export function atEffort(profile: ModelProfile, effort: Effort | undefined): ModelProfile {
+  const next = { ...profile }
+  delete next.effort
+  return effort ? { ...next, effort } : next
+}
+
 /** A model of a provider as the chat picker offers it, and as a resolved profile for a session to run on. */
 export function providerModel(provider: Provider, model: string): ModelProfile {
   return {

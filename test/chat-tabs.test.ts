@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest'
-import type { PlanState, RunControls, RunSection, ToWebview } from '../src/chat/protocol'
+import type { ModelOption, PlanState, RunControls, RunSection, ToWebview } from '../src/chat/protocol'
 import type { SessionEvent } from '../src/agent/session/code-session'
+import type { Effort } from '../src/agent/session/model-profile'
 
 const sent: unknown[] = []
 ;(globalThis as Record<string, unknown>).acquireVsCodeApi = () => ({ postMessage: (m: unknown) => sent.push(m), setState: () => {} })
@@ -56,11 +57,12 @@ const state = (runs: RunControls[] = [planRun()]): Extract<ToWebview, { type: 's
   models: [],
 })
 
-function app(runs: RunSection[] = [{ ...planRun(), events: [] }]) {
+/** `runs` carry a section's events and the controls the composer takes from the run it talks to. */
+function app(runs: (RunSection & Partial<RunControls>)[] = [{ ...planRun(), events: [] }]) {
   const node = new ChatApp()
   document.body.appendChild(node)
   send(state(runs.map(({ events: _events, ...run }) => run as RunControls)))
-  send({ type: 'transcript', sessionId: SESSION, runs })
+  send({ type: 'transcript', sessionId: SESSION, runs: runs.map(({ effort: _effort, ...run }) => run) })
   return node
 }
 
@@ -195,19 +197,31 @@ function posted(sent: unknown[], type: string): Record<string, unknown> | undefi
 describe("the composer's model switch follows the session it belongs to", () => {
   const composerOf = (node: HTMLElement) => node.querySelector('chat-composer')!
 
-  it('B9_a_chat_sessions_composer_offers_every_registered_model_switchable_at_any_point_independent_of_any_features_phase_choices', () => {
+  /** A tab showing one chat session, on `Careful`, with the models the host offers it. */
+  function chatApp(models: ModelOption[], effort?: Effort): HTMLElement {
     const node = new ChatApp()
     document.body.appendChild(node)
-    const { plan: _plan, ...rest } = state([{ sessionId: SESSION, mode: 'chat', title: 'Untitled', profileName: 'Careful', live: false, settled: false }])
+    const run: RunControls = { sessionId: SESSION, mode: 'chat', title: 'Untitled', profileName: 'Careful', live: false, settled: false }
+    const { plan: _plan, ...rest } = state([run])
     send({
       ...rest,
-      tab: { id: SESSION, title: 'Untitled', mode: 'chat', access: 'scoped', profileName: 'Careful', status: 'idle' },
-      models: [
-        { name: 'Careful', engine: 'claude-sdk', model: 'opus' },
-        { name: 'Fast', engine: 'claude-sdk', model: 'sonnet' },
-      ],
+      tab: { id: SESSION, title: 'Untitled', mode: 'chat', access: 'scoped', profileName: 'Careful', status: 'idle', ...(effort ? { effort } : {}) },
+      models,
     })
     send({ type: 'transcript', sessionId: SESSION, runs: [] })
+    return node
+  }
+
+  const THINKERS: ModelOption[] = [
+    { name: 'Careful', efforts: ['low', 'medium', 'high'] },
+    { name: 'Fast', efforts: ['low', 'medium', 'high'] },
+  ]
+
+  it('B9_a_chat_sessions_composer_offers_every_registered_model_switchable_at_any_point_independent_of_any_features_phase_choices', () => {
+    const node = chatApp([
+      { name: 'Careful', efforts: [] },
+      { name: 'Fast', efforts: [] },
+    ])
 
     const select = composerOf(node).querySelector<HTMLSelectElement>('select[name=model]')
     expect(select).not.toBeNull()
@@ -226,6 +240,49 @@ describe("the composer's model switch follows the session it belongs to", () => 
     const composer = composerOf(node)
     expect(composer.querySelector('select[name=model]')).toBeNull()
     expect(composer.querySelector('.model-current')?.textContent).toBe('Claude')
+    node.remove()
+  })
+
+  it('B14_the_effort_levels_the_chosen_model_takes_are_offered_and_a_pick_is_sent_as_the_sessions_effort', () => {
+    const node = chatApp(THINKERS)
+    sent.length = 0
+
+    const select = composerOf(node).querySelector<HTMLSelectElement>('select[name=effort]')!
+    expect([...select.options].map((o) => o.value)).toEqual(['', 'low', 'medium', 'high'])
+
+    select.value = 'high'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+
+    expect(posted(sent, 'set_session_effort')).toEqual({ type: 'set_session_effort', effort: 'high' })
+    node.remove()
+  })
+
+  it('B14_a_model_whose_effort_levels_are_not_known_is_offered_no_effort_switch', () => {
+    const node = chatApp([{ name: 'Careful', efforts: [] }])
+
+    expect(composerOf(node).querySelector('select[name=effort]')).toBeNull()
+    node.remove()
+  })
+
+  it('B15_the_switch_rests_on_the_models_own_default_until_a_level_is_picked_and_going_back_to_it_sends_no_level', () => {
+    const node = chatApp(THINKERS, 'high')
+    sent.length = 0
+    const select = composerOf(node).querySelector<HTMLSelectElement>('select[name=effort]')!
+    expect(select.value).toBe('high')
+
+    select.value = ''
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+
+    expect(posted(sent, 'set_session_effort')).toEqual({ type: 'set_session_effort' })
+    node.remove()
+  })
+
+  it('E3_a_plan_phase_shows_the_effort_its_profile_sets_as_text_beside_the_profile_name', () => {
+    const node = app([{ ...planRun(), effort: 'high', events: [] }])
+
+    const composer = composerOf(node)
+    expect(composer.querySelector('select[name=effort]')).toBeNull()
+    expect(composer.querySelector('.effort-current')?.textContent?.trim()).toBe('high effort')
     node.remove()
   })
 })

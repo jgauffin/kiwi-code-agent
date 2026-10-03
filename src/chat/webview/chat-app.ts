@@ -1,4 +1,4 @@
-import type { PlanState, RunControls, SessionTab, ToWebview } from '../protocol'
+import type { ModelOption, PlanState, RunControls, SessionTab, ToWebview } from '../protocol'
 import type { SessionEvent } from '../../agent/session/code-session'
 import { PHASE_LABEL, phaseOfRun, phaseOfStep, recipient, refusal, type ChatPhase } from '../phase-runs'
 import { onMessage, post, rememberTab } from './vscode-api'
@@ -36,6 +36,7 @@ import {
   ReviewActionEvent,
   ReviewSubmittedEvent,
   RulingsSentEvent,
+  SessionEffortChangedEvent,
   SessionModelChangedEvent,
   SessionSelectedEvent,
   SpecApprovedEvent,
@@ -73,7 +74,7 @@ export class ChatApp extends HTMLElement {
   /** The session the view shows, absent while it shows the new-session screen. */
   private tabId: string | undefined
   private tab: SessionTab | undefined
-  private models: string[] = []
+  private models: ModelOption[] = []
   private creating = false
   private plan: PlanState | undefined
   /** Every run under the tab as the host last described it. */
@@ -148,6 +149,7 @@ export class ChatApp extends HTMLElement {
     })
     this.addEventListener(AllowWritesToggledEvent.type, (e) => this.toTarget((sessionId) => post({ type: 'set_allow_writes', sessionId, enabled: e.enabled })))
     this.addEventListener(SessionModelChangedEvent.type, (e) => post({ type: 'set_session_model', name: e.name }))
+    this.addEventListener(SessionEffortChangedEvent.type, (e) => post({ type: 'set_session_effort', ...(e.effort ? { effort: e.effort } : {}) }))
     this.addEventListener(PlanApprovedEvent.type, () => post({ type: 'approve_plan' }))
     this.addEventListener(McpReconnectRequestedEvent.type, (e) => this.toTarget((sessionId) => post({ type: 'reconnect_mcp', sessionId, server: e.server })))
     this.addEventListener(SessionSelectedEvent.type, (e) => post({ type: 'switch_session', sessionId: e.sessionId }))
@@ -180,7 +182,7 @@ export class ChatApp extends HTMLElement {
         if ((tab === undefined) !== this.creating) this.showCreating(tab === undefined)
         this.newSession.update(message.profiles, { plans: message.plans, chats: message.chats, unfiled: message.unfiled })
         this.tab = tab
-        this.models = message.models.map((m) => m.name)
+        this.models = message.models
         this.runs = message.runs
         this.plan = message.plan
         this.agentsMd.show(message.agentsMd)
@@ -266,9 +268,14 @@ export class ChatApp extends HTMLElement {
       // profile its phase runs on with no switch here — that lives on the plan bar, one per phase (E2).
       model:
         tab?.mode === 'chat' || tab?.access === 'full'
-          ? { current: tab.profileName, options: this.models }
+          ? {
+              current: tab.profileName,
+              options: this.models.map((m) => m.name),
+              efforts: this.models.find((m) => m.name === tab.profileName)?.efforts ?? [],
+              ...(tab.effort ? { effort: tab.effort } : {}),
+            }
           : target && this.plan
-            ? { current: target.profileName }
+            ? { current: target.profileName, ...(target.effort ? { effort: target.effort } : {}) }
             : undefined,
       // Only a code plan waits on an approval: the docs evaluation is granted full access once it has said its findings.
       approvePlan: tab?.mode === 'code-plan' && tab.access === 'scoped',

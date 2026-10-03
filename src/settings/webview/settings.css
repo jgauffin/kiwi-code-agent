@@ -166,11 +166,11 @@ settings-app {
   }
 
   & verify-rules {
-    max-width: 48rem;
+    max-width: 64rem;
 
     & .row {
       display: grid;
-      grid-template-columns: 1fr 1fr 1.5fr auto;
+      grid-template-columns: 1fr 1fr 1.5fr 1.5fr auto;
 
       &.head {
         opacity: 0.7;

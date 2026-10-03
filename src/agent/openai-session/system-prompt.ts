@@ -5,7 +5,7 @@ import { readOptional } from '../workspace-files'
 import { DOC_READING } from './tools/markdown/outline-gate'
 import { CODE_READING } from '../code-outline/code-outline-gate'
 import { CHAT_DECISIONS } from '../phases/unfiled-decisions'
-import { SPEC_READING } from '../phases/blind-plan'
+import { SPEC_AMENDING, SPEC_READING } from '../phases/blind-plan'
 import { SCRIPT_WRITING } from '../script/script-gate'
 import { EDIT_WRITING } from './tools/edit'
 import { memoryWritingInstructions } from '../memory/memories'
@@ -14,7 +14,9 @@ import { projectScriptsInstruction } from '../permissions/package-scripts'
 
 /**
  * System prompt for the own-loop engine. Short on purpose: judgment rules
- * belong here, checkable rules belong in the build. The user's and the
+ * belong here, checkable rules belong in the build. The core lines stand in
+ * for what Claude Code's preset says on the other engine; the fragments after
+ * them are the text both engines share. The user's and the
  * workspace's instruction files (CLAUDE.md, AGENTS.md) and any per-profile
  * prompt file are appended so the same instructions apply to every engine.
  * The person's own memories ride along inside their CLAUDE.md, read below as
@@ -23,7 +25,8 @@ import { projectScriptsInstruction } from '../permissions/package-scripts'
 export async function buildSystemPrompt(cwd: string, profilePromptFile?: string, home = homedir()): Promise<string> {
   const parts = [
     'You are a coding agent.',
-    'Work through the tools: Read before Edit or Write, Grep and Glob to find things, JsonSchema and JsonQuery to look inside JSON files, Bash for builds, tests and git.',
+    // Which tool finds what is the fragments' to say; this line keeps only what none of them does.
+    'Work through the tools: Read a file before you Edit or Write it, and use Bash for builds, tests and git.',
     DOC_READING,
     CODE_READING,
     SCRIPT_WRITING,
@@ -33,6 +36,7 @@ export async function buildSystemPrompt(cwd: string, profilePromptFile?: string,
     'When a tool reports an error, read it and adjust; do not repeat the same call.',
     'When the task is done, say what changed in a few sentences. When something is unclear, ask instead of guessing.',
     SPEC_READING,
+    SPEC_AMENDING,
     CHAT_DECISIONS,
     memoryWritingInstructions(cwd, home),
     memorySection(await readMemorySources(cwd, home)) ?? '',

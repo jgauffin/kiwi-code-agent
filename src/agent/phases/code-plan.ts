@@ -5,9 +5,11 @@ import { CODE_OUTLINE_TOOL } from '../code-outline/code-outline-tool'
 import { CODE_READING } from '../code-outline/code-outline-gate'
 import { CODE_SEARCH_TOOL } from '../code-outline/code-search'
 import { DOCS_DIR, SPEC_READING } from './blind-plan'
+import { SPEC_SEARCH_TOOL } from './spec-search'
+import { FUTURE_FILE, UNFILED_FILE } from './unfiled-decisions'
 
 /** Read-only: the plan is agreed here and built in the chat the session continues into. */
-export const CODE_PLAN_TOOLS = ['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', MARKDOWN_SEARCH_TOOL, CODE_OUTLINE_TOOL, CODE_SEARCH_TOOL, 'Skill', ASK_USER_TOOL]
+export const CODE_PLAN_TOOLS = ['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', MARKDOWN_SEARCH_TOOL, SPEC_SEARCH_TOOL, CODE_OUTLINE_TOOL, CODE_SEARCH_TOOL, 'Skill', ASK_USER_TOOL]
 
 /**
  * The plan for work that is shaped by what the code already has (a UI on its
@@ -25,12 +27,12 @@ ${SPEC_READING}
 
 Then, the code. Find what the change builds on: the frameworks and libraries installed, the components, patterns and utilities to reuse, the tests that cover the area. ${CODE_READING} ${DOC_READING}
 
-Then, the plan, in chat: what changes and where, what is reused, what is new, and how it is verified. Short enough to scan, concrete enough to build from. Stop and let the developer steer; revise until they agree.
+Then, the plan, in chat: what changes and where, what is reused, what is new, and how it is verified. Short enough to scan, concrete enough to build from. Where the plan breaks a spec rule the developer agreed to break, it names the rule and gives its new text. What the developer decided along the way that reaches beyond this change goes in two lists at its end: how the product works, which the build records in \`${UNFILED_FILE}\` for the specs, and work decided for later, which the build records in \`${FUTURE_FILE}\`. Stop and let the developer steer; revise until they agree.
 
 When they agree, tell them to press Approve plan in chat: the conversation carries on there with the tools to build it.`
 }
 
-/** The first prompt of the chat a code plan continues into. */
+/** The first prompt of the chat a code plan continues into: what the plan settled is recorded before the build buries it. */
 export function codePlanBuildKickoff(): string {
-  return 'Implement the plan agreed above.'
+  return `Implement the plan agreed above. First amend the spec rules it changes and record the decisions it lists, the ones on how the product works in \`${UNFILED_FILE}\` and the work for later in \`${FUTURE_FILE}\`; then build.`
 }

@@ -31,6 +31,17 @@ describe('ScopeGuard for reconciling', () => {
     expect(await use('Bash', { command: 'ls' })).toMatchObject({ deny: expect.any(String) })
     expect(await use('Read', { file_path: '../secrets.txt' })).toMatchObject({ deny: expect.stringContaining('outside') })
   })
+
+  it('a_memory_note_the_index_names_opens_but_nothing_else_outside_does', async () => {
+    const memory = process.platform === 'win32' ? 'C:\\Users\\me\\.claude\\projects\\repo\\memory' : '/home/me/.claude/projects/repo/memory'
+    const noted = new ScopeGuard(cwd, reconcileScope('Order cancellation', memory))
+    const call = (toolName: string, input: unknown) => noted.preToolUse({ toolName, input, toolUseId: 't' })
+    expect(await call('Read', { file_path: `${memory}${process.platform === 'win32' ? '\\' : '/'}build-quirks.md` })).toBeUndefined()
+    expect(await call('Read', { file_path: '../secrets.txt' })).toMatchObject({ deny: expect.stringContaining('outside') })
+    // Read only: the folder is neither searched nor written.
+    expect(await call('Grep', { pattern: 'x', path: memory })).toMatchObject({ deny: expect.stringContaining('outside') })
+    expect(await call('Write', { file_path: `${memory}/new.md` })).toMatchObject({ deny: expect.stringContaining('outside') })
+  })
 })
 
 describe('reconcile prompt', () => {

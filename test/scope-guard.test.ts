@@ -97,6 +97,11 @@ describe('ScopeGuard for blind planning', () => {
     expect(await use('Read', { file_path: 'specs/unfiled-decisions.md' })).toBeUndefined()
     expect(await use('Edit', { file_path: 'specs/unfiled-decisions.md' })).toEqual({ allow: true })
   })
+
+  it('the_future_work_is_read_as_intent_and_work_decided_for_later_is_added_without_a_prompt', async () => {
+    expect(await use('Read', { file_path: 'specs/future-work.md' })).toBeUndefined()
+    expect(await use('Edit', { file_path: 'specs/future-work.md' })).toEqual({ allow: true })
+  })
 })
 
 describe('ScopeGuard for filing decisions', () => {
@@ -114,6 +119,7 @@ describe('ScopeGuard for filing decisions', () => {
 
   it('removing_a_filed_entry_needs_no_prompt_but_every_spec_or_doc_write_is_asked', async () => {
     expect(await file('Edit', { file_path: 'specs/unfiled-decisions.md' })).toEqual({ allow: true })
+    expect(await file('Edit', { file_path: 'specs/future-work.md' })).toEqual({ allow: true })
     expect(await file('Edit', { file_path: 'specs/tenants.spec.md' })).toBeUndefined()
     expect(await file('Write', { file_path: 'docs/intent/identity.md' })).toBeUndefined()
     expect(await file('Write', { file_path: '.kiwi/specs/tenants.tasks.json' })).toMatchObject({ deny: expect.any(String) })
@@ -144,7 +150,7 @@ describe('blind plan helpers', () => {
     expect(prompt).toContain('it never changes once written')
     expect(prompt).toContain('(was Old name)')
     expect(flowed(prompt)).toContain('Write nothing until the user says go')
-    expect(BLIND_PLAN_TOOLS).toEqual(['Read', 'Glob', 'MarkdownSearch', 'JsonSchema', 'JsonQuery', 'Write', 'Edit', 'MultiEdit', 'AskUser'])
+    expect(BLIND_PLAN_TOOLS).toEqual(['Read', 'Glob', 'MarkdownSearch', 'SpecSearch', 'JsonSchema', 'JsonQuery', 'Write', 'Edit', 'MultiEdit', 'AskUser'])
   })
 
   it('prompt_states_the_contract_scenarios_with_nested_edges_and_no_restating_sections', () => {
@@ -170,6 +176,7 @@ describe('blind plan helpers', () => {
   it('prompt_reads_the_unfiled_decisions_as_the_users_latest_word_and_records_what_reaches_beyond_the_feature', () => {
     const prompt = blindPlanPrompt('Order cancellation', cwd)
     expect(prompt).toContain('specs/unfiled-decisions.md')
+    expect(prompt).toContain('specs/future-work.md')
     expect(prompt).toContain(UNFILED_DECISIONS)
   })
 })

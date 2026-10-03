@@ -1,6 +1,7 @@
 import type { SessionMode } from '../../agent/session/session-manager'
 import type { QuestionOutcome } from '../../agent/session/user-question'
 import type { BundleScope } from '../../agent/instructions/bundles'
+import type { Effort } from '../../agent/session/model-profile'
 import type { AgentsMdAnswer, ReviewAction, UserPermissionDecision } from '../protocol'
 import type { Step, ViewTab } from './plan-step'
 
@@ -240,6 +241,14 @@ export class SessionModelChangedEvent extends Event {
   }
 }
 
+/** The composer's effort switch: how hard the model thinks from the session's next turn, or nothing for the model's own default. */
+export class SessionEffortChangedEvent extends Event {
+  static readonly type = 'session-effort-changed'
+  constructor(public readonly effort: Effort | undefined) {
+    super(SessionEffortChangedEvent.type, { bubbles: true })
+  }
+}
+
 /** The composer's "Approve plan", on a code plan only: the session goes on to build it with the full tool set. */
 export class PlanApprovedEvent extends Event {
   static readonly type = 'plan-approved'
@@ -321,6 +330,7 @@ declare global {
     [ChatTargetChangedEvent.type]: ChatTargetChangedEvent
     [AllowWritesToggledEvent.type]: AllowWritesToggledEvent
     [SessionModelChangedEvent.type]: SessionModelChangedEvent
+    [SessionEffortChangedEvent.type]: SessionEffortChangedEvent
     [PlanApprovedEvent.type]: PlanApprovedEvent
     [McpReconnectRequestedEvent.type]: McpReconnectRequestedEvent
     [DefaultProfileChangedEvent.type]: DefaultProfileChangedEvent

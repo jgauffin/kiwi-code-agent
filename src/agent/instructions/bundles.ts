@@ -176,29 +176,31 @@ export async function bundleSkillNames(root: string, source: string, name: strin
   return entries.filter((entry) => entry.bundle?.source === source && entry.bundle?.name === name).map((entry) => entry.name)
 }
 
+/** One folder's own files under a skill's directory, its own marker left out, walked into every folder beneath it; a folder gone by the time it is read carries none. */
+async function skillFilesUnder(dir: string, sub: string): Promise<BundleSkillFile[]> {
+  let entries
+  try {
+    entries = await readdir(join(dir, sub), { withFileTypes: true })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw error
+  }
+  const files: BundleSkillFile[] = []
+  for (const entry of entries) {
+    const relative = sub ? `${sub}/${entry.name}` : entry.name
+    if (entry.isDirectory()) {
+      files.push(...(await skillFilesUnder(dir, relative)))
+      continue
+    }
+    if (relative === BUNDLE_MARKER_FILE) continue
+    files.push({ path: relative, content: await readFile(join(dir, relative), 'utf8') })
+  }
+  return files
+}
+
 /** Every file a skill now has on disk, the bundle's own marker left out, read back to tell a hand edit from an untouched install before an update would replace it. */
 export async function readInstalledSkillFiles(root: string, skillName: string): Promise<BundleSkillFile[]> {
-  const dir = join(root, skillName)
-  const files: BundleSkillFile[] = []
-  async function walk(sub: string): Promise<void> {
-    let entries
-    try {
-      entries = await readdir(join(dir, sub), { withFileTypes: true })
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
-      throw error
-    }
-    for (const entry of entries) {
-      const relative = sub ? `${sub}/${entry.name}` : entry.name
-      if (entry.isDirectory()) {
-        await walk(relative)
-        continue
-      }
-      if (relative === BUNDLE_MARKER_FILE) continue
-      files.push({ path: relative, content: await readFile(join(dir, relative), 'utf8') })
-    }
-  }
-  await walk('')
+  const files = await skillFilesUnder(join(root, skillName), '')
   return files.sort((a, b) => a.path.localeCompare(b.path))
 }
 
@@ -262,14 +264,8 @@ export type WorkspaceSignals = { languages: ReadonlySet<string>; frameworks: Rea
 
 const CSPROJ_REFERENCE = /<PackageReference\s+Include="([^"]+)"/g
 
-/**
- * What the workspace holds: a language from the source files the repo map
- * already walks for, a framework from the root `package.json`'s dependencies
- * and every `.csproj`'s package references, named exactly as those files name
- * them so a bundle's target matches them by that same name.
- */
-export async function workspaceSignals(cwd: string): Promise<WorkspaceSignals> {
-  const { files } = await scanWorkspace(cwd)
+/** A language per source file extension the repo map's scan turned up, and every `.csproj` path among them for its package references to be read from next. */
+function languagesAndCsprojPaths(files: readonly { path: string }[]): { languages: Set<string>; csprojPaths: string[] } {
   const languages = new Set<string>()
   const csprojPaths: string[] = []
   for (const file of files) {
@@ -279,20 +275,44 @@ export async function workspaceSignals(cwd: string): Promise<WorkspaceSignals> {
     if (lower.endsWith('.js') || lower.endsWith('.jsx') || lower.endsWith('.mjs') || lower.endsWith('.cjs')) languages.add('javascript')
     if (lower.endsWith('.csproj')) csprojPaths.push(file.path)
   }
+  return { languages, csprojPaths }
+}
+
+/** The frameworks the root `package.json`'s dependencies name; empty once it has none or cannot be read. */
+async function frameworksFromPackageJson(cwd: string): Promise<Set<string>> {
   const frameworks = new Set<string>()
   const pkg = await readOptional(join(cwd, 'package.json'))
-  if (pkg) {
-    try {
-      const parsed = JSON.parse(pkg) as { dependencies?: Record<string, unknown>; devDependencies?: Record<string, unknown> }
-      for (const name of [...Object.keys(parsed.dependencies ?? {}), ...Object.keys(parsed.devDependencies ?? {})]) frameworks.add(name)
-    } catch {
-      // An unreadable manifest names no frameworks; it is still a workspace a bundle can be applied to by hand.
-    }
+  if (!pkg) return frameworks
+  try {
+    const parsed = JSON.parse(pkg) as { dependencies?: Record<string, unknown>; devDependencies?: Record<string, unknown> }
+    for (const name of [...Object.keys(parsed.dependencies ?? {}), ...Object.keys(parsed.devDependencies ?? {})]) frameworks.add(name)
+  } catch {
+    // An unreadable manifest names no frameworks; it is still a workspace a bundle can be applied to by hand.
   }
+  return frameworks
+}
+
+/** The frameworks every named `.csproj`'s package references name. */
+async function frameworksFromCsproj(cwd: string, csprojPaths: readonly string[]): Promise<Set<string>> {
+  const frameworks = new Set<string>()
   for (const path of csprojPaths) {
     const text = await readOptional(join(cwd, ...path.split('/')))
     for (const m of text?.matchAll(CSPROJ_REFERENCE) ?? []) frameworks.add(m[1]!)
   }
+  return frameworks
+}
+
+/**
+ * What the workspace holds: a language from the source files the repo map
+ * already walks for, a framework from the root `package.json`'s dependencies
+ * and every `.csproj`'s package references, named exactly as those files name
+ * them so a bundle's target matches them by that same name.
+ */
+export async function workspaceSignals(cwd: string): Promise<WorkspaceSignals> {
+  const { files } = await scanWorkspace(cwd)
+  const { languages, csprojPaths } = languagesAndCsprojPaths(files)
+  const frameworks = await frameworksFromPackageJson(cwd)
+  for (const name of await frameworksFromCsproj(cwd, csprojPaths)) frameworks.add(name)
   return { languages, frameworks }
 }
 

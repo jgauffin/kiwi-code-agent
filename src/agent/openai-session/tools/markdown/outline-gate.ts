@@ -6,9 +6,13 @@ import { formatOutline, isMarkdown, markdownLines } from './outline'
 /** A doc this short costs less to read whole than to take in two calls. */
 export const OUTLINE_THRESHOLD_LINES = 200
 
-/** Said in every prompt, so the ranged read is the model's first move rather than the gate's correction. */
+/**
+ * Said in every prompt that reads docs, so the ranged read is the model's first move rather than the
+ * gate's correction. Search is offered as the cheap way to find a doc, not a step before every read:
+ * a doc the model can already name is read directly. Specs are exempt from the gate, so they come back whole.
+ */
 export const DOC_READING =
-  "Find before you read docs: MarkdownSearch gives each match with the section it sits in, and Read of a long markdown file answers with its outline first; then Read only the section's line range. Read every doc or section you already know you need in one reply, not one per turn."
+  "MarkdownSearch is the cheap way to find which doc answers a question: it gives each match with the section it sits in and that section's line range, so you read the section rather than doc after doc. A doc you already know you need, Read directly: a long one answers with its outline first, then Read only the section's line range. Specs are read whole. Read every doc or section you already know you need in one reply, not one per turn."
 
 /**
  * Answers the first whole-file Read of a long markdown doc with its outline.

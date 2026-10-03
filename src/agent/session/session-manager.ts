@@ -107,7 +107,12 @@ export type SessionRecord = {
   /** Permission rules the person allowed for this session, in force beside the project's. Kept across engines and hosts. */
   allowed?: string[]
   createdAt: string
+  /** When the session was last sent a prompt; absent on one stored before this was kept. */
+  lastActiveAt?: string
 }
+
+/** When the session was last worked in: its last prompt, else its start. */
+export const lastActive = (record: SessionRecord): string => record.lastActiveAt ?? record.createdAt
 
 /** The mode a session behaves as now: one granted full access works like a chat. */
 export const actingMode = (record: SessionRecord): SessionMode => (record.access === 'full' ? 'chat' : record.mode)
@@ -330,14 +335,12 @@ export class SessionManager {
     if (record.title === 'New session') {
       const title = label ?? text
       record.title = title.length > 60 ? title.slice(0, 57) + '...' : title
-      await this.store.save(this.records)
     }
-    if (record.cutOff || record.settled) {
-      // A settled run sent work again (its task reopened) has a job once more.
-      delete record.cutOff
-      delete record.settled
-      await this.store.save(this.records)
-    }
+    // A settled run sent work again (its task reopened) has a job once more.
+    delete record.cutOff
+    delete record.settled
+    record.lastActiveAt = new Date().toISOString()
+    await this.store.save(this.records)
     // Echoed here rather than by the engine, and the start-up said out loud: bringing an
     // engine up can take a repo or docs map build, and the wait is the user's to see.
     await this.emit(record, { type: 'user_message', text, ...(label ? { label } : {}) })

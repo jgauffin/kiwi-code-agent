@@ -26,3 +26,11 @@ A chat session runs on one profile at a time and the user can change it mid-conv
 - **B11**: a chat session that switches profile carries on with the conversation it already has rather than starting over, and on a switch to a profile on a different engine it loses only what the previous engine alone held.
 - **B12**: a new chat session starts on the active-profile setting, and switching changes that session only — not the setting and not other sessions.
 - **B13**: the composer shows which profile the session is on, and the transcript records each switch where it happened, so a reader can tell which model produced which part of the conversation.
+
+## Switching effort in a chat session
+How hard the session thinks is set beside its model, and only where the levels are known. (docs/intent/agent.md#Engines)
+
+- **B14**: the composer offers the effort levels the session's current model takes, switchable the same way and under the same rule as the model (B9, B10); a model whose levels are not known is offered no effort at all.
+  - **E3**: a plan session's composer shows the effort its phase runs at as text beside the profile name and offers no switch there, as it does for the model (E2).
+- **B15**: the switch rests on the model's own default, sending no effort, until a level is picked; going back to the default sends none again.
+- **B16**: a model switch keeps the effort picked, brought down to the highest level the new model takes; a switch to a model that takes none leaves it to the model.

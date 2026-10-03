@@ -17,20 +17,21 @@ import {
 const DOCS_MAP = 'docs map'
 
 /**
- * The modes that start with the map: the blind planner, which has nothing but
- * the docs to work from, the docs evaluation, which judges how they are
- * arranged, the filing of decisions, which finds the section each one
- * belongs in, and the doc migration, whose first pass is that same outline,
- * section by section, before it judges any of them. The map is derived from
- * the docs alone, so a blind session reading it stays blind. A code plan gets
- * it too: it settles intent before it reads code, and the docs are where
- * intent is written down.
+ * The modes that start with the map: the ones that need to know what the docs
+ * hold before they know what to search for. The blind planner, which has
+ * nothing but the docs to work from and meets them in the request's words,
+ * not theirs; the docs evaluation, which judges how they are arranged; and the
+ * doc migration, whose first pass goes through every section. The map is
+ * derived from the docs alone, so a blind session reading it stays blind.
+ *
+ * A code plan and the filing of decisions start from a concrete request or
+ * entry, so they know what to look for: MarkdownSearch and SpecSearch find it,
+ * and the map would only be tokens in every request.
  *
  * The mode is taken as a plain string: this module is host-side and mechanical,
  * and reaches for nothing in the session layer.
  */
-export const wantsDocsMap = (mode: string): boolean =>
-  mode === 'plan' || mode === 'code-plan' || mode === 'docs' || mode === 'file-decisions' || mode === 'doc-migration'
+export const wantsDocsMap = (mode: string): boolean => mode === 'plan' || mode === 'docs' || mode === 'doc-migration'
 
 export type DocsMapSource = GeneratedSource
 export type DocsMapContext = GeneratedContext
@@ -75,15 +76,14 @@ export function docsMapSection(context: DocsMapContext, style: DocsMapStyle = 'd
     lines.push(
       '',
       style === 'described'
-        ? 'Every doc you may read, what it is for, and one line per section. Nothing in it comes from anywhere but the docs themselves.'
-        : 'Every doc you may read, its opening paragraph, and its sections with their line ranges, taken from the docs as they stand.',
+        ? 'Every doc you may read with its length in lines, what it is for, and one line per section with its line range. Nothing in it comes from anywhere but the docs themselves.'
+        : 'Every doc you may read with its length in lines, its opening paragraph, and its sections with their line ranges, taken from the docs as they stand.',
       '',
       context.summary.trim(),
       '',
-      'Use it to open the one doc that answers your question instead of reading the tree, and to cite a section as `path#Heading` with the heading spelled as the map spells it.',
-      style === 'described'
-        ? `The map is generated output under \`${DOCS_MAP_ROOT}/\`; it is not yours to read or write, and it says nothing the docs do not.`
-        : 'A range is the lines of that section: Read just those with offset and limit.',
+      'Use it to open the one section that answers your question instead of reading the tree, and to cite a section as `path#Heading` with the heading spelled as the map spells it. A range is the lines of that section: Read just those with offset and limit.',
+      'Specs are not in the map: SpecSearch finds their rules.',
+      ...(style === 'described' ? [`The map is generated output under \`${DOCS_MAP_ROOT}/\`; it is not yours to read or write, and it says nothing the docs do not.`] : []),
     )
   }
   return lines.join('\n')
