@@ -16,14 +16,24 @@ status: draft
 Orders can be cancelled.
 `
 
-type Delivery = { kind: 'open'; sessionId: string } | { kind: 'start'; feature: string; prompt: string; label: string }
+type Delivery =
+  | { kind: 'open'; sessionId: string }
+  | { kind: 'start'; feature: string; prompt: string; label: string }
+  | { kind: 'say'; sessionId: string; note: string }
 
-function courier(): PlanPickupCourier & { delivered: Delivery[] } {
+function courier(): PlanPickupCourier & { delivered: Delivery[]; owed: string[] } {
   const delivered: Delivery[] = []
+  const owed: string[] = []
   return {
     delivered,
+    owed,
     open: async (sessionId) => void delivered.push({ kind: 'open', sessionId }),
-    start: async (feature, prompt, label) => void delivered.push({ kind: 'start', feature, prompt, label }),
+    start: async (feature, prompt, label) => {
+      delivered.push({ kind: 'start', feature, prompt, label })
+      return 'started-1'
+    },
+    say: async (sessionId, note) => void delivered.push({ kind: 'say', sessionId, note }),
+    critiqueOwed: (feature) => void owed.push(feature),
   }
 }
 
@@ -64,6 +74,28 @@ describe('picking up a plan', () => {
     }
   })
 
+  it('a_draft_pickup_says_a_critique_is_owed_before_the_session_it_starts_says_anything', async () => {
+    const dir = await workspace({ 'order-cancellation.spec.md': spec })
+    try {
+      const post = courier()
+      await pickUpPlan({ courier: post, cwd: dir, feature: 'Order cancellation' })
+      expect(post.owed).toEqual(['Order cancellation'])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('a_settled_spec_is_resumed_with_no_critique_owed_since_there_is_nothing_left_to_steer', async () => {
+    const dir = await workspace({ 'order-cancellation.spec.md': spec.replace('status: draft', 'status: approved') })
+    try {
+      const post = courier()
+      await pickUpPlan({ courier: post, cwd: dir, feature: 'Order cancellation' })
+      expect(post.owed).toEqual([])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('a_pickup_never_approves_the_draft_or_touches_its_review_so_no_comment_is_spent_by_it', async () => {
     const dir = await workspace({ 'order-cancellation.spec.md': spec })
     try {
@@ -86,6 +118,44 @@ describe('picking up a plan', () => {
       // Authorship comes from the spec's own front matter, read fresh rather than assumed.
       expect(started.prompt).toContain('take it as complete and critique only what changed around it since')
       expect(started.prompt).toContain('Write nothing until the user says go')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('a_note_typed_before_the_pickup_is_said_in_the_session_that_already_owns_the_plan', async () => {
+    const dir = await workspace()
+    try {
+      const post = courier()
+      await pickUpPlan({ courier: post, cwd: dir, feature: 'Order cancellation', owner: { sessionId: 'owner-1' }, note: 'Drop the refund rule' })
+      expect(post.delivered).toEqual([
+        { kind: 'open', sessionId: 'owner-1' },
+        { kind: 'say', sessionId: 'owner-1', note: 'Drop the refund rule' },
+      ])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('a_note_typed_before_the_pickup_is_said_in_the_fresh_session_after_its_kickoff', async () => {
+    const dir = await workspace({ 'order-cancellation.spec.md': spec })
+    try {
+      const post = courier()
+      await pickUpPlan({ courier: post, cwd: dir, feature: 'Order cancellation', note: 'Drop the refund rule' })
+      // The kickoff stays the extension's own text; the note follows it as the person's own message, so the chat shows it in their words.
+      expect(post.delivered[0]).toMatchObject({ kind: 'start' })
+      expect(post.delivered[1]).toEqual({ kind: 'say', sessionId: 'started-1', note: 'Drop the refund rule' })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('no_note_typed_leaves_the_pickup_with_nothing_extra_to_say', async () => {
+    const dir = await workspace({ 'order-cancellation.spec.md': spec })
+    try {
+      const post = courier()
+      await pickUpPlan({ courier: post, cwd: dir, feature: 'Order cancellation' })
+      expect(post.delivered.filter((d) => d.kind === 'say')).toEqual([])
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

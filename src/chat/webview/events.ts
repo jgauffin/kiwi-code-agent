@@ -72,11 +72,25 @@ export class NewSessionRequestedEvent extends Event {
   }
 }
 
-/** The new-session screen's pick of a plan already on disk. */
+/** The new-session screen's pick of a plan already on disk, carrying whatever was typed on the card before picking it. */
 export class PlanResumeRequestedEvent extends Event {
   static readonly type = 'plan-resume-requested'
-  constructor(public readonly feature: string) {
+  constructor(
+    public readonly feature: string,
+    public readonly note?: string,
+  ) {
     super(PlanResumeRequestedEvent.type, { bubbles: true })
+  }
+}
+
+/** The new-session screen's Update spec: the feature picked and the change described, in the developer's own words. */
+export class UpdateSpecRequestedEvent extends Event {
+  static readonly type = 'update-spec-requested'
+  constructor(
+    public readonly feature: string,
+    public readonly description: string,
+  ) {
+    super(UpdateSpecRequestedEvent.type, { bubbles: true })
   }
 }
 
@@ -317,6 +331,7 @@ declare global {
     [QuestionAnsweredEvent.type]: QuestionAnsweredEvent
     [NewSessionRequestedEvent.type]: NewSessionRequestedEvent
     [PlanResumeRequestedEvent.type]: PlanResumeRequestedEvent
+    [UpdateSpecRequestedEvent.type]: UpdateSpecRequestedEvent
     [SessionSelectedEvent.type]: SessionSelectedEvent
     [SpecApprovedEvent.type]: SpecApprovedEvent
     [RulingsSentEvent.type]: RulingsSentEvent

@@ -11,6 +11,7 @@ import { EDIT_WRITING } from './tools/edit'
 import { memoryWritingInstructions } from '../memory/memories'
 import { memorySection, readMemorySources } from '../memory/session-context'
 import { projectScriptsInstruction } from '../permissions/package-scripts'
+import { PIPE_WRITING } from '../permissions/read-only-commands'
 
 /**
  * System prompt for the own-loop engine. Short on purpose: judgment rules
@@ -31,6 +32,7 @@ export async function buildSystemPrompt(cwd: string, profilePromptFile?: string,
     SCRIPT_WRITING,
     EDIT_WRITING,
     projectScriptsInstruction(cwd),
+    PIPE_WRITING,
     'Make the smallest change that does the job. Do not add abstractions, options or comments the task did not ask for.',
     'When a tool reports an error, read it and adjust; do not repeat the same call.',
     'When the task is done, say what changed in a few sentences. When something is unclear, ask instead of guessing.',

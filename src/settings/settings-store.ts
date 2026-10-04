@@ -7,6 +7,9 @@ import type { VerifyRule } from '../agent/phases/verification'
 import { DEFAULT_COMPACT_AT_TOKENS } from '../agent/session/compaction-point'
 import { migrateModelSettings, needsMigration, type LegacyProfile, type ModelSettings } from './model-settings'
 import type { EditableSettings, SettingKey, SettingsSnapshot, SettingsTarget } from './protocol'
+import { DEFAULT_SERVICE_URL } from '../remote-control/remote-link'
+import type { PairedPhone } from '../remote-control/pairing'
+import type { PairingCode } from '../remote-control/remote-control-service'
 
 /** The `kiwiAgent` configuration section, keys relative to it. */
 export type ConfigPort = {
@@ -36,6 +39,13 @@ export type ProfileDefaults = { names: string[]; active: string }
 export type MemoryPort = {
   list(): Promise<{ project: MemoryEntry[]; user: MemoryEntry[] }>
   forget(scope: MemoryScope, title: string): Promise<void>
+}
+
+/** The paired phones and the pairing in progress, closed over this workspace's own link to the forwarding service. */
+export type RemoteControlPort = {
+  phones(): PairedPhone[]
+  requestPairingCode(): Promise<PairingCode>
+  unpair(phoneId: string): void
 }
 
 /** Bundles, read off the catalog and off the `AGENTS.md` files they are applied into, closed over this workspace. */
@@ -79,6 +89,9 @@ const TARGETS: Record<SettingKey | 'profiles' | 'providers', SettingsTarget> = {
   'cleanup.ignore': 'workspace',
   planIgnore: 'workspace',
   cutCoveredDocs: 'workspace',
+  'remoteControl.enabled': 'workspace',
+  'remoteControl.serviceUrl': 'workspace',
+  'remoteControl.pushByDefault': 'workspace',
 }
 
 /**
@@ -119,6 +132,7 @@ export class SettingsStore {
     private readonly secrets: SecretPort,
     private readonly memory: MemoryPort,
     private readonly bundles: BundlePort,
+    private readonly remoteControl: RemoteControlPort,
   ) {}
 
   async snapshot(): Promise<SettingsSnapshot> {
@@ -145,6 +159,12 @@ export class SettingsStore {
       traceEngine: this.config.get('traceEngine', false),
       compactAtTokens: this.config.get('compactAtTokens', DEFAULT_COMPACT_AT_TOKENS),
       hasWorkspace: this.config.hasWorkspace(),
+      remoteControl: {
+        enabled: this.config.get('remoteControl.enabled', false),
+        serviceUrl: this.config.get('remoteControl.serviceUrl', DEFAULT_SERVICE_URL),
+        pushByDefault: this.config.get('remoteControl.pushByDefault', true),
+        phones: this.remoteControl.phones(),
+      },
     }
   }
 
@@ -212,6 +232,14 @@ export class SettingsStore {
 
   async forgetMemory(scope: MemoryScope, title: string): Promise<void> {
     await this.memory.forget(scope, title)
+  }
+
+  async requestPairingCode(): Promise<PairingCode> {
+    return this.remoteControl.requestPairingCode()
+  }
+
+  unpairPhone(phoneId: string): void {
+    this.remoteControl.unpair(phoneId)
   }
 
   async applyBundle(scope: BundleScope, bundle: Bundle): Promise<void> {

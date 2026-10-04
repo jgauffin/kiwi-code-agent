@@ -2,6 +2,7 @@ import { commandName, runCommand, unwrapCommand } from './command-wrappers'
 import { NO_PROJECT_COMMANDS, projectCommandOf, type ProjectCommands } from './project-commands'
 import { cdTarget, hidesCommandWord, isCdCommand, isReadOnlySegment, type ReadOnlyContext } from './read-only-commands'
 import { splitShellCommand, type ShellSegment } from './shell-split'
+import { subcommandAt } from './subcommand-tools'
 import { WRITE_TOOLS } from './tool-classes'
 import { commandWriteTargets, writesWithin, type WritableArea } from './write-targets'
 
@@ -35,18 +36,22 @@ export function formatRule(rule: PermissionRule): string {
   return rule.pattern === undefined ? rule.tool : `${rule.tool}(${rule.pattern})`
 }
 
-/** Tools whose command word takes a subcommand that decides what they do. */
-const SUBCOMMAND_TOOLS = new Set(['npm', 'npx', 'pnpm', 'yarn', 'git', 'dotnet', 'cargo', 'go', 'docker', 'gh', 'az', 'kubectl'])
-
-/** A command is named without its path, so `./build.cmd` and `build.cmd` are the same command. */
-/** The words of a segment that "Allow for project" remembers: the command, plus its subcommand for tools that have one. */
+/**
+ * The words of a segment that "Allow for project" remembers: the command, plus
+ * its subcommand for tools that have one, and the tool's own options where they
+ * stand in between. The options stay in the rule because they are part of what
+ * was allowed: `npm --prefix ../other run` is another package's scripts.
+ */
 export function commandPrefix(tokens: string[]): string[] {
   // A rule remembered for `timeout` would cover everything it ever wraps, so the wrapper is taken off first.
-  const [command, sub] = unwrapCommand(tokens)
+  const [command, ...args] = unwrapCommand(tokens)
   if (!command) return []
+  // A command is named without its path, so `./build.cmd` and `build.cmd` are the same command.
   const name = commandName(command)
-  if (SUBCOMMAND_TOOLS.has(name) && sub && !sub.startsWith('-')) return [name, sub]
-  return [name]
+  const at = subcommandAt(name, args)
+  const sub = at === undefined ? undefined : args[at]
+  if (sub === undefined || sub.startsWith('-')) return [name]
+  return [name, ...args.slice(0, at), sub]
 }
 
 /** The rule "Allow for project" writes for a call that is not a shell command; none for a file write, which is never remembered. */

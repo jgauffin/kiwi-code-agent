@@ -6,6 +6,7 @@ import type { ModelOffer } from '../agent/session/model-profile'
 import { listPlans, type PlanSummary } from '../agent/phases/plan-list'
 import { readUnfiled } from '../agent/phases/unfiled-decisions'
 import { sessionGroups } from './session-groups'
+import { updatableSpecs } from './update-candidates'
 import type { ResumableChat, RunSection, ToWebview } from './protocol'
 import { forDisplay } from './display-event'
 import { runRef, runsOf, tabIdOf } from './tab-view'
@@ -79,13 +80,13 @@ export class StateBroadcaster {
       void vscode.window.showErrorMessage(`Kiwipow Agent: cannot read the unfiled decisions: ${errorMessage(error)}`)
       return []
     })
-    const shared = this.sharedState(plans, unfiled.length)
+    const shared = await this.sharedState(plans, unfiled.length)
     for (const entry of panels.panels) await this.updatePanel(entry, shared)
   }
 
   /** What every tab is told alike: the plans and chats it can pick up, and what new sessions run on. */
-  private sharedState(plans: PlanSummary[], unfiledCount: number) {
-    const { sessions, profileDefaults, registeredModels, agentsMd } = this.deps
+  private async sharedState(plans: PlanSummary[], unfiledCount: number) {
+    const { workspaceRoot, sessions, profileDefaults, registeredModels, agentsMd } = this.deps
     const groups = sessionGroups(sessions.list(), plans)
     const current = agentsMd.current()
     return {
@@ -97,6 +98,7 @@ export class StateBroadcaster {
         ...(p.review ? { review: p.review } : {}),
       })),
       chats: this.pastChats(groups.chats),
+      updates: await updatableSpecs(workspaceRoot, sessions, plans),
       unfiled: unfiledCount,
       profiles: profileDefaults.read(),
       models: registeredModels().map((m) => ({ name: m.profile.name, efforts: [...m.efforts] })),
@@ -105,7 +107,7 @@ export class StateBroadcaster {
   }
 
   /** One tab's own line and, while it shows a session, its plan bar. */
-  private async updatePanel(entry: ChatPanel, shared: ReturnType<StateBroadcaster['sharedState']>): Promise<void> {
+  private async updatePanel(entry: ChatPanel, shared: Awaited<ReturnType<StateBroadcaster['sharedState']>>): Promise<void> {
     const { sessions, panels, tabView } = this.deps
     const record = entry.tabId ? sessions.get(entry.tabId) : undefined
     // A session removed under the tab leaves it on the new-session screen rather than on a session that is gone.

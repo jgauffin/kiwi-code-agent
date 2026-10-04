@@ -3,7 +3,8 @@ import type { Profile, Provider } from '../src/agent/session/model-profile'
 import type { SettingsTarget } from '../src/settings/protocol'
 import type { MemoryEntry, MemoryScope } from '../src/agent/memory/memories'
 import type { AppliedBundle, Bundle, BundleScope } from '../src/agent/instructions/bundles'
-import { SettingsStore, type BundlePort, type ConfigPort, type MemoryPort, type SecretPort } from '../src/settings/settings-store'
+import { SettingsStore, type BundlePort, type ConfigPort, type MemoryPort, type RemoteControlPort, type SecretPort } from '../src/settings/settings-store'
+import type { PairedPhone } from '../src/remote-control/pairing'
 
 type Written = { key: string; value: unknown; target: SettingsTarget }
 
@@ -68,12 +69,27 @@ function fakeBundles(available: Bundle[] = [], applied: AppliedBundle[] = [], ma
   return { port, applies, removes }
 }
 
-function store(config: Record<string, unknown>, options: { hasWorkspace?: boolean; secrets?: string[]; bundles?: ReturnType<typeof fakeBundles> } = {}) {
+/** Remembers the code requested and the phones unpaired, rather than opening any link. */
+function fakeRemoteControl(phones: PairedPhone[] = []) {
+  const unpaired: string[] = []
+  const port: RemoteControlPort = {
+    phones: () => phones,
+    requestPairingCode: async () => ({ code: '123456', qrDataUrl: 'data:image/png;base64,x', expiresAt: 0 }),
+    unpair: (phoneId) => void unpaired.push(phoneId),
+  }
+  return { port, unpaired }
+}
+
+function store(
+  config: Record<string, unknown>,
+  options: { hasWorkspace?: boolean; secrets?: string[]; bundles?: ReturnType<typeof fakeBundles>; remoteControl?: ReturnType<typeof fakeRemoteControl> } = {},
+) {
   const cfg = fakeConfig(config, options.hasWorkspace ?? true)
   const sec = fakeSecrets(options.secrets)
   const mem = fakeMemory()
   const bun = options.bundles ?? fakeBundles()
-  return { store: new SettingsStore(cfg.port, sec.port, mem.port, bun.port), ...cfg, secrets: sec.keys, memory: mem, bundles: bun }
+  const rem = options.remoteControl ?? fakeRemoteControl()
+  return { store: new SettingsStore(cfg.port, sec.port, mem.port, bun.port, rem.port), ...cfg, secrets: sec.keys, memory: mem, bundles: bun, remoteControl: rem }
 }
 
 const withModels = (providers: Provider[], profiles: Profile[], activeProfile: string) => ({ providers, profiles, activeProfile })
@@ -304,7 +320,7 @@ describe('SettingsStore memories', () => {
     const project = [{ title: 'Blue means clickable', file: 'blue.md', summary: 'say so' }]
     const user = [{ title: 'Likes short replies', file: 'CLAUDE.md', summary: 'say less' }]
     const mem = fakeMemory(project, user)
-    const s = new SettingsStore(cfg.port, sec.port, mem.port, fakeBundles().port)
+    const s = new SettingsStore(cfg.port, sec.port, mem.port, fakeBundles().port, fakeRemoteControl().port)
     expect((await s.snapshot()).memories).toEqual({ project, user })
   })
 
@@ -312,6 +328,40 @@ describe('SettingsStore memories', () => {
     const { store: s, memory } = store({})
     await s.forgetMemory('project', 'Blue means clickable')
     expect(memory.forgotten).toEqual([{ scope: 'project', title: 'Blue means clickable' }])
+  })
+})
+
+describe('SettingsStore remote control', () => {
+  it('the_snapshot_lists_every_phone_the_remote_control_port_holds', async () => {
+    const phones: PairedPhone[] = [{ id: 'phone-1', name: "Jonas' Phone", lastConnectedAt: 1000 }]
+    const rem = fakeRemoteControl(phones)
+    const { store: s } = store({ 'remoteControl.enabled': true }, { remoteControl: rem })
+    const snapshot = await s.snapshot()
+    expect(snapshot.remoteControl).toEqual({ enabled: true, serviceUrl: 'wss://remote.kiwipow.com', pushByDefault: true, phones })
+  })
+
+  it('requesting_a_pairing_code_passes_straight_to_the_remote_control_port', async () => {
+    const { store: s } = store({})
+    expect(await s.requestPairingCode()).toEqual({ code: '123456', qrDataUrl: 'data:image/png;base64,x', expiresAt: 0 })
+  })
+
+  it('unpairing_a_phone_passes_its_id_straight_to_the_remote_control_port', async () => {
+    const { store: s, remoteControl } = store({})
+    s.unpairPhone('phone-1')
+    expect(remoteControl.unpaired).toEqual(['phone-1'])
+  })
+
+  it('remote_control_settings_write_to_the_workspace_target', async () => {
+    const { store: s, writes } = store({})
+    await s.save('remoteControl.enabled', true)
+    expect(writes).toEqual([{ key: 'remoteControl.enabled', value: true, target: 'workspace' }])
+  })
+
+  it('a_session_at_the_desk_may_push_by_default_until_the_person_changes_the_workspace_standing_default', async () => {
+    const { store: s } = store({})
+    expect((await s.snapshot()).remoteControl.pushByDefault).toBe(true)
+    await s.save('remoteControl.pushByDefault', false)
+    expect((await store({ 'remoteControl.pushByDefault': false }).store.snapshot()).remoteControl.pushByDefault).toBe(false)
   })
 })
 

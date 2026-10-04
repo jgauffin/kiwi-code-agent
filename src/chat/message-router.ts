@@ -1,14 +1,10 @@
-import * as vscode from 'vscode'
-import { isAbsolute, join } from 'node:path'
 import type { SessionManager, SessionMode, SessionRecord } from '../agent/session/session-manager'
-import { atEffort, switchedTo, type ModelOffer, type ModelProfile, type Step } from '../agent/session/model-profile'
-import { codePlanBuildKickoff } from '../agent/phases/code-plan'
+import type { ModelOffer, ModelProfile, Step } from '../agent/session/model-profile'
 import { addComment, editComment, removeComment, resolveComment, strikeItem, unstrikeItem } from '../agent/phases/plan-review'
-import { editDiffTitle, editLine, isRunSnapshot, runsRoot } from '../agent/edits/open-edit'
-import { docMigrationKickoff } from '../agent/phases/doc-migration'
-import { fileDecisionsKickoff } from '../agent/phases/file-decisions'
-import { linkedFilePath, withLinkedFiles } from './linked-files'
-import type { FromWebview, ToWebview } from './protocol'
+import { withLinkedFiles } from './linked-files'
+import { handleRunMessage } from './run-messages'
+import { linkOpenFile, openEditDiff, openFile, startFromCard } from './tab-messages'
+import type { FromWebview } from './protocol'
 import type { AgentsMdOffers } from './agents-md-offers'
 import { agentsMdTidyKickoff } from '../agent/instructions/agents-md-tidy'
 import type { FeatureBuild } from './feature-build'
@@ -21,7 +17,7 @@ import type { TabView } from './tab-view'
 import type { PermissionStore, ProfileDefaultsStore } from './chat-view-provider'
 
 /** One kind of message from the tab. */
-type WebviewMessage<T extends FromWebview['type']> = Extract<FromWebview, { type: T }>
+export type WebviewMessage<T extends FromWebview['type']> = Extract<FromWebview, { type: T }>
 
 export type MessageRouterDeps = {
   workspaceRoot: string
@@ -39,7 +35,7 @@ export type MessageRouterDeps = {
   build: FeatureBuild
   newSession: (mode: SessionMode, feature?: string, prompt?: string, into?: ChatPanel, label?: string) => Promise<SessionRecord | undefined>
   open: (sessionId: string, into?: ChatPanel) => Promise<void>
-  resumePlan: (feature: string, into?: ChatPanel) => Promise<void>
+  resumePlan: (feature: string, into?: ChatPanel, note?: string) => Promise<void>
   sendState: () => Promise<void>
   sendTranscript: (sessionId: string) => Promise<void>
 }
@@ -51,7 +47,7 @@ export class MessageRouter {
   async handle(message: FromWebview, entry: ChatPanel): Promise<void> {
     const shown = this.shownBy(entry)
     if (await this.handleTabMessage(message, shown, entry)) return
-    if (await this.handleRunMessage(message, shown)) return
+    if (await handleRunMessage(this.deps, message, shown)) return
     if (await this.handlePlanMessage(message, shown)) return
     await this.handleBuildMessage(message, shown, entry)
   }
@@ -73,7 +69,7 @@ export class MessageRouter {
         await this.sendFromTab(message, shown, entry)
         return true
       case 'link_open_file':
-        this.linkOpenFile(entry)
+        linkOpenFile(this.deps, entry)
         return true
       case 'agents_md_answer': {
         const tidy = await agentsMd.answer(message.scope, message.answer)
@@ -85,66 +81,19 @@ export class MessageRouter {
         await this.deps.open(message.sessionId, entry)
         return true
       case 'new_session':
-        await this.startFromCard(message, entry)
+        await startFromCard(this.deps, message, entry)
         return true
       case 'resume_plan':
-        await this.deps.resumePlan(message.feature, entry)
+        await this.deps.resumePlan(message.feature, entry, message.note)
+        return true
+      case 'update_spec':
+        await this.deps.planActions.startUpdate(message.feature, message.description, entry)
         return true
       case 'open_file':
-        await this.openFile(message)
+        await openFile(this.deps, message)
         return true
       case 'open_edit_diff':
-        await this.openEditDiff(message)
-        return true
-      default:
-        return false
-    }
-  }
-
-  /** Messages about one run's own controls: permissions, questions, switches and the model it talks on. */
-  private async handleRunMessage(message: FromWebview, shown: SessionRecord | undefined): Promise<boolean> {
-    const { sessions, tabView, tracker, allowWrites, registeredModels, profileFor, profileDefaults, sendState } = this.deps
-    switch (message.type) {
-      case 'permission':
-        await this.answerPermission(message)
-        return true
-      case 'question':
-        if (sessions.get(message.sessionId)) await sessions.respondToQuestion(message.sessionId, message.requestId, message.outcome)
-        return true
-      case 'interrupt':
-        if (shown) await sessions.interrupt(tabView.targetOf(shown, message.sessionId, false).id)
-        return true
-      case 'compact':
-        if (shown) sessions.compact(tabView.targetOf(shown, message.sessionId, false).id)
-        return true
-      case 'set_allow_writes':
-        if (shown) allowWrites.setEnabled(tabView.targetOf(shown, message.sessionId, false).id, message.enabled)
-        void sendState()
-        return true
-      case 'set_session_model': {
-        const offer = registeredModels().find((m) => m.profile.name === message.name)
-        if (shown && offer) await tracker.switchProfile(shown.id, switchedTo(tracker.switchingFrom(shown), offer))
-        void sendState()
-        return true
-      }
-      case 'set_session_effort':
-        if (shown) await tracker.switchProfile(shown.id, atEffort(tracker.switchingFrom(shown), message.effort))
-        void sendState()
-        return true
-      case 'approve_plan':
-        // The approval is the go-ahead, so the build starts at once rather than waiting on another prompt.
-        if (shown?.mode === 'code-plan' && shown.access !== 'full') {
-          await sessions.grantFullAccess(shown.id, profileFor('code-build'))
-          await sessions.send(shown.id, codePlanBuildKickoff(), 'Plan approved: building it')
-          await sendState()
-        }
-        return true
-      case 'reconnect_mcp':
-        if (shown) await sessions.reconnectMcp(tabView.targetOf(shown, message.sessionId, false).id, message.server)
-        return true
-      case 'set_default_profile':
-        await profileDefaults.set(message.name)
-        await sendState()
+        await openEditDiff(this.deps, message)
         return true
       default:
         return false
@@ -251,59 +200,5 @@ export class MessageRouter {
     // A model switch picked while a turn of this chat session was in flight takes effect now (B10).
     await tracker.applyPendingProfileSwitch(run)
     await sessions.send(run.id, text)
-  }
-
-  private linkOpenFile(entry: ChatPanel): void {
-    // With focus in the view there may be no active text editor, so the file on screen is the one meant.
-    const editor = vscode.window.activeTextEditor ?? vscode.window.visibleTextEditors[0]
-    if (!editor) {
-      void vscode.window.showWarningMessage('Kiwipow Agent: no file is open in the editor to link.')
-      return
-    }
-    void entry.panel.webview.postMessage({
-      type: 'linked_file',
-      path: linkedFilePath(this.deps.workspaceRoot, editor.document.uri.fsPath),
-    } satisfies ToWebview)
-  }
-
-  private async answerPermission(message: WebviewMessage<'permission'>): Promise<void> {
-    const { sessions, permissions } = this.deps
-    if (!sessions.get(message.sessionId)) return
-    // The rules are in place before the call runs, so a second call they cover in the same turn already passes.
-    const { remember, ...decision } = message.decision
-    if (remember?.project.length) await permissions.allowForProject(remember.project)
-    if (remember?.session.length) await permissions.allowForSession(message.sessionId, remember.session)
-    await sessions.respondToPermission(message.sessionId, message.requestId, decision)
-  }
-
-  private async startFromCard(message: WebviewMessage<'new_session'>, entry: ChatPanel): Promise<void> {
-    const { sessions, newSession, open } = this.deps
-    // One filing at a time: a second would propose the same entries again.
-    const filing = message.mode === 'file-decisions' ? sessions.list().find((r) => r.mode === 'file-decisions' && sessions.isLive(r.id)) : undefined
-    if (filing) return open(filing.id, entry)
-    const prompt = withLinkedFiles(message.prompt ?? '', message.files ?? [])
-    // The filing and the docs cleanup have nothing to fill in, so their sessions start on the job rather than waiting for a prompt.
-    const kickoff =
-      message.mode === 'file-decisions'
-        ? { text: fileDecisionsKickoff(), label: 'Filing the decisions' }
-        : message.mode === 'doc-migration'
-          ? { text: docMigrationKickoff(), label: 'Cleaning up the docs' }
-          : undefined
-    if (prompt !== '' || !kickoff) await newSession(message.mode, message.feature, prompt, entry)
-    else await newSession(message.mode, message.feature, kickoff.text, entry, kickoff.label)
-  }
-
-  private async openFile(message: WebviewMessage<'open_file'>): Promise<void> {
-    // An edit names its file absolutely; a task names it relative to the workspace.
-    const path = isAbsolute(message.path) ? message.path : join(this.deps.workspaceRoot, message.path)
-    const file = await vscode.workspace.openTextDocument(vscode.Uri.file(path))
-    const at = new vscode.Position(editLine(message.line, file.lineCount), 0)
-    await vscode.window.showTextDocument(file, { selection: new vscode.Range(at, at) })
-  }
-
-  private async openEditDiff(message: WebviewMessage<'open_edit_diff'>): Promise<void> {
-    // The path comes back from the webview, so only a snapshot this extension wrote is opened.
-    if (!isRunSnapshot(runsRoot(this.deps.workspaceRoot), message.snapshot)) return
-    await vscode.commands.executeCommand('vscode.diff', vscode.Uri.file(message.snapshot), vscode.Uri.file(message.path), editDiffTitle(message.label))
   }
 }

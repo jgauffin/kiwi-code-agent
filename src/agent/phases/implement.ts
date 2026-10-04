@@ -7,6 +7,7 @@ import { CODE_READING } from '../code-outline/code-outline-gate'
 import { CODE_SEARCH_TOOL } from '../code-outline/code-search'
 import { SCRIPT_WRITING } from '../script/script-gate'
 import { projectScriptsInstruction } from '../permissions/package-scripts'
+import { PIPE_WRITING } from '../permissions/read-only-commands'
 import { rulingKind, type Decision } from './decisions'
 import { UNFILED_DECISIONS } from './unfiled-decisions'
 import { SPEC_SEARCH_TOOL } from './spec-search'
@@ -215,5 +216,6 @@ Rules:
 - ${CODE_READING} Before writing a test, outline the test file or folder it belongs in: the rule may already be proven, and the neighbouring tests show the pattern to follow.
 - ${EDIT_WRITING}
 - ${SCRIPT_WRITING}${scripts ? `\n- ${scripts}` : ''}
+- ${PIPE_WRITING}
 - A task marked tested without a run of your own is a false record.`
 }

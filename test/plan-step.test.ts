@@ -39,6 +39,13 @@ describe('planStep', () => {
     expect(step.next).toMatchObject({ kind: 'action', action: 'approve' })
   })
 
+  it('a_planner_turn_on_the_draft_shows_a_busy_line_beside_approve', () => {
+    const working = planStep(plan({ approvable: true, atWork: true }))
+    expect(working.next).toMatchObject({ kind: 'action', action: 'approve', busy: expect.stringContaining('the planner is at work') })
+    expect(working.yours).toBe(true)
+    expect(planStep(plan({ approvable: true, atWork: false })).next).not.toHaveProperty('busy')
+  })
+
   it('a_pending_round_offers_submit_with_its_count', () => {
     const step = planStep(plan({ stage: 'under_review', review: { rounds: [round({ comments: [{ target: 'Cancel', text: 'no' }], strikes: ['Refund'] })] } }))
     expect(step.next).toMatchObject({ kind: 'action', action: 'submit_review', label: 'Submit review (2)' })
@@ -176,6 +183,27 @@ describe('planStep', () => {
     // Skipped and done are answers: the offer is not put again.
     expect(planStep(plan({ ...verified, cleanupSweep: sweep, cleanupDecision: 'skipped' })).next).toEqual({ kind: 'done', text: 'cleanup skipped' })
     expect(planStep(plan({ ...verified, cleanupSweep: sweep, cleanupDecision: 'done' })).next).toEqual({ kind: 'done', text: 'verified' })
+  })
+
+  it('a_change_asked_for_past_the_draft_stands_at_plan_whatever_the_tab_was_showing', () => {
+    // Never answered by the phase at work: a cleanup offer, a build or a check in flight all give way to Plan.
+    const cleaning = plan({ stage: 'verified', status: 'approved', commentable: false, cleanupSweep: { units: [unit()] }, startingChange: true })
+    expect(planStep(cleaning)).toMatchObject({ current: 'plan', next: { kind: 'waiting' }, yours: false })
+
+    const building = plan({ stage: 'under_development', status: 'approved', commentable: false, implementable: true, tasks: [task('open')], startingChange: true })
+    expect(planStep(building).current).toBe('plan')
+
+    const checking = plan({ stage: 'checking', status: 'approved', commentable: false, check: { live: true, text: 'reading src' }, startingChange: true })
+    expect(planStep(checking).current).toBe('plan')
+  })
+
+  it('the_bar_stands_at_plan_until_the_revision_lands_not_only_while_the_planner_answers', () => {
+    // The planner's turn can end asking a follow-up before "go"; the bar still reads Plan rather than falling back to the stale, settled stage.
+    const stopped = plan({ stage: 'verified', status: 'approved', commentable: false, atWork: false, startingChange: true })
+    const step = planStep(stopped)
+    expect(step.current).toBe('plan')
+    expect(step.complete).toBe(false)
+    expect(step.reached).toEqual(['plan'])
   })
 
   it('a_cleanup_run_in_flight_says_what_it_is_doing', () => {

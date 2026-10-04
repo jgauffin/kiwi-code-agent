@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { projectScriptsInstruction } from '../src/agent/permissions/package-scripts'
+import { PIPE_WRITING } from '../src/agent/permissions/read-only-commands'
 import { IMPLEMENT_TOOLS, assertImplementable, fixKickoff, implementPrompt, implementationStarts, taskKickoff, taskSettled } from '../src/agent/phases/implement'
 import { decisions } from '../src/agent/phases/decisions'
 import type { SpecState } from '../src/agent/phases/spec-file'
@@ -168,6 +169,10 @@ describe('implement phase', () => {
     expect(prompt).toContain('Search only for what they leave open')
     // A reading ritual for docs invites doc reading in a run that may not even edit them.
     expect(prompt).not.toContain(DOC_READING)
+  })
+
+  it('an_implementer_takes_a_field_of_a_commands_output_with_commands_that_run_unasked_rather_than_with_awk', () => {
+    expect(implementPrompt('Order cancellation', cwd)).toContain(`- ${PIPE_WRITING}`)
   })
 
   it('an_implementer_in_a_node_project_runs_its_tools_through_package_json_scripts', async () => {

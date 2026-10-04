@@ -156,6 +156,24 @@ describe('SessionManager', () => {
     expect(store.saved.at(-1)?.find((r) => r.id === record.id)).not.toHaveProperty('allowWrites')
   })
 
+  it('the_persons_own_choice_to_push_for_a_session_is_kept_with_it_and_outlives_its_engine_and_the_host', async () => {
+    const store = memoryStore()
+    const noEngine = async (): Promise<CodeSession> => {
+      throw new Error('not started')
+    }
+    const manager = new SessionManager(store, noEngine, () => {
+      throw new Error('no log')
+    }, () => {})
+    const record = await manager.create(profile, 'chat', undefined, { startedFrom: 'phone' })
+    expect(record.startedFrom).toBe('phone')
+
+    await manager.setPushAllowed(record.id, false)
+    const reopened = new SessionManager(store, noEngine, () => {
+      throw new Error('no log')
+    }, () => {})
+    expect(reopened.get(record.id)).toMatchObject({ pushAllowed: false, startedFrom: 'phone' })
+  })
+
   it('allow_writes_is_offered_where_editing_docs_is_the_job_and_not_to_a_planner_writing_blind', () => {
     for (const mode of ['chat', 'implement', 'file-decisions', 'doc-migration'] as const) expect(offersAllowWrites(mode), mode).toBe(true)
     for (const mode of ['plan', 'reconcile', 'code-plan'] as const) expect(offersAllowWrites(mode), mode).toBe(false)
@@ -1157,6 +1175,59 @@ describe('SessionManager', () => {
         await manager.close(record.id)
         await expect(manager.respondToQuestion(record.id, 'q-1', { kind: 'unanswered' })).rejects.toThrow(/q-1/)
         expect(engines).toHaveLength(1)
+        await manager.disposeAll()
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
+  })
+
+  describe('remote act on the record', () => {
+    it('a_note_landed_by_a_remote_act_is_recorded_in_the_sessions_log', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+      try {
+        const manager = new SessionManager(
+          memoryStore(),
+          async (r) => new FakeSession(r.id, r.profile, r.engineSessionId),
+          (id) => RunLog.forSession(dir, id),
+          () => {},
+        )
+        const record = await manager.create(profile)
+        await manager.send(record.id, 'hello')
+        await manager.noteRemoteAct(record.id, 'Sent from the phone')
+        const transcript = await manager.transcript(record.id)
+        expect(transcript.at(-1)).toEqual({ type: 'remote_action', note: 'Sent from the phone' })
+        await manager.disposeAll()
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
+  })
+
+  describe('first answer wins', () => {
+    it('a_request_is_open_while_it_waits_and_no_longer_once_whichever_device_got_there_first_resolved_it', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+      try {
+        const engines: FakeSession[] = []
+        const manager = new SessionManager(
+          memoryStore(),
+          async (r) => {
+            const s = new FakeSession(r.id, r.profile, r.engineSessionId)
+            engines.push(s)
+            return s
+          },
+          (id) => RunLog.forSession(dir, id),
+          () => {},
+        )
+        const record = await manager.create(profile)
+        await manager.send(record.id, 'run the tests')
+        engines[0]!.out.push({ type: 'permission_request', requestId: 'req-1', toolName: 'Bash', input: { command: 'npm test' } })
+        await tick()
+        expect(await manager.isRequestOpen(record.id, 'req-1')).toBe(true)
+        // The engine let go of the request (closed between devices racing for it); resolving it is what the second device must see reflected.
+        await manager.close(record.id)
+        await manager.respondToPermission(record.id, 'req-1', { kind: 'allow' })
+        expect(await manager.isRequestOpen(record.id, 'req-1')).toBe(false)
         await manager.disposeAll()
       } finally {
         await rm(dir, { recursive: true, force: true })

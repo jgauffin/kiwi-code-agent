@@ -76,11 +76,11 @@ export class PlanNavigator {
     if (target) act(target.sessionId)
   }
 
-  /** The chat shows while the phase's run works; the finished plan tab takes over when the turn ends. */
+  /** The chat shows while the phase's run works; the finished plan tab takes over when the turn ends, unless a picked-up draft's critique is what just landed there. */
   follow(event: SessionEvent): void {
     if (!this.plan) return
     if (speaks(event)) this.chatWent()
-    else if (event.type === 'turn_done' && !event.isError) this.show(this.planTab)
+    else if (event.type === 'turn_done' && !event.isError && !this.plan.critiqueOwed) this.show(this.planTab)
   }
 
   /** A new step picks its chat, and opens the tab it works in for a reader who stayed on the last step's; while the step holds, the reader's own picks do. */

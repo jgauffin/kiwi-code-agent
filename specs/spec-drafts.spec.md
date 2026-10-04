@@ -12,6 +12,9 @@ A developer comes back to a feature whose spec is still a draft: one they planne
 What the new-session screen offers and what the session begins with.
 - **Drafts are pickable work**: wherever a draft is listed, including the Code tab of the new-session screen as work waiting to be picked up, picking it opens that feature's planning session on the draft (specs/unfiled-decisions.md#The new-session screen splits work in the code from maintenance)
   - **Feature already open**: picking a draft whose feature already has a tab brings that tab up instead of starting a second session on the same spec (specs/unfiled-decisions.md#Every session has its own tab, in the right sidebar)
+- **What was typed goes with the pickup**: text typed on the new-session card before a draft is picked is said in that draft's chat as the person's own message, in their words, rather than lost when the card gives way to the session
+  - **Whether the session is new or already there**: an existing planning session hears it as the next message, and a session the pickup starts hears it after the kickoff that pointed it at the files
+  - **Taken off the card**: the text goes with the first pickup only, so picking a second draft says nothing of it again
 - **How the draft came to be**: each draft records whether it was planned with the person, drafted from the docs, or hand-written, and its entry shows that beside how far its review got — never reviewed, a review in flight, or every comment answered (docs/intent/agent.md#Stages)
   - **Nothing recorded**: a draft whose authorship nothing records counts as hand-written, the least complete of the three
 - **Started on the files**: the pickup starts on the draft as it stands, the docs, every other spec and the recorded decisions, and carries none of the conversation that wrote it (docs/intent/agent.md#Shape)

@@ -110,7 +110,7 @@ export class ChatApp extends HTMLElement {
     }
     // What the tab shows follows what it is: a session, or no session yet.
     if ((tab === undefined) !== this.nav.creating) this.showCreating(tab === undefined)
-    this.newSession.update(message.profiles, { plans: message.plans, chats: message.chats, unfiled: message.unfiled })
+    this.newSession.update(message.profiles, { plans: message.plans, chats: message.chats, unfiled: message.unfiled, updates: message.updates })
     this.tab = tab
     this.models = message.models
     this.runs = message.runs
@@ -135,9 +135,10 @@ export class ChatApp extends HTMLElement {
         this.contextUsage.set(run.sessionId, { usedTokens, windowTokens, compactAtTokens })
       }
     }
-    // A spec that exists is what the session is about; the conversation is one click away.
+    // A spec that exists is what the session is about; the conversation is one click away. A draft picked up is the other way round:
+    // its critique says whether the draft still holds, and that is said in the chat alone.
     this.nav.clearMoved()
-    this.show(this.nav.plan?.body ? this.nav.shownPlanTab() : 'chat')
+    this.show(this.nav.plan?.body && !this.nav.plan.critiqueOwed ? this.nav.shownPlanTab() : 'chat')
     this.showTarget()
     this.composer.focusInput()
   }

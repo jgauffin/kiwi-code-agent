@@ -1,5 +1,21 @@
 # Unfiled decisions
 
+### A spec's state shows on its file in the explorer
+- decided: Every spec file carries its status in the file explorer as a symbol badge (draft, approved, implemented, verified) with the full word on hover, kept current as the file changes, so where a feature stands is visible without opening the spec or the Sessions view. The badge never uses a letter and never colours the file name, both of which belong to git's own marks in that place.
+- affects: spec drafts, sessions and tabs
+
+### A spec is opened in its planner from the file itself
+- decided: A spec file offers the planner for its feature from the file explorer, whatever its status, and the editor offers it as a button while the spec is still a draft, so planning carries on from the spec rather than only from the Sessions view. The status badge is not the way in: it cannot be clicked.
+- affects: spec drafts, picking up a plan, sessions and tabs
+
+### Work on a draft shows on the plan bar, not in the chat alone
+- decided: While a planner turn is in flight on a draft whose Approve stands open — the critique a pickup writes among them — the plan bar carries a line beside Approve saying the planner is at work and answers in the chat, so the person is not left with a still bar and a button they could press mid-thought. Approve stays theirs to press throughout; the line never takes it away. It is greyed while the turn runs, so the line is what the eye lands on rather than the button.
+- affects: spec drafts, picking up a plan, sessions and tabs
+
+### A picked-up draft is read in its chat, not on its spec
+- decided: Picking a draft up opens that session on its chat rather than on its spec, and the critique landing leaves the reader there instead of handing the tab over to the spec the way every other planner turn does, because whether the draft has gone stale is said in the chat and nowhere else. Any later turn of that session hands over to the spec as usual.
+- affects: spec drafts, picking up a plan, sessions and tabs
+
 ### Optional rules leave the phase instructions and live in rule bundles
 - decided: A phase's instructions hold only what makes the agent work the way it does — blind planning, the spec contract, reading before writing, tests as evidence; rules of practice such as reproducing a bug before fixing it, refactoring towards SOLID or naming conventions are gone from them and reach a session only as a rule bundle the person applied, which no workspace gets pre-applied on upgrade and which the blind planner never carries.
 - affects: bundles, instructions and skills, docs/intent/agent.md
@@ -79,3 +95,15 @@
 ### A question or a permission prompt may be answered from outside the editor
 - decided: Anything that blocks a session from completing — a question asked, a permission prompt pending, a step waiting on the person — can be put to a paired phone and answered there with the same effect as at the desk, the first answer from any device resolving it while every other device is told it was already answered, so a session never stalls for want of someone at the keyboard.
 - affects: remote control, user question, file edit diff, permissions and the Allow writes switch, docs/settings.md
+
+### Remote control's forwarding service has a fixed address and ships behind a flag
+- decided: The forwarding service remote control pairs through lives at a known address (remote.kiwipow.com) rather than one each workspace points at on its own, and the pairing and connecting built against it stays off by default until the service itself is in place, turned on per workspace once it is.
+- affects: remote control, docs/settings.md
+
+### Changing a spec begins on the new-session screen with a described change
+- decided: The new-session screen's Code tab carries *Update spec*, where the person picks any spec, whatever state it is in, and describes in their own words what should change; the pick routes by state, a settled spec into a change of that spec and a draft into a draft pickup, nothing starts until the change is described, and a spec opened from that screen always shows the act that changes it.
+- affects: changing an implemented spec, change feature, spec drafts, starting a new session, picking up a plan, docs/plan-sessions.md
+
+### A change is never answered by the phase conversation the tab is showing
+- decided: Asking for a change on a feature opens the describe-the-change step and plans it in a feature-planning session, never handing the request to the cleanup, implement or check conversation its tab happens to show; a feature whose only open step is an unsettled cleanup is changeable, and that cleanup waits for the change's own build.
+- affects: changing an implemented spec, change feature, cleanup phase, sessions and tabs, docs/intent/agent.md

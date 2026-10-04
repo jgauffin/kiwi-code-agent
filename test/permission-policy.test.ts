@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isReadOnlyCommand } from '../src/agent/permissions/read-only-commands'
+import { commandEffect, isReadOnlyCommand } from '../src/agent/permissions/read-only-commands'
 import { PermissionPolicy, type PermissionRules } from '../src/agent/permissions/permission-policy'
 import { commandLines, projectRuleFor, ruleLabel } from '../src/agent/permissions/permission-rules'
 import { readOnlyTools } from '../src/agent/permissions/tool-classes'
@@ -52,11 +52,68 @@ describe('isReadOnlyCommand', () => {
       expect(isReadOnlyCommand(c), c).toBe(false)
   })
 
+  it('a_sed_script_that_runs_a_command_or_writes_a_file_asks_however_it_is_spelled', () => {
+    for (const c of [
+      // `e` runs a shell command, as a command of its own and as a flag on a substitution.
+      "sed '1e rm -rf x' f", "sed 's/.*/rm -rf x/e' f", "sed -n 's|a|b|ge' f", "sed -e '$e rm x' f", "sed --expression='1e rm x' f",
+      // `w` and `W` write any path, and `r`/`R` read one.
+      "sed -n 'w /tmp/out' f", "sed 's/a/b/w /tmp/out' f", "sed -n '1W out' f", "sed '1r /etc/passwd' f",
+      // Appended, inserted and changed text, and a block or a label, are shapes this does not read.
+      "sed 'a\\ text' f", "sed '1{p;p}' f", "sed ':a;N;$!ba' f", "sed '1y/ab/cd/' f",
+      // The script itself cannot be read: it comes from a file, or sed is told something unknown.
+      'sed -f script.sed f', 'sed --file=script.sed f', 'sed --unknown-flag p f', 'sed', 'sed -n',
+      // In-place editing, however it is written.
+      'sed -i s/a/b/ f', 'sed -i.bak s/a/b/ f', 'sed --in-place p f', 'sed -ni p f',
+      // A bracket expression holding the delimiter unescaped is a shape this does not read: escape it or pick another delimiter.
+      "sed 's/[/]/-/g' f",
+    ])
+      expect(isReadOnlyCommand(c), c).toBe(false)
+  })
+
+  it('a_sed_script_that_only_prints_or_substitutes_runs_without_a_prompt', () => {
+    for (const c of [
+      'sed -n 1,10p f', "sed -n '$p' f", "sed '/foo/d' f", "sed -n '/foo/,/bar/p' f", "sed -n '2~3p' f", "sed -n '1,+4p' f",
+      "sed 's/a/b/' f", "sed -E 's#(a)#\\1#g' f", "sed 's/a/b/3gp' f", "sed -n 's/a/b/Ip' f", "sed '/x/Id' f",
+      // A separator or a delimiter inside a regex is text, not the end of the command.
+      "sed -n '/;/p' f", "sed 's/\\//-/g' f", "sed -n '\\%a/b%p' f",
+      // Several scripts, a negated address, an exit code, a comment and blank lines.
+      "sed -n -e '1p' -e '$p' f", "sed -n '1!p' f", "sed '10q' f", "sed -n '1p\n\n# note\n2p' f", 'sed -n = f',
+      'sed --version', 'sed --quiet 1p f', 'ls | sed -n 1p',
+    ])
+      expect(isReadOnlyCommand(c), c).toBe(true)
+  })
+
+  it('every_pipeline_offered_in_place_of_awk_runs_without_a_prompt_and_awk_itself_still_asks', () => {
+    for (const c of [
+      "ps | tr -s ' ' | cut -d' ' -f2", 'ls | sort | uniq -c', 'git log --oneline | wc -l', 'git diff --stat | tail -1',
+      'cat package.json | jq -r .name', 'cat x | nl | column -t', 'comm -12 a b', 'yq .a x.yaml | head -3',
+    ])
+      expect(isReadOnlyCommand(c), c).toBe(true)
+    for (const c of ["ps | awk '{print $2}'", "awk 'BEGIN{system(\"rm -rf x\")}'", "ps | perl -ane 'print $F[1]'"])
+      expect(isReadOnlyCommand(c), c).toBe(false)
+  })
+
   it('a_command_word_a_substitution_supplies_is_not_read_only_whatever_it_prints', () => {
     for (const c of ['$(which ls)', 'timeout 30 $(which ls)', '`which ls` -la'])
       expect(isReadOnlyCommand(c), c).toBe(false)
     // Quoted, it is text the command reads, not a command the shell runs.
     expect(isReadOnlyCommand("echo '$(rm x)'")).toBe(true)
+  })
+})
+
+describe('commandEffect', () => {
+  const effectOf = (command: string, ...args: string[]) => commandEffect(command, args)
+
+  it('a_command_judged_by_its_arguments_says_what_it_would_do_not_only_that_it_asks', () => {
+    expect(effectOf('sed', '-n', '1p', 'f')).toEqual({ kind: 'inspects' })
+    expect(effectOf('sed', '1e rm -rf x', 'f')).toEqual({ kind: 'mutates', reason: expect.stringContaining('run a command') })
+    expect(effectOf('sed', '-i', 's/a/b/', 'f')).toEqual({ kind: 'mutates', reason: expect.stringContaining('edit in place') })
+    expect(effectOf('sort', '-o', 'out', 'x')).toEqual({ kind: 'mutates', reason: expect.stringContaining('writes its output to a file') })
+    expect(effectOf('find', '.', '-delete')).toEqual({ kind: 'mutates', reason: expect.stringContaining('deletes what it finds') })
+  })
+
+  it('a_command_its_arguments_cannot_turn_into_a_write_is_not_judged_by_them_at_all', () => {
+    for (const command of ['ls', 'cat', 'rm', 'npm']) expect(effectOf(command, '-la'), command).toBeUndefined()
   })
 })
 
@@ -116,6 +173,36 @@ describe('commandLines', () => {
     ])
     expect(commandLines('Bash', 'git commit -m "x && y"', [])).toEqual([{ text: 'git commit -m "x && y"', rule: 'Bash(git commit:*)' }])
     expect(commandLines('Bash', 'rm -rf dist', [])).toEqual([{ text: 'rm -rf dist', rule: 'Bash(rm:*)' }])
+  })
+
+  it('a_tools_own_options_before_its_subcommand_stay_in_the_rule_so_the_rule_names_what_runs', () => {
+    // A rule remembered for `npx` alone would cover every program npx ever fetches and runs.
+    expect(commandLines('Bash', 'npx --prefix v2/web tsc --noEmit -p v2/web/tsconfig.json', [])).toEqual([
+      { text: 'npx --prefix v2/web tsc --noEmit -p v2/web/tsconfig.json', rule: 'Bash(npx --prefix v2/web tsc:*)' },
+    ])
+    expect(commandLines('Bash', 'npm --prefix ../ts-language-mcp run build', [])).toEqual([
+      { text: 'npm --prefix ../ts-language-mcp run build', rule: 'Bash(npm --prefix ../ts-language-mcp run:*)' },
+    ])
+    expect(commandLines('Bash', 'npm -s run build', [])).toEqual([{ text: 'npm -s run build', rule: 'Bash(npm -s run:*)' }])
+    expect(commandLines('Bash', 'npx -y vsce package', [])).toEqual([{ text: 'npx -y vsce package', rule: 'Bash(npx -y vsce:*)' }])
+    expect(commandLines('Bash', 'git -C ../other commit -m x', [])).toEqual([{ text: 'git -C ../other commit -m x', rule: 'Bash(git -C ../other commit:*)' }])
+    expect(commandLines('Bash', 'dotnet -d test', [])).toEqual([{ text: 'dotnet -d test', rule: 'Bash(dotnet -d test:*)' }])
+  })
+
+  it('an_option_the_rule_cannot_read_leaves_it_at_the_tool_rather_than_naming_the_wrong_subcommand', () => {
+    // Nobody can say whether `--loglevel` takes the next word, and `-c` hands npx a shell string of its own.
+    expect(commandLines('Bash', 'npm --loglevel warn run build', [])).toEqual([{ text: 'npm --loglevel warn run build', rule: 'Bash(npm:*)' }])
+    expect(commandLines('Bash', 'npx -c "rm -rf dist"', [])).toEqual([{ text: 'npx -c "rm -rf dist"', rule: 'Bash(npx:*)' }])
+    // An attached value needs no such knowledge.
+    expect(commandLines('Bash', 'npm --loglevel=warn run build', [])).toEqual([{ text: 'npm --loglevel=warn run build', rule: 'Bash(npm --loglevel=warn run:*)' }])
+  })
+
+  it('the_rule_offered_for_a_tool_with_leading_options_covers_that_command_next_time', () => {
+    for (const command of ['npx --prefix v2/web tsc --noEmit', 'npm --prefix ../other run build', 'npm -s run build', 'git -C ../other commit -m x', 'dotnet -d test']) {
+      const [line] = commandLines('Bash', command, [])
+      expect(line?.rule, command).toBeDefined()
+      expect(commandLines('Bash', command, [line!.rule!]), command).toEqual([{ text: command, passes: line!.rule }])
+    }
   })
 
   it('a_command_an_allow_rule_covers_passes_by_that_rule', () => {

@@ -63,6 +63,18 @@ export class FeatureCleanup implements BuildListener {
     this.cleanupProgress.delete(feature)
   }
 
+  /**
+   * A change starts on the feature: an offer the user has not settled yet
+   * would run its split over code the change is about to rewrite, so it is
+   * dropped rather than left to act on. The feature's own next build sweeps
+   * it fresh once its tests pass.
+   */
+  clear(feature: string): void {
+    this.cleanups.delete(feature)
+    this.cleanupProgress.delete(feature)
+    this.sweeps.delete(feature)
+  }
+
   passed(feature: string): Promise<void> {
     return this.sweep(feature)
   }

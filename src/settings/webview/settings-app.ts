@@ -11,6 +11,8 @@ import {
   MemoryForgottenEvent,
   MemoryOpenedEvent,
   ModelsRefreshRequestedEvent,
+  PairingCodeRequestedEvent,
+  PhoneUnpairedEvent,
   ProfileRemovedEvent,
   ProfileSavedEvent,
   ProviderRemovedEvent,
@@ -24,6 +26,7 @@ import { MemoriesTab } from './memories-tab'
 import { ModelsSection } from './models-section'
 import { PermissionsTab } from './permissions-tab'
 import { ProjectTab } from './project-tab'
+import { RemoteTab } from './remote-tab'
 
 const post = (message: FromSettingsWebview): void => postToHost(message)
 
@@ -33,6 +36,7 @@ const TABS: { tab: SettingsTab; label: string }[] = [
   { tab: 'project', label: 'Project' },
   { tab: 'memories', label: 'Memories' },
   { tab: 'bundles', label: 'Bundles' },
+  { tab: 'remote', label: 'Remote' },
   { tab: 'advanced', label: 'Advanced' },
 ]
 
@@ -44,12 +48,14 @@ const TABS: { tab: SettingsTab; label: string }[] = [
 export class SettingsApp extends HTMLElement {
   private readonly strip = document.createElement('nav')
   private readonly modelsSection = new ModelsSection()
+  private readonly remoteTab = new RemoteTab()
   private readonly panes: Record<SettingsTab, HTMLElement & { update(snapshot: SettingsSnapshot): void }> = {
     models: this.modelsSection,
     permissions: new PermissionsTab(),
     project: new ProjectTab(),
     memories: new MemoriesTab(),
     bundles: new BundlesTab(),
+    remote: this.remoteTab,
     advanced: new AdvancedTab(),
   }
   private tab: SettingsTab = 'models'
@@ -78,6 +84,8 @@ export class SettingsApp extends HTMLElement {
     this.addEventListener(BundleAppliedEvent.type, (e) => post({ type: 'apply_bundle', scope: e.scope, bundle: e.bundle }))
     this.addEventListener(BundleRemovedEvent.type, (e) => post({ type: 'remove_bundle', scope: e.scope, source: e.source, name: e.name }))
     this.addEventListener(BundleOfferDismissedEvent.type, () => post({ type: 'dismiss_bundle_offer' }))
+    this.addEventListener(PairingCodeRequestedEvent.type, () => post({ type: 'request_pairing_code' }))
+    this.addEventListener(PhoneUnpairedEvent.type, (e) => post({ type: 'unpair_phone', id: e.id }))
 
     onHostMessage<ToSettingsWebview>((message) => this.receive(message))
     post({ type: 'ready' })
@@ -86,6 +94,10 @@ export class SettingsApp extends HTMLElement {
   private receive(message: ToSettingsWebview): void {
     if (message.type === 'models') {
       this.modelsSection.discoveredModels(message.provider, message.models)
+      return
+    }
+    if (message.type === 'pairing_code') {
+      this.remoteTab.showPairingCode(message)
       return
     }
     for (const pane of Object.values(this.panes)) pane.update(message.snapshot)

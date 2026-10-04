@@ -1,5 +1,18 @@
 import { commandName, runCommand, unwrapCommand } from './command-wrappers'
 import { splitShellCommand, type ShellSegment } from './shell-split'
+import { subcommandArguments } from './subcommand-tools'
+import { sedScriptInspects } from './sed-script'
+
+/**
+ * Said to every session, so the model reaches for a command that runs unasked
+ * rather than for awk. awk is not on the list below and never will be: its
+ * `system()`, `| "cmd"` and `print > file` make it a shell of its own, so
+ * telling a safe program from a dangerous one means parsing the program, and
+ * one miss runs anything without a prompt. The commands named here cover what
+ * awk is reached for in a pipeline, and the scratch file covers the rest.
+ */
+export const PIPE_WRITING =
+  'Take a field or a column out of a command\'s output with the commands that only inspect, which run without a permission prompt: `tr -s \' \'` into `cut`, with `sort`, `uniq -c`, `wc`, `head`, `tail`, `comm`, `nl` and `column` beside them, and `jq` or `yq` for JSON and YAML. Never awk or perl for it: they run a program of their own, so the whole call is asked every time. Where a column is not enough and the answer is computed, redirect the output to a file in the scratch folder and read that from a RunScript program.'
 
 /**
  * Commands that only inspect, whatever their arguments: they never change
@@ -45,45 +58,113 @@ function subcommandMutates(command: string, sub: string, args: string[]): boolea
   return false
 }
 
-/** Commands that write a file or launch a program given these arguments, and only inspect otherwise. */
-function argumentsMutate(command: string, args: string[]): boolean {
-  switch (command) {
-    case 'find':
-      return args.some((a) => ['-delete', '-exec', '-execdir', '-ok', '-okdir', '-fprint', '-fprint0', '-fprintf', '-fls'].includes(a))
-    case 'sed':
-      return args.some((a) => a === '-i' || a.startsWith('-i') || a === '--in-place' || a.startsWith('--in-place='))
-    case 'sort':
-      return args.some((a) => longFlag(a, '--output', '--compress-program') || shortFlags(a, 'ktSTo').includes('o'))
-    // `uniq IN OUT` writes OUT.
-    case 'uniq':
-      return operands(args, 'fsw', ['--skip-fields', '--skip-chars', '--check-chars']).length > 1
-    case 'tree':
-      return args.some((a) => /[oR]/.test(shortFlags(a, 'LPIoHT')))
-    case 'less':
-      return args.some((a) => a.startsWith('+') || longFlag(a, '--log-file', '--LOG-FILE') || /[oO]/.test(shortFlags(a, 'bhjkoOpPtTxyz')))
-    // Setting the clock, and an operand that is not a `+FORMAT` is a time to set it to.
-    case 'date':
-      return args.some((a) => longFlag(a, '--set') || shortFlags(a, 'dfrsI').includes('s')) || operands(args, 'dfr', ['--date', '--file', '--reference']).some((o) => !o.startsWith('+'))
-    // A name, or a file to read one from, sets the hostname.
-    case 'hostname':
-      return operands(args, '').length > 0 || args.some((a) => longFlag(a, '--file', '--boot') || /[Fb]/.test(shortFlags(a, 'F')))
-    // `--pre` runs a program over every file searched.
-    case 'rg':
-      return args.some((a) => longFlag(a, '--pre'))
-    case 'ag':
-      return args.some((a) => longFlag(a, '--pager'))
-    // `-i` edits in place and `-s` splits documents into files.
-    case 'yq':
-      return args.some((a) => longFlag(a, '--inplace', '--split-exp') || /[is]/.test(shortFlags(a, 'op')))
-    // `-C` compiles a magic file next to its source.
-    case 'file':
-      return args.some((a) => longFlag(a, '--compile') || shortFlags(a, 'eFfmP').includes('C'))
-    default:
-      return false
-  }
+/**
+ * What a command would do, as its own arguments decide. Another outcome is
+ * added as another kind, and the compiler then asks each reader what it makes
+ * of it; a bare yes or no leaves nowhere to put one.
+ */
+export type CommandEffect =
+  | { kind: 'inspects' }
+  | { kind: 'mutates'; reason: string }
+
+const INSPECTS: CommandEffect = { kind: 'inspects' }
+
+/** The reason is shown to the user as why their answer is wanted, so it is in the command's own terms. */
+const mutates = (reason: string): CommandEffect => ({ kind: 'mutates', reason })
+
+const effect = (mutating: boolean, reason: string): CommandEffect => (mutating ? mutates(reason) : INSPECTS)
+
+/** What a command makes of its arguments. */
+type ArgumentRule = (args: string[]) => CommandEffect
+
+/**
+ * Commands that only inspect given some arguments and write a file or launch a
+ * program given others. The command word is the key, so adding one is this
+ * entry alone: the names are read from here rather than kept in a second list
+ * that could fall out of step with it.
+ */
+const BY_ARGUMENTS: Record<string, ArgumentRule> = {
+  find: (args) => effect(args.some((a) => FIND_ACTIONS.has(a)), 'deletes what it finds, runs a program over it, or writes the matches to a file'),
+  sed: sedEffect,
+  sort: (args) => effect(args.some((a) => longFlag(a, '--output', '--compress-program') || shortFlags(a, 'ktSTo').includes('o')), 'writes its output to a file, or pipes it through a program of its own'),
+  // `uniq IN OUT` writes OUT.
+  uniq: (args) => effect(operands(args, 'fsw', ['--skip-fields', '--skip-chars', '--check-chars']).length > 1, 'writes its output to the second file it names'),
+  tree: (args) => effect(args.some((a) => /[oR]/.test(shortFlags(a, 'LPIoHT'))), 'writes its listing to a file'),
+  less: (args) => effect(args.some((a) => a.startsWith('+') || longFlag(a, '--log-file', '--LOG-FILE') || /[oO]/.test(shortFlags(a, 'bhjkoOpPtTxyz'))), 'runs a command on what it opens, or writes a copy of it'),
+  // Setting the clock, and an operand that is not a `+FORMAT` is a time to set it to.
+  date: (args) =>
+    effect(
+      args.some((a) => longFlag(a, '--set') || shortFlags(a, 'dfrsI').includes('s')) || operands(args, 'dfr', ['--date', '--file', '--reference']).some((o) => !o.startsWith('+')),
+      "sets the machine's clock",
+    ),
+  // A name, or a file to read one from, sets the hostname.
+  hostname: (args) => effect(operands(args, '').length > 0 || args.some((a) => longFlag(a, '--file', '--boot') || /[Fb]/.test(shortFlags(a, 'F'))), "sets the machine's hostname"),
+  rg: (args) => effect(args.some((a) => longFlag(a, '--pre')), 'runs a program over every file it searches'),
+  ag: (args) => effect(args.some((a) => longFlag(a, '--pager')), 'pipes its matches through a program'),
+  yq: (args) => effect(args.some((a) => longFlag(a, '--inplace', '--split-exp') || /[is]/.test(shortFlags(a, 'op'))), 'edits the document in place, or splits it into files'),
+  file: (args) => effect(args.some((a) => longFlag(a, '--compile') || shortFlags(a, 'eFfmP').includes('C')), 'compiles a magic file next to its source'),
 }
 
-const READ_ONLY_BY_ARGUMENTS = new Set(['find', 'sed', 'sort', 'uniq', 'tree', 'less', 'date', 'hostname', 'rg', 'ag', 'yq', 'file'])
+const FIND_ACTIONS = new Set(['-delete', '-exec', '-execdir', '-ok', '-okdir', '-fprint', '-fprint0', '-fprintf', '-fls'])
+
+/** What this command's own arguments make of it; undefined for a command they do not decide. */
+export function commandEffect(command: string, args: string[]): CommandEffect | undefined {
+  return BY_ARGUMENTS[command]?.(args)
+}
+
+/** Flags that only change how sed reads its input. */
+const SED_FLAGS = 'nszuEr'
+const SED_LONG_FLAGS = ['--quiet', '--silent', '--separate', '--null-data', '--unbuffered', '--regexp-extended', '--follow-symlinks', '--posix', '--debug', '--sandbox']
+
+const SED_SCRIPT_UNREAD = 'has a script this cannot read, and sed scripts can run a command or write a file'
+
+/**
+ * `sed` only inspects when its whole script is a shape without effect, which
+ * `sedScriptInspects` decides. Here the script is found: `-i` edits in place,
+ * `-f` takes it from a file nobody has shown the user, and a flag not listed
+ * above is taken as a write, since what it does with its value is unknown.
+ */
+function sedEffect(args: string[]): CommandEffect {
+  if (args.some((a) => longFlag(a, '--help', '--version'))) return INSPECTS
+  const scripts: string[] = []
+  const words: string[] = []
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!
+    if (arg === '--') {
+      words.push(...args.slice(i + 1))
+      break
+    }
+    if (arg.startsWith('--') && arg.length > 2) {
+      if (!longFlag(arg, '--expression')) {
+        if (!SED_LONG_FLAGS.some((flag) => longFlag(arg, flag))) return mutates(`is given ${arg}, whose effect is unknown here`)
+        continue
+      }
+      const equals = arg.indexOf('=')
+      const script = equals === -1 ? args[++i] : arg.slice(equals + 1)
+      if (script === undefined) return mutates(SED_SCRIPT_UNREAD)
+      scripts.push(script)
+      continue
+    }
+    if (arg.length > 1 && arg.startsWith('-')) {
+      const letters = shortFlags(arg, 'e')
+      if (![...letters].every((letter) => letter === 'e' || SED_FLAGS.includes(letter))) return mutates(`is given ${arg}, which may edit in place or take its script from a file`)
+      if (letters.endsWith('e')) {
+        // `-e` takes the rest of its own word, or the word after when it ends there.
+        const inline = arg.slice(letters.length + 1)
+        const script = inline === '' ? args[++i] : inline
+        if (script === undefined) return mutates(SED_SCRIPT_UNREAD)
+        scripts.push(script)
+      }
+      continue
+    }
+    words.push(arg)
+  }
+  // Without `-e` the first operand is the script; the rest are files, which sed only reads.
+  if (scripts.length === 0 && words[0] !== undefined) scripts.push(words[0])
+  if (scripts.length === 0) return mutates(SED_SCRIPT_UNREAD)
+  // sed joins its scripts with a newline, so a command split across two of them reads as one.
+  return effect(!sedScriptInspects(scripts.join('\n')), 'has a script beyond printing and substituting, which may run a command with `e` or write a path with `w`')
+}
 
 /** Does a `--name` word stand for one of these long flags? GNU tools take any unambiguous abbreviation of one. */
 function longFlag(arg: string, ...flags: string[]): boolean {
@@ -178,25 +259,15 @@ export function isReadOnlySegment(segment: ShellSegment, context: ReadOnlyContex
   // Moving around inside the project changes nothing; going anywhere else needs a rule for that directory.
   if (command === 'cd') return args.length === 1 && (context.canEnter?.(args[0]!) ?? false)
   if (READ_ONLY.has(command)) return true
-  if (READ_ONLY_BY_ARGUMENTS.has(command)) return !argumentsMutate(command, args)
+  const byArguments = commandEffect(command, args)
+  if (byArguments) return byArguments.kind === 'inspects'
   const subs = READ_ONLY_SUBCOMMANDS[command]
   if (subs) {
-    const [sub, ...rest] = command === 'git' ? gitSubcommand(args) : args
+    // `git -C ../other status` inspects as much as `git status` does, so the options before the subcommand are read past.
+    const [sub, ...rest] = subcommandArguments(command, args)
     return sub !== undefined && subs.has(sub) && !subcommandMutates(command, sub, rest)
   }
   return false
-}
-
-/** Git's arguments from its subcommand on, past the global options that only say where to look or how to page. `-c` is not one: it can name a pager or a hook to run. */
-function gitSubcommand(args: string[]): string[] {
-  let i = 0
-  while (i < args.length) {
-    const arg = args[i]!
-    if (arg === '-P' || arg === '--no-pager' || /^--(git-dir|work-tree)=/.test(arg)) i++
-    else if (arg === '-C' || arg === '--git-dir' || arg === '--work-tree') i += 2
-    else break
-  }
-  return args.slice(i)
 }
 
 /** Does this segment run git to change the repository or its config? A redirect of its output writes a file, not the repository, so it is left out. */

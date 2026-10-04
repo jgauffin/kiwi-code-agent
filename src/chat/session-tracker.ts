@@ -10,6 +10,7 @@ import type { FeatureBuild } from './feature-build'
 import type { FeatureCleanup } from './feature-cleanup'
 import type { PlanActions } from './plan-actions'
 import type { PanelRegistry } from './panel-registry'
+import { alertFor, mayPush, resolvesCompletion, type RemoteAlertPort } from '../remote-control/alerts'
 
 export type SessionTrackerDeps = {
   sessions: SessionManager
@@ -24,6 +25,10 @@ export type SessionTrackerDeps = {
   isOpen: (sessionId: string) => boolean
   sendState: () => Promise<void>
   changed: () => void
+  /** Where a session stopped mid-turn on the person is pushed to the paired phones, and taken back once answered. */
+  remoteAlerts: RemoteAlertPort
+  /** The workspace's standing default for whether a session may push, until the person changes it. */
+  pushDefault: () => boolean
 }
 
 /**
@@ -120,6 +125,7 @@ export class SessionTracker {
       if (isBuild(record.mode)) return this.deps.docsMap.follow(record, event)
       if (record.parentId) this.followRun(record, event)
       this.forwardToTab(record, event)
+      this.followRemoteAlert(record, event)
     }
     this.trackMcpServers(sessionId, event)
     const startsOrEnds = event.type === 'session_started' || event.type === 'ended'
@@ -149,6 +155,24 @@ export class SessionTracker {
     if (record.mode === 'cleanup') this.deps.cleanup.follow(record, event)
     else if (record.mode === 'implement') void this.deps.build.followTask(record, event)
     else this.deps.planActions.followCheck(record, event)
+  }
+
+  /**
+   * A question asked or a permission prompt pending is pushed to the paired
+   * phones that the session's tab may reach; a turn that merely ended, or any
+   * other progress, pushes nothing. Resolved elsewhere, or the session
+   * ending, takes the alert back.
+   */
+  private followRemoteAlert(record: SessionRecord, event: SessionEvent): void {
+    const { sessions, remoteAlerts, pushDefault } = this.deps
+    const tabId = tabIdOf(sessions, record)
+    const owner = sessions.get(tabId) ?? record
+    const alert = alertFor(tabId, owner.feature ?? owner.title, event)
+    if (alert) {
+      if (mayPush(owner.pushAllowed, owner.startedFrom, pushDefault())) remoteAlerts.send(alert)
+    } else if (resolvesCompletion(event)) {
+      remoteAlerts.withdraw(tabId)
+    }
   }
 
   private forwardToTab(record: SessionRecord, event: SessionEvent): void {

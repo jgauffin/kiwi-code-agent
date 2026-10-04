@@ -90,6 +90,10 @@ export type PlanState = {
   applyingRulings: boolean
   /** The planner is listing what the docs should now say, right after the clean check; the build starts once that turn ends. */
   reviewingDocs: boolean
+  /** A change or an update was just asked for on a feature past its draft; the bar stands at Plan until the revision lands back on `draft`. */
+  startingChange: boolean
+  /** A draft was picked up and its critique has yet to land; the tab stays on the chat, where the critique is said, until a turn goes through. */
+  critiqueOwed: boolean
   /** Some run of the feature is at work: a turn in flight, or a check, test run or cleanup live. False means the next act is the dev's. */
   atWork: boolean
   /** A run of the feature is stopped mid-turn on the dev: a question to answer or a call to allow or deny. */
@@ -160,6 +164,14 @@ export type ResumablePlan = { feature: string; status: SpecStatus | undefined; l
 export type ResumableChat = { sessionId: string; title: string; mode: SessionMode; lastActiveAt: string }
 
 /**
+ * Every feature's spec, for Update spec on the new-session screen's Code
+ * tab: a draft is always pickable, carried on there as a draft pickup, so
+ * `changeable` is absent on one. A settled spec is pickable only once
+ * `changeable`; `waiting` says what it is waiting for otherwise.
+ */
+export type UpdatableSpec = { feature: string; status: SpecStatus; changeable?: boolean; waiting?: string }
+
+/**
  * What is put to the person about one scope's `AGENTS.md`, over the chat:
  * moving a `CLAUDE.md` that still holds rules into it, tidying it once it is
  * long, or both. `text` is what `AGENTS.md` reads, after the move when one is offered.
@@ -193,6 +205,8 @@ export type ToWebview =
       plans: ResumablePlan[]
       /** Conversations no tab is showing, newest worked in first, for the same list. */
       chats: ResumableChat[]
+      /** Every feature's spec, whatever its state, for the new-session screen's Update spec card. */
+      updates: UpdatableSpec[]
       /** Entries in `specs/unfiled-decisions.md` and `specs/future-work.md` waiting to be filed into the specs and docs, for the same list. */
       unfiled: number
       /** The profiles by name and which of them new sessions get, for the new-session screen's pickers. */
@@ -259,8 +273,10 @@ export type FromWebview =
   | { type: 'new_session'; mode: SessionMode; feature?: string; prompt?: string; files?: string[] }
   /** Sets the profile new sessions run on. */
   | { type: 'set_default_profile'; name: string }
-  /** Opens the plan session behind a spec on disk, or starts one on it when none remains; what it offers follows the spec's status. */
-  | { type: 'resume_plan'; feature: string }
+  /** Opens the plan session behind a spec on disk, or starts one on it when none remains; what it offers follows the spec's status. `note` is what was typed on the screen the pickup came from, said in the plan's chat. */
+  | { type: 'resume_plan'; feature: string; note?: string }
+  /** The new-session screen's Update spec: picks a feature's spec, whatever its state, and says `description` in its planning session as the developer's own first message. */
+  | { type: 'update_spec'; feature: string; description: string }
   /** Approves the draft and starts its check against the code; refused while a comment is open. */
   | { type: 'approve_spec' }
   /** Hands the rulings to the plan session to apply; refused while a decision is still open. */

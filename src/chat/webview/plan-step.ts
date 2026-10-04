@@ -1,8 +1,26 @@
-import type { CleanupUnit, PlanState, RunFailure } from '../protocol'
+import type { CleanupUnit, PlanState } from '../protocol'
 import { isVerified } from '../../agent/phases/spec-status'
-import type { Task } from '../../agent/phases/tasks-file'
-import type { SessionMode } from '../../agent/session/session-manager'
 import type { RunBlock } from '../../agent/session/session-status'
+import {
+  RUN_NOUN,
+  capitalized,
+  cleanupNext,
+  deriveChecking,
+  deriveCreated,
+  deriveFinalDraft,
+  derivePendingReview,
+  deriveUnderDevelopment,
+  deriveUnderReview,
+  deriveVerification,
+  failureText,
+  onlyBlockedLeft,
+  ruling,
+  tryAgain,
+  type Derived,
+} from './plan-step-derive'
+
+/** Re-exported from `./plan-step-derive`, where every other stage's step is also derived. */
+export { failureText, onlyBlockedLeft }
 
 /**
  * The plan flow as the person walks it, read off the plan state: which step
@@ -36,8 +54,8 @@ export type ViewTab = Tab | 'chat'
 export type NextAction = 'check' | 'submit_review' | 'send_rulings' | 'approve' | 'implement' | 'verify' | 'sweep'
 
 export type NextStep =
-  /** A button in the bar: the act moves the plan on. */
-  | { kind: 'action'; action: NextAction; label: string; hint: string }
+  /** A button in the bar: the act moves the plan on. `busy` says who is at work beside it, while the act stays the person's. */
+  | { kind: 'action'; action: NextAction; label: string; hint: string; busy?: string }
   /** A link in the bar: the act is on a row of the named tab, or in the chat. */
   | { kind: 'goto'; tab: ViewTab; label: string; hint: string }
   /** Nothing to do; the text says who is at work. */
@@ -55,28 +73,6 @@ export type PlanStep = {
   yours: boolean
   /** The tests passed and nothing runs: the plan is complete, and what the cleanup left is the dev's to decide on. */
   complete: boolean
-}
-
-type Derived = Omit<PlanStep, 'reached' | 'yours' | 'complete'>
-
-const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`
-
-/** Nothing is left to build but blocked tasks: with no run at work, the build stands still until the person hands one back or accepts it. */
-export function onlyBlockedLeft(live: Task[]): boolean {
-  const unfinished = live.filter((t) => t.state !== 'tested')
-  return unfinished.length > 0 && unfinished.every((t) => t.state === 'blocked')
-}
-
-const RUN_NOUN: Record<SessionMode, string> = {
-  chat: 'the session',
-  plan: 'the planner',
-  reconcile: 'the check',
-  implement: 'the implementer',
-  cleanup: 'the cleanup',
-  'code-plan': 'the planner',
-  'docs-map': 'the docs map',
-  'file-decisions': 'the filing session',
-  'doc-migration': 'the docs cleanup',
 }
 
 /** Who a step waits on while it is not the person's. */
@@ -97,7 +93,7 @@ export function planStep(plan: PlanState): PlanStep {
     : derived.next.kind === 'waiting' && !plan.atWork
       ? stopped(derived.current, plan)
       : derived
-  const complete = plan.stage === 'verified' && !plan.blocked && !plan.cleanup?.live && !plan.verification?.live
+  const complete = plan.stage === 'verified' && !plan.blocked && !plan.cleanup?.live && !plan.verification?.live && !plan.startingChange
   return { ...step, reached: reached(step.current, plan), yours: !complete && (step.next.kind === 'action' || step.next.kind === 'goto'), complete }
 }
 
@@ -139,154 +135,27 @@ function stopped(current: Step, plan: PlanState): Derived {
   }
 }
 
-/** A failed turn is retried by the same act that starts the build; the reason rides along so the dev fixes it first. */
-function tryAgain(failure: RunFailure): NextStep {
-  return { kind: 'action', action: 'implement', label: 'Try again', hint: `${failureText(failure)}. Fix the cause, then hand the board back to the implementer.` }
-}
-
-const capitalized = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1)
-
-/** What the bar says about a run whose last turn failed. */
-export const failureText = (failure: RunFailure): string => `${capitalized(RUN_NOUN[failure.mode])} failed: ${failure.message}`
-
 function derive(plan: PlanState): Derived {
   if (plan.status === 'missing') return { current: 'plan', next: { kind: 'waiting', text: 'the planner is writing the spec' } }
   // A swept feature stands on its spec alone: no board is left to offer a cleanup from.
   if (isVerified(plan.status) && plan.tasks.length === 0) return { current: 'cleanup', next: { kind: 'done', text: 'verified' } }
 
+  // A change or an update was just asked for on this settled feature: the bar says so at once, on whatever step it was showing, rather than only in the chat the request reached.
+  if (plan.startingChange) return { current: 'plan', next: { kind: 'waiting', text: 'the planner is working the change' } }
+
   const pending = pendingRound(plan)
-  if (pending) {
-    const n = pending.comments.length + pending.strikes.length
-    return {
-      current: 'review',
-      next: {
-        kind: 'action',
-        action: 'submit_review',
-        label: `Submit review (${n})`,
-        hint: 'Hand the plan and this review to the session that owns it.',
-      },
-    }
-  }
+  if (pending) return derivePendingReview(pending)
 
-  if (plan.stage === 'under_review') {
-    const unanswered = plan.review.rounds.flatMap((r) => r.comments).filter((c) => !c.resolution).length
-    return { current: 'review', next: { kind: 'waiting', text: `the planner is answering ${plural(unanswered, 'comment')}` } }
-  }
-
-  if (plan.stage === 'final_draft') {
-    const open = plan.review.rounds.flatMap((r) => r.comments).filter((c) => !c.closed).length
-    return {
-      current: 'review',
-      next: { kind: 'goto', tab: 'review', label: `${plural(open, 'answer')} to read`, hint: 'Read what the planner answered and resolve each comment; then the spec can be approved.' },
-    }
-  }
-
-  if (plan.stage === 'created') {
-    // A draft an earlier mapping left decisions on is ruled before it is approved.
-    if (plan.pendingDecisions > 0) return ruling(plan)
-    if (!plan.approvable) return { current: 'approve', next: { kind: 'waiting', text: 'the planner is revising the spec' } }
-    return {
-      current: 'approve',
-      next: {
-        kind: 'action',
-        action: 'approve',
-        label: 'Approve',
-        hint: 'Comment on the spec first, or approve it as it stands: the code is checked against it, and the build starts unless the code disagrees.',
-      },
-    }
-  }
-
-  if (plan.stage === 'checking') {
-    if (plan.check?.live) return { current: 'approve', next: { kind: 'waiting', text: plan.check.text } }
-    if (plan.applyingRulings) return { current: 'rule', next: { kind: 'waiting', text: `the planner is applying ${plural(plan.pendingDecisions, 'ruling')}` } }
-    return { current: 'approve', next: { kind: 'waiting', text: 'the spec is checked against the code' } }
-  }
-
+  if (plan.stage === 'under_review') return deriveUnderReview(plan)
+  if (plan.stage === 'final_draft') return deriveFinalDraft(plan)
+  if (plan.stage === 'created') return deriveCreated(plan)
+  if (plan.stage === 'checking') return deriveChecking(plan)
   if (plan.stage === 'ruling') return ruling(plan)
-
-  if (plan.stage === 'under_development') {
-    if (plan.reviewingDocs) return { current: 'approve', next: { kind: 'waiting', text: 'the planner is listing what the docs should now say; the implementation starts after it' } }
-    const live = plan.tasks.filter((t) => !t.removed)
-    if (plan.implementable && !live.some((t) => t.state !== 'open')) {
-      // The clean check starts the build: this is the way back in when nothing is building the tasks.
-      if (plan.failure) return { current: 'implement', next: tryAgain(plan.failure) }
-      return { current: 'implement', next: { kind: 'action', action: 'implement', label: 'Implement', hint: 'Nothing is building the tasks: pick the board up in a session that builds them one by one.' } }
-    }
-    const tested = live.filter((t) => t.state === 'tested').length
-    const blocked = live.filter((t) => t.state === 'blocked').length
-    // The build handed each one back once and it stayed blocked: the person decides, on the task's row.
-    if (!plan.atWork && !plan.failure && onlyBlockedLeft(live)) {
-      return {
-        current: 'implement',
-        next: {
-          kind: 'goto',
-          tab: 'tasks',
-          label: `${plural(blocked, 'task')} still blocked`,
-          hint: 'Every other task is finished and these stayed blocked after another look: hand one back to its run, answer it in its chat, or accept it as it is.',
-        },
-      }
-    }
-    // The scenario under way is what the person wants to know; the count is how far along it is.
-    const current = live.find((t) => t.state === 'in_progress')
-    const where = current ? `${current.group ?? current.name}, ` : ''
-    const progress = `${where}${tested} of ${live.length} tested${blocked > 0 ? `, ${blocked} blocked` : ''}`
-    return { current: 'implement', next: { kind: 'waiting', text: progress } }
-  }
-
-  if (plan.stage === 'verification') {
-    // With no test command for the tasks' files the step is not shown: the empty run that moves the feature on is the end of Implement.
-    const current: Step = plan.verifies ? 'verify' : 'implement'
-    if (plan.verification?.live) return { current, next: { kind: 'waiting', text: plan.verification.text } }
-    // A failed run goes to a fix run, which starts the tests again when its turn ends: running them under it would test half-made fixes.
-    if (plan.atWork) return { current, next: { kind: 'waiting', text: 'the implementer is fixing the failed tests' } }
-    return {
-      current,
-      next: { kind: 'action', action: 'verify', label: plan.lastVerification ? 'Verify again' : 'Verify', hint: 'Run the test commands over the files the tasks name.' },
-    }
-  }
+  if (plan.stage === 'under_development') return deriveUnderDevelopment(plan)
+  if (plan.stage === 'verification') return deriveVerification(plan)
 
   // verified
   return { current: 'cleanup', next: cleanupNext(plan) }
-}
-
-/**
- * The cleanup step: the split is offered, never taken on the user's behalf.
- * A run in flight speaks for itself; an offer and a postponement point at the
- * list on the Cleanup tab, where the choices are; a feature with no sweep
- * to show can ask for one.
- */
-function cleanupNext(plan: PlanState): NextStep {
-  if (plan.cleanup?.live) return { kind: 'waiting', text: plan.cleanup.text }
-  const units = plan.cleanupSweep?.units.length ?? 0
-  if (units > 0 && plan.cleanupDecision !== 'skipped' && plan.cleanupDecision !== 'done') {
-    const label = plan.cleanupDecision === 'postponed' ? `Cleanup postponed (${units})` : `${plural(units, 'unit')} over the limit`
-    return { kind: 'goto', tab: 'cleanup', label, hint: 'Pick the files the sweep found to split, leave it for later, or settle the feature as it stands.' }
-  }
-  if (plan.cleanupDecision === 'skipped') return { kind: 'done', text: 'cleanup skipped' }
-  if (plan.cleanupSweep || plan.cleanupDecision === 'done') return { kind: 'done', text: 'verified' }
-  return { kind: 'action', action: 'sweep', label: 'Check sizes', hint: 'Measure the files this feature touched against the size limits.' }
-}
-
-/** The check found what the person rules on: proposals first, then the rulings, then the planner applies them. */
-function ruling(plan: PlanState): Derived {
-  const unproposed = plan.decisions.filter((d) => d.state === 'open' && d.proposals.length === 0).length
-  if (unproposed > 0) return { current: 'rule', next: { kind: 'waiting', text: `the planner is proposing on ${plural(unproposed, 'decision')}` } }
-  if (plan.applyingRulings) return { current: 'rule', next: { kind: 'waiting', text: `the planner is applying ${plural(plan.pendingDecisions, 'ruling')}` } }
-  if (plan.pendingDecisions > 0) {
-    const open = plan.decisions.filter((d) => d.state === 'open').length
-    // Every ruling is the user's: with several options to choose from there is no default, so the bar links to the wizard until all are ruled.
-    if (open > 0) return { current: 'rule', next: { kind: 'goto', tab: 'decisions', label: `${open} to rule on`, hint: 'Rule on each decision: change the spec one of the proposed ways, keep it and change the code instead, or say it in your own words.' } }
-    return {
-      current: 'rule',
-      next: {
-        kind: 'action',
-        action: 'send_rulings',
-        label: `Send rulings (${plan.pendingDecisions})`,
-        hint: 'Hand the rulings to the planner, which revises the rules; the spec is then checked again and the build starts.',
-      },
-    }
-  }
-  return { current: 'rule', next: { kind: 'waiting', text: 'the spec is checked against the code' } }
 }
 
 /** Every step up to the current one; a draft can always take a comment, so Review stays open on one. */

@@ -25,6 +25,7 @@ function snapshot(bundles: SettingsSnapshot['bundles']): SettingsSnapshot {
     traceEngine: false,
     compactAtTokens: 400_000,
     hasWorkspace: true,
+    remoteControl: { enabled: false, serviceUrl: 'wss://remote.kiwipow.com', pushByDefault: true, phones: [] },
   }
 }
 

@@ -26,6 +26,8 @@ export function planState(over: Partial<PlanState> = {}): PlanState {
     pendingDecisions: 0,
     applyingRulings: false,
     reviewingDocs: false,
+    startingChange: false,
+    critiqueOwed: false,
     atWork: true,
     ...over,
   }

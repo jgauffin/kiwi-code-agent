@@ -109,6 +109,8 @@ export type SessionEvent =
   /** `resumable` is set when the turn stopped short with its work intact: another turn carries on where it stopped. */
   | { type: 'error'; message: string; fatal: boolean; resumable?: true }
   | { type: 'ended' }
+  /** A paired phone's command, carried out through the same call a desk act would make; logged beside it so the record says where it came from. */
+  | { type: 'remote_action'; note: string }
 
 /**
  * A coding session on one engine. Session-centric on purpose: the extension

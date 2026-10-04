@@ -1,12 +1,29 @@
 # Changelog
 
-## 0.2.6
+## 0.2.7
 
+- New *Update spec* card on the new-session screen's Code tab: pick any feature's spec, whatever its state, describe what should change, and it starts that change, whether or not the feature has anything open.
+- *Update spec*'s direction answers every part of what you described, leaves a rule it doesn't reach exactly as it stands, and names which feature owns it when what you asked for is behaviour another spec already defines.
+- Change and *Update spec* always plan, never land in whatever cleanup, build or check conversation a feature's tab happens to show: a cleanup offer not yet settled is dropped rather than split over code about to be rewritten, and the plan bar stands at Plan from the moment you ask.
+- A session takes a column out of a command's output with `tr`, `cut`, `sort`, `uniq` or `jq`, which run without a prompt, instead of reaching for awk and asking you every time.
+- A `sed` call runs without a prompt only where its script plainly just prints: an address with `p`, `d`, `q` or `=`, or one `s///`. Every other script asks, `-f` among them, since sed's own `e` runs a shell command and `w` writes any path.
+- A task button in the implementation switcher carries its state as a colour: grey waiting, blue being built, green done.
+- A spec opens in its planner from the file itself: *Open In Planner* on the explorer's right-click menu for any spec, and a button in the editor's title bar while the spec is still a draft.
+- Each spec in the file explorer carries where it stands as a symbol, with the full word on hover: ✎ draft, ⚑ approved, ⚙ implemented, ✅ verified. The file name's colour is left to git.
+- New Remote tab in Settings: pair a phone with this workspace by a code shown as text and as a QR code, list paired phones by name and last connection, and unpair one. Behind `kiwiAgent.remoteControl.enabled`, off by default.
+- New *Push by default* setting in the Remote tab: whether a session started at the desk pushes to paired phones when it stops on a question or a permission prompt, until you turn it off for that session; one started from the phone always pushes. On by default.
+- A permission prompt names the subcommand even when the tool's own options stand before it: `npx --prefix web tsc` is remembered as that, not as every use of `npx`.
+- The plan bar says when the planner is at work on a draft, beside Approve, which is greyed while it works but still yours to press.
+- Picking up a draft opens its chat and leaves you there when the critique lands, so what the planner makes of the draft is read before the spec.
+- Notes typed on the new-session card survive picking a plan up from the same screen: they are said in that plan's chat as your own message instead of being lost with the card.
 - New `spec-writing-from-code` skill: drafts specs by reading the source, for a codebase with nothing written down, and flags what it had to guess.
 - A tab stopped on an open question or a permission prompt fades its icon in and out, so it shows while you are on another tab.
 - A chat session's effort sits beside its model in the composer, switchable between turns the same way: pick how hard the model thinks, or leave it at the model's own default. The switch only appears for a model whose levels are known (Claude, and an OpenAI-compatible model that takes `reasoning_effort`), and a level you picked survives a model switch, brought down to what the new model takes.
 - *Evaluate docs* and *Doc migration* are one job, *Clean up docs*; it can also change the README. A profile's model for *Evaluate docs* is dropped.
 - A task run starts from the files its task names instead of working the surface out again: it opens those and the task's context first, searches only for what they leave open, and no longer sweeps the other features' specs or the docs before writing anything.
+
+## 0.2.6
+
 - New `SpecSearch` tool: finds spec rules and returns them whole.
 - Future work moves to `specs/future-work.md`; entries marked `built: false` are moved there on startup.
 - An approved code plan records its spec changes and decisions before building.
@@ -25,6 +42,7 @@
 - Picking a draft up with no session of its own buys a critique in chat before any write, sized to how the draft was authored, and answers a review already waiting on it before raising anything of its own.
 - A draft's critique names every other draft whose rules describe the same behaviour and proposes which feature should own it; it writes only its own spec, and the user's ruling on ownership is recorded for the other draft to pick up.
 - A draft's critique can propose a different direction than the one the draft takes, leaving the spec untouched until you choose; taking it rewrites the same spec file, keeping the draft's direction carries it on as it stands without raising the same redirect again.
+- A paired phone can answer a question or a permission prompt, send a running session a prompt or interrupt it, approve a spec and send its rulings, and pick up a draft's planning session; whichever device answers first wins, and every act from the phone is logged as having come from there.
 
 ## 0.2.5
 

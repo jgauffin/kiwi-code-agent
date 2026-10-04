@@ -38,6 +38,8 @@ function plan(): PlanState {
     pendingDecisions: 0,
     applyingRulings: false,
     reviewingDocs: false,
+    startingChange: false,
+    critiqueOwed: false,
     atWork: true,
   }
 }
@@ -55,6 +57,7 @@ const state = (runs: RunControls[] = [planRun()]): Extract<ToWebview, { type: 's
   plan: plan(),
   plans: [],
   chats: [],
+  updates: [],
   unfiled: 0,
   profiles: { names: ['Claude'], active: 'Claude' },
   models: [],

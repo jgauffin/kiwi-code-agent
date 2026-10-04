@@ -8,6 +8,7 @@ import { changePrompt, specPath } from '../agent/phases/blind-plan'
 import { compactAppliedDecisions, decisionsPath, readDecisions } from '../agent/phases/decisions'
 import { contextPath, readScenarioContext } from '../agent/phases/scenario-context'
 import { pickUpPlan } from '../agent/phases/plan-pickup'
+import { startUpdate as startUpdateSpec } from '../agent/phases/update-spec'
 import { assertImplementable } from '../agent/phases/implement'
 import { checkDue } from '../agent/phases/plan-stage'
 import { parseSpec } from '../agent/phases/spec-model'
@@ -17,6 +18,7 @@ import type { Review } from '../agent/phases/plan-review'
 import type { FromWebview, PlanState, RunState } from './protocol'
 import type { ChatPanel } from './panel-registry'
 import type { FeatureBuild } from './feature-build'
+import type { FeatureCleanup } from './feature-cleanup'
 import { PlanChecks } from './plan-checks'
 import { PlanRepairs } from './plan-repairs'
 import { PlanApprovals } from './plan-approvals'
@@ -27,6 +29,7 @@ export type PlanActionsDeps = {
   /** What a step runs on. `attempt` counts the fixes of a failed test run. */
   profileFor: (step: Step, attempt?: number) => ModelProfile
   build: FeatureBuild
+  cleanup: FeatureCleanup
   newSession: (mode: SessionMode, feature?: string, prompt?: string, into?: ChatPanel, label?: string) => Promise<SessionRecord | undefined>
   open: (sessionId: string, into?: ChatPanel) => Promise<void>
   /** The plan bar's state for the tab a session belongs to; `startChange` reads only whether it is changeable. */
@@ -45,6 +48,10 @@ export class PlanActions {
   private readonly checks: PlanChecks
   private readonly repairs: PlanRepairs
   private readonly approvals: PlanApprovals
+  /** Features whose change or update was just asked for, past their draft; the plan bar stands at Plan until the revision lands back on `draft`. */
+  private readonly startingChange = new Set<string>()
+  /** Drafts whose pickup critique has yet to land; the tab stays on the chat until it has, since what the critique found is said there and nowhere else. */
+  private readonly critiqueOwed = new Set<string>()
 
   constructor(private readonly deps: PlanActionsDeps) {
     this.checks = new PlanChecks({
@@ -82,6 +89,19 @@ export class PlanActions {
     return this.approvals.isReviewingDocs(feature)
   }
 
+  isStartingChange(feature: string): boolean {
+    return this.startingChange.has(feature)
+  }
+
+  isCritiqueOwed(feature: string): boolean {
+    return this.critiqueOwed.has(feature)
+  }
+
+  /** The revision landed back on `draft`: the bar reads the files again rather than standing at Plan on their old, settled word. */
+  changeLanded(feature: string): void {
+    this.startingChange.delete(feature)
+  }
+
   /**
    * The plan session of a tab. The tab is the feature, whichever of its runs
    * is speaking, so the plan bar's acts belong to the planner even while an
@@ -102,9 +122,10 @@ export class PlanActions {
    * context; the engine resumes on the next prompt), else a fresh plan session
    * told to read the files. The plan bar then offers what the stage allows:
    * review and mapping on a draft, implement on an approved one, the test run
-   * on a tested board.
+   * on a tested board. `note` is what the person had typed where they picked
+   * the plan up from, said in the plan's chat in their own words.
    */
-  async resumePlan(feature: string, into?: ChatPanel): Promise<void> {
+  async resumePlan(feature: string, into?: ChatPanel, note?: string): Promise<void> {
     const { workspaceRoot, sessions } = this.deps
     const path = specPath(workspaceRoot, feature)
     // The list is newest first; the latest session on the spec is the one that knows it best.
@@ -112,27 +133,62 @@ export class PlanActions {
     await pickUpPlan({
       courier: {
         open: (sessionId) => this.deps.open(sessionId, into),
-        start: async (f, prompt, label) => {
-          await this.deps.newSession('plan', f, prompt, into, label)
-        },
+        start: async (f, prompt, label) => (await this.deps.newSession('plan', f, prompt, into, label))?.id,
+        say: (sessionId, text) => sessions.send(sessionId, text),
+        critiqueOwed: (f) => void this.critiqueOwed.add(f),
       },
       cwd: workspaceRoot,
       feature,
       ...(owner ? { owner: { sessionId: owner.id } } : {}),
+      ...(note ? { note } : {}),
     })
   }
 
   /**
    * Starts a change on the feature shown: a new plan session on its settled
    * spec, carrying none of the conversation that shaped it. Refused while the
-   * build still has something in flight, whatever the bar last showed.
+   * build still has something in flight, whatever the bar last showed. Never
+   * handed to whatever conversation the tab happened to show: a cleanup
+   * offer not yet settled is dropped rather than left to run over code the
+   * change is about to rewrite, and the bar stands at Plan until the
+   * revision lands back on `draft`.
    */
   async startChange(shown: SessionRecord | undefined, entry: ChatPanel): Promise<void> {
     const feature = shown?.feature
     if (!shown || !feature) return
     const plan = await this.deps.planState(shown)
     if (!plan?.changeable) throw new Error(`"${feature}" still has work in flight: nothing to change yet.`)
+    this.startingChange.add(feature)
+    this.deps.cleanup.clear(feature)
     await this.deps.newSession('plan', feature, changePrompt(feature), entry, 'Starting a change')
+  }
+
+  /**
+   * The new-session screen's "Update spec": picks a feature's spec,
+   * whatever its state, and starts or carries on its planning session with
+   * the description as the developer's own first message rather than a
+   * prompt written for them. Same guarantees as a change: a stale cleanup
+   * offer is dropped, and the bar stands at Plan until the revision lands.
+   */
+  async startUpdate(feature: string, description: string, into: ChatPanel): Promise<void> {
+    const { workspaceRoot, sessions } = this.deps
+    const path = specPath(workspaceRoot, feature)
+    const owner = sessions.list().find((r) => r.mode === 'plan' && r.feature && specPath(workspaceRoot, r.feature) === path)
+    await startUpdateSpec({
+      courier: {
+        open: (sessionId) => this.deps.open(sessionId, into),
+        start: async (f, prompt, label) => (await this.deps.newSession('plan', f, prompt, into, label))?.id,
+        say: (sessionId, text) => sessions.send(sessionId, text),
+        critiqueOwed: (f) => void this.critiqueOwed.add(f),
+      },
+      cwd: workspaceRoot,
+      feature,
+      description,
+      ...(owner ? { owner: { sessionId: owner.id } } : {}),
+    })
+    // Refused above (still at work) throws before this line; reached only once the description is on its way.
+    this.startingChange.add(feature)
+    this.deps.cleanup.clear(feature)
   }
 
   followCheck(child: SessionRecord, event: SessionEvent): void {
@@ -233,7 +289,9 @@ export class PlanActions {
   followPlanTurn(record: SessionRecord, feature: string, isError: boolean): void {
     // However the turn ended, the rulings are no longer in flight: Approve is the user's again, on the spec as it stands.
     const { applied, reviewed } = this.approvals.clearAfterTurn(feature)
-    if (applied || reviewed) void this.deps.sendState()
+    // A turn that went through has said what it found: the critique is no longer owed and the tab is free to show the spec again.
+    const critiqued = !isError && this.critiqueOwed.delete(feature)
+    if (applied || reviewed || critiqued) void this.deps.sendState()
     // The clean check was the go-ahead for the build; the docs listing was the last thing between it and the implementer.
     if (reviewed && !isError) void this.deps.build.implementAfterApproval(record)
     if (!isError) void this.followPlan(record)

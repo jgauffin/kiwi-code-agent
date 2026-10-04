@@ -175,6 +175,37 @@ export function draftPickupPrompt(feature: string, authorship: Authorship, prese
 }
 
 /**
+ * What a change does once the developer has said what they want, the same
+ * whether that came as a question's answer or arrived already said: proposes
+ * before writing, then revises the spec in place to the same contract and
+ * sends it through the ordinary review. `onceSaid` leads the first sentence,
+ * worded for how this change got the developer's words. `extra` adds lines
+ * to the analysis step for a caller whose description can carry more than
+ * change ever asks a question about.
+ */
+function changeAnalysisSteps(spec: string, slug: string, onceSaid: string, extra: string[] = []): string[] {
+  return [
+    `${onceSaid}, answer in chat, before writing anything: which of the spec's existing rules the change would amend, which it would drop, and what it would add. Fold in an unfiled entry that names this feature; name a future-work entry that names it as something the change could take in, and take it in only if the developer says so. A short message, then stop and wait. Write nothing until they say go.`,
+    ...extra,
+    '',
+    `Once they say go, revise \`${spec}\` itself, to the same contract: never a second spec and never a separate file of changes. Behaviour that belongs to a situation the spec already has becomes rules in that scenario; behaviour that is a situation of its own becomes a new \`##\` scenario. Set the front matter \`status\` back to \`draft\`, so the feature stands as a plan being made again until the user approves it. From there the revision is reviewed like any draft: the developer comments and strikes its rules in \`${WORK_DIR}/${slug}.review.md\`, you answer them, before Approve.`,
+  ]
+}
+
+/**
+ * What `updatePrompt` adds to the shared analysis step: the description
+ * arrives as one block of the developer's own words rather than an answer
+ * to a question, so it can ask for several things at once, for less than it
+ * seems to, or for behaviour that belongs to a feature other than this one.
+ */
+function updateAnalysisExtra(spec: string): string[] {
+  return [
+    `Answer every part of what they wrote: each thing it asks for is taken in, named as something the direction would amend, drop or add, or declined with a reason, so nothing they typed is left without an answer. A rule it does not reach stays exactly as it stands; where you judge other behaviour must change alongside it, only name that in the direction, and take it in if they say so.`,
+    `Search ${SPEC_SEARCH} for a settled spec that already defines what they described; where one does, name in the direction which feature owns it and write only \`${spec}\`, never the other spec, whatever they asked. Once the user agrees, record the ownership as an unfiled decision in \`${UNFILED_FILE}\` naming both features, so the other feature's own change takes it in.`,
+  ]
+}
+
+/**
  * The first message of a session asked to change an already-settled feature:
  * a new session, carrying none of the conversation that shaped the spec, told
  * to start from the files rather than invent the feature afresh.
@@ -187,9 +218,25 @@ export function changePrompt(feature: string): string {
     '',
     `Read the spec, and \`${UNFILED_FILE}\` and \`${FUTURE_FILE}\` for an entry naming "${feature}". Then ask what the developer wants changed.`,
     '',
-    `Once they say, answer in chat, before writing anything: which of the spec's existing rules the change would amend, which it would drop, and what it would add. Fold in an unfiled entry that names this feature; name a future-work entry that names it as something the change could take in, and take it in only if the developer says so. A short message, then stop and wait. Write nothing until they say go.`,
+    ...changeAnalysisSteps(spec, slug, 'Once they say'),
+  ].join('\n')
+}
+
+/**
+ * The first message of a session the new-session screen's "Update spec"
+ * starts on an already-settled feature with nothing open: unlike `changePrompt`,
+ * it never asks, since the developer's description is already on its way as
+ * the next message, in their own words rather than folded into this kickoff.
+ */
+export function updatePrompt(feature: string): string {
+  const slug = featureSlug(feature)
+  const spec = `${SPECS_DIR}/${slug}.spec.md`
+  return [
+    `"${feature}" is already settled, at \`${spec}\`. This is a change to it, not a new feature: start from the spec as it stands, never from an earlier conversation about it.`,
     '',
-    `Once they say go, revise \`${spec}\` itself, to the same contract: never a second spec and never a separate file of changes. Behaviour that belongs to a situation the spec already has becomes rules in that scenario; behaviour that is a situation of its own becomes a new \`##\` scenario. Set the front matter \`status\` back to \`draft\`, so the feature stands as a plan being made again until the user approves it. From there the revision is reviewed like any draft: the developer comments and strikes its rules in \`${WORK_DIR}/${slug}.review.md\`, you answer them, before Approve.`,
+    `Read the spec, and \`${UNFILED_FILE}\` and \`${FUTURE_FILE}\` for an entry naming "${feature}". The next message says what the developer wants changed.`,
+    '',
+    ...changeAnalysisSteps(spec, slug, 'Once it arrives', updateAnalysisExtra(spec)),
   ].join('\n')
 }
 

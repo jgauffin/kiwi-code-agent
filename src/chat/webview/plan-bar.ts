@@ -128,7 +128,13 @@ export class PlanBar extends HTMLElement {
     }
     switch (next.kind) {
       case 'action':
-        nodes.push(button(next.label, () => this.dispatchEvent(eventFor(next.action)), `next ${next.action}`, next.hint))
+        if (next.busy) {
+          const node = el('span', 'running', next.busy)
+          node.title = next.busy
+          nodes.push(node)
+        }
+        // The busy line is what the person should read while a run works, so the act is muted beside it; it stays theirs to press.
+        nodes.push(button(next.label, () => this.dispatchEvent(eventFor(next.action)), `next ${next.action}${next.busy ? ' busy' : ''}`, next.hint))
         break
       case 'waiting':
         // A run's own progress line already says who is at work.

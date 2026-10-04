@@ -7,6 +7,7 @@ import { CHAT_DECISIONS } from '../src/agent/phases/unfiled-decisions'
 import { SPEC_READING } from '../src/agent/phases/blind-plan'
 import { memoryWritingInstructions } from '../src/agent/memory/memories'
 import { projectScriptsInstruction } from '../src/agent/permissions/package-scripts'
+import { PIPE_WRITING } from '../src/agent/permissions/read-only-commands'
 import { CLASH_WITH_CORE } from '../src/agent/instructions/instruction-files'
 
 let cwd: string
@@ -67,6 +68,10 @@ describe('buildSystemPrompt', () => {
 
   it('a_correction_or_a_standing_rule_is_told_apart_from_a_single_use_fact_and_written_down', async () => {
     expect(await buildSystemPrompt(cwd, undefined, home)).toContain(memoryWritingInstructions(cwd, home))
+  })
+
+  it('a_field_of_a_commands_output_is_taken_with_commands_that_run_unasked_rather_than_with_awk', async () => {
+    expect(await buildSystemPrompt(cwd, undefined, home)).toContain(PIPE_WRITING)
   })
 
   it('a_node_project_runs_its_tools_through_npm_run_scripts', async () => {

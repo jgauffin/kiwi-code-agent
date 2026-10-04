@@ -2,7 +2,7 @@
   "name": "kiwipow-agent",
   "displayName": "Kiwipow Agent",
   "description": "Coding sessions in VS Code with a choice of model engine per session.",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "publisher": "CoderrAB",
   "icon": "docs/logos/kiwipow-agent-logo-128.png",
   "galleryBanner": {
@@ -37,7 +37,8 @@
   "main": "./dist/extension.js",
   "activationEvents": [
     "onWebviewPanel:kiwiAgent.settingsPanel",
-    "onWebviewPanel:kiwiAgent.chatPanel"
+    "onWebviewPanel:kiwiAgent.chatPanel",
+    "workspaceContains:specs/*.spec.md"
   ],
   "contributes": {
     "viewsContainers": {
@@ -87,6 +88,11 @@
         "icon": "$(checklist)"
       },
       {
+        "command": "kiwiAgent.planThisSpec",
+        "title": "Kiwipow Agent: Open In Planner",
+        "icon": "$(checklist)"
+      },
+      {
         "command": "kiwiAgent.stopSession",
         "title": "Stop Session",
         "icon": "$(debug-stop)"
@@ -112,8 +118,20 @@
     "menus": {
       "editor/title": [
         {
+          "command": "kiwiAgent.planThisSpec",
+          "when": "kiwiAgent.draftSpecOpen",
+          "group": "navigation@99"
+        },
+        {
           "command": "kiwiAgent.openChat",
           "group": "navigation@100"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "kiwiAgent.planThisSpec",
+          "when": "resourceFilename =~ /\\.spec\\.md$/",
+          "group": "navigation@50"
         }
       ],
       "view/title": [
@@ -146,6 +164,10 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "kiwiAgent.planThisSpec",
+          "when": "kiwiAgent.draftSpecOpen"
+        },
         {
           "command": "kiwiAgent.removeSession",
           "when": "false"
@@ -255,6 +277,18 @@
           "type": "string",
           "default": "",
           "description": "Node executable used to run the Claude engine. Empty: VS Code's own executable in Node mode."
+        },
+        "kiwiAgent.remoteControl.enabled": {
+          "type": "boolean",
+          "default": false,
+          "scope": "resource",
+          "description": "Lets this workspace pair with a phone over the forwarding service, from the Remote tab of Settings. Off by default while the service is still being built."
+        },
+        "kiwiAgent.remoteControl.serviceUrl": {
+          "type": "string",
+          "default": "wss://remote.kiwipow.com",
+          "scope": "resource",
+          "description": "Where the forwarding service that carries pairing and messages between this workspace and a paired phone lives."
         },
         "kiwiAgent.verify": {
           "type": "array",
@@ -530,7 +564,7 @@
     "package": "npm run typecheck && node scripts/package.mjs",
     "link-dev": "node scripts/link-dev.mjs",
     "unlink-dev": "node scripts/link-dev.mjs --unlink",
-    "publish": "npm run typecheck && node esbuild.mjs --target=win32-x64 && node scripts/marketplace-readme.mjs && vsce publish --no-dependencies --readme-path dist/marketplace-readme.md --target win32-x64 && node esbuild.mjs --target=win32-arm64 && node scripts/marketplace-readme.mjs && vsce publish --no-dependencies --readme-path dist/marketplace-readme.md --target win32-arm64 && node esbuild.mjs"
+    "publish": "node scripts/publish.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.2.112",
@@ -541,6 +575,7 @@
     "highlight.js": "^11.12.0",
     "marked": "^18.0.13",
     "mermaid": "^12.0.0",
+    "qrcode": "^1.5.4",
     "quickjs-emscripten": "^0.32.0",
     "zod": "^4.0.0"
   },
@@ -550,6 +585,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/qrcode": "^1.5.6",
     "@types/vscode": "~1.100.0",
     "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.28.2",

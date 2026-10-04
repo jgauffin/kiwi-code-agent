@@ -41,6 +41,24 @@ describe('PlanBar next step', () => {
     expect(dispatched(node, events.SpecApprovedEvent.type, () => slot.click())).toBe(true)
   })
 
+  it('a_planner_at_work_on_a_draft_puts_a_running_line_beside_approve', () => {
+    const working = bar(plan({ approvable: true, atWork: true }))
+    expect(working.querySelector('.running')!.textContent).toContain('the planner is at work')
+    expect(next(working)!.textContent).toBe('Approve')
+
+    expect(bar(plan({ approvable: true, atWork: false })).querySelector('.running')).toBeNull()
+  })
+
+  it('approve_is_muted_beside_the_running_line_but_stays_the_persons_to_press', () => {
+    const working = bar(plan({ approvable: true, atWork: true }))
+    const slot = next(working)!
+    expect(slot.classList.contains('busy')).toBe(true)
+    expect(slot.hasAttribute('disabled')).toBe(false)
+    expect(dispatched(working, events.SpecApprovedEvent.type, () => slot.click())).toBe(true)
+
+    expect(next(bar(plan({ approvable: true, atWork: false })))!.classList.contains('busy')).toBe(false)
+  })
+
   it('submit_review_and_send_rulings_are_bar_buttons', () => {
     const submit = bar(plan({ stage: 'under_review', review: { rounds: [{ number: 1, comments: [{ target: 'Cancel', text: 'no' }], strikes: [] }] } }))
     expect(next(submit)!.textContent).toBe('Submit review (1)')
@@ -117,6 +135,12 @@ describe('PlanBar next step', () => {
     const node = bar(plan({ stage: 'under_development', status: 'approved', implementable: true, changeable: false }))
     expect(node.querySelector('.change')).toBeNull()
     expect(next(node)!.textContent).toBe('Implement')
+  })
+
+  it('a_change_just_asked_for_stands_at_plan_and_offers_no_second_change', () => {
+    const node = bar(plan({ stage: 'verified', status: 'approved', changeable: false, startingChange: true }))
+    expect(node.querySelector('.change')).toBeNull()
+    expect(node.querySelector('.step.current')!.textContent).toBe('Plan')
   })
 
   it('a_stopped_check_is_offered_again_and_a_live_one_can_be_stopped', () => {

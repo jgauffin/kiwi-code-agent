@@ -114,6 +114,9 @@ export class TabView {
     const feature = record?.feature
     if (!path || !record || !feature) return undefined
     const state = await readSpecState(path)
+    // The revision landed back on draft: the bar reads the files again rather than standing at Plan on their old, settled word.
+    if (state.exists && state.status === 'draft' && planActions.isStartingChange(feature)) planActions.changeLanded(feature)
+    const startingChange = planActions.isStartingChange(feature)
     const check = planActions.checkOf(record.id)
     const verification = build.lineOf(feature)
     const cleanupState = cleanup.stateOf(feature)
@@ -127,7 +130,7 @@ export class TabView {
     const runs = runsOf(sessions, record).map((r) => ({ mode: r.mode, status: tracker.statusOf(r.id) }))
     // The newest run that ran in this window speaks for the tab: a later run that went through supersedes an older failure.
     const lastRun = [...runsOf(sessions, record)].reverse().find((r) => tracker.has(r.id))
-    return buildPlanState({ workspaceRoot, path, feature, record, state, tasks, decisions, stage, recorded, check, verification, cleanupState, build, review, runs, lastRun, tracker, planActions })
+    return buildPlanState({ workspaceRoot, path, feature, record, state, tasks, decisions, stage, recorded, check, verification, cleanupState, build, review, runs, lastRun, tracker, planActions, startingChange })
   }
 }
 
@@ -150,11 +153,13 @@ type PlanStateInputs = {
   lastRun: SessionRecord | undefined
   tracker: SessionTracker
   planActions: PlanActions
+  startingChange: boolean
 }
 
 /** Everything read for the plan bar, assembled into what it shows. */
 function buildPlanState(inputs: PlanStateInputs): PlanState {
-  const { workspaceRoot, path, feature, record, state, tasks, decisions, stage, recorded, check, verification, cleanupState, build, review, runs, lastRun, tracker, planActions } = inputs
+  const { workspaceRoot, path, feature, record, state, tasks, decisions, stage, recorded, check, verification, cleanupState, build, review, runs, lastRun, tracker, planActions, startingChange } =
+    inputs
   const fromPlan = record.mode === 'plan' && state.exists
   const spec = state.exists ? parseSpec(state.body) : undefined
   const relativeTo = (file: string) => relative(workspaceRoot, file).split('\\').join('/')
@@ -184,6 +189,8 @@ function buildPlanState(inputs: PlanStateInputs): PlanState {
     pendingDecisions: pendingDecisions(decisions).length,
     applyingRulings: planActions.isApplying(feature),
     reviewingDocs: planActions.isReviewingDocs(feature),
+    startingChange,
+    critiqueOwed: planActions.isCritiqueOwed(feature),
     atWork,
   }
 }
@@ -225,7 +232,8 @@ function planCoverage(
 ): PlanCoverage {
   return {
     // Settled, nothing pending or at work, and the board holds no unfinished task: a run still at work, or stopped on the dev, holds it back too.
-    changeable: isChangeable(state, tasks, decisions) && !atWork && !blocked,
+    // A change already asked for and not yet landed back on draft holds it back too, between turns included, so a second one is never offered beside it.
+    changeable: isChangeable(state, tasks, decisions) && !atWork && !blocked && !planActions.isStartingChange(feature),
     // Offered only as the way back in: approval starts the check itself, so the button is for one that failed or was stopped.
     checkable: fromPlan && checkDue(state, tasks, decisions) && check?.live !== true && !planActions.isApplying(feature),
     // Offered only as the way back in: the clean check starts the build itself, so the button is for an implementer that never started or stopped early.

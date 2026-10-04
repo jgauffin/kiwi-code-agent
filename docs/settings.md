@@ -1,6 +1,6 @@
 # Settings
 
-*Kiwipow Agent: Settings* (or the gear in the Sessions and Chat views) opens a page in the editor with four tabs: Models and Advanced write to user settings, Permissions and Project to the workspace. Models has its own Providers and Profiles sub-tabs. API keys go to the editor's secret storage from the Providers sub-tab, under the provider's own name; a rename carries the stored key with it, so nothing else names it. A `claude-sdk` provider's key is optional: with one, Claude sessions use that Anthropic API key; without one, they use the Claude Code login on this machine.
+*Kiwipow Agent: Settings* (or the gear in the Sessions and Chat views) opens a page in the editor with several tabs: Models and Advanced write to user settings, Permissions, Project and Remote to the workspace. Models has its own Providers and Profiles sub-tabs. API keys go to the editor's secret storage from the Providers sub-tab, under the provider's own name; a rename carries the stored key with it, so nothing else names it. A `claude-sdk` provider's key is optional: with one, Claude sessions use that Anthropic API key; without one, they use the Claude Code login on this machine.
 
 The keys, for settings.json:
 
@@ -29,6 +29,8 @@ The keys, for settings.json:
 - `kiwiAgent.cutCoveredDocs`: on approval the planner cuts the doc sections the spec now covers or contradicts, each edit confirmed. Off (the default), it lists them in chat and edits only what you ask.
 - Command *Kiwipow Agent: Build Docs Map* describes the docs that changed since the last build. A planning session and *Clean up docs* do it themselves when the map is behind.
 - `kiwiAgent.docsMap.style`: `described` (default) has a model write one line per section; `outline` gives headings with line ranges and each doc's opening paragraph, read at session start at no model cost. Set it to compare the two.
+- `kiwiAgent.remoteControl.enabled`: lets this workspace pair with a phone over the forwarding service. Off by default. Settings page, Remote tab, where *Pair a phone* produces a code shown as text and as a QR code; presenting it once on the phone pairs it, and the tab lists every paired phone by the name it gave and when it last connected, each with its own *Unpair*.
+- `kiwiAgent.remoteControl.serviceUrl`: where that forwarding service lives; the agent only ever connects out to it, never the other way.
 
 ## Instruction files and skills
 

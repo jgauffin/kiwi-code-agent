@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { tasksPath, writeBoard } from '../src/agent/phases/tasks-file'
 import type { Thresholds } from '../src/agent/cleanup/oversized'
 import { FeatureCleanup } from '../src/chat/feature-cleanup'
@@ -73,5 +73,29 @@ describe('FeatureCleanup', () => {
     expect(cleanup.stateOf(FEATURE).cleanup?.text).toBe('Sizes not checked: no size limits are set')
     cleanup.runStarting(FEATURE)
     expect(cleanup.stateOf(FEATURE).cleanup).toBeUndefined()
+  })
+
+  it('a_change_drops_an_unsettled_cleanup_offer_rather_than_leave_it_to_run_over_the_rewrite', async () => {
+    const file = join(dir, 'src', 'orders', 'cancel.ts')
+    await mkdir(dirname(file), { recursive: true })
+    await writeFile(file, 'export function cancel() {\n  return 1\n}\n', 'utf8')
+    const strict: Thresholds = { functionLines: 0, functionComplexity: 0, typeLines: 0, fileLines: 1 }
+    const cleanup = new FeatureCleanup({
+      workspaceRoot: dir,
+      sessions,
+      profileFor: () => profile,
+      sizeLimits: { limits: () => ({ source: strict, tests: none, testGlobs: [] }), ignore: () => [] },
+      refresh,
+      notify: new FakeNotify(),
+      verify: async () => ({ passed: true, text: 'Tests passed' }),
+    })
+    await sessions.create(profile, 'implement', FEATURE)
+    sessions.transcript = async () => [{ type: 'tool_result', toolUseId: 't1', text: '', isError: false, edit: { path: file, label: 'src/orders/cancel.ts', diffs: [], omitted: 0 } }]
+    await cleanup.sweep(FEATURE)
+    // The offer stands, not yet settled by the developer: a split or a skip.
+    expect(cleanup.stateOf(FEATURE).cleanupSweep?.units.length).toBeGreaterThan(0)
+
+    cleanup.clear(FEATURE)
+    expect(cleanup.stateOf(FEATURE)).toEqual({})
   })
 })

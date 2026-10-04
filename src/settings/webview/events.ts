@@ -4,7 +4,7 @@ import type { Profile, Provider } from '../../agent/session/model-profile'
 import type { StepGroup } from '../../agent/session/session-manager'
 import type { EditableSettings, SettingKey, SettingsTarget } from '../protocol'
 
-export type SettingsTab = 'models' | 'permissions' | 'project' | 'memories' | 'bundles' | 'advanced'
+export type SettingsTab = 'models' | 'permissions' | 'project' | 'memories' | 'bundles' | 'remote' | 'advanced'
 
 export class SettingsTabSelectedEvent extends Event {
   static readonly type = 'settings-tab-selected'
@@ -168,6 +168,22 @@ export class BundleOfferDismissedEvent extends Event {
   }
 }
 
+/** "Pair a phone": asks the host for a fresh code. */
+export class PairingCodeRequestedEvent extends Event {
+  static readonly type = 'pairing-code-requested'
+  constructor() {
+    super(PairingCodeRequestedEvent.type, { bubbles: true })
+  }
+}
+
+/** "Unpair" on a paired phone's row. */
+export class PhoneUnpairedEvent extends Event {
+  static readonly type = 'phone-unpaired'
+  constructor(public readonly id: string) {
+    super(PhoneUnpairedEvent.type, { bubbles: true })
+  }
+}
+
 declare global {
   interface HTMLElementEventMap {
     [SettingsTabSelectedEvent.type]: SettingsTabSelectedEvent
@@ -187,5 +203,7 @@ declare global {
     [BundleAppliedEvent.type]: BundleAppliedEvent
     [BundleRemovedEvent.type]: BundleRemovedEvent
     [BundleOfferDismissedEvent.type]: BundleOfferDismissedEvent
+    [PairingCodeRequestedEvent.type]: PairingCodeRequestedEvent
+    [PhoneUnpairedEvent.type]: PhoneUnpairedEvent
   }
 }

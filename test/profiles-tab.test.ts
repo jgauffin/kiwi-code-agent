@@ -37,6 +37,7 @@ function snapshot(over: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     traceEngine: false,
     compactAtTokens: 400_000,
     hasWorkspace: true,
+    remoteControl: { enabled: false, serviceUrl: 'wss://remote.kiwipow.com', pushByDefault: true, phones: [] },
     ...over,
   }
 }

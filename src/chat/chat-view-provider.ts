@@ -6,144 +6,23 @@ import type { SessionStatus } from '../agent/session/session-status'
 import type { DocsMapResult } from '../agent/docs-map/build'
 import type { FromWebview } from './protocol'
 import type { AgentsMdOffers } from './agents-md-offers'
-import { FeatureBuild } from './feature-build'
-import { FeatureCleanup } from './feature-cleanup'
-import type { ChatRefresh, Notify, SessionSwitch, SizeLimits, Verifier } from './feature-runs'
+import type { FeatureBuild } from './feature-build'
+import type { FeatureCleanup } from './feature-cleanup'
+import type { SessionSwitch, SizeLimits, Verifier } from './feature-runs'
 import type { ProfileDefaults } from '../settings/settings-store'
-import { attributeWith } from '../agent/phases/verification'
-import { FileHands } from '../agent/session/file-hands'
-import { CHAT_PANEL_TYPE, PanelRegistry, type ChatPanel } from './panel-registry'
-import { SessionTracker } from './session-tracker'
-import { PlanActions } from './plan-actions'
-import { TabView, runsOf, tabIdOf } from './tab-view'
-import { DocsMapRunner } from './docs-map-runner'
-import { StateBroadcaster } from './state-broadcaster'
-import { MessageRouter } from './message-router'
+import { CHAT_PANEL_TYPE, type ChatPanel, type PanelRegistry } from './panel-registry'
+import type { SessionTracker } from './session-tracker'
+import type { PlanActions } from './plan-actions'
+import { runsOf, tabIdOf, type TabView } from './tab-view'
+import type { DocsMapRunner } from './docs-map-runner'
+import type { StateBroadcaster } from './state-broadcaster'
+import type { MessageRouter } from './message-router'
+import type { RemoteAlertPort } from '../remote-control/alerts'
+import type { RemoteCommand } from '../remote-control/remote-commands'
+import type { RemoteActions } from './remote-actions'
+import { wireCollaborators } from './chat-collaborators'
 
 export { CHAT_PANEL_TYPE }
-
-type ConstructorDeps = {
-  extensionUri: vscode.Uri
-  sessions: SessionManager
-  profileFor: (step: Step, attempt?: number) => ModelProfile
-  profileDefaults: ProfileDefaultsStore
-  registeredModels: () => ModelOffer[]
-  verifier: Verifier
-  sizeLimits: SizeLimits
-  allowWrites: SessionSwitch
-  permissions: PermissionStore
-  workspaceRoot: string
-  agentsMd: AgentsMdOffers
-}
-
-type Collaborators = {
-  panels: PanelRegistry
-  cleanup: FeatureCleanup
-  build: FeatureBuild
-  planActions: PlanActions
-  docsMap: DocsMapRunner
-  tracker: SessionTracker
-  tabView: TabView
-  broadcaster: StateBroadcaster
-  router: MessageRouter
-}
-
-/**
- * Every collaborator the provider delegates to, wired to call back into it
- * for the handful of things only it can answer: whether a tab shows a
- * session, and the acts (`handle`, `sendState`, `sendTranscript`,
- * `newSession`, `open`, `resumePlan`) its own methods carry out.
- */
-function wireCollaborators(provider: ChatViewProvider, deps: ConstructorDeps): Collaborators {
-  const { extensionUri, sessions, profileFor, profileDefaults, registeredModels, verifier, sizeLimits, allowWrites, permissions, workspaceRoot, agentsMd } = deps
-  const refresh: ChatRefresh = { sendState: () => provider.sendState(), changed: () => provider.fireChanged() }
-  const notify: Notify = {
-    warn: (text) => void vscode.window.showWarningMessage(`Kiwipow Agent: ${text}`),
-    error: (text) => void vscode.window.showErrorMessage(`Kiwipow Agent: ${text}`),
-    ask: (text, ...choices) => Promise.resolve(vscode.window.showWarningMessage(`Kiwipow Agent: ${text}`, { modal: true }, ...choices)),
-  }
-  const panels = new PanelRegistry({
-    extensionUri,
-    hasSession: (tabId) => sessions.get(tabId) !== undefined,
-    handle: (message, entry) => provider.handle(message, entry),
-    changed: () => provider.fireChanged(),
-  })
-  // Each waits on the other: the cleanup follows a passing test run, and ends in one.
-  const cleanup = new FeatureCleanup({
-    workspaceRoot,
-    sessions,
-    profileFor,
-    sizeLimits,
-    refresh,
-    notify,
-    verify: async (feature) => ({ passed: await build.verify(feature, false), text: build.lineOf(feature)?.text ?? 'tests not run' }),
-  })
-  const build: FeatureBuild = new FeatureBuild({
-    workspaceRoot,
-    sessions,
-    profileFor,
-    verifier,
-    attribute: (feature) => attributeWith(new FileHands(workspaceRoot, `verify-${feature}`, 'implement', feature), feature, workspaceRoot),
-    allowWrites,
-    statusOf: (id) => tracker.statusOf(id),
-    isOpen: (id) => provider.isOpen(id),
-    refresh,
-    notify,
-    listener: cleanup,
-  })
-  const planActions: PlanActions = new PlanActions({
-    workspaceRoot,
-    sessions,
-    profileFor,
-    build,
-    newSession: (mode, feature, prompt, into, label) => provider.newSession(mode, feature, prompt, into, label),
-    open: (sessionId, into) => provider.open(sessionId, into),
-    planState: (record) => tabView.planState(record),
-    sendState: () => provider.sendState(),
-    changed: () => provider.fireChanged(),
-  })
-  const docsMap = new DocsMapRunner({
-    workspaceRoot,
-    sessions,
-    profileFor,
-    forgetStatus: (id) => tracker.forgetStatus(id),
-  })
-  const tracker: SessionTracker = new SessionTracker({
-    sessions,
-    profileFor,
-    docsMap,
-    build,
-    cleanup,
-    planActions,
-    panels,
-    isOpen: (id) => provider.isOpen(id),
-    sendState: () => provider.sendState(),
-    changed: () => provider.fireChanged(),
-  })
-  const tabView: TabView = new TabView({ workspaceRoot, sessions, tracker, build, cleanup, planActions, allowWrites })
-  const broadcaster = new StateBroadcaster({ workspaceRoot, sessions, panels, tabView, profileDefaults, registeredModels, agentsMd })
-  const router = new MessageRouter({
-    workspaceRoot,
-    sessions,
-    profileFor,
-    registeredModels,
-    profileDefaults,
-    allowWrites,
-    permissions,
-    agentsMd,
-    tracker,
-    tabView,
-    planActions,
-    cleanup,
-    build,
-    newSession: (mode, feature, prompt, into, label) => provider.newSession(mode, feature, prompt, into, label),
-    open: (sessionId, into) => provider.open(sessionId, into),
-    resumePlan: (feature, into) => provider.resumePlan(feature, into),
-    sendState: () => provider.sendState(),
-    sendTranscript: (sessionId) => provider.sendTranscript(sessionId),
-  })
-  return { panels, cleanup, build, planActions, docsMap, tracker, tabView, broadcaster, router }
-}
 
 /** Where a prompt's allowances go: the workspace's permission allow list, or the session's own, kept with the session. */
 export interface PermissionStore {
@@ -172,6 +51,7 @@ export class ChatViewProvider {
   private readonly tabView: TabView
   private readonly broadcaster: StateBroadcaster
   private readonly router: MessageRouter
+  private readonly remoteActions: RemoteActions
   private readonly changed = new vscode.EventEmitter<void>()
   /** Fires when a tab opened or closed, a status changed or the session list changed. */
   readonly onDidChange = this.changed.event
@@ -189,6 +69,8 @@ export class ChatViewProvider {
     permissions: PermissionStore,
     private readonly workspaceRoot: string,
     agentsMd: AgentsMdOffers,
+    remoteAlerts: RemoteAlertPort,
+    pushDefault: () => boolean,
   ) {
     const built = wireCollaborators(this, {
       extensionUri,
@@ -201,6 +83,8 @@ export class ChatViewProvider {
       allowWrites,
       permissions,
       workspaceRoot,
+      remoteAlerts,
+      pushDefault,
       agentsMd,
     })
     this.panels = built.panels
@@ -212,6 +96,7 @@ export class ChatViewProvider {
     this.tabView = built.tabView
     this.broadcaster = built.broadcaster
     this.router = built.router
+    this.remoteActions = built.remoteActions
   }
 
   /** Whether a tab shows the session, its own or its feature's. */
@@ -275,8 +160,8 @@ export class ChatViewProvider {
   }
 
   /** Picks a plan up where its spec leaves it; see `PlanActions.resumePlan`. */
-  resumePlan(feature: string, into?: ChatPanel): Promise<void> {
-    return this.planActions.resumePlan(feature, into)
+  resumePlan(feature: string, into?: ChatPanel, note?: string): Promise<void> {
+    return this.planActions.resumePlan(feature, into, note)
   }
 
   async open(sessionId: string, into?: ChatPanel): Promise<void> {
@@ -343,6 +228,11 @@ export class ChatViewProvider {
   /** Not part of the provider's own API: called back from `wireCollaborators` and from inside this class alike. */
   handle(message: FromWebview, entry: ChatPanel): Promise<void> {
     return this.router.handle(message, entry)
+  }
+
+  /** A command a paired phone sent, carried out the same way the matching desk act would be. */
+  handleRemoteCommand(command: RemoteCommand): Promise<void> {
+    return this.remoteActions.handle(command)
   }
 
   sendState(): Promise<void> {

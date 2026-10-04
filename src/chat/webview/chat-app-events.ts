@@ -36,6 +36,7 @@ import {
   SpecCheckStoppedEvent,
   SpecRepairRequestedEvent,
   SweepRequestedEvent,
+  UpdateSpecRequestedEvent,
   VerifyRequestedEvent,
 } from './events'
 
@@ -66,7 +67,7 @@ export function wireChatEvents(el: HTMLElement, actions: ChatAppActions): void {
   el.addEventListener(SpecCheckRequestedEvent.type, () => post({ type: 'check_spec' }))
   el.addEventListener(SpecCheckStoppedEvent.type, () => post({ type: 'stop_check' }))
   el.addEventListener(CleanupStoppedEvent.type, () => post({ type: 'stop_cleanup' }))
-  el.addEventListener(CleanupDecidedEvent.type, (e) => post({ type: 'cleanup_decision', decision: e.decision, ...(e.paths ? { paths: e.paths } : {}) }))
+  el.addEventListener(CleanupDecidedEvent.type, (e) => post(cleanupDecidedMessage(e)))
   el.addEventListener(SweepRequestedEvent.type, () => post({ type: 'sweep_sizes' }))
   el.addEventListener(SpecRepairRequestedEvent.type, () => post({ type: 'repair_spec' }))
   el.addEventListener(ChangeRequestedEvent.type, () => post({ type: 'start_change' }))
@@ -75,41 +76,64 @@ export function wireChatEvents(el: HTMLElement, actions: ChatAppActions): void {
   el.addEventListener(PlanViewSelectedEvent.type, (e) => actions.show(e.view))
   el.addEventListener(ChatTargetChangedEvent.type, () => actions.showTarget())
 
-  el.addEventListener(PromptSubmittedEvent.type, (e) => {
-    // A Resume button speaks for the run it sits under; the composer for the run the phase's chat talks to.
-    const sessionId = runOf(e.target) ?? actions.target()?.sessionId
-    post({ type: 'send', text: e.text, ...(e.files.length > 0 ? { files: e.files } : {}), ...(sessionId ? { sessionId } : {}) })
-  })
-  el.addEventListener(LinkOpenFileRequestedEvent.type, (e) => {
-    actions.setLinkTarget(e.target instanceof LinkedFilesRow ? e.target : undefined)
-    post({ type: 'link_open_file' })
-  })
+  el.addEventListener(PromptSubmittedEvent.type, (e) => sendPrompt(actions, e))
+  el.addEventListener(LinkOpenFileRequestedEvent.type, (e) => linkOpenFile(actions, e))
   el.addEventListener(InterruptRequestedEvent.type, () => actions.toTarget((sessionId) => post({ type: 'interrupt', sessionId })))
   el.addEventListener(CompactRequestedEvent.type, () => actions.toTarget((sessionId) => post({ type: 'compact', sessionId })))
-  el.addEventListener(PermissionDecidedEvent.type, (e) => {
-    const sessionId = runOf(e.target)
-    if (sessionId) post({ type: 'permission', sessionId, requestId: e.requestId, decision: e.decision })
-  })
-  el.addEventListener(QuestionAnsweredEvent.type, (e) => {
-    const sessionId = runOf(e.target)
-    if (sessionId) post({ type: 'question', sessionId, requestId: e.requestId, outcome: e.outcome })
-  })
+  el.addEventListener(PermissionDecidedEvent.type, (e) => answerPermission(e))
+  el.addEventListener(QuestionAnsweredEvent.type, (e) => answerQuestion(e))
   el.addEventListener(AllowWritesToggledEvent.type, (e) => actions.toTarget((sessionId) => post({ type: 'set_allow_writes', sessionId, enabled: e.enabled })))
   el.addEventListener(SessionModelChangedEvent.type, (e) => post({ type: 'set_session_model', name: e.name }))
-  el.addEventListener(SessionEffortChangedEvent.type, (e) => post({ type: 'set_session_effort', ...(e.effort ? { effort: e.effort } : {}) }))
+  el.addEventListener(SessionEffortChangedEvent.type, (e) => post(sessionEffortMessage(e)))
   el.addEventListener(PlanApprovedEvent.type, () => post({ type: 'approve_plan' }))
   el.addEventListener(McpReconnectRequestedEvent.type, (e) => actions.toTarget((sessionId) => post({ type: 'reconnect_mcp', sessionId, server: e.server })))
   el.addEventListener(SessionSelectedEvent.type, (e) => post({ type: 'switch_session', sessionId: e.sessionId }))
-  el.addEventListener(PlanResumeRequestedEvent.type, (e) => post({ type: 'resume_plan', feature: e.feature }))
+  el.addEventListener(PlanResumeRequestedEvent.type, (e) => post(planResumeMessage(e)))
+  el.addEventListener(UpdateSpecRequestedEvent.type, (e) => post({ type: 'update_spec', feature: e.feature, description: e.description }))
   el.addEventListener(DefaultProfileChangedEvent.type, (e) => post({ type: 'set_default_profile', name: e.name }))
   el.addEventListener(AgentsMdAnsweredEvent.type, (e) => post({ type: 'agents_md_answer', scope: e.scope, answer: e.answer }))
-  el.addEventListener(NewSessionRequestedEvent.type, (e) =>
-    post({
-      type: 'new_session',
-      mode: e.mode,
-      ...(e.feature ? { feature: e.feature } : {}),
-      ...(e.prompt ? { prompt: e.prompt } : {}),
-      ...(e.files.length > 0 ? { files: e.files } : {}),
-    }),
-  )
+  el.addEventListener(NewSessionRequestedEvent.type, (e) => post(newSessionMessage(e)))
+}
+
+/** A Resume button speaks for the run it sits under; the composer for the run the phase's chat talks to. */
+function sendPrompt(actions: ChatAppActions, e: PromptSubmittedEvent): void {
+  const sessionId = runOf(e.target) ?? actions.target()?.sessionId
+  post({ type: 'send', text: e.text, ...(e.files.length > 0 ? { files: e.files } : {}), ...(sessionId ? { sessionId } : {}) })
+}
+
+function linkOpenFile(actions: ChatAppActions, e: LinkOpenFileRequestedEvent): void {
+  actions.setLinkTarget(e.target instanceof LinkedFilesRow ? e.target : undefined)
+  post({ type: 'link_open_file' })
+}
+
+function answerPermission(e: PermissionDecidedEvent): void {
+  const sessionId = runOf(e.target)
+  if (sessionId) post({ type: 'permission', sessionId, requestId: e.requestId, decision: e.decision })
+}
+
+function answerQuestion(e: QuestionAnsweredEvent): void {
+  const sessionId = runOf(e.target)
+  if (sessionId) post({ type: 'question', sessionId, requestId: e.requestId, outcome: e.outcome })
+}
+
+function cleanupDecidedMessage(e: CleanupDecidedEvent) {
+  return { type: 'cleanup_decision' as const, decision: e.decision, ...(e.paths ? { paths: e.paths } : {}) }
+}
+
+function sessionEffortMessage(e: SessionEffortChangedEvent) {
+  return { type: 'set_session_effort' as const, ...(e.effort ? { effort: e.effort } : {}) }
+}
+
+function planResumeMessage(e: PlanResumeRequestedEvent) {
+  return { type: 'resume_plan' as const, feature: e.feature, ...(e.note ? { note: e.note } : {}) }
+}
+
+function newSessionMessage(e: NewSessionRequestedEvent) {
+  return {
+    type: 'new_session' as const,
+    mode: e.mode,
+    ...(e.feature ? { feature: e.feature } : {}),
+    ...(e.prompt ? { prompt: e.prompt } : {}),
+    ...(e.files.length > 0 ? { files: e.files } : {}),
+  }
 }

@@ -1,10 +1,10 @@
-import { permissionResolved, type CodeSession, type PermissionDecision, type SessionEvent } from './code-session'
-import { sameModelProfile, type ModelProfile, type Step } from './model-profile'
+import type { CodeSession, PermissionDecision, SessionEvent } from './code-session'
+import type { ModelProfile, Step } from './model-profile'
 import type { RunLog } from '../runs/run-log'
-import { answerText, UNANSWERED_RESULT, type QuestionOutcome, type UserQuestionRequest } from './user-question'
-import { nextStatus, underWay, type SessionStatus } from './session-status'
+import type { QuestionOutcome } from './user-question'
 import type { ToolUse } from './hooks'
-import { errorMessage } from '../../error-message'
+import { SessionEngineHost } from './session-engine-host'
+import { SessionControl } from './session-control'
 
 /**
  * `plan` writes a feature's spec blind, `reconcile` checks it against the code
@@ -105,6 +105,10 @@ export type SessionRecord = {
   allowWrites?: true
   /** Permission rules the person allowed for this session, in force beside the project's. Kept across engines and hosts. */
   allowed?: string[]
+  /** Where the session began: one started from the phone may push to the paired phones regardless of the workspace's standing default. Absent means the desk. */
+  startedFrom?: 'phone' | 'desk'
+  /** The person's own choice for this session, overriding the default for where it started: whether a turn stopped mid-way on them may push to the paired phones. */
+  pushAllowed?: boolean
   createdAt: string
   /** When the session was last sent a prompt; absent on one stored before this was kept. */
   lastActiveAt?: string
@@ -156,6 +160,8 @@ export type CreateOptions = {
    * starts empty and the files on disk are its whole input.
    */
   continues?: SessionRecord | undefined
+  /** Set when the session is started from the paired phone rather than at the desk. */
+  startedFrom?: 'phone' | 'desk'
 }
 
 /** What the new session resumes from: the engine's conversation id for the Claude SDK, the previous record's log for the own loop. */
@@ -208,23 +214,26 @@ function fromStore(stored: Omit<SessionRecord, 'mode'> & { mode?: SessionMode | 
  */
 export class SessionManager {
   private records: SessionRecord[]
-  private readonly live = new Map<string, CodeSession>()
-  /** Per session, the call the user allowed after its engine had stopped; answered for them when the resumed engine asks. */
-  private readonly preapproved = new Map<string, { toolName: string; input: string }>()
-  /** One log per session: the write chain that keeps entries in emission order belongs to the instance. */
-  private readonly logs = new Map<string, RunLog>()
-  /** Per session, what its events say it is doing: what a shutdown needs to know which turns it cuts off. */
-  private readonly statuses = new Map<string, SessionStatus>()
+  private readonly host: SessionEngineHost
+  private readonly control: SessionControl
 
   constructor(
     private readonly store: SessionStore,
-    private readonly createEngine: EngineFactory,
-    private readonly runLogFor: (sessionId: string) => RunLog,
-    private readonly listener: SessionListener,
-    private readonly decorate: EventDecorator = noDecoration,
-    private readonly passes: CallPasses = nothingPasses,
+    createEngine: EngineFactory,
+    runLogFor: (sessionId: string) => RunLog,
+    listener: SessionListener,
+    decorate: EventDecorator = noDecoration,
+    passes: CallPasses = nothingPasses,
   ) {
     this.records = store.list().map(fromStore)
+    this.host = new SessionEngineHost(
+      { get: (id) => this.get(id), all: () => this.records, save: () => this.store.save(this.records) },
+      createEngine,
+      runLogFor,
+      listener,
+      decorate,
+    )
+    this.control = new SessionControl(this.host, (id) => this.require(id), () => this.store.save(this.records), passes)
   }
 
   list(): SessionRecord[] {
@@ -236,22 +245,22 @@ export class SessionManager {
   }
 
   isLive(id: string): boolean {
-    return this.live.has(id)
+    return this.host.liveSession(id) !== undefined
   }
 
   /** Every engine running now, for what the host applies to all of them at once. */
   liveSessions(): CodeSession[] {
-    return [...this.live.values()]
+    return this.host.liveSessions()
   }
 
   /** One MCP server of a live session, tried again; nothing to do for a session that is not running. */
   async reconnectMcp(id: string, server: string): Promise<void> {
-    await this.live.get(id)?.mcp?.reconnect(server)
+    await this.host.reconnectMcp(id, server)
   }
 
   /** The live session running under another one's tab, if any. */
   liveChildOf(parentId: string): SessionRecord | undefined {
-    return this.records.find((r) => r.parentId === parentId && this.live.has(r.id))
+    return this.host.liveChildOf(parentId)
   }
 
   /** The newest record of a mode on a feature, live or not: the one that knows the feature best. */
@@ -260,7 +269,7 @@ export class SessionManager {
   }
 
   async create(profile: ModelProfile, mode: SessionMode = 'chat', feature?: string, options: CreateOptions = {}): Promise<SessionRecord> {
-    const { parentId, files, task, fixAttempt, continues } = options
+    const { parentId, files, task, fixAttempt, continues, startedFrom } = options
     const continued = continues ? continuationOf(continues, profile) : undefined
     const record: SessionRecord = {
       id: crypto.randomUUID(),
@@ -273,6 +282,7 @@ export class SessionManager {
       ...(task ? { task } : {}),
       ...(fixAttempt ? { fixAttempt } : {}),
       ...(continued ? { engineSessionId: continued } : {}),
+      ...(startedFrom ? { startedFrom } : {}),
       createdAt: new Date().toISOString(),
     }
     this.records.unshift(record)
@@ -280,215 +290,92 @@ export class SessionManager {
     return record
   }
 
-  /**
-   * The session goes on with the full tool set, in place: the person carries on
-   * in the session they are reading rather than in a second one. The engine
-   * stops, as it does on a model switch, and the next prompt brings one up on
-   * the wider setup and resumes the thread, on `continuesOn` where the grant
-   * moves it to another model.
-   */
   async grantFullAccess(id: string, continuesOn?: ModelProfile): Promise<void> {
-    const record = this.require(id)
-    if (record.access === 'full') return
-    // The thread carries only within one engine, and a plan agreed in chat exists nowhere else.
-    if (continuesOn && continuesOn.engine !== record.profile.engine) {
-      throw new Error(`"${record.title}" cannot continue on ${continuesOn.model}: its conversation is on the ${record.profile.engine} engine and does not carry over to ${continuesOn.engine}.`)
-    }
-    record.access = 'full'
-    if (continuesOn) record.profile = continuesOn
-    await this.store.save(this.records)
-    await this.close(id)
+    await this.control.grantFullAccess(id, continuesOn)
   }
 
   /** In force from the next call on; the engine is not restarted, since the rules are read on every call. */
   async allowForSession(id: string, rules: string[]): Promise<void> {
-    const record = this.require(id)
-    const current = record.allowed ?? []
-    record.allowed = [...current, ...rules.filter((r) => !current.includes(r))]
-    await this.store.save(this.records)
+    await this.control.allowForSession(id, rules)
   }
 
   async setAllowWrites(id: string, enabled: boolean): Promise<void> {
-    const record = this.require(id)
-    if (enabled) record.allowWrites = true
-    else delete record.allowWrites
-    await this.store.save(this.records)
-    if (enabled) await this.answerWhatPassesNow(record)
+    await this.control.setAllowWrites(id, enabled)
   }
 
-  /**
-   * A switch just turned on answers the prompts it covers: the write the
-   * session is waiting on goes through, rather than needing the click the
-   * switch was meant to spare. What it does not cover is still asked.
-   */
-  private async answerWhatPassesNow(record: SessionRecord): Promise<void> {
-    const live = this.live.get(record.id)
-    if (!live) return
-    for (const request of await this.openRequests(record)) {
-      const call = { toolName: request.toolName, input: request.input, toolUseId: request.toolUseId ?? request.requestId }
-      if (await this.passes(record.id, call)) live.respondToPermission(request.requestId, { kind: 'allow' })
-    }
+  /** The person's own choice for this session, overriding the default for where it started. */
+  async setPushAllowed(id: string, allowed: boolean): Promise<void> {
+    await this.control.setPushAllowed(id, allowed)
   }
 
   /** `label` marks text the extension wrote: the chat and the title show it in the text's place. */
   async send(id: string, text: string, label?: string): Promise<void> {
-    const record = this.require(id)
-    if (record.title === 'New session') {
-      const title = label ?? text
-      record.title = title.length > 60 ? title.slice(0, 57) + '...' : title
-    }
-    // A settled run sent work again (its task reopened) has a job once more.
-    delete record.cutOff
-    delete record.settled
-    record.lastActiveAt = new Date().toISOString()
-    await this.store.save(this.records)
-    // Echoed here rather than by the engine, and the start-up said out loud: bringing an
-    // engine up can take a repo or docs map build, and the wait is the user's to see.
-    await this.emit(record, { type: 'user_message', text, ...(label ? { label } : {}) })
-    if (!this.live.has(id)) await this.emit(record, { type: 'status', status: 'starting' })
-    let session: CodeSession
-    try {
-      session = await this.ensureLive(record)
-    } catch (error) {
-      // The start-up is over either way; the chat must stop showing it as under way.
-      await this.emit(record, { type: 'error', message: errorMessage(error), fatal: true })
-      throw error
-    }
-    session.send(text)
+    await this.control.send(id, text, label)
   }
 
-  /**
-   * A request the engine still holds is answered in place. One the engine let
-   * go of (it stopped with the prompt open, say over a window reload) resumes
-   * the session: the decision becomes the next user turn, and an allow is
-   * honoured once more should the resumed engine ask for the same call again.
-   */
   async respondToPermission(id: string, requestId: string, decision: PermissionDecision): Promise<void> {
-    const live = this.live.get(id)
-    if (live) {
-      live.respondToPermission(requestId, decision)
-      return
-    }
-    const record = this.require(id)
-    const request = await this.openRequest(record, requestId)
-    if (!request) throw new Error(`Permission request ${requestId} is no longer open`)
-    await this.emit(record, permissionResolved(requestId, decision))
-    if (decision.kind === 'allow') this.preapproved.set(id, { toolName: request.toolName, input: JSON.stringify(request.input) })
-    await this.send(id, decisionPrompt(request, decision), decision.kind === 'allow' ? `Allowed ${request.toolName}` : `Denied ${request.toolName}`)
+    await this.control.respondToPermission(id, requestId, decision)
   }
 
-  /**
-   * The answer goes to the engine that asked while it still holds the
-   * question. One that let go of it — the turn ended around the card, the
-   * window was reloaded — is not a reason to throw a decision the user already
-   * made away: it becomes the session's next prompt, so the answer arrives a
-   * turn late rather than not at all.
-   */
   async respondToQuestion(id: string, requestId: string, outcome: QuestionOutcome): Promise<void> {
-    if (this.live.get(id)?.respondToQuestion(requestId, outcome)) return
-    const record = this.require(id)
-    const request = await this.openQuestion(record, requestId)
-    if (!request) throw new Error(`Question ${requestId} is no longer open`)
-    await this.emit(record, { type: 'question_resolved', requestId, outcome })
-    await this.send(id, questionPrompt(request.request, outcome), 'Question answered')
+    await this.control.respondToQuestion(id, requestId, outcome)
   }
 
-  /**
-   * Switches a session to a model chosen mid-conversation: the engine stops,
-   * the next prompt starts it again on the new profile. The conversation
-   * carries only within the same engine, by the rule a new session follows
-   * when it continues one; across engines it starts from the files on disk.
-   */
   async setProfile(id: string, profile: ModelProfile): Promise<void> {
-    const record = this.require(id)
-    await this.close(id)
-    const continued = continuationOf(record, profile)
-    record.profile = profile
-    if (continued) record.engineSessionId = continued
-    else delete record.engineSessionId
-    await this.store.save(this.records)
+    await this.control.setProfile(id, profile)
   }
 
-  /**
-   * A fix run handed the next failed sweep: its thread carries on, the attempt
-   * counts up, and the profile that attempt resolves to takes hold on the next
-   * turn, as a model switch would.
-   */
   async retryFix(id: string, attempt: number, profile: ModelProfile): Promise<void> {
-    const record = this.require(id)
-    record.fixAttempt = attempt
-    if (sameModelProfile(record.profile, profile)) await this.store.save(this.records)
-    else await this.setProfile(id, profile)
+    await this.control.retryFix(id, attempt, profile)
   }
 
   async interrupt(id: string): Promise<void> {
-    await this.live.get(id)?.interrupt()
+    await this.host.interrupt(id)
+  }
+
+  /** A paired phone's command, logged beside the act itself so the record says where it came from. */
+  async noteRemoteAct(id: string, note: string): Promise<void> {
+    await this.control.noteRemoteAct(id, note)
+  }
+
+  /** Whether a permission or question request still waits on an answer: false once whichever device got there first has resolved it. */
+  async isRequestOpen(id: string, requestId: string): Promise<boolean> {
+    return this.host.isRequestOpen(id, requestId)
   }
 
   /** Only a running engine holds a conversation to fold; a stopped one is compacted, if need be, once it runs again. */
   compact(id: string): void {
-    this.live.get(id)?.compact()
+    this.host.compact(id)
   }
 
   /** Stop the engine but keep the record; a later prompt resumes it. A run under the session stops with it. */
   async close(id: string): Promise<void> {
-    for (const child of this.records.filter((r) => r.parentId === id)) await this.close(child.id)
-    const session = this.live.get(id)
-    if (!session) return
-    this.live.delete(id)
-    await session.dispose()
+    await this.host.close(id)
   }
 
   /** Closed because its job is done, unlike a run merely stopped, which still waits on the person. */
   async settle(id: string): Promise<void> {
-    const record = this.require(id)
-    record.settled = true
-    await this.store.save(this.records)
-    await this.close(id)
+    await this.control.settle(id)
   }
 
   async remove(id: string): Promise<void> {
     await this.close(id)
     this.records = this.records.filter((r) => r.id !== id && r.parentId !== id)
-    this.logs.delete(id)
-    this.statuses.delete(id)
+    this.host.forget(id)
     await this.store.save(this.records)
   }
 
   async transcript(id: string): Promise<SessionEvent[]> {
-    const log = this.logFor(id)
-    // Everything queued is on disk before it is read back: a request answered right after it arrived is in there.
-    await log.settled()
-    return (await log.read()).map((e) => e.event)
+    return this.host.transcript(id)
   }
 
-  /** The session's log, kept: entries land in emission order only while one instance chains the writes. */
-  private logFor(id: string): RunLog {
-    const existing = this.logs.get(id)
-    if (existing) return existing
-    const log = this.runLogFor(id)
-    this.logs.set(id, log)
-    return log
-  }
-
-  /**
-   * The whole conversation behind a session: the transcripts of the sessions
-   * it continues, oldest first, then its own. Only the own loop's records name
-   * a record as their engine session; any other id resolves to nothing.
-   */
   async conversation(id: string): Promise<SessionEvent[]> {
-    const record = this.require(id)
-    const previous = record.engineSessionId !== undefined && record.engineSessionId !== id ? this.get(record.engineSessionId) : undefined
-    const own = await this.transcript(id)
-    return previous ? [...(await this.conversation(previous.id)), ...own] : own
+    return this.host.conversation(id)
   }
 
   /** The host is going away: a turn it cuts off is marked before its engine stops, so the next host can carry it on. */
   async disposeAll(): Promise<void> {
-    const cut = this.records.filter((r) => this.live.has(r.id) && underWay(this.statuses.get(r.id) ?? 'idle'))
-    for (const record of cut) record.cutOff = true
-    if (cut.length > 0) await this.store.save(this.records)
-    await Promise.all([...this.live.keys()].map((id) => this.close(id)))
+    await this.host.disposeAll()
   }
 
   /** The runs the last host cut off mid-turn, each handed out once: a later reload does not carry them on again. */
@@ -503,110 +390,5 @@ export class SessionManager {
     const record = this.get(id)
     if (!record) throw new Error(`Unknown session ${id}`)
     return record
-  }
-
-  private async ensureLive(record: SessionRecord): Promise<CodeSession> {
-    const existing = this.live.get(record.id)
-    if (existing) return existing
-    const session = await this.createEngine(record, (line) => this.publish(record, { type: 'status', status: 'starting', detail: line }))
-    this.live.set(record.id, session)
-    void this.pump(record, session)
-    return session
-  }
-
-  private async pump(record: SessionRecord, session: CodeSession): Promise<void> {
-    for await (const raw of session.events()) {
-      // A decoration that fails must not cost the event itself.
-      const event = await this.decorate(record.id, raw).catch(() => raw)
-      if (event.type === 'session_started' && record.engineSessionId !== event.engineSessionId) {
-        record.engineSessionId = event.engineSessionId
-        await this.store.save(this.records)
-      }
-      this.publish(record, event)
-      this.answerPreapproved(record.id, session, event)
-    }
-    if (this.live.get(record.id) === session) this.live.delete(record.id)
-  }
-
-  /** Shown at once and logged in emission order, without waiting on the write: what follows may not overtake it on screen. */
-  private publish(record: SessionRecord, event: SessionEvent): void {
-    this.logFor(record.id)
-      .append(event)
-      .catch((error: unknown) => {
-        const message = errorMessage(error)
-        this.listener(record.id, { type: 'error', message: `Run log write failed: ${message}`, fatal: false })
-      })
-    this.notify(record, event)
-  }
-
-  private notify(record: SessionRecord, event: SessionEvent): void {
-    this.statuses.set(record.id, nextStatus(this.statuses.get(record.id) ?? 'idle', actingMode(record), event))
-    this.listener(record.id, event)
-  }
-
-  /** The allow given after a restart covers one call, in the turn it resumed; anything else is the user's to decide. */
-  private answerPreapproved(id: string, session: CodeSession, event: SessionEvent): void {
-    const approved = this.preapproved.get(id)
-    if (!approved) return
-    if (event.type === 'turn_done' || event.type === 'ended') {
-      this.preapproved.delete(id)
-      return
-    }
-    if (event.type !== 'permission_request') return
-    if (event.toolName !== approved.toolName || JSON.stringify(event.input) !== approved.input) return
-    this.preapproved.delete(id)
-    session.respondToPermission(event.requestId, { kind: 'allow' })
-  }
-
-  /** An event of the session's own, outside its engine: logged and shown like the engine's. */
-  private async emit(record: SessionRecord, event: SessionEvent): Promise<void> {
-    await this.logFor(record.id).append(event)
-    this.notify(record, event)
-  }
-
-  /** The request as logged, if nothing has decided it since. */
-  private async openRequest(record: SessionRecord, requestId: string): Promise<PermissionRequest | undefined> {
-    return (await this.openRequests(record)).find((request) => request.requestId === requestId)
-  }
-
-  /** Every prompt the log shows as still waiting, in the order they were asked. */
-  private async openRequests(record: SessionRecord): Promise<PermissionRequest[]> {
-    const open = new Map<string, PermissionRequest>()
-    for (const event of await this.transcript(record.id)) {
-      if (event.type === 'permission_request') open.set(event.requestId, event)
-      if (event.type === 'permission_resolved') open.delete(event.requestId)
-    }
-    return [...open.values()]
-  }
-
-  /** The question as logged, if nothing has resolved it since; a request is resolved at most once. */
-  private async openQuestion(record: SessionRecord, requestId: string): Promise<QuestionRequest | undefined> {
-    let request: QuestionRequest | undefined
-    for (const event of await this.transcript(record.id)) {
-      if (event.type === 'question_request' && event.requestId === requestId) request = event
-      if (event.type === 'question_resolved' && event.requestId === requestId) request = undefined
-    }
-    return request
-  }
-}
-
-type PermissionRequest = Extract<SessionEvent, { type: 'permission_request' }>
-type QuestionRequest = Extract<SessionEvent, { type: 'question_request' }>
-
-/** The answers as the model hears them once the engine that asked is gone: the questions are repeated so nothing rests on what the resumed engine remembers. */
-export function questionPrompt(request: UserQuestionRequest, outcome: QuestionOutcome): string {
-  if (outcome.kind === 'unanswered') return `The question you asked was not answered.\n\n${UNANSWERED_RESULT}`
-  return `Your question was answered:\n\n${answerText(request, outcome.answers)}`
-}
-
-/** The decision as the model hears it once the engine that asked is gone: the call is named in full so nothing rests on what the resumed engine remembers. */
-export function decisionPrompt(request: PermissionRequest, decision: PermissionDecision): string {
-  const call = `the \`${request.toolName}\` call you proposed`
-  const input = `\`\`\`json\n${JSON.stringify(request.input, null, 2)}\n\`\`\``
-  switch (decision.kind) {
-    case 'allow':
-      return `Go ahead with ${call}; it is allowed.\n\n${input}`
-    case 'deny':
-      return `Do not make ${call}; it is denied${decision.message ? `: ${decision.message}` : ''}.\n\n${input}`
   }
 }

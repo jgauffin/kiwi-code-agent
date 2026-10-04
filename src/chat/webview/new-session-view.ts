@@ -2,14 +2,23 @@ import { compileTemplate } from '@relax.js/core/html'
 import { readData } from '@relax.js/core/forms'
 import type { SessionMode } from '../../agent/session/session-manager'
 import type { ProfileDefaults } from '../../settings/settings-store'
-import type { ResumableChat, ResumablePlan } from '../protocol'
+import type { ResumableChat, ResumablePlan, UpdatableSpec } from '../protocol'
 import { LinkedFilesRow } from './linked-files-row'
-import { DefaultProfileChangedEvent, NewSessionRequestedEvent, PlanResumeRequestedEvent, SessionSelectedEvent } from './events'
+import { DefaultProfileChangedEvent, NewSessionRequestedEvent, PlanResumeRequestedEvent, SessionSelectedEvent, UpdateSpecRequestedEvent } from './events'
 
 type NewSessionForm = { mode: SessionMode; feature?: string; prompt?: string }
 
+/** A card the new-session screen offers beside the engine's own session types: pick a spec, rather than start one from nothing. */
+type Card = SessionMode | 'update-spec'
+
 /** Work already on disk this screen offers to pick up rather than start over. */
-export type PickUp = { plans: ResumablePlan[]; chats: ResumableChat[]; unfiled: number }
+export type PickUp = { plans: ResumablePlan[]; chats: ResumableChat[]; unfiled: number; updates: UpdatableSpec[] }
+
+/** One spec on the Update spec card's picker: pickable once nothing is in flight, saying what it waits for otherwise. */
+const updateChoice = (u: UpdatableSpec) => {
+  const pickable = u.status === 'draft' || u.changeable === true
+  return { feature: u.feature, disabled: !pickable, label: pickable ? `${u.feature} (${u.status})` : `${u.feature} (${u.status}) — waiting: ${u.waiting}` }
+}
 
 const STATUS_HINT: Record<NonNullable<ResumablePlan['status']>, string> = {
   draft: 'draft: review, check or approve',
@@ -58,7 +67,7 @@ const chatPick = (chat: ResumableChat) => {
 /** The text fields, held by the view rather than by the form that happens to show them. */
 type Draft = { feature: string; prompt: string }
 
-type TextField = HTMLInputElement | HTMLTextAreaElement
+type TextField = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
 
 /**
  * The two halves of the screen. Work in the code is what a person comes here
@@ -72,9 +81,9 @@ type Screen = 'code' | 'maintenance'
 const FIRST: Record<Screen, SessionMode> = { code: 'chat', maintenance: 'doc-migration' }
 
 /** The template data for a render: what each card and tab shows, from the screen and mode shown and what is there to pick up. */
-function renderData(screen: Screen, mode: SessionMode, profileDefaults: ProfileDefaults, pickUp: PickUp) {
+function renderData(screen: Screen, mode: Card, profileDefaults: ProfileDefaults, pickUp: PickUp) {
   const { names, active } = profileDefaults
-  const { plans, chats, unfiled } = pickUp
+  const { plans, chats, unfiled, updates } = pickUp
   return {
     profiles: names.map((name) => ({ name, selected: name === active })),
     // Plans and chats are code work; what waits to be filed is counted on the maintenance tab instead.
@@ -84,6 +93,8 @@ function renderData(screen: Screen, mode: SessionMode, profileDefaults: ProfileD
     filingHint: unfiled > 0 ? `${unfiled} decided, not yet in the specs or docs` : 'Nothing waiting to be filed',
     plans: plans.map((p) => ({ ...p, stage: p.status ?? 'unwritten', hint: planHint(p) })),
     chats: chats.map(chatPick),
+    updates: updates.map(updateChoice),
+    noUpdates: updates.length === 0,
     onCode: screen === 'code',
     onMaintenance: screen === 'maintenance',
     codeScreenState: screen === 'code' ? 'active' : '',
@@ -91,11 +102,13 @@ function renderData(screen: Screen, mode: SessionMode, profileDefaults: ProfileD
     isChat: mode === 'chat',
     isCodePlan: mode === 'code-plan',
     isPlan: mode === 'plan',
+    isUpdate: mode === 'update-spec',
     isFiling: mode === 'file-decisions',
     isMigration: mode === 'doc-migration',
     chatState: mode === 'chat' ? 'selected' : '',
     codePlanState: mode === 'code-plan' ? 'selected' : '',
     planState: mode === 'plan' ? 'selected' : '',
+    updateState: mode === 'update-spec' ? 'selected' : '',
     filingState: mode === 'file-decisions' ? 'selected' : '',
     migrationState: mode === 'doc-migration' ? 'selected' : '',
   }
@@ -145,6 +158,11 @@ export class NewSessionView extends HTMLElement {
         <strong>Feature planning</strong>
         <span class="hint">Write a spec from the intent docs, blind to the code.</span>
       </button>
+      <button type="button" class="type {{updateState}}" r-click="choose('update-spec')">
+        <span class="icon">🔄</span>
+        <strong>Update spec</strong>
+        <span class="hint">Pick a spec, whatever its state, and say what should change.</span>
+      </button>
     </div>
     <div class="types" if="onMaintenance">
       <button type="button" class="type {{migrationState}}" r-click="choose('doc-migration')">
@@ -190,6 +208,21 @@ export class NewSessionView extends HTMLElement {
         <linked-files-row class="linked-files"></linked-files-row>
       </div>
     </form>
+    <form class="update-fields" if="isUpdate" r-submit="create(event)">
+      <label>Which spec?
+        <select name="feature" required r-change="edit('feature', event)">
+          <option value="" disabled selected hidden>Pick a spec</option>
+          <option loop="u in updates" value="{{u.feature}}" disabled="{{u.disabled}}">{{u.label}}</option>
+        </select>
+      </label>
+      <label>What should change, and why?
+        <textarea name="prompt" rows="6" required placeholder="What should change, and why" r-input="edit('prompt', event)"></textarea>
+      </label>
+      <p class="hint" if="noUpdates">No spec yet: write one with Feature planning first.</p>
+      <div class="submit">
+        <button type="submit">Update spec</button>
+      </div>
+    </form>
     <form class="filing-fields" if="isFiling" r-submit="create(event)">
       <p class="hint">Reads the unfiled decisions with the docs and the specs, says where each one belongs, and moves it there one confirmed write at a time. An entry leaves the file once it stands where a planner looks for it.</p>
       <p class="hint" if="nothingUnfiled">Nothing is waiting. An entry lands there when a chat or an implement run settles something that reaches features other than the one at hand.</p>
@@ -218,11 +251,11 @@ export class NewSessionView extends HTMLElement {
     </section>
   `)
   private screen: Screen = 'code'
-  private mode: SessionMode = 'chat'
+  private mode: Card = 'chat'
   /** What has been typed, so swapping card keeps it: the same intent describes either session type. */
   private draft: Draft = { feature: '', prompt: '' }
   private profileDefaults: ProfileDefaults = { names: [], active: '' }
-  private pickUp: PickUp = { plans: [], chats: [], unfiled: 0 }
+  private pickUp: PickUp = { plans: [], chats: [], unfiled: 0, updates: [] }
 
   connectedCallback(): void {
     if (this.childElementCount > 0) return
@@ -254,15 +287,17 @@ export class NewSessionView extends HTMLElement {
           this.screen = screen
           this.choose(FIRST[screen])
         },
-        resume: (plan: ResumablePlan) => this.dispatchEvent(new PlanResumeRequestedEvent(plan.feature)),
+        // What was typed before picking a plan goes with it; the card is about to be replaced by that plan's chat.
+        resume: (plan: ResumablePlan) => this.dispatchEvent(new PlanResumeRequestedEvent(plan.feature, this.take())),
         reopen: (chat: ResumableChat) => this.dispatchEvent(new SessionSelectedEvent(chat.sessionId)),
         edit: (field: keyof Draft, event: Event) => {
           this.draft[field] = (event.target as TextField).value
         },
-        choose: (mode: SessionMode) => this.choose(mode),
+        choose: (mode: Card) => this.choose(mode),
         create: (event: SubmitEvent) => {
           event.preventDefault()
           const form = event.target as HTMLFormElement
+          if (this.mode === 'update-spec') return this.updateSpec(form)
           const data = readData<NewSessionForm>(form)
           const row = form.querySelector('linked-files-row') as LinkedFilesRow | null
           const request = new NewSessionRequestedEvent(
@@ -279,15 +314,34 @@ export class NewSessionView extends HTMLElement {
         },
       },
     )
-    this.fill('input[name="feature"]', this.draft.feature)
+    this.fill('input[name="feature"], select[name="feature"]', this.draft.feature)
     this.fill('textarea[name="prompt"]', this.draft.prompt)
   }
 
-  private choose(mode: SessionMode): void {
+  /** Update spec's own submit: a pick and a description, neither of which starts anything on its own. */
+  private updateSpec(form: HTMLFormElement): void {
+    const data = readData<{ feature?: string; prompt?: string }>(form)
+    const feature = data.feature?.trim()
+    const description = data.prompt?.trim()
+    if (!feature || !description) return
+    this.draft = { feature: '', prompt: '' }
+    this.render()
+    this.dispatchEvent(new UpdateSpecRequestedEvent(feature, description))
+  }
+
+  private choose(mode: Card): void {
     this.mode = mode
     this.render()
     // A card with nothing to fill in focuses its button, so the keyboard reaches the next step either way.
     this.querySelector<HTMLElement>('form input, form textarea, form button[type=submit]')?.focus()
+  }
+
+  /** The typed prompt, taken off the card so it cannot be sent twice. */
+  private take(): string | undefined {
+    const note = this.draft.prompt.trim()
+    this.draft = { feature: '', prompt: '' }
+    this.render()
+    return note || undefined
   }
 
   /** Writes a field back after a render dropped it; an unchanged value is left alone to keep the caret. */

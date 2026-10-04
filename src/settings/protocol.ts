@@ -2,6 +2,7 @@ import type { AppliedBundle, Bundle, BundleScope } from '../agent/instructions/b
 import type { MemoryEntry, MemoryScope } from '../agent/memory/memories'
 import type { Profile, Provider } from '../agent/session/model-profile'
 import type { VerifyRule } from '../agent/phases/verification'
+import type { PairedPhone } from '../remote-control/pairing'
 
 /** Whether a key the providers name is in secret storage; the key itself never leaves the host. */
 export type ApiKeyState = { name: string; stored: boolean }
@@ -47,6 +48,14 @@ export type SettingsSnapshot = {
   compactAtTokens: number
   /** Workspace-scoped settings need a folder open to be written. */
   hasWorkspace: boolean
+  remoteControl: {
+    enabled: boolean
+    serviceUrl: string
+    /** Whether a session started at the desk may push until the person sets it for that session; one started from the phone pushes regardless. */
+    pushByDefault: boolean
+    /** Every phone paired with this workspace, by the name it gave and when it last connected. */
+    phones: PairedPhone[]
+  }
 }
 
 /** The settings saved one at a time, by their `kiwiAgent.` key; providers and profiles have their own messages. */
@@ -72,6 +81,9 @@ export type EditableSettings = {
   'cleanup.ignore': string[]
   planIgnore: string[]
   cutCoveredDocs: boolean
+  'remoteControl.enabled': boolean
+  'remoteControl.serviceUrl': string
+  'remoteControl.pushByDefault': boolean
 }
 
 export type SettingKey = keyof EditableSettings
@@ -88,6 +100,8 @@ export type ToSettingsWebview =
    * offer the user has not accepted yet must survive that.
    */
   | { type: 'models'; provider: string; models: string[] }
+  /** Answers `request_pairing_code`: the code the agent just produced, as text and as a QR code carrying it. */
+  | { type: 'pairing_code'; code: string; qrDataUrl: string; expiresAt: number }
 
 export type FromSettingsWebview =
   | { type: 'ready' }
@@ -116,3 +130,7 @@ export type FromSettingsWebview =
   | { type: 'remove_bundle'; scope: BundleScope; source: string; name: string }
   /** Ends the one-time suggestion for this workspace without applying anything. */
   | { type: 'dismiss_bundle_offer' }
+  /** "Pair a phone": produces a fresh code, answered with a `pairing_code` message. */
+  | { type: 'request_pairing_code' }
+  /** "Unpair" on a paired phone's row. */
+  | { type: 'unpair_phone'; id: string }

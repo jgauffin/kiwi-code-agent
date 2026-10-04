@@ -102,6 +102,12 @@ export class SettingsPanel {
         case 'dismiss_bundle_offer':
           await this.store.dismissBundleOffer()
           return
+        case 'request_pairing_code':
+          await this.requestPairingCode()
+          return
+        case 'unpair_phone':
+          this.store.unpairPhone(message.id)
+          return
       }
     } finally {
       // The page shows what the host holds, whether the write went through or was refused.
@@ -113,6 +119,13 @@ export class SettingsPanel {
     const models = await this.listModels(args)
     if (!this.panel) return
     const message: ToSettingsWebview = { type: 'models', provider: args.name, models }
+    await this.panel.webview.postMessage(message)
+  }
+
+  private async requestPairingCode(): Promise<void> {
+    const pairing = await this.store.requestPairingCode()
+    if (!this.panel) return
+    const message: ToSettingsWebview = { type: 'pairing_code', ...pairing }
     await this.panel.webview.postMessage(message)
   }
 

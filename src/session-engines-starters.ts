@@ -30,6 +30,7 @@ import { connectMcp } from './agent/mcp/mcp-connect'
 import type { McpServerSet } from './agent/mcp/mcp-servers'
 import { McpToolHost } from './agent/mcp/mcp-tool-host'
 import { projectScriptsInstruction } from './agent/permissions/package-scripts'
+import { PIPE_WRITING } from './agent/permissions/read-only-commands'
 import { SPEC_AMENDING, SPEC_READING } from './agent/phases/blind-plan'
 import { CHAT_DECISIONS } from './agent/phases/unfiled-decisions'
 import { memoryWritingInstructions } from './agent/memory/memories'
@@ -132,7 +133,7 @@ export class EngineStarters {
       ...(setup.systemPrompt !== undefined
         ? { systemPrompt: setup.systemPrompt + whereLine + scratchLine + toolNaming }
         : {
-            appendSystemPrompt: `${DOC_READING}\n${CODE_READING}\n${SCRIPT_WRITING}\n${EDIT_WRITING}\n${projectScriptsInstruction(workspaceRoot)}\n${SPEC_READING}\n${SPEC_AMENDING}\n${CHAT_DECISIONS}\n${memoryWritingInstructions(workspaceRoot)}${chatMemories ? `\n\n${chatMemories}` : ''}${chatInstructionFiles?.length ? `\n\n${instructionsText(chatInstructionFiles)}` : ''}${whereLine}${scratchLine}${toolNaming}`,
+            appendSystemPrompt: `${DOC_READING}\n${CODE_READING}\n${SCRIPT_WRITING}\n${EDIT_WRITING}\n${projectScriptsInstruction(workspaceRoot)}\n${PIPE_WRITING}\n${SPEC_READING}\n${SPEC_AMENDING}\n${CHAT_DECISIONS}\n${memoryWritingInstructions(workspaceRoot)}${chatMemories ? `\n\n${chatMemories}` : ''}${chatInstructionFiles?.length ? `\n\n${instructionsText(chatInstructionFiles)}` : ''}${whereLine}${scratchLine}${toolNaming}`,
           }),
       ...(setup.toolNames ? { tools: setup.toolNames } : {}),
       compactAtTokens: this.deps.compactAtTokens(profile),

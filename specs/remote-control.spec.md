@@ -1,6 +1,6 @@
 ---
 feature: Remote control
-status: approved
+status: verified
 ---
 
 # Remote control

@@ -43,6 +43,7 @@ const state = (at: Partial<PlanState>): ToWebview => ({
   plan: planState(at),
   plans: [],
   chats: [],
+  updates: [],
   unfiled: 0,
   profiles: { names: ['Claude'], active: 'Claude' },
   models: [],
@@ -75,6 +76,29 @@ describe('the open tab follows the step', () => {
     pickTab(node, 'Spec')
 
     send(state(verified))
+
+    expect(openTab(node)).toBe('Spec')
+    node.remove()
+  })
+
+  it('a_picked_up_draft_opens_on_the_chat_where_its_critique_is_said_rather_than_on_the_spec', () => {
+    const node = app({ critiqueOwed: true })
+
+    expect(openTab(node)).toBe('Chat · Plan')
+    node.remove()
+  })
+
+  it('the_critique_landing_leaves_the_reader_in_the_chat_rather_than_handing_the_tab_to_the_spec', () => {
+    const node = app({ critiqueOwed: true })
+
+    send({ type: 'event', sessionId: PLAN, run: planner, event: { type: 'turn_done', isError: false, errors: [] } })
+
+    expect(openTab(node)).toBe('Chat · Plan')
+    node.remove()
+  })
+
+  it('a_draft_with_nothing_owed_on_it_opens_on_its_spec_as_any_other_session_does', () => {
+    const node = app({})
 
     expect(openTab(node)).toBe('Spec')
     node.remove()

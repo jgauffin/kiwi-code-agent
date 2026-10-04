@@ -12,8 +12,12 @@ import { readTasks, tasksPath } from './tasks-file'
 export interface PlanPickupCourier {
   /** Brings the tab that already holds this session up, with the conversation it already has. */
   open(sessionId: string): Promise<void>
-  /** Starts a session with no conversation of its own, `label` standing in for the prompt in the chat. */
-  start(feature: string, prompt: string, label: string): Promise<void>
+  /** Starts a session with no conversation of its own, `label` standing in for the prompt in the chat; its id, when one started. */
+  start(feature: string, prompt: string, label: string): Promise<string | undefined>
+  /** A critique is owed on the draft, before the session it is about to start says anything: what it finds is in the chat alone. */
+  critiqueOwed(feature: string): void
+  /** Says text in the session as the person's own message, in their words. */
+  say(sessionId: string, note: string): Promise<void>
 }
 
 /**
@@ -24,11 +28,23 @@ export interface PlanPickupCourier {
  * where they exist) from disk rather than take the feature's state on faith.
  * Nothing here writes to the spec or its review: the pickup leaves a draft a
  * draft, and spends none of the user's comments.
+ *
+ * `note` is what the person typed before picking the plan up. It follows the
+ * session into the chat as their own message, so what they came to say is not
+ * lost to the switch, and it is theirs to word rather than folded into the
+ * extension's kickoff.
  */
-export async function pickUpPlan(options: { courier: PlanPickupCourier; cwd: string; feature: string; owner?: { sessionId: string } }): Promise<void> {
-  const { courier, cwd, feature, owner } = options
+export async function pickUpPlan(options: {
+  courier: PlanPickupCourier
+  cwd: string
+  feature: string
+  owner?: { sessionId: string }
+  note?: string
+}): Promise<void> {
+  const { courier, cwd, feature, owner, note } = options
   if (owner) {
     await courier.open(owner.sessionId)
+    if (note) await courier.say(owner.sessionId, note)
     return
   }
   const path = specPath(cwd, feature)
@@ -40,7 +56,9 @@ export async function pickUpPlan(options: { courier: PlanPickupCourier; cwd: str
   }
   const present = { review: existsSync(reviewPath(cwd, feature)), decisions: existsSync(decisionsPath(cwd, feature)) }
   // A draft buys a critique before any write; a settled spec only a status report, since there is nothing left to steer.
-  const prompt =
-    state.status === 'draft' ? draftPickupPrompt(feature, authorshipOf(await readFile(path, 'utf8')), present) : resumePlanPrompt(feature, present)
-  await courier.start(feature, prompt, 'Picking the plan up')
+  const draft = state.status === 'draft'
+  const prompt = draft ? draftPickupPrompt(feature, authorshipOf(await readFile(path, 'utf8')), present) : resumePlanPrompt(feature, present)
+  if (draft) courier.critiqueOwed(feature)
+  const started = await courier.start(feature, prompt, 'Picking the plan up')
+  if (note && started) await courier.say(started, note)
 }

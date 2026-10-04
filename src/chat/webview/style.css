@@ -159,6 +159,17 @@ chat-app {
         color: var(--vscode-button-foreground);
       }
 
+      /* A run at work puts its line beside the act: the act keeps its place and stays pressable, muted so the line is what the eye lands on. */
+      &.busy {
+        background: var(--vscode-button-secondaryBackground);
+        color: var(--vscode-button-secondaryForeground);
+        opacity: 0.7;
+
+        &:hover {
+          opacity: 1;
+        }
+      }
+
       /* A goto is always the person's act: a pill, not a faint link, so it is not read past. */
       &.goto {
         background: var(--vscode-button-secondaryBackground);
@@ -1354,13 +1365,23 @@ chat-app {
         border-bottom: 1px solid var(--vscode-panel-border);
 
         & .task {
+          background: var(--vscode-button-secondaryBackground, var(--vscode-editorWidget-background));
+          color: var(--vscode-button-secondaryForeground, var(--vscode-descriptionForeground));
+          border: 1px solid transparent;
+
+          &.building {
+            color: var(--vscode-charts-blue);
+            border-color: var(--vscode-charts-blue);
+          }
+
+          &.settled {
+            color: var(--vscode-testing-iconPassed);
+            border-color: var(--vscode-testing-iconPassed);
+          }
+
           &.selected {
             font-weight: 600;
             outline: 1px solid var(--vscode-focusBorder);
-          }
-
-          &.settled:not(.selected) {
-            opacity: 0.7;
           }
         }
       }
