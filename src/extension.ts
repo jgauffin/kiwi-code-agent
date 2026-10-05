@@ -143,6 +143,7 @@ function createChat(
   agentsMd: AgentsMdOffers,
   remoteControl: RemoteControlService,
   output: vscode.OutputChannel,
+  ask: (prompt: string) => Promise<string>,
 ): ChatViewProvider {
   const provider = new ChatViewProvider(
     context.extensionUri,
@@ -161,6 +162,7 @@ function createChat(
     agentsMd,
     remoteAlertPort(remoteControl),
     pushDefault,
+    ask,
   )
   // The only way in from the phone: a command reaches the chat the same way a desk act would.
   remoteControl.onCommand((command) => {
@@ -269,7 +271,9 @@ export function activate(context: vscode.ExtensionContext): void {
   const remoteControl = createRemoteControl(context, output)
   const settings = createSettings(context, memoryPort, bundles.port, remoteControlPort(remoteControl))
   const settingsPanel = createSettingsPanel(context, settings, workspaceRoot)
-  chat = createChat(context, sessions, settings, verifier, sizeLimits, allowWritesControl, permissionStore, workspaceRoot, agentsMd, remoteControl, output)
+  // Naming a feature runs on what its planning would, so the one ask follows the profile rather than a model of its own.
+  const ask = (prompt: string) => engines.ask(profileFor('plan'), prompt)
+  chat = createChat(context, sessions, settings, verifier, sizeLimits, allowWritesControl, permissionStore, workspaceRoot, agentsMd, remoteControl, output, ask)
   const tree = createSessionsTree(sessions, workspaceRoot, chat)
 
   registerSubscriptions(context, output, chat, tree, sessions, settingsPanel, mcp, workspaceRoot, planIgnore)

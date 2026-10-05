@@ -33,9 +33,10 @@ export const FILE_TOOLS: ReadonlySet<string> = new Set([
 ])
 
 /**
- * Looking about the file system rather than at a file already named. Within
- * the project that is as free as a read; anywhere else it is asked, so a
- * script cannot survey the disk on its own.
+ * Looking about the file system rather than at a file already named. These
+ * carry no `readOnly` of their own, being names a script's own calls are gated
+ * under rather than tools a session is given, so they are named here to be
+ * judged as the looking they are.
  */
 export const WITHIN_PROJECT_TOOLS: ReadonlySet<string> = new Set(['ReadDir', 'Exists'])
 
@@ -43,6 +44,9 @@ export const WITHIN_PROJECT_TOOLS: ReadonlySet<string> = new Set(['ReadDir', 'Ex
  * The engine's own tools that only look. The tools this extension implements
  * are not listed: they carry the answer themselves, and `readOnlyTools` below
  * prefers it, so there is one place to state it per tool.
+ *
+ * Only looking is not on its own leave to run: a call is judged by where it
+ * looks as well, so reading stays inside the project exactly as writing does.
  */
 const BUILT_IN_READ_ONLY: ReadonlySet<string> = new Set(['Read', 'Glob', 'Grep', 'LS', 'NotebookRead', 'TodoRead', 'TodoWrite'])
 

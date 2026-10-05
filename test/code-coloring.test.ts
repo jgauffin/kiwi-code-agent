@@ -43,7 +43,7 @@ describe('tool input in the transcript', () => {
   it('shell_commands_are_colored_as_shell', () => {
     const view = new ChatTranscript()
     document.body.appendChild(view)
-    view.reset([{ type: 'tool_call', toolUseId: 't1', name: 'Bash', input: { command: 'echo "hi" && ls -la', description: 'Say hi' } }])
+    view.reset([{ type: 'tool_call', toolUseId: 't1', name: 'Bash', input: { command: 'echo "hi" && ls -la', description: 'Say hi' } }], true)
     const input = view.querySelector('pre.input')!
     expect(input.textContent).toBe('echo "hi"\nls -la')
     expect(tokens(input, 'string')).toEqual(['"hi"'])
@@ -52,7 +52,7 @@ describe('tool input in the transcript', () => {
   it('other_tool_input_is_colored_as_json', () => {
     const view = new ChatTranscript()
     document.body.appendChild(view)
-    view.reset([{ type: 'tool_call', toolUseId: 't1', name: 'Read', input: { file_path: 'a.ts', limit: 5 } }])
+    view.reset([{ type: 'tool_call', toolUseId: 't1', name: 'Read', input: { file_path: 'a.ts', limit: 5 } }], true)
     const input = view.querySelector('pre.input')!
     expect(input.textContent).toBe(JSON.stringify({ file_path: 'a.ts', limit: 5 }, null, 2))
     expect(tokens(input, 'attr')).toEqual(['"file_path"', '"limit"'])

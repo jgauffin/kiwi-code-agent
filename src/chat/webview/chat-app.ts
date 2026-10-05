@@ -99,6 +99,9 @@ export class ChatApp extends HTMLElement {
         // The answer belongs to the row that asked: the composer's, or the new-session card's.
         if (this.linkTarget?.isConnected) this.linkTarget.link(message.path)
         break
+      case 'suggested_feature_name':
+        this.newSession.suggestedName(message)
+        break
     }
   }
 

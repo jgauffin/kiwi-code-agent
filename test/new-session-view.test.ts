@@ -161,6 +161,70 @@ describe('NewSessionView fields across cards', () => {
   })
 })
 
+describe('NewSessionView asking for a feature name', () => {
+  const suggest = (node: HTMLElement) => node.querySelector<HTMLButtonElement>('.plan-fields .suggest')!
+
+  it('asks_for_a_description_rather_than_naming_a_feature_nothing_describes', () => {
+    const node = view()
+    card(node, 'plan').click()
+    let asks = 0
+    node.addEventListener(events.FeatureNameSuggestionRequestedEvent.type, () => asks++)
+    suggest(node).click()
+    expect(asks).toBe(0)
+    expect(node.querySelector('.plan-fields .naming .hint')!.textContent).toContain('Describe the feature below first')
+    expect(suggest(node).disabled).toBe(false)
+    node.remove()
+  })
+
+  it('asks_with_the_description_and_says_it_is_at_work_until_the_name_lands', () => {
+    const node = view()
+    card(node, 'plan').click()
+    type(node, '.plan-fields textarea[name=prompt]', 'As a buyer I want to cancel')
+    let asked: string | undefined
+    node.addEventListener(events.FeatureNameSuggestionRequestedEvent.type, (e) => (asked = e.description))
+    suggest(node).click()
+    expect(asked).toBe('As a buyer I want to cancel')
+    expect(suggest(node).textContent).toContain('Naming')
+    expect(suggest(node).disabled).toBe(true)
+    node.remove()
+  })
+
+  it('puts_the_name_in_the_field_where_it_stays_the_developers_to_edit', () => {
+    const node = view()
+    card(node, 'plan').click()
+    type(node, '.plan-fields textarea[name=prompt]', 'As a buyer I want to cancel')
+    suggest(node).click()
+    ;(node as InstanceType<typeof NewSessionView>).suggestedName({ name: 'Order cancellation' })
+    expect(node.querySelector<HTMLInputElement>('.plan-fields input[name=feature]')!.value).toBe('Order cancellation')
+    expect(suggest(node).disabled).toBe(false)
+    node.remove()
+  })
+
+  it('says_why_nothing_came_back_rather_than_leaving_the_button_at_work', () => {
+    const node = view()
+    card(node, 'plan').click()
+    type(node, '.plan-fields textarea[name=prompt]', 'As a buyer I want to cancel')
+    suggest(node).click()
+    ;(node as InstanceType<typeof NewSessionView>).suggestedName({ reason: 'No API key stored for "Kimi".' })
+    expect(node.querySelector('.plan-fields .naming .hint')!.textContent).toContain('No API key stored')
+    expect(suggest(node).textContent).toContain('Suggest a name')
+    expect(suggest(node).disabled).toBe(false)
+    node.remove()
+  })
+
+  it('asks_nothing_while_an_ask_is_already_in_flight', () => {
+    const node = view()
+    card(node, 'plan').click()
+    type(node, '.plan-fields textarea[name=prompt]', 'As a buyer I want to cancel')
+    let asks = 0
+    node.addEventListener(events.FeatureNameSuggestionRequestedEvent.type, () => asks++)
+    suggest(node).click()
+    suggest(node).click()
+    expect(asks).toBe(1)
+    node.remove()
+  })
+})
+
 const picks = (node: HTMLElement) => [...node.querySelectorAll<HTMLButtonElement>('.pick-up .pick')]
 
 describe('NewSessionView pick-up list', () => {

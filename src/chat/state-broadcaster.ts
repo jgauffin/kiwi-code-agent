@@ -64,7 +64,7 @@ export class StateBroadcaster {
     if (!entry) return
     const runs: RunSection[] = []
     for (const run of runsOf(sessions, record)) {
-      runs.push({ ...runRef(run), events: (await sessions.transcript(run.id)).map(forDisplay) })
+      runs.push({ ...runRef(run), live: sessions.isLive(run.id), events: (await sessions.transcript(run.id)).map(forDisplay) })
     }
     void entry.panel.webview.postMessage({ type: 'transcript', sessionId: tabId, runs } satisfies ToWebview)
   }

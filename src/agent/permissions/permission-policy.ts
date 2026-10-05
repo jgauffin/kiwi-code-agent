@@ -95,9 +95,10 @@ export class PermissionPolicy implements SessionHooks {
   }
 
   /**
-   * Where this shell may stand: in the project, or in a directory a `cd` rule
-   * in force names. The rule carries the directory rather than `cd` itself, so
-   * allowing one place to work from does not allow every other.
+   * Where this shell may stand and what it may read: in the project, or in a
+   * directory a `cd` rule in force names. The rule carries the directory rather
+   * than `cd` itself, so allowing one place to work from does not allow every
+   * other, and a place the session may work in is one it may read.
    */
   private enterContext(toolName: string, allow: string[]): ReadOnlyContext {
     const directories = allow
@@ -106,21 +107,30 @@ export class PermissionPolicy implements SessionHooks {
       .map((rule) => cdRuleDirectory(rule.pattern!))
       .filter((directory): directory is string => directory !== undefined)
       .map((directory) => shellPath(toolName, directory))
-    return {
-      canEnter: (target) => {
-        const path = shellPath(toolName, target)
-        return this.paths.inside(path) || directories.some((directory) => this.paths.under(directory, path))
-      },
+    const reaches = (target: string) => {
+      const path = shellPath(toolName, target)
+      return this.paths.inside(path) || directories.some((directory) => this.paths.under(directory, path))
     }
+    return { canEnter: reaches, canRead: reaches }
   }
 
+  /**
+   * A call that only looks, and only inside the project. Reading outside it is
+   * left to the rules, so the person grants another workspace or a folder of
+   * their own once rather than the agent reaching anywhere on the machine
+   * unasked. A call naming no path is working in the project.
+   */
   private isReadOnly(tool: ToolUse, context: ReadOnlyContext): boolean {
     if (isShellTool(tool.toolName)) return isReadOnlyCommand(this.command(tool), context)
-    if (WITHIN_PROJECT_TOOLS.has(tool.toolName)) {
-      const paths = this.relativePaths(tool)
-      return paths.length > 0 && paths.every((path) => this.paths.inside(path))
-    }
-    return this.readOnly(tool.toolName)
+    if (!this.readOnly(tool.toolName) && !WITHIN_PROJECT_TOOLS.has(tool.toolName)) return false
+    return this.readPaths(tool).every((path) => this.paths.inside(path))
+  }
+
+  /** The paths a looking call reaches: those it names, and the pattern a search walks, which is a path of its own. */
+  private readPaths(tool: ToolUse): string[] {
+    const pattern = (tool.input as { pattern?: unknown } | undefined)?.pattern
+    const walked = tool.toolName === 'Glob' && typeof pattern === 'string' ? [this.paths.relative(pattern)] : []
+    return [...this.relativePaths(tool), ...walked]
   }
 
   /**

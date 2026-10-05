@@ -4,7 +4,8 @@ import type { SessionEvent } from '../src/agent/session/code-session'
 import type { QuestionOutcome } from '../src/agent/session/user-question'
 
 // The webview talks to the host through this handle, acquired when its modules load.
-;(globalThis as Record<string, unknown>).acquireVsCodeApi = () => ({ postMessage: () => {} })
+const posted: unknown[] = []
+;(globalThis as Record<string, unknown>).acquireVsCodeApi = () => ({ postMessage: (message: unknown) => void posted.push(message) })
 
 // Test files share a worker, so the module registry is cleared first: what
 // loads here is this file's own, bound to its stub and its document.
@@ -63,7 +64,7 @@ describe('terminal output in the transcript', () => {
     view.reset([
       { type: 'tool_call', toolUseId: 't1', name: 'Bash', input: { command: 'npm test' } },
       { type: 'tool_result', toolUseId: 't1', text: `${ESC}[41m${ESC}[1m FAIL ${ESC}[22m${ESC}[49m test/x.test.ts`, isError: true },
-    ])
+    ], true)
 
     const result = view.querySelector('pre.result')!
     expect(result.textContent).toBe(' FAIL  test/x.test.ts')
@@ -73,7 +74,7 @@ describe('terminal output in the transcript', () => {
   it('a_handoff_message_carrying_test_output_shows_it_coloured_too', () => {
     const view = transcript()
 
-    view.reset([{ type: 'user_message', text: `The test run failed:\n${ESC}[31mFAIL${ESC}[39m test/x.test.ts` }])
+    view.reset([{ type: 'user_message', text: `The test run failed:\n${ESC}[31mFAIL${ESC}[39m test/x.test.ts` }], true)
 
     const message = view.querySelector('article.user')!
     expect(message.textContent).toBe('The test run failed:\nFAIL test/x.test.ts')
@@ -99,7 +100,7 @@ describe('finished steps in the transcript', () => {
     view.reset([
       { type: 'tool_call', toolUseId: 't1', name: 'Bash', input: { command: 'npm test' } },
       { type: 'tool_result', toolUseId: 't1', text: 'boom', isError: true },
-    ])
+    ], true)
 
     expect(step(view).classList.contains('failed')).toBe(true)
   })
@@ -107,7 +108,7 @@ describe('finished steps in the transcript', () => {
   it('a_collapsed_read_names_the_lines_it_read_and_a_whole_file_read_names_none', () => {
     const view = transcript()
     const summary = (input: unknown) => {
-      view.reset([{ type: 'tool_call', toolUseId: 't1', name: 'Read', input }])
+      view.reset([{ type: 'tool_call', toolUseId: 't1', name: 'Read', input }], true)
       return step(view).querySelector('summary')!.textContent
     }
 
@@ -120,7 +121,7 @@ describe('finished steps in the transcript', () => {
   it('a_collapsed_search_names_the_folder_it_searched_since_the_pattern_alone_is_ambiguous', () => {
     const view = transcript()
     const summary = (name: string, input: unknown) => {
-      view.reset([{ type: 'tool_call', toolUseId: 't1', name, input }])
+      view.reset([{ type: 'tool_call', toolUseId: 't1', name, input }], true)
       return step(view).querySelector('summary')!.textContent
     }
 
@@ -141,7 +142,7 @@ describe('file edits in the transcript', () => {
   it('a_successful_edit_shows_its_diff_without_the_tools_confirmation_text', () => {
     const view = transcript()
 
-    view.reset(write('t1', 'src/a.ts'))
+    view.reset(write('t1', 'src/a.ts'), true)
 
     expect(steps(view)[0]?.querySelector('.edit')).not.toBeNull()
     expect(view.querySelectorAll('pre.result')).toHaveLength(0)
@@ -150,7 +151,7 @@ describe('file edits in the transcript', () => {
   it('a_failed_edit_still_shows_why_it_failed', () => {
     const view = transcript()
 
-    view.reset(write('t1', 'src/a.ts', true))
+    view.reset(write('t1', 'src/a.ts', true), true)
 
     expect(view.querySelector('pre.result')?.textContent).toBe('Permission denied')
   })
@@ -158,7 +159,7 @@ describe('file edits in the transcript', () => {
   it('only_the_latest_successful_edit_stays_open', () => {
     const view = transcript()
 
-    view.reset([...write('t1', 'src/a.ts'), ...write('t2', 'src/b.ts')])
+    view.reset([...write('t1', 'src/a.ts'), ...write('t2', 'src/b.ts')], true)
     view.apply(write('t3', 'src/c.ts')[0]!)
     view.apply(write('t3', 'src/c.ts')[1]!)
 
@@ -169,7 +170,7 @@ describe('file edits in the transcript', () => {
     const view = transcript()
     const [call, result] = write('t1', 'src/a.ts')
 
-    view.reset([call!, ...prompt('t1', 'src/a.ts', 'allow'), result!])
+    view.reset([call!, ...prompt('t1', 'src/a.ts', 'allow'), result!], true)
 
     expect(steps(view)[0]?.open).toBe(false)
     expect(steps(view)[0]?.querySelector('.edit')).not.toBeNull()
@@ -179,7 +180,7 @@ describe('file edits in the transcript', () => {
     const view = transcript()
     const [call, result] = write('t2', 'src/b.ts')
 
-    view.reset([...write('t1', 'src/a.ts'), call!, ...prompt('t2', 'src/b.ts', 'allow'), result!])
+    view.reset([...write('t1', 'src/a.ts'), call!, ...prompt('t2', 'src/b.ts', 'allow'), result!], true)
 
     expect(steps(view).map((s) => s.open)).toEqual([true, false])
   })
@@ -196,7 +197,7 @@ describe('a permission prompt in the transcript', () => {
       { type: 'tool_call', toolUseId: 't1', name: 'Write', input: { file_path: 'src/a.ts' } },
       ...prompt('t1', 'src/a.ts', 'allow'),
       { type: 'tool_result', toolUseId: 't1', text: 'File written', isError: false, edit: edit('src/a.ts') },
-    ])
+    ], true)
 
     expect(cards(view)).toHaveLength(0)
     expect(view.querySelectorAll('.edit')).toHaveLength(1)
@@ -209,7 +210,7 @@ describe('a permission prompt in the transcript', () => {
       { type: 'tool_call', toolUseId: 't1', name: 'Write', input: { file_path: 'src/a.ts' } },
       ...prompt('t1', 'src/a.ts', 'deny'),
       { type: 'tool_result', toolUseId: 't1', text: 'Denied by user', isError: true },
-    ])
+    ], true)
 
     expect(cards(view)).toHaveLength(1)
     expect(cards(view)[0]?.querySelector('.edit')).not.toBeNull()
@@ -328,6 +329,23 @@ describe('the activity row', () => {
     expect(activity(view)).toBe('Waiting on model…')
     expect(waitsOnUser(view)).toBe(false)
   })
+
+  it('a_turn_the_last_window_cut_off_replays_with_no_row_rather_than_as_still_at_work', () => {
+    const view = transcript()
+
+    view.reset([{ type: 'user_message', text: 'go' }, { type: 'tool_call', toolUseId: 't1', name: 'Bash', input: { command: 'npm test' } }], false)
+
+    expect(activity(view)).toBeNull()
+  })
+
+  it('a_question_a_cut_off_turn_left_open_still_says_the_answer_is_the_users_to_give', () => {
+    const view = transcript()
+
+    view.reset([{ type: 'user_message', text: 'go' }, ask('r1', 'Storage')], false)
+
+    expect(activity(view)).toBe('Waiting for your answer…')
+    expect(waitsOnUser(view)).toBe(true)
+  })
 })
 
 describe('questions in a replayed transcript', () => {
@@ -344,7 +362,7 @@ describe('questions in a replayed transcript', () => {
       ask('r1', 'Storage'),
       answered('r1', 'Yes'),
       { type: 'tool_result', toolUseId: 't1', text: 'Chose: Yes', isError: false },
-    ])
+    ], true)
 
     const [card] = cards(view)
     expect(cards(view)).toHaveLength(1)
@@ -361,7 +379,7 @@ describe('questions in a replayed transcript', () => {
   it('a_request_left_open_in_the_log_replays_still_pending_and_still_answerable', () => {
     const view = transcript()
 
-    view.reset([{ type: 'user_message', text: 'go' }, ask('r1', 'Storage')])
+    view.reset([{ type: 'user_message', text: 'go' }, ask('r1', 'Storage')], true)
 
     const [card] = cards(view)
     expect(card?.isResolved).toBe(false)
@@ -377,7 +395,7 @@ describe('questions in a replayed transcript', () => {
   it('skipping_a_card_leaves_the_question_unanswered_rather_than_choosing_for_the_user', () => {
     const view = transcript()
 
-    view.reset([{ type: 'user_message', text: 'go' }, ask('r1', 'Storage')])
+    view.reset([{ type: 'user_message', text: 'go' }, ask('r1', 'Storage')], true)
 
     const [card] = cards(view)
     let sent: unknown
@@ -391,7 +409,7 @@ describe('questions in a replayed transcript', () => {
   it('the_transcript_reports_an_open_question_until_it_is_resolved', () => {
     const view = transcript()
 
-    view.reset([{ type: 'user_message', text: 'go' }, ask('r1', 'Storage')])
+    view.reset([{ type: 'user_message', text: 'go' }, ask('r1', 'Storage')], true)
     expect(view.hasOpenQuestion).toBe(true)
     view.apply({ type: 'question_resolved', requestId: 'r1', outcome: { kind: 'unanswered', reason: 'Skipped by the user' } })
     expect(view.hasOpenQuestion).toBe(false)
@@ -402,7 +420,7 @@ describe('questions in a replayed transcript', () => {
   it('two_requests_replay_as_two_cards_in_arrival_order_each_answered_on_its_own', () => {
     const view = transcript()
 
-    view.reset([ask('r1', 'Storage'), ask('r2', 'Naming'), answered('r2', 'Yes')])
+    view.reset([ask('r1', 'Storage'), ask('r2', 'Naming'), answered('r2', 'Yes')], true)
 
     const [first, second] = cards(view)
     expect(cards(view).map((c) => headers(c)[0])).toEqual(['Storage', 'Naming'])
@@ -416,9 +434,9 @@ describe('questions in a replayed transcript', () => {
     const view = transcript()
     const events: SessionEvent[] = [ask('r1', 'Storage'), answered('r1', 'Yes'), ask('r2', 'Naming')]
 
-    view.reset(events)
+    view.reset(events, true)
     // A tab switch, or a reopened view, replays the same log into the same element.
-    view.reset(events)
+    view.reset(events, true)
 
     expect(cards(view).map((c) => headers(c)[0])).toEqual(['Storage', 'Naming'])
     expect(cards(view).map((c) => c.isResolved)).toEqual([true, false])
@@ -436,7 +454,7 @@ describe('a turn stopped at its round limit', () => {
       sent = (e as InstanceType<typeof PromptSubmittedEvent>).text
     })
 
-    view.reset([stopped])
+    view.reset([stopped], true)
     resume(view)?.click()
 
     expect(sent).toMatch(/continue/i)
@@ -445,7 +463,7 @@ describe('a turn stopped at its round limit', () => {
   it('the_offer_goes_once_the_conversation_moves_on', () => {
     const view = transcript()
 
-    view.reset([stopped, { type: 'user_message', text: 'something else' }])
+    view.reset([stopped, { type: 'user_message', text: 'something else' }], true)
 
     expect(resume(view)).toBeNull()
     expect(view.querySelector('article.error')?.textContent).toContain('Stopped after 50 tool rounds')
@@ -454,9 +472,56 @@ describe('a turn stopped at its round limit', () => {
   it('an_ordinary_error_offers_no_resume', () => {
     const view = transcript()
 
-    view.reset([{ type: 'error', message: 'API error 429', fatal: false }])
+    view.reset([{ type: 'error', message: 'API error 429', fatal: false }], true)
 
     expect(resume(view)).toBeNull()
+  })
+})
+
+describe('copying a message out of the transcript', () => {
+  const copy = (message: Element | null) => message?.querySelector<HTMLButtonElement>('button.copy')
+
+  function copied(view: Transcript, selector: string): unknown[] {
+    posted.length = 0
+    copy(view.querySelector(selector))?.click()
+    return posted
+  }
+
+  it('an_assistant_message_copies_its_markdown_source_not_the_html_it_was_rendered_to', () => {
+    const view = transcript()
+    view.reset([{ type: 'assistant_message', messageId: 'm1', text: '# Done\n\nIt is **finished**.' }], true)
+
+    expect(copied(view, 'article.assistant')).toEqual([{ type: 'copy_text', text: '# Done\n\nIt is **finished**.' }])
+  })
+
+  it('a_message_still_streaming_copies_the_text_that_has_arrived_so_far', () => {
+    const view = transcript()
+    view.apply({ type: 'assistant_text', messageId: 'm1', delta: 'Half a ' })
+    view.apply({ type: 'assistant_text', messageId: 'm1', delta: 'sentence' })
+
+    expect(copied(view, 'article.assistant')).toEqual([{ type: 'copy_text', text: 'Half a sentence' }])
+  })
+
+  it('a_user_message_copies_the_prompt_as_it_was_typed', () => {
+    const view = transcript()
+    view.reset([{ type: 'user_message', text: 'Fix the `copy` button' }], true)
+
+    expect(copied(view, 'article.user')).toEqual([{ type: 'copy_text', text: 'Fix the `copy` button' }])
+  })
+
+  it('the_copy_adds_nothing_to_what_the_message_reads_as', () => {
+    const view = transcript()
+    view.reset([{ type: 'user_message', text: 'just this' }], true)
+
+    expect(view.querySelector('article.user')?.textContent).toBe('just this')
+  })
+
+  it('a_turn_the_extension_kicked_off_is_named_not_quoted_so_it_has_nothing_to_copy', () => {
+    const view = transcript()
+    view.reset([{ type: 'user_message', text: 'the hidden kickoff', label: 'Tidying AGENTS.md' }], true)
+
+    expect(view.querySelector('article.kickoff')?.textContent).toBe('Tidying AGENTS.md')
+    expect(copy(view.querySelector('article.kickoff'))).toBeNull()
   })
 })
 
@@ -493,7 +558,7 @@ describe('a model switch in the transcript', () => {
       { type: 'user_message', text: 'go' },
       { type: 'session_started', engineSessionId: 'e2', model: 'glm' },
       { type: 'user_message', text: 'and now' },
-    ])
+    ], true)
 
     const order = [...view.children].map((el) => el.className)
     expect(order.indexOf('turn model-switch')).toBeGreaterThan(order.indexOf('user'))

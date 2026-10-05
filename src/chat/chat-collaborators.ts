@@ -35,6 +35,8 @@ export type ConstructorDeps = {
   agentsMd: AgentsMdOffers
   remoteAlerts: RemoteAlertPort
   pushDefault: () => boolean
+  /** One prompt on the model new plan sessions run on, answered as text: for the small asks that are not a session. */
+  ask: (prompt: string) => Promise<string>
 }
 
 export type Collaborators = {
@@ -191,11 +193,12 @@ function buildRouter(
   cleanup: FeatureCleanup,
   build: FeatureBuild,
 ): MessageRouter {
-  const { workspaceRoot, sessions, profileFor, registeredModels, profileDefaults, allowWrites, permissions, agentsMd } = deps
+  const { workspaceRoot, sessions, profileFor, registeredModels, profileDefaults, allowWrites, permissions, agentsMd, ask } = deps
   return new MessageRouter({
     workspaceRoot,
     sessions,
     profileFor,
+    ask,
     registeredModels,
     profileDefaults,
     allowWrites,

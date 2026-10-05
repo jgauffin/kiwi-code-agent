@@ -299,7 +299,7 @@ describe('a shell step in the transcript', () => {
     const view = new ChatTranscript()
     document.body.appendChild(view)
 
-    view.reset([{ type: 'tool_call', toolUseId: 't1', name: 'Bash', input: { command: 'npm run build && npx vitest run', description: 'Build, then test' } }])
+    view.reset([{ type: 'tool_call', toolUseId: 't1', name: 'Bash', input: { command: 'npm run build && npx vitest run', description: 'Build, then test' } }], true)
 
     const step = view.querySelector('details.tool')!
     expect(step.querySelector('summary')?.textContent).toBe('Build, then test')

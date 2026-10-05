@@ -18,7 +18,7 @@ export class RunSections extends HTMLElement {
   reset(runs: RunSection[]): void {
     this.replaceChildren()
     this.sections.clear()
-    for (const run of runs) this.sectionFor(run).transcript.reset(run.events)
+    for (const run of runs) this.sectionFor(run).transcript.reset(run.events, run.live)
     this.arrange(true)
   }
 

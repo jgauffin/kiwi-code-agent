@@ -14,12 +14,12 @@ The keys, for settings.json:
   Effort: a step's own, else the one suggested for the step (plan, reconcile and code-plan high, implement, fix, code-build, docs, file-decisions and doc-migration medium, cleanup and docs-map low), else the default's. A fix goes one level higher for each sweep in a row that failed. Example, the strongest reasoner for planning and mapping, throughput for the rest:
 
   ```json
-  { "name": "Balanced", "default": { "provider": "Claude", "model": "claude-sonnet-5[1m]" }, "steps": { "plan": { "provider": "Claude", "model": "claude-opus-5[1m]" }, "reconcile": { "provider": "Claude", "model": "claude-opus-5[1m]" } } }
+  { "name": "Balanced", "default": { "provider": "Claude", "model": "claude-sonnet-5-5[1m]" }, "steps": { "plan": { "provider": "Claude", "model": "claude-opus-5-5[1m]" }, "reconcile": { "provider": "Claude", "model": "claude-opus-5-5[1m]" } } }
   ```
 
   On `claude-sdk`, the `[1m]` suffix gives the model its 1M-token context window.
 - `kiwiAgent.activeProfile`: the profile name new sessions run on.
-- `kiwiAgent.permissions.allow`: shell commands and tools allowed without asking, per project. Read-only tools never ask; a shell call is prompted command by command and can be allowed for the session or the project, or denied. A write to the root `package.json`, `.vscode/settings.json`, `.mcp.json` or a root `.code-workspace` is always asked, whatever this list or the Allow writes switch says: those files decide what runs without asking.
+- `kiwiAgent.permissions.allow`: shell commands and tools allowed without asking, per project. A call that only looks never asks while everything it reads lies in the project; one reaching outside it is asked for like any other, so another workspace or a folder of your own is granted once rather than being open to every session. A shell call is prompted command by command and can be allowed for the session or the project, or denied. A write to the root `package.json`, `.vscode/settings.json`, `.mcp.json` or a root `.code-workspace` is always asked, whatever this list or the Allow writes switch says: those files decide what runs without asking.
 - `kiwiAgent.permissions.denyGitWrites`: blocks every git command that is not read-only, whatever the allow rules say. Permissions tab, Git.
 - `kiwiAgent.nodePath`: Node executable for the Claude engine; empty uses VS Code's executable.
 - `kiwiAgent.compactAtTokens`: compact a conversation once it is this large, even when the window holds more, since every request re-sends it; 0 compacts only when the window runs short. Settings page, Advanced tab. A provider can set its own per model (`compactAtTokens` on the provider, model id → tokens), edited beside each model under Models › Providers; that wins for sessions on that provider and model.

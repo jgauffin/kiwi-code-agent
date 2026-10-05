@@ -104,6 +104,23 @@
 - decided: The new-session screen's Code tab carries *Update spec*, where the person picks any spec, whatever state it is in, and describes in their own words what should change; the pick routes by state, a settled spec into a change of that spec and a draft into a draft pickup, nothing starts until the change is described, and a spec opened from that screen always shows the act that changes it.
 - affects: changing an implemented spec, change feature, spec drafts, starting a new session, picking up a plan, docs/plan-sessions.md
 
+### Reading outside the project is asked for, the way writing is
+- decided: A call that only inspects runs unasked only while every file it names lies in the project, or under a directory an allow rule already grants; one reaching outside is put to the person like any other call, and may be allowed for the project from that prompt. This holds for the tools that read a file, list a folder or search for one as much as for a shell command that only inspects, closing the asymmetry where a write was confined to the project while a read could reach the person's keys, another workspace's source or anything else on the machine. A file fed in by a redirect counts as named, and a command handed its arguments by another command cannot be shown to stay inside, so it is asked for too. A call naming no path at all is working in the project and is not asked about.
+- affects: permissions and the Allow writes switch, running a script, docs/settings.md
+
 ### A change is never answered by the phase conversation the tab is showing
 - decided: Asking for a change on a feature opens the describe-the-change step and plans it in a feature-planning session, never handing the request to the cleanup, implement or check conversation its tab happens to show; a feature whose only open step is an unsettled cleanup is changeable, and that cleanup waits for the change's own build.
 - affects: changing an implemented spec, change feature, cleanup phase, sessions and tabs, docs/intent/agent.md
+
+### No two features share a name
+- decided: A feature's name identifies it, so starting feature planning on a name another feature already answers to is refused rather than started: the refusal names the feature holding it and offers the two ways on, picking that plan up or describing a change to its spec. Names are compared by the spec they resolve to rather than by spelling, so two spellings that would land on one spec collide, and a feature whose planning has yet to write a spec holds its name from the moment it starts.
+- affects: starting a new session, picking up a plan, changing an implemented spec, spec drafts, sessions and tabs
+
+### Specs may sit in domain folders, and the agent picks the folder
+- decided: A spec may live in a folder named after the domain it belongs to rather than only at the root of the specs folder; the planning session proposes that folder with its direction, read from the feature's description and the folders the workspace already has, and the person keeps or changes it before anything is written. The folder is grouping only: a feature is still identified by its name alone, every spec is read, searched and cited wherever it sits with its folder in the citation, and the working files stay keyed by the feature's name. Whether folders are used follows the workspace by default, and the docs cleanup job offers once to sort the specs that already exist into folders, citations following each move.
+- affects: spec folders, doc migration, changing an implemented spec, spec drafts, docs/intent/agent.md, docs/plan-sessions.md, docs/settings.md
+
+### A feature can be named by the model from its description
+- decided: Naming a feature is offered rather than left to the person: from the description they have written, the model proposes a name clear of the ones already taken, and it lands in the name field as theirs to keep or edit, never as a name applied behind their back. Pressing it with nothing described asks for a description instead of guessing. The ask is one prompt on the model the feature's planning would run on, holding no conversation and keeping nothing.
+- affects: starting a new session, choosing models
+

@@ -102,6 +102,11 @@ export class SessionEngines {
     return this.sessionTools.get(sessionId) ?? []
   }
 
+  /** One prompt on a profile's model, answered as text, with no session and nothing kept; see `EngineStarters.ask`. */
+  ask(profile: ModelProfile, prompt: string): Promise<string> {
+    return this.starters.ask(profile, prompt)
+  }
+
   recorderOf(sessionId: string): FileEditRecorder | undefined {
     return this.editRecorders.get(sessionId)
   }

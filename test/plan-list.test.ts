@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { listDraftPlans, listPlans } from '../src/agent/phases/plan-list'
+import { featureAlreadyNamed, listDraftPlans, listPlans } from '../src/agent/phases/plan-list'
 import { renderBoard, withCleanupDecision, withRecord, type TaskBoard } from '../src/agent/phases/tasks-file'
 import { addComment, emptyReview, resolveComment, submitRound, writeReview } from '../src/agent/phases/plan-review'
 import { board, task } from './task-board-fixture'
@@ -170,6 +170,44 @@ describe('plan list', () => {
       resolveComment(review, { round: 1, index: 0 })
       await writeReview(join(dir, '.kiwi', 'specs', 'orders.review.md'), review, 'specs/orders.spec.md')
       expect(await listPlans(dir)).toMatchObject([{ feature: 'Orders', review: 'created' }])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('a feature name already taken', () => {
+  it('names_the_feature_whose_spec_the_name_resolves_to', async () => {
+    const dir = await workspace({ 'order-cancellation.spec.md': '---\nfeature: Order cancellation\nstatus: draft\n---\n# Order cancellation\n' })
+    try {
+      expect(await featureAlreadyNamed(dir, 'Order cancellation', [])).toBe('Order cancellation')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('names_the_feature_when_a_differently_spelled_name_resolves_to_the_same_spec', async () => {
+    const dir = await workspace({ 'order-cancellation.spec.md': '---\nfeature: Order cancellation\nstatus: draft\n---\n# Order cancellation\n' })
+    try {
+      expect(await featureAlreadyNamed(dir, 'Order, cancellation!', [])).toBe('Order cancellation')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('names_a_feature_whose_planning_session_has_yet_to_write_its_spec', async () => {
+    const dir = await workspace({})
+    try {
+      expect(await featureAlreadyNamed(dir, 'Plan linked spec', ['Plan linked spec'])).toBe('Plan linked spec')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('leaves_a_name_no_spec_and_no_planning_session_holds_free', async () => {
+    const dir = await workspace({ 'order-cancellation.spec.md': '---\nfeature: Order cancellation\nstatus: draft\n---\n# Order cancellation\n' })
+    try {
+      expect(await featureAlreadyNamed(dir, 'Order refunds', ['Plan linked spec'])).toBeUndefined()
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

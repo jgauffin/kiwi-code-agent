@@ -143,7 +143,8 @@ export type RunControls = RunRef & {
   mcp?: McpServerState[]
 }
 
-export type RunSection = RunRef & { events: SessionEvent[] }
+/** A run's conversation to replay, with whether its engine is still there: a turn its log leaves unfinished was cut off with the last window. */
+export type RunSection = RunRef & { live: boolean; events: SessionEvent[] }
 
 /**
  * A model the composer's switch offers, and the effort levels it takes, so
@@ -220,6 +221,8 @@ export type ToWebview =
   | { type: 'transcript'; sessionId: string; runs: RunSection[] }
   /** The file the editor had open when the composer asked to link it, as it will be named in the prompt. */
   | { type: 'linked_file'; path: string }
+  /** A name for the feature being described, for the plan card's name field to take; `name` is absent when the asking failed, `reason` saying why. */
+  | { type: 'suggested_feature_name'; name?: string; reason?: string }
   | { type: 'event'; sessionId: string; run: RunRef; event: SessionEvent }
 
 /** The user's answer to a permission prompt, with the rules its lines were allowed by that later calls should pass on. */
@@ -249,6 +252,8 @@ export type FromWebview =
   | { type: 'send'; text: string; files?: string[]; sessionId?: string }
   /** Answers with `linked_file` for the file open in the editor, so the composer can link it. */
   | { type: 'link_open_file' }
+  /** Answers with `suggested_feature_name`: a name for the feature `description` is about, clear of the names already taken. */
+  | { type: 'suggest_feature_name'; description: string }
   /** `sessionId` is the run whose section the card sits in: a tab holds several, and only that one asked. */
   | { type: 'permission'; sessionId: string; requestId: string; decision: UserPermissionDecision }
   /** The card's answers to a question the model asked, or that the user left it unanswered. */
@@ -306,6 +311,8 @@ export type FromWebview =
   | { type: 'accept_task'; task: string }
   /** The person's answer to the `AGENTS.md` offer shown for `scope`. */
   | { type: 'agents_md_answer'; scope: BundleScope; answer: AgentsMdAnswer }
+  /** Puts a message's own Markdown on the clipboard; the webview cannot reach it, so the host writes it. */
+  | { type: 'copy_text'; text: string }
   /** Opens an edited file, at the line the edit changed when one is known. */
   | { type: 'open_file'; path: string; line?: number }
   /** Opens the whole edit in the editor's diff view: the pre-edit snapshot against the file as it now stands. */

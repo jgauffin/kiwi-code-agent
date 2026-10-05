@@ -164,10 +164,12 @@ function buildPlanState(inputs: PlanStateInputs): PlanState {
   const spec = state.exists ? parseSpec(state.body) : undefined
   const relativeTo = (file: string) => relative(workspaceRoot, file).split('\\').join('/')
   const blocked = blockOf(runs)
-  const implementerBusy = runs.some((r) => r.mode === 'implement' && r.status === 'implementing')
+  // The build between two of its own runs is at work too: the turn that ended is no longer running and the next run has not had its prompt yet.
+  const handingOver = build.handsOver(feature)
+  const implementerBusy = handingOver || runs.some((r) => r.mode === 'implement' && r.status === 'implementing')
   const failure = lastRunFailure(lastRun, tracker)
   const testPlan = build.testPlan(tasks.exists ? tasks.tasks : [])
-  const atWork = tasksAtWork(runs, check, verification, cleanupState)
+  const atWork = handingOver || tasksAtWork(runs, check, verification, cleanupState)
   const coverage = planCoverage(state, tasks, decisions, stage, fromPlan, atWork, blocked, check, verification, implementerBusy, planActions, feature)
   return {
     specPath: relativeTo(path),

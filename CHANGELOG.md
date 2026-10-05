@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.8
+
+- Opus 5.5 and Sonnet 5.5 are in the Claude provider's model list and are what the two built-in profiles run on; Opus 5 and Sonnet 5 stay there to pick.
+- A copy button on each message in the conversation, on hover: it puts the message on the clipboard as the Markdown it was written in, not as the formatted text you see.
+- Reading outside the project is now asked for, the way writing already was: a session reads, lists and searches freely inside the project, and a file anywhere else — your keys, another workspace, the rest of the disk — needs your say-so once, by allowing that call or that folder.
+- A command that only inspects is judged by where it reads: `cat ../other/.env`, `grep -rn secret /`, `git -C ../other log` and `cat < ../other/.env` all ask, while `echo`, `basename` and a `grep` pattern that merely looks like a path do not.
+- A command fed its arguments by `xargs` now asks, since the files it will touch are named nowhere on the line.
+- Feature planning refuses a name another feature already holds, naming that feature and pointing you at picking it up or *Update spec*, instead of quietly starting a second planning session inside the first one's tab and over its spec.
+- The plan bar no longer offers *Continue implementing* in the moment between two tasks: while the build hands one task's run over to the next it keeps showing the board's progress, and the button comes back only when the build really has stopped on you.
+- *Suggest a name* on the Feature planning card: describe the feature and the model names it for you, clear of the names already taken. The name lands in the field as yours to keep or edit.
+- The Decisions tab's "waiting for the planner to propose" now pulses, so it reads as something still happening.
+- A reopened conversation no longer says "Waiting on model" when nothing is running.
+
 ## 0.2.7
 
 - New *Update spec* card on the new-session screen's Code tab: pick any feature's spec, whatever its state, describe what should change, and it starts that change, whether or not the feature has anything open.

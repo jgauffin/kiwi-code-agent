@@ -71,6 +71,8 @@ export class ChatViewProvider {
     agentsMd: AgentsMdOffers,
     remoteAlerts: RemoteAlertPort,
     pushDefault: () => boolean,
+    /** One prompt on the model new plan sessions run on, answered as text: for the small asks that are not a session. */
+    ask: (prompt: string) => Promise<string>,
   ) {
     const built = wireCollaborators(this, {
       extensionUri,
@@ -86,6 +88,7 @@ export class ChatViewProvider {
       remoteAlerts,
       pushDefault,
       agentsMd,
+      ask,
     })
     this.panels = built.panels
     this.cleanup = built.cleanup

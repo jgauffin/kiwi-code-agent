@@ -15,12 +15,14 @@ export const PIPE_WRITING =
   'Take a field or a column out of a command\'s output with the commands that only inspect, which run without a permission prompt: `tr -s \' \'` into `cut`, with `sort`, `uniq -c`, `wc`, `head`, `tail`, `comm`, `nl` and `column` beside them, and `jq` or `yq` for JSON and YAML. Never awk or perl for it: they run a program of their own, so the whole call is asked every time. Where a column is not enough and the answer is computed, redirect the output to a file in the scratch folder and read that from a RunScript program.'
 
 /**
- * Commands that only inspect, whatever their arguments: they never change
- * files, the repository or the machine, so running them needs no permission.
- * Anything not listed is presumed to mutate. A command that some argument
- * turns into a write or a program launch is judged by its arguments below
- * instead, so this list stays safe for arguments nobody can read, such as
- * those `xargs` adds.
+ * Commands that change nothing, whatever their arguments: not a file, not the
+ * repository, not the machine. Anything not listed is presumed to mutate. A
+ * command that some argument turns into a write or a program launch is judged
+ * by its arguments below instead.
+ *
+ * Changing nothing is only half of running unasked: which files a command here
+ * reads is settled by `FILE_OPERANDS`, so being on this list is leave to run
+ * but never leave to read outside the project.
  */
 const READ_ONLY = new Set([
   'ls', 'dir', 'cat', 'head', 'tail', 'more', 'wc', 'cut', 'tr', 'tac', 'nl', 'column',
@@ -106,6 +108,69 @@ const BY_ARGUMENTS: Record<string, ArgumentRule> = {
 }
 
 const FIND_ACTIONS = new Set(['-delete', '-exec', '-execdir', '-ok', '-okdir', '-fprint', '-fprint0', '-fprintf', '-fls'])
+
+/** Every word that is not a flag names a file this command reads. */
+const namedFiles = (args: string[]): string[] => operands(args, '')
+
+/**
+ * A pattern or a script stands where a file would, so the first operand is not
+ * one: `grep foo bar.ts` reads `bar.ts` alone. A flag that supplies the pattern
+ * instead leaves every operand a file. A word that is no path at all is left in
+ * and costs nothing: it reads as a relative path, which lies in the project.
+ */
+const filesAfterPattern =
+  (letters: string, ...flags: string[]) =>
+  (args: string[]): string[] => {
+    const files = namedFiles(args)
+    const supplied = args.some((a) => longFlag(a, ...flags) || [...shortFlags(a, letters)].some((l) => letters.includes(l)))
+    return supplied ? files : files.slice(1)
+  }
+
+/** `-C`, `--git-dir` and `--work-tree` point git at a repository, which may be any repository on the machine. */
+function gitDirectories(args: string[]): string[] {
+  const directories: string[] = []
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!
+    if (arg === '-C') {
+      if (args[i + 1] !== undefined) directories.push(args[++i]!)
+    } else if (longFlag(arg, '--git-dir', '--work-tree')) {
+      const equals = arg.indexOf('=')
+      if (equals !== -1) directories.push(arg.slice(equals + 1))
+      else if (args[i + 1] !== undefined) directories.push(args[++i]!)
+    }
+  }
+  return directories
+}
+
+/**
+ * Where a command's own words name files it reads, so a read outside the
+ * project is asked about as a write to one would be. A command absent here
+ * reads no file it names and its words are never judged as paths: `echo
+ * /etc/passwd` prints a string, `basename /usr/lib` cuts one, and `whoami`
+ * names nothing. Adding a command that reads what it names is an entry here;
+ * leaving it out is what lets a path through unjudged.
+ */
+const FILE_OPERANDS: Record<string, (args: string[]) => string[]> = {
+  cat: namedFiles, head: namedFiles, tail: namedFiles, more: namedFiles, tac: namedFiles, nl: namedFiles,
+  column: namedFiles, cut: namedFiles, tr: namedFiles, wc: namedFiles, ls: namedFiles, dir: namedFiles,
+  stat: namedFiles, du: namedFiles, df: namedFiles, diff: namedFiles, cmp: namedFiles, comm: namedFiles,
+  md5sum: namedFiles, sha1sum: namedFiles, sha256sum: namedFiles, sort: namedFiles, uniq: namedFiles,
+  file: namedFiles, tree: namedFiles, less: namedFiles, find: namedFiles,
+  grep: filesAfterPattern('ef', '--regexp', '--file'),
+  egrep: filesAfterPattern('ef', '--regexp', '--file'),
+  fgrep: filesAfterPattern('ef', '--regexp', '--file'),
+  rg: filesAfterPattern('ef', '--regexp', '--file'),
+  ag: filesAfterPattern('ef', '--regexp', '--file'),
+  sed: filesAfterPattern('ef', '--expression', '--file'),
+  jq: filesAfterPattern('f', '--from-file'),
+  yq: filesAfterPattern('f', '--from-file'),
+  git: gitDirectories,
+}
+
+/** The files this command reads among its own words; none for a command whose words name no file. */
+export function fileOperands(command: string, args: string[]): string[] {
+  return FILE_OPERANDS[command]?.(args) ?? []
+}
 
 /** What this command's own arguments make of it; undefined for a command they do not decide. */
 export function commandEffect(command: string, args: string[]): CommandEffect | undefined {
@@ -209,6 +274,18 @@ export type ReadOnlyContext = {
    * presumed to leave.
    */
   canEnter?: (path: string) => boolean
+  /**
+   * May the session read this path: inside the project, or under a directory a
+   * rule already grants. Without it a path is not judged at all, since a caller
+   * that leaves it out is asking only whether the command mutates.
+   */
+  canRead?: (path: string) => boolean
+}
+
+/** Every file this segment reads lies where the session may read. */
+function readsWithin(paths: string[], context: ReadOnlyContext): boolean {
+  const canRead = context.canRead
+  return canRead === undefined || paths.every((path) => canRead(path))
 }
 
 /** Does this segment change directory, whether or not we can read where to? */
@@ -249,21 +326,24 @@ export function hidesCommandWord(segment: ShellSegment): boolean {
 
 export function isReadOnlySegment(segment: ShellSegment, context: ReadOnlyContext = {}): boolean {
   if (segment.writesFile || hidesCommandWord(segment)) return false
+  // A file fed in by `< path` is read as surely as one named as an argument.
+  if (!readsWithin(segment.reads, context)) return false
   // `timeout 30 ls` is a listing and `env FOO=1 rm -rf x` is a deletion: what runs is what counts.
   const { tokens, argumentsFromInput } = runCommand(segment.tokens)
   const [raw, ...args] = tokens
   if (!raw) return true
   const command = commandName(raw)
-  // Arguments nobody can read may be any at all, so only a command no argument turns into a write passes.
-  if (argumentsFromInput) return READ_ONLY.has(command)
+  // Arguments nobody can read may name any file at all, so nothing here can be shown to stay in the project.
+  if (argumentsFromInput) return false
   // Moving around inside the project changes nothing; going anywhere else needs a rule for that directory.
   if (command === 'cd') return args.length === 1 && (context.canEnter?.(args[0]!) ?? false)
+  if (!readsWithin(fileOperands(command, args), context)) return false
   if (READ_ONLY.has(command)) return true
   const byArguments = commandEffect(command, args)
   if (byArguments) return byArguments.kind === 'inspects'
   const subs = READ_ONLY_SUBCOMMANDS[command]
   if (subs) {
-    // `git -C ../other status` inspects as much as `git status` does, so the options before the subcommand are read past.
+    // `git -C ../other status` inspects as much as `git status` does, so the options before the subcommand are read past; the repository it names is judged above.
     const [sub, ...rest] = subcommandArguments(command, args)
     return sub !== undefined && subs.has(sub) && !subcommandMutates(command, sub, rest)
   }

@@ -13,6 +13,7 @@ const FEATURE = 'Order cancellation'
 let dir: string
 let sessions: FakeSessions
 let notify: FakeNotify
+let refresh: FakeRefresh
 let testsPass: boolean
 let foreign: boolean
 let budget: number
@@ -33,7 +34,7 @@ const build = () =>
     allowWrites: { isEnabled: () => true, setEnabled: () => {} },
     statusOf: () => 'idle',
     isOpen: () => false,
-    refresh: new FakeRefresh(),
+    refresh,
     notify,
     listener: {
       runStarting: (feature) => void events.push(`starting ${feature}`),
@@ -50,6 +51,7 @@ beforeEach(async () => {
   await writeBoard(tasksPath(dir, FEATURE), board(task('Cancel', { state: 'tested', files: ['src/order.ts'] })))
   sessions = new FakeSessions()
   notify = new FakeNotify()
+  refresh = new FakeRefresh()
   testsPass = false
   foreign = false
   budget = 1
@@ -180,6 +182,29 @@ describe('FeatureBuild.startImplementing', () => {
 })
 
 describe('FeatureBuild.followTask', () => {
+  it('between_two_task_runs_the_build_counts_as_at_work_so_the_bar_never_offers_the_build_back', async () => {
+    await writeFile(
+      join(dir, 'specs', 'order-cancellation.spec.md'),
+      '---\nfeature: Order cancellation\nstatus: approved\n---\n\n# Order cancellation\n\n## Goal\nCancel.\n\n## Refund\n- **Refund on cancel**: refunded.\n',
+    )
+    await writeBoard(tasksPath(dir, FEATURE), board(task('Cancel', { state: 'tested', files: ['src/order.ts'] }), task('Refund')))
+    const plan = await sessions.create(profile, 'plan', FEATURE)
+    const run = await sessions.create(profile, 'implement', FEATURE, { parentId: plan.id, task: 'Cancel' })
+    const feature = build()
+    const whileHandingOver: boolean[] = []
+    refresh.sendState = async () => void whileHandingOver.push(feature.handsOver(FEATURE))
+
+    await feature.followTask(run, { type: 'turn_done', isError: false } as never)
+
+    expect(sessions.records.find((r) => r.task === 'Refund')).toBeDefined()
+    // Every state the bar was given on the way said the build was at work; the last, once the next run had its prompt, says the gap is over.
+    const during = whileHandingOver.slice(0, -1)
+    expect(during.length).toBeGreaterThan(0)
+    expect(during).not.toContain(false)
+    expect(whileHandingOver.at(-1)).toBe(false)
+    expect(feature.handsOver(FEATURE)).toBe(false)
+  })
+
   it('answer_in_the_chat_a_run_whose_task_ended_blocked_is_closed_but_not_settled', async () => {
     await writeBoard(tasksPath(dir, FEATURE), board(task('Refund', { state: 'blocked', blockedReason: 'no e2e setup', reassessed: true })))
     const plan = await sessions.create(profile, 'plan', FEATURE)

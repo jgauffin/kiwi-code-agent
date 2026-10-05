@@ -7,6 +7,7 @@
         "mcp__typescript__get_references",
         "mcp__html-analytics__element_styles",
         "mcp__html-analytics__html_outline",
-        "Bash(npm audit:*)"
+        "Bash(npm audit:*)",
+        "WebSearch"
     ]
 }

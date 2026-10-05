@@ -9,6 +9,7 @@ import { PromptSubmittedEvent } from './events'
 import { renderMarkdown } from './markdown'
 import { PermissionCard } from './permission-card'
 import { isQuestionTool, QuestionCard } from './question-card'
+import { post } from './vscode-api'
 
 type AssistantBubble = { element: HTMLElement; text: HTMLElement; thinking: HTMLElement; streamed: string; finalParts: string[] }
 
@@ -64,7 +65,13 @@ export class ChatTranscript extends HTMLElement {
     this.appendChild(this.statusLine)
   }
 
-  reset(events: SessionEvent[]): void {
+  /**
+   * Replays a run's log. `live` says whether its engine is still there: a turn
+   * the log leaves unfinished was cut off with the last window and nothing is
+   * at work on it, where a card left open is still the user's to answer and
+   * reaches the session as its next prompt.
+   */
+  reset(events: SessionEvent[], live: boolean): void {
     this.ensureStatusLine()
     this.replaceChildren(this.statusLine)
     this.bubbles.clear()
@@ -86,8 +93,14 @@ export class ChatTranscript extends HTMLElement {
     for (const bubble of this.bubbles.values()) {
       if (bubble.finalParts.length === 0) renderMarkdown(bubble.streamed, bubble.text, true)
     }
+    if (!live) this.dropWork()
     this.showWorking()
     this.scrollToEnd()
+  }
+
+  /** The engine behind the log is gone, so nothing is at work on it; a card it left open still waits on the user, who answers it a turn late. */
+  private dropWork(): void {
+    if (!this.activity?.needsUser) this.activity = undefined
   }
 
   /** A question card still waiting on the user. */
@@ -118,7 +131,11 @@ export class ChatTranscript extends HTMLElement {
         this.resume = undefined
         // What the extension sent on the person's behalf is named, not quoted; the host never passes its text on.
         if (event.label) this.insert(block('turn kickoff', event.label))
-        else this.insert(block('user', event.text, renderAnsi))
+        else {
+          const message = block('user', event.text, renderAnsi)
+          message.appendChild(copyButton(() => event.text))
+          this.insert(message)
+        }
         this.activity = atWork(WAITING_ON_MODEL)
         break
       case 'assistant_text': {
@@ -294,9 +311,9 @@ export class ChatTranscript extends HTMLElement {
     thinking.hidden = true
     const text = document.createElement('div')
     text.className = 'text'
-    element.append(thinking, text)
+    const bubble: AssistantBubble = { element, text, thinking, streamed: '', finalParts: [] }
+    element.append(thinking, text, copyButton(() => bubble.finalParts.join('') || bubble.streamed))
     this.insert(element, parentToolUseId)
-    const bubble = { element, text, thinking, streamed: '', finalParts: [] }
     this.bubbles.set(messageId, bubble)
     return bubble
   }
@@ -423,6 +440,29 @@ function turnLine(event: Extract<SessionEvent, { type: 'turn_done' }>): HTMLElem
 /** Where the session switched to another model, so a reader can place which model produced what follows (B13). */
 function switchMarker(event: Extract<SessionEvent, { type: 'session_started' }>): HTMLElement {
   return block('turn model-switch', `Switched to ${event.model}`)
+}
+
+const COPY_ICONS =
+  '<svg class="idle" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">' +
+  '<rect x="5.5" y="1.5" width="9" height="9" rx="1.5"/><path d="M10.5 13.5A1.5 1.5 0 0 1 9 15H3a1.5 1.5 0 0 1-1.5-1.5V7A1.5 1.5 0 0 1 3 5.5"/></svg>' +
+  '<svg class="done" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
+  '<path d="m2.5 8.5 3.5 3.5 7.5-8"/></svg>'
+
+/** Icon-only and without a space between its tags, so a message's own words stay the whole of its text. */
+const COPY_BUTTON = document.createElement('template')
+COPY_BUTTON.innerHTML = `<button type="button" class="copy" title="Copy as Markdown" aria-label="Copy as Markdown">${COPY_ICONS}</button>`
+
+/** The Markdown the message was written in, not the HTML it was rendered to. The clipboard is the host's, so the text goes there to be written. */
+function copyButton(markdown: () => string): HTMLButtonElement {
+  const button = COPY_BUTTON.content.firstElementChild!.cloneNode(true) as HTMLButtonElement
+  let revert: number | undefined
+  button.addEventListener('click', () => {
+    post({ type: 'copy_text', text: markdown() })
+    button.classList.add('copied')
+    window.clearTimeout(revert)
+    revert = window.setTimeout(() => button.classList.remove('copied'), 1500)
+  })
+  return button
 }
 
 function block(className: string, text: string, render: (text: string, into: HTMLElement) => void = plainText): HTMLElement {

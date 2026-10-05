@@ -1,6 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { SPECS_DIR, WORK_DIR } from './blind-plan'
+import { SPECS_DIR, WORK_DIR, featureSlug, specPath } from './blind-plan'
 import { draftStage, type PlanStage } from './plan-stage'
 import { readReview, reviewPath } from './plan-review'
 import { authorshipOf, bodyOf, builtOf, statusOf } from './spec-file'
@@ -44,6 +44,33 @@ export async function listPlans(cwd: string): Promise<PlanSummary[]> {
     plans.push({ feature: featureOf(text) ?? slug, path, status, ...draft })
   }
   return plans
+}
+
+/**
+ * Every feature name in use, one per feature: each spec by the name it carries,
+ * then the names planning sessions hold. For telling a model which names it may
+ * not offer, so it is the names as a person reads them, not the slugs.
+ */
+export async function takenFeatureNames(cwd: string, planned: string[]): Promise<string[]> {
+  const seen = new Set<string>()
+  return [...(await listPlans(cwd)).map((p) => p.feature), ...planned].filter((name) => {
+    const slug = featureSlug(name)
+    if (seen.has(slug)) return false
+    seen.add(slug)
+    return true
+  })
+}
+
+/**
+ * The feature already answering to a name, matched by the spec file the name
+ * resolves to rather than by its spelling. `planned` are the names feature
+ * planning sessions hold, which covers one that has yet to write its spec.
+ */
+export async function featureAlreadyNamed(cwd: string, feature: string, planned: string[]): Promise<string | undefined> {
+  const path = specPath(cwd, feature)
+  const spec = (await listPlans(cwd)).find((p) => p.path === path)
+  if (spec) return spec.feature
+  return planned.find((name) => specPath(cwd, name) === path)
 }
 
 /** How far a draft's review has got, read from its review file (none yet counts as never reviewed). */

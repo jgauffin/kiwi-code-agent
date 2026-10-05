@@ -3,7 +3,7 @@ import type { ModelOffer, ModelProfile, Step } from '../agent/session/model-prof
 import { addComment, editComment, removeComment, resolveComment, strikeItem, unstrikeItem } from '../agent/phases/plan-review'
 import { withLinkedFiles } from './linked-files'
 import { handleRunMessage } from './run-messages'
-import { linkOpenFile, openEditDiff, openFile, startFromCard } from './tab-messages'
+import { copyText, linkOpenFile, openEditDiff, openFile, startFromCard, suggestName } from './tab-messages'
 import type { FromWebview } from './protocol'
 import type { AgentsMdOffers } from './agents-md-offers'
 import { agentsMdTidyKickoff } from '../agent/instructions/agents-md-tidy'
@@ -35,6 +35,8 @@ export type MessageRouterDeps = {
   build: FeatureBuild
   newSession: (mode: SessionMode, feature?: string, prompt?: string, into?: ChatPanel, label?: string) => Promise<SessionRecord | undefined>
   open: (sessionId: string, into?: ChatPanel) => Promise<void>
+  /** One prompt on the model new plan sessions run on, answered as text: for the small asks that are not a session. */
+  ask: (prompt: string) => Promise<string>
   resumePlan: (feature: string, into?: ChatPanel, note?: string) => Promise<void>
   sendState: () => Promise<void>
   sendTranscript: (sessionId: string) => Promise<void>
@@ -71,6 +73,9 @@ export class MessageRouter {
       case 'link_open_file':
         linkOpenFile(this.deps, entry)
         return true
+      case 'suggest_feature_name':
+        await suggestName(this.deps, message, entry)
+        return true
       case 'agents_md_answer': {
         const tidy = await agentsMd.answer(message.scope, message.answer)
         // A tab on the new-session screen takes the tidy chat; one showing a session keeps it.
@@ -88,6 +93,9 @@ export class MessageRouter {
         return true
       case 'update_spec':
         await this.deps.planActions.startUpdate(message.feature, message.description, entry)
+        return true
+      case 'copy_text':
+        await copyText(message)
         return true
       case 'open_file':
         await openFile(this.deps, message)

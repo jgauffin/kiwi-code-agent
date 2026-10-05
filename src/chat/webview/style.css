@@ -879,6 +879,7 @@ chat-app {
 
     & .awaiting {
       color: var(--vscode-editorWarning-foreground, var(--vscode-charts-orange));
+      animation: pulse 1.2s ease-in-out infinite;
     }
 
     & .strikes {
@@ -1271,6 +1272,29 @@ chat-app {
         align-items: center;
         gap: 0.5rem;
       }
+
+      /* Naming the feature is an offer beside the field, not a step of the form: quiet, and where the field is already being read. */
+      & .naming {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 0.5rem;
+        margin-top: -0.3rem;
+
+        & .suggest {
+          background: none;
+          color: var(--vscode-textLink-foreground);
+          border: none;
+          padding: 0;
+          cursor: pointer;
+
+          &:disabled {
+            color: var(--vscode-foreground);
+            opacity: 0.5;
+            cursor: default;
+          }
+        }
+      }
     }
 
     /* What can be picked up again: plans on disk, chats with no tab open, decisions waiting to be filed. */
@@ -1534,6 +1558,51 @@ chat-app {
       padding: 0.4rem 0.6rem;
       white-space: pre-wrap;
       color: var(--vscode-foreground);
+    }
+
+    /*
+     * The copy sits over the message's top-right corner rather than in its
+     * flow: every message carries one, and a row of buttons down the
+     * transcript would read as louder than the conversation it belongs to.
+     */
+    & .user,
+    & .assistant {
+      position: relative;
+
+      & > .copy {
+        position: absolute;
+        top: 0.1rem;
+        right: 0.1rem;
+        display: inline-flex;
+        line-height: 1;
+        padding: 0.2rem 0.3rem;
+        background: var(--vscode-editor-background);
+        color: var(--vscode-descriptionForeground);
+        border-radius: 3px;
+        opacity: 0;
+
+        & .done,
+        &.copied .idle {
+          display: none;
+        }
+
+        &.copied .done {
+          display: inline;
+          color: var(--vscode-charts-green, var(--vscode-foreground));
+        }
+      }
+
+      /* Shown on focus too, so it can be reached without a mouse. */
+      &:hover > .copy,
+      & > .copy:focus-visible,
+      & > .copy.copied {
+        opacity: 1;
+      }
+
+      & > .copy:hover {
+        color: var(--vscode-foreground);
+        background: var(--vscode-toolbar-hoverBackground, var(--vscode-editor-background));
+      }
     }
 
     & .assistant {

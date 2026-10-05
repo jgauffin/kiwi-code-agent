@@ -131,11 +131,15 @@ describe('commands that wrap another command', () => {
     for (const c of ['env -S "rm -rf x"', 'env --unknown-flag ls', 'timeout --verbose']) expect(isReadOnlyCommand(c), c).toBe(false)
   })
 
-  it('xargs_passes_only_a_command_that_no_argument_from_its_input_can_turn_into_a_write', () => {
-    for (const c of ['ls | xargs grep -n foo', 'find . -name "*.ts" | xargs wc -l', 'ls | xargs -0 cat', 'ls | xargs -n1 -P4 head -5', 'ls | xargs -I{} cat {}', 'ls | xargs -I {} cat {}', 'ls | xargs --max-args=2 cat', 'ls | xargs', 'ls | xargs timeout 5 cat'])
-      expect(isReadOnlyCommand(c), c).toBe(true)
-    // `echo -delete | xargs find .` deletes, and `echo -i | xargs sed s/a/b/ f` edits in place.
-    for (const c of ['ls | xargs rm', 'ls | xargs sed -n 1p', 'ls | xargs find .', 'ls | xargs sort', 'ls | xargs git log', 'ls | xargs cd', 'ls | xargs -I{} sh -c "cat {}"', 'ls | xargs --unknown cat', 'ls | xargs timeout 5 rm', 'timeout 5 xargs sort'])
+  it('a_command_xargs_feeds_is_asked_about_since_neither_what_it_does_nor_what_it_reads_can_be_read_off_the_line', () => {
+    // Bare xargs runs echo, which names no file and reads none.
+    for (const c of ['ls | xargs', 'ls | xargs -0']) expect(isReadOnlyCommand(c), c).toBe(true)
+    // `echo -delete | xargs find .` deletes, `echo -i | xargs sed s/a/b/ f` edits in place, and `echo /etc/shadow | xargs cat` reads a file the line never names.
+    for (const c of [
+      'ls | xargs grep -n foo', 'find . -name "*.ts" | xargs wc -l', 'ls | xargs -0 cat', 'ls | xargs -n1 -P4 head -5', 'ls | xargs -I{} cat {}',
+      'ls | xargs --max-args=2 cat', 'ls | xargs timeout 5 cat', 'ls | xargs rm', 'ls | xargs sed -n 1p', 'ls | xargs find .', 'ls | xargs sort',
+      'ls | xargs git log', 'ls | xargs cd', 'ls | xargs -I{} sh -c "cat {}"', 'ls | xargs --unknown cat', 'ls | xargs timeout 5 rm', 'timeout 5 xargs sort',
+    ])
       expect(isReadOnlyCommand(c), c).toBe(false)
   })
 
@@ -286,6 +290,44 @@ describe('PermissionPolicy', () => {
       expect(await use(policy({ allow: [`${name}(${outside}/**)`] }), name, { path: `${outside}/logs` })).toEqual({ allow: true })
       expect(await use(policy({ deny: [`${name}(**/.ssh)`] }), name, { path: '.ssh' })).toMatchObject({ deny: expect.stringContaining('.ssh') })
     }
+  })
+
+  it('a_tool_that_only_reads_is_free_inside_the_project_and_asked_for_a_path_outside_it', async () => {
+    const p = policy({})
+    const outside = process.platform === 'win32' ? 'E:/elsewhere' : '/elsewhere'
+    expect(await use(p, 'Read', { file_path: 'src/a.ts' })).toEqual({ allow: true })
+    expect(await use(p, 'Read', { file_path: `${outside}/.ssh/id_rsa` })).toBeUndefined()
+    expect(await use(p, 'Read', { file_path: '../sibling/src/a.ts' })).toBeUndefined()
+    expect(await use(p, 'CodeSearch', { query: 'x', path: '../sibling' })).toBeUndefined()
+    expect(await use(p, 'MarkdownSearch', { query: 'x', path: outside })).toBeUndefined()
+    // A search names its ground by pattern as much as by path, so the pattern is judged too.
+    expect(await use(p, 'Glob', { pattern: 'src/**/*.ts' })).toEqual({ allow: true })
+    expect(await use(p, 'Glob', { pattern: '../sibling/**/*.ts' })).toBeUndefined()
+    // Naming no path at all is working in the project.
+    expect(await use(p, 'Grep', { pattern: 'x' })).toEqual({ allow: true })
+    // The rules are how reading outside is granted, once.
+    expect(await use(policy({ allow: [`Read(${outside}/**)`] }), 'Read', { file_path: `${outside}/notes.md` })).toEqual({ allow: true })
+  })
+
+  it('a_command_that_only_inspects_is_asked_about_when_it_reads_outside_the_project', async () => {
+    const p = policy({})
+    const outside = process.platform === 'win32' ? 'E:/elsewhere' : '/elsewhere'
+    for (const c of ['cat src/a.ts', 'grep -rn foo src', 'wc -l src/a.ts src/b.ts', 'head -5 package.json', 'ls src', 'diff src/a.ts src/b.ts', 'git log --oneline'])
+      expect(await use(p, 'Bash', { command: c }), c).toEqual({ allow: true })
+    for (const c of [
+      `cat ${outside}/.env`, 'cat ../sibling/.env', `grep -rn secret ${outside}`, `wc -l src/a.ts ${outside}/b.ts`, `head -5 ${outside}/x`,
+      `ls ${outside}`, `diff src/a.ts ${outside}/b.ts`, `sed -n 1p ${outside}/x`, `find ${outside} -name "*.env"`, `git -C ${outside} log`,
+      // A file fed in by a redirect is read as surely as one named as an argument.
+      `cat < ${outside}/.env`, 'grep foo < ../sibling/.env',
+    ])
+      expect(await use(p, 'Bash', { command: c }), c).toBeUndefined()
+    // A word that is no path stays a word: a pattern is not judged as the file it would name.
+    expect(await use(p, 'Bash', { command: 'grep /etc/passwd src/a.ts' })).toEqual({ allow: true })
+    for (const c of ['echo /etc/passwd', `basename ${outside}/x`, 'pwd', 'whoami'])
+      expect(await use(p, 'Bash', { command: c }), c).toEqual({ allow: true })
+    // Granted once, by a rule for the command or by the directory being one the session may work in.
+    expect(await use(policy({ allow: [`Bash(cat ${outside}/.env)`] }), 'Bash', { command: `cat ${outside}/.env` })).toEqual({ allow: true })
+    expect(await use(policy({ allow: [`Bash(cd ${outside})`] }), 'Bash', { command: `cat ${outside}/.env` })).toEqual({ allow: true })
   })
 
   it('cd_inside_the_project_is_read_only_and_cd_elsewhere_prompts', async () => {

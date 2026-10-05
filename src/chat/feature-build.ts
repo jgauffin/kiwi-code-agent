@@ -75,12 +75,39 @@ export class FeatureBuild {
   private readonly verifications = new Map<string, RunState>()
   /** Consecutive failed test runs per feature; a pass or a manual run resets it. */
   private readonly verifyFailures = new Map<string, number>()
+  /** Per feature, how many handovers are open at once: one starts the next inside it. */
+  private readonly handovers = new Map<string, number>()
 
   constructor(private readonly deps: BuildDeps) {}
 
   /** The test run's line on the plan bar. */
   lineOf(feature: string): RunState | undefined {
     return this.verifications.get(feature)
+  }
+
+  /**
+   * The build is between runs on this feature: the turn that ended is no
+   * longer at work and the next run has not had its prompt yet. Nothing is in
+   * flight in that gap, so without this the plan bar reads it as a build that
+   * stopped and offers it back to the person while it carries on by itself.
+   */
+  handsOver(feature: string): boolean {
+    return this.handovers.has(feature)
+  }
+
+  /** Marks the feature as handed over for as long as `work` runs; the bar is told once the last one closes. */
+  private async acrossHandover(feature: string, work: () => Promise<void>): Promise<void> {
+    this.handovers.set(feature, (this.handovers.get(feature) ?? 0) + 1)
+    try {
+      await work()
+    } finally {
+      const open = (this.handovers.get(feature) ?? 1) - 1
+      if (open > 0) this.handovers.set(feature, open)
+      else {
+        this.handovers.delete(feature)
+        void this.deps.refresh.sendState()
+      }
+    }
   }
 
   /** Whether the tasks have a test run to show, and the commands it would run over their files as they stand. */
@@ -221,6 +248,10 @@ export class FeatureBuild {
    * blocked it; `name` picks which one.
    */
   async startImplementing(plan: SessionRecord, handBack = false, name?: string): Promise<void> {
+    await this.acrossHandover(plan.feature!, () => this.startNextTask(plan, handBack, name))
+  }
+
+  private async startNextTask(plan: SessionRecord, handBack: boolean, name: string | undefined): Promise<void> {
     const { workspaceRoot, sessions, allowWrites } = this.deps
     const feature = plan.feature!
     const path = tasksPath(workspaceRoot, feature)
@@ -280,11 +311,14 @@ export class FeatureBuild {
    * to the sweep.
    */
   async followTask(record: SessionRecord, event: SessionEvent): Promise<void> {
-    const { workspaceRoot, sessions } = this.deps
     // The run moves its task on the board; the plan view shows the board, so it follows.
     if (event.type === 'tool_result' && this.deps.isOpen(record.id)) void this.deps.refresh.sendState()
     if (event.type !== 'turn_done' || event.isError) return
-    const feature = record.feature!
+    await this.acrossHandover(record.feature!, () => this.taskEnded(record, record.feature!))
+  }
+
+  private async taskEnded(record: SessionRecord, feature: string): Promise<void> {
+    const { workspaceRoot, sessions } = this.deps
     await this.followAmendment(feature)
     if (record.task === undefined) {
       // A fix run is over once the board goes back to the test run; left open, it holds the plan's tab against the cleanup.

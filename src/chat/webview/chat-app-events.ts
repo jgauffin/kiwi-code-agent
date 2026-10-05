@@ -12,6 +12,7 @@ import {
   CleanupStoppedEvent,
   CompactRequestedEvent,
   DefaultProfileChangedEvent,
+  FeatureNameSuggestionRequestedEvent,
   ImplementRequestedEvent,
   InterruptRequestedEvent,
   LinkOpenFileRequestedEvent,
@@ -90,6 +91,7 @@ export function wireChatEvents(el: HTMLElement, actions: ChatAppActions): void {
   el.addEventListener(SessionSelectedEvent.type, (e) => post({ type: 'switch_session', sessionId: e.sessionId }))
   el.addEventListener(PlanResumeRequestedEvent.type, (e) => post(planResumeMessage(e)))
   el.addEventListener(UpdateSpecRequestedEvent.type, (e) => post({ type: 'update_spec', feature: e.feature, description: e.description }))
+  el.addEventListener(FeatureNameSuggestionRequestedEvent.type, (e) => post({ type: 'suggest_feature_name', description: e.description }))
   el.addEventListener(DefaultProfileChangedEvent.type, (e) => post({ type: 'set_default_profile', name: e.name }))
   el.addEventListener(AgentsMdAnsweredEvent.type, (e) => post({ type: 'agents_md_answer', scope: e.scope, answer: e.answer }))
   el.addEventListener(NewSessionRequestedEvent.type, (e) => post(newSessionMessage(e)))

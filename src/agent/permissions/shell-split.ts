@@ -15,6 +15,8 @@ export type ShellSegment = {
   tokens: string[]
   /** A redirect to something other than /dev/null or a file descriptor. */
   writesFile: boolean
+  /** Files fed in by `< path`: read as surely as a file named as an argument, and named nowhere in `tokens`. */
+  reads: string[]
   /** A word of it came out of `$(…)`, backticks or `<(…)`: it holds the substitution as written, not what it will stand for. */
   substituted: boolean
 }
@@ -54,6 +56,9 @@ class Splitter {
   private equalsAt = -1
   private redirectPending = false
   private writesFile = false
+  /** The word being read is the file an input redirect feeds in, not a word of the command. */
+  private readPending = false
+  private reads: string[] = []
   /** Heredocs opened on the current line; their bodies start on the next line, in order. */
   private heredocs: Heredoc[] = []
   /** Bodies of the current segment's heredocs, appended to its text when it closes. */
@@ -346,9 +351,9 @@ class Splitter {
       this.redirectPending = true
       return
     }
+    // The file it feeds in is read, so the word is taken like any other, quotes and expansions resolved.
     this.i++
-    this.skipSpaces()
-    this.i = skipWord(src, this.i)
+    this.readPending = true
   }
 
   /** `2>`, `{fd}>`: the descriptor before the arrow belongs to the redirect, not to a word. */
@@ -441,6 +446,11 @@ class Splitter {
       this.redirectPending = false
       return
     }
+    if (this.readPending) {
+      if (!isHarmlessRedirectTarget(word.text)) this.reads.push(word.text)
+      this.readPending = false
+      return
+    }
     this.words.push(word)
     if (word.quoted) return
     if (word.text === '[[') this.inConditional = true
@@ -460,7 +470,7 @@ class Splitter {
     if (command) {
       const text = this.src.slice(command.from, textEnd).trim() + this.heredocText
       const substituted = command.words.some((w) => w.substituted)
-      this.segments.push({ text, tokens: command.words.map((w) => w.text), writesFile: this.writesFile, substituted })
+      this.segments.push({ text, tokens: command.words.map((w) => w.text), writesFile: this.writesFile, reads: this.reads, substituted })
     }
     // What a substitution hides runs too, whether or not the command holding it turned out to be one.
     this.segments.push(...this.nested)
@@ -468,6 +478,8 @@ class Splitter {
     this.words = []
     this.writesFile = false
     this.redirectPending = false
+    this.reads = []
+    this.readPending = false
     this.heredocText = ''
     this.inConditional = false
     this.i = nextStart

@@ -8,7 +8,7 @@ import { reasoningEffortFor } from './agent/session/effort'
 import type { ModeSetup } from './agent/session/mode-setup'
 import { SdkSession } from './agent/sdk-session/sdk-session'
 import { toolNamingLine } from './agent/sdk-session/tool-server'
-import { hostExecutableAsNode, type NodeRuntime } from './agent/sdk-session/node-runtime'
+import { hostExecutableAsNode, spawnWithRuntime, type NodeRuntime } from './agent/sdk-session/node-runtime'
 import { OpenAiSession } from './agent/openai-session/openai-session'
 import { OpenAiClient } from './agent/openai-session/openai-client'
 import { messagesFromEvents } from './agent/openai-session/history'
@@ -87,6 +87,57 @@ function nodeRuntime(): NodeRuntime {
 /** Builds the `CodeSession` each engine starts into, once its mode is set up. */
 export class EngineStarters {
   constructor(private readonly deps: EngineStarterDeps) {}
+
+  /**
+   * One prompt on the profile's model, answered as text, with no session and no
+   * tools: for the small asks that are not work on the code and have nothing to
+   * keep, such as naming a feature from its description.
+   */
+  async ask(profile: ModelProfile, prompt: string): Promise<string> {
+    return profile.engine === 'claude-sdk' ? await this.askClaude(profile, prompt) : await this.askOpenAi(profile, prompt)
+  }
+
+  private async askClaude(profile: ModelProfile, prompt: string): Promise<string> {
+    const { context, workspaceRoot, cliPath } = this.deps
+    const apiKey = profile.apiKeySecret ? await context.secrets.get(secretKey(profile.apiKeySecret)) : undefined
+    const run = query({
+      prompt,
+      options: {
+        cwd: workspaceRoot,
+        model: profile.model,
+        maxTurns: 1,
+        // Nothing to read and nothing to settle: the answer is in the prompt, so the
+        // project's own settings and instruction files are left out of it too.
+        allowedTools: [],
+        settingSources: [],
+        permissionMode: 'default',
+        executable: 'node',
+        pathToClaudeCodeExecutable: cliPath,
+        spawnClaudeCodeProcess: spawnWithRuntime(nodeRuntime(), () => {}),
+        ...(apiKey ? { env: { ANTHROPIC_API_KEY: apiKey } } : {}),
+      },
+    })
+    const parts: string[] = []
+    for await (const message of run) {
+      if (message.type !== 'assistant') continue
+      for (const block of message.message.content) if (block.type === 'text') parts.push(block.text)
+    }
+    return parts.join('')
+  }
+
+  private async askOpenAi(profile: ModelProfile, prompt: string): Promise<string> {
+    if (!profile.baseUrl) throw new Error(`Profile "${profile.name}" has no baseUrl`)
+    if (!profile.apiKeySecret) throw new Error(`Profile "${profile.name}" has no apiKeySecret`)
+    const apiKey = await this.deps.context.secrets.get(secretKey(profile.apiKeySecret))
+    if (!apiKey) throw new Error(`No API key stored for "${profile.apiKeySecret}". Set it on the provider in Kiwipow Agent settings.`)
+    const client = new OpenAiClient({ baseUrl: profile.baseUrl, apiKey })
+    const parts: string[] = []
+    const abort = new AbortController()
+    for await (const delta of client.stream({ model: profile.model, messages: [{ role: 'user', content: prompt }], tools: [], maxTokens: 256, signal: abort.signal })) {
+      if (delta.type === 'text') parts.push(delta.text)
+    }
+    return parts.join('')
+  }
 
   async startClaude({ record, setup, ownTools, mcpServers, skills, whereLine, scratchLine, onProgress }: EngineStart): Promise<CodeSession> {
     const { profile } = record

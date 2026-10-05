@@ -83,6 +83,14 @@ export class PlanResumeRequestedEvent extends Event {
   }
 }
 
+/** The plan card asking for a name for the feature it describes, so naming one is not the developer's chore. */
+export class FeatureNameSuggestionRequestedEvent extends Event {
+  static readonly type = 'feature-name-suggestion-requested'
+  constructor(public readonly description: string) {
+    super(FeatureNameSuggestionRequestedEvent.type, { bubbles: true })
+  }
+}
+
 /** The new-session screen's Update spec: the feature picked and the change described, in the developer's own words. */
 export class UpdateSpecRequestedEvent extends Event {
   static readonly type = 'update-spec-requested'
@@ -332,6 +340,7 @@ declare global {
     [NewSessionRequestedEvent.type]: NewSessionRequestedEvent
     [PlanResumeRequestedEvent.type]: PlanResumeRequestedEvent
     [UpdateSpecRequestedEvent.type]: UpdateSpecRequestedEvent
+    [FeatureNameSuggestionRequestedEvent.type]: FeatureNameSuggestionRequestedEvent
     [SessionSelectedEvent.type]: SessionSelectedEvent
     [SpecApprovedEvent.type]: SpecApprovedEvent
     [RulingsSentEvent.type]: RulingsSentEvent

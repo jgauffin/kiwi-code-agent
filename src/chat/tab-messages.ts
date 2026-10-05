@@ -3,6 +3,9 @@ import { isAbsolute, join } from 'node:path'
 import { editDiffTitle, editLine, isRunSnapshot, runsRoot } from '../agent/edits/open-edit'
 import { docMigrationKickoff } from '../agent/phases/doc-migration'
 import { fileDecisionsKickoff } from '../agent/phases/file-decisions'
+import { featureAlreadyNamed, takenFeatureNames } from '../agent/phases/plan-list'
+import { suggestFeatureName } from '../agent/phases/feature-naming'
+import { errorMessage } from '../error-message'
 import { linkedFilePath, withLinkedFiles } from './linked-files'
 import type { ToWebview } from './protocol'
 import type { ChatPanel } from './panel-registry'
@@ -21,11 +24,37 @@ export function linkOpenFile(deps: MessageRouterDeps, entry: ChatPanel): void {
   } satisfies ToWebview)
 }
 
+/** The feature names planning sessions hold, which covers one whose spec is not written yet. */
+const plannedNames = (sessions: MessageRouterDeps['sessions']): string[] =>
+  sessions.list().flatMap((r) => (r.mode === 'plan' && r.feature ? [r.feature] : []))
+
+/**
+ * A name for the feature being described, asked of the model so that naming one
+ * is not the person's chore, and answered back to the card for them to take or
+ * edit. The names in use go with the ask, so what comes back is free.
+ */
+export async function suggestName(deps: MessageRouterDeps, message: WebviewMessage<'suggest_feature_name'>, entry: ChatPanel): Promise<void> {
+  const { workspaceRoot, sessions, ask } = deps
+  const post = (answer: ToWebview) => void entry.panel.webview.postMessage(answer)
+  try {
+    const taken = await takenFeatureNames(workspaceRoot, plannedNames(sessions))
+    post({ type: 'suggested_feature_name', name: await suggestFeatureName(ask, message.description, taken) })
+  } catch (error) {
+    post({ type: 'suggested_feature_name', reason: errorMessage(error) })
+  }
+}
+
 export async function startFromCard(deps: MessageRouterDeps, message: WebviewMessage<'new_session'>, entry: ChatPanel): Promise<void> {
   const { sessions, newSession, open } = deps
   // One filing at a time: a second would propose the same entries again.
   const filing = message.mode === 'file-decisions' ? sessions.list().find((r) => r.mode === 'file-decisions' && sessions.isLive(r.id)) : undefined
   if (filing) return open(filing.id, entry)
+  // A feature's name is its tab's identity and its spec's file name, so a second feature on a name
+  // already taken would be swallowed by the first one's tab and plan over its spec.
+  if (message.mode === 'plan' && message.feature) {
+    const taken = await featureAlreadyNamed(deps.workspaceRoot, message.feature, plannedNames(sessions))
+    if (taken) throw new Error(`"${taken}" is already planned. Pick it up below to carry on with it, or use Update spec to say what should change.`)
+  }
   const prompt = withLinkedFiles(message.prompt ?? '', message.files ?? [])
   // The filing and the docs cleanup have nothing to fill in, so their sessions start on the job rather than waiting for a prompt.
   const kickoff =
@@ -36,6 +65,10 @@ export async function startFromCard(deps: MessageRouterDeps, message: WebviewMes
         : undefined
   if (prompt !== '' || !kickoff) await newSession(message.mode, message.feature, prompt, entry)
   else await newSession(message.mode, message.feature, kickoff.text, entry, kickoff.label)
+}
+
+export async function copyText(message: WebviewMessage<'copy_text'>): Promise<void> {
+  await vscode.env.clipboard.writeText(message.text)
 }
 
 export async function openFile(deps: MessageRouterDeps, message: WebviewMessage<'open_file'>): Promise<void> {

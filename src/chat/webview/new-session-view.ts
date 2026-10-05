@@ -4,7 +4,14 @@ import type { SessionMode } from '../../agent/session/session-manager'
 import type { ProfileDefaults } from '../../settings/settings-store'
 import type { ResumableChat, ResumablePlan, UpdatableSpec } from '../protocol'
 import { LinkedFilesRow } from './linked-files-row'
-import { DefaultProfileChangedEvent, NewSessionRequestedEvent, PlanResumeRequestedEvent, SessionSelectedEvent, UpdateSpecRequestedEvent } from './events'
+import {
+  DefaultProfileChangedEvent,
+  FeatureNameSuggestionRequestedEvent,
+  NewSessionRequestedEvent,
+  PlanResumeRequestedEvent,
+  SessionSelectedEvent,
+  UpdateSpecRequestedEvent,
+} from './events'
 
 type NewSessionForm = { mode: SessionMode; feature?: string; prompt?: string }
 
@@ -80,11 +87,20 @@ type Screen = 'code' | 'maintenance'
 /** The card a tab opens on, so a tab is never a row of cards with nothing under it. */
 const FIRST: Record<Screen, SessionMode> = { code: 'chat', maintenance: 'doc-migration' }
 
+/** Where the plan card's ask for a name stands: in flight, and what the last one left to say. */
+type Naming = { asking: boolean; reason: string }
+
+/** What the plan card's name button offers. Only an ask in flight disables it: whether a description is there is read when it is pressed, so no keystroke re-renders the form under the caret. */
+function namingData({ asking, reason }: Naming) {
+  return { cannotName: asking, nameLabel: asking ? 'Naming…' : 'Suggest a name', nameHint: reason }
+}
+
 /** The template data for a render: what each card and tab shows, from the screen and mode shown and what is there to pick up. */
-function renderData(screen: Screen, mode: Card, profileDefaults: ProfileDefaults, pickUp: PickUp) {
+function renderData(screen: Screen, mode: Card, profileDefaults: ProfileDefaults, pickUp: PickUp, naming: Naming) {
   const { names, active } = profileDefaults
   const { plans, chats, unfiled, updates } = pickUp
   return {
+    ...namingData(naming),
     profiles: names.map((name) => ({ name, selected: name === active })),
     // Plans and chats are code work; what waits to be filed is counted on the maintenance tab instead.
     any: screen === 'code' && (plans.length > 0 || chats.length > 0),
@@ -199,6 +215,10 @@ export class NewSessionView extends HTMLElement {
       <label>Feature name
         <input name="feature" required placeholder="Order cancellation" r-input="edit('feature', event)">
       </label>
+      <div class="naming">
+        <button type="button" class="suggest" disabled="{{cannotName}}" r-click="suggestName()">{{nameLabel}}</button>
+        <span class="hint" if="nameHint">{{nameHint}}</span>
+      </div>
       <label>User story or feature description
         <textarea name="prompt" rows="6" required placeholder="As a ... I want ... so that ..." r-input="edit('prompt', event)"></textarea>
       </label>
@@ -256,6 +276,9 @@ export class NewSessionView extends HTMLElement {
   private draft: Draft = { feature: '', prompt: '' }
   private profileDefaults: ProfileDefaults = { names: [], active: '' }
   private pickUp: PickUp = { plans: [], chats: [], unfiled: 0, updates: [] }
+  /** An ask for a name in flight, and what the last one left to say. */
+  private asking = false
+  private nameReason = ''
 
   connectedCallback(): void {
     if (this.childElementCount > 0) return
@@ -266,6 +289,8 @@ export class NewSessionView extends HTMLElement {
   reset(): void {
     this.screen = 'code'
     this.mode = 'chat'
+    this.asking = false
+    this.nameReason = ''
     this.render()
   }
 
@@ -279,8 +304,9 @@ export class NewSessionView extends HTMLElement {
 
   private render(): void {
     this.template.render(
-      renderData(this.screen, this.mode, this.profileDefaults, this.pickUp),
+      renderData(this.screen, this.mode, this.profileDefaults, this.pickUp, { asking: this.asking, reason: this.nameReason }),
       {
+        suggestName: () => this.suggestName(),
         pick: (event: Event) => this.dispatchEvent(new DefaultProfileChangedEvent((event.target as HTMLSelectElement).value)),
         open: (screen: Screen) => {
           if (screen === this.screen) return
@@ -316,6 +342,28 @@ export class NewSessionView extends HTMLElement {
     )
     this.fill('input[name="feature"], select[name="feature"]', this.draft.feature)
     this.fill('textarea[name="prompt"]', this.draft.prompt)
+  }
+
+  /** Asks the host to name the feature being described; the button says it is at work until the answer lands. */
+  private suggestName(): void {
+    if (this.asking) return
+    const description = this.draft.prompt.trim()
+    this.asking = description !== ''
+    this.nameReason = description === '' ? 'Describe the feature below first, so there is something to name it from.' : ''
+    this.render()
+    if (description !== '') this.dispatchEvent(new FeatureNameSuggestionRequestedEvent(description))
+  }
+
+  /**
+   * The host's answer to a name asked for. A name goes into the field, where it
+   * is the developer's to keep or edit; a failure says why, rather than leaving
+   * the button at work over an answer that is never coming.
+   */
+  suggestedName(answer: { name?: string; reason?: string }): void {
+    this.asking = false
+    if (answer.name) this.draft.feature = answer.name
+    this.nameReason = answer.reason ?? ''
+    this.render()
   }
 
   /** Update spec's own submit: a pick and a description, neither of which starts anything on its own. */
