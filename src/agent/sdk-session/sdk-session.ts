@@ -20,7 +20,7 @@ import { spawnWithRuntime, type NodeRuntime } from './node-runtime'
 import { bareToolName, toolServer } from './tool-server'
 import { ReadTracker } from '../openai-session/tools/read-tracker'
 import { fail, folded, type Tool, type ToolContext } from '../openai-session/tools/tool'
-import { confirmReason, denyReason, gateCall, reviewEdits, type AskPermission, type PermissionShown } from '../permissions/gate'
+import { confirmReason, denyReason, gateCall, noteCall, reviewEdits, type AskPermission, type PermissionShown } from '../permissions/gate'
 import type { QuestionOutcome, UserQuestionRequest } from '../session/user-question'
 import { errorMessage } from '../../error-message'
 import type { CompactionFocus } from '../session/compaction-focus'
@@ -31,11 +31,12 @@ export type SdkSessionOptions = {
   id: string
   profile: ModelProfile
   cwd: string
-  /** Absolute path to the SDK's cli.js. */
-  cliPath: string
+  /** Absolute path to the Claude Code this session runs on: the bundled engine, or the one installed on the machine. */
+  enginePath: string
   /** A plugin folder of skills this extension ships, loaded into the engine. */
   pluginPath?: string
-  runtime: NodeRuntime
+  /** What runs the engine when it is a JavaScript file; absent for a native Claude Code, which runs itself. */
+  runtime?: NodeRuntime
   /** Engine session id from an earlier `session_started`, to continue that conversation. */
   resumeEngineSessionId?: string
   /** Extra environment for the engine process, on top of the host's. */
@@ -200,8 +201,8 @@ export class SdkSession implements CodeSession {
       // the user's global settings, which belong to this machine, not the repo.
       settingSources: ['project', 'local'],
       ...(this.options.pluginPath ? { plugins: [{ type: 'local' as const, path: this.options.pluginPath }] } : {}),
-      executable: 'node',
-      pathToClaudeCodeExecutable: this.options.cliPath,
+      ...(this.options.runtime ? { executable: 'node' as const } : {}),
+      pathToClaudeCodeExecutable: this.options.enginePath,
       spawnClaudeCodeProcess: spawnWithRuntime(this.options.runtime, this.options.onStderr ?? (() => {})),
       canUseTool: (toolName, input, ctx) => this.requestPermission(toolName, input, ctx),
       // Questions go through the own AskUser tool on every engine. The engine's built-in one
@@ -352,7 +353,7 @@ export class SdkSession implements CodeSession {
    * engine's process, out of reach, so a script's calls run our own
    * implementations of them here, through the same permission gate.
    */
-  private scriptAccess(): Pick<ToolContext, 'call' | 'authorize' | 'confirm' | 'review'> {
+  private scriptAccess(): Pick<ToolContext, 'call' | 'authorize' | 'confirm' | 'review' | 'observed'> {
     const ask: AskPermission = (id, toolName, input, shown) => this.askScriptPermission(id, toolName, input, shown)
     const use = (toolName: string, input: unknown) => ({ toolName, input, toolUseId: crypto.randomUUID() })
     return {
@@ -372,6 +373,7 @@ export class SdkSession implements CodeSession {
       authorize: (name, input) => denyReason(this.options.hooks, use(name, input)),
       confirm: (name, input) => confirmReason(this.options.hooks, ask, use(name, input)),
       review: (title, edits) => reviewEdits(this.options.hooks, ask, use('RunScript', { files: edits.map((e) => e.label) }), { title, edits }),
+      observed: (name, input) => noteCall(this.options.hooks, use(name, input)),
     }
   }
 

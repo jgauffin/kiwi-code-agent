@@ -1,6 +1,6 @@
 ---
 name: feature-status
-description: Where a planned feature stands, read from its spec and working files. Use when the user asks whether a feature planning session is done, how far a feature has come, what it is waiting on, which features are planned, or anything about `specs/*.spec.md` and `.kiwi/specs/`.
+description: Where a planned feature stands, read from its spec and working files. Use when the user asks whether a feature planning session is done, how far a feature has come, what it is waiting on, which features are planned, or anything about `specs/**/*.spec.md` and `.kiwi/specs/`.
 ---
 
 # Feature status
@@ -12,10 +12,11 @@ the question as the extension would.
 ## Files
 
 `<slug>` is the feature name lower-cased with runs of other characters turned into `-`. List
-`specs/*.spec.md` when unsure; the spec's `feature:` line holds the name as the user wrote it.
+`specs/**/*.spec.md` when unsure; the spec's `feature:` line holds the name as the user wrote it.
 
 - `specs/<slug>.spec.md`: the spec, committed. Frontmatter `status:` is `draft`, `approved` or
-  `implemented`.
+  `implemented`. Specs may be grouped one level deep by domain, as
+  `specs/<domain>/<slug>.spec.md`, so look for a feature's spec in any folder under `specs/`.
 - `.kiwi/specs/<slug>.review.md`: comment rounds on the draft. Under each comment,
   `- addressed:` / `- disagreed:` is the planner's answer and `- resolved` means the user closed it.
   `- remove:` lists struck rules.

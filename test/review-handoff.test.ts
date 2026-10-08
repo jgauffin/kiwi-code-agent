@@ -145,6 +145,22 @@ describe('submitting a review', () => {
     }
   })
 
+  it('a_spec_filed_in_a_domain_folder_is_reviewed_like_any_other_the_prompt_naming_its_full_path', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'handoff-'))
+    try {
+      await mkdir(join(dir, 'specs', 'orders'), { recursive: true })
+      await writeFile(join(dir, 'specs', 'orders', 'order-cancellation.spec.md'), spec, 'utf8')
+      await writeReview(reviewPath(dir, 'Order cancellation'), pending(), 'specs/orders/order-cancellation.spec.md')
+      const post = courier([])
+      await submitReview({ courier: post, cwd: dir, feature: 'Order cancellation', owner: { sessionId: 'owner-1' } })
+      expect(post.delivered[0]!.text).toContain('specs/orders/order-cancellation.spec.md')
+      const stored = await readReview(reviewPath(dir, 'Order cancellation'))
+      expect(stored.rounds[0]!.submittedAt).toBeDefined()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('an_approved_plan_cannot_be_reviewed', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'handoff-'))
     try {
@@ -241,7 +257,7 @@ describe('the plan session knows what a review asks of it', () => {
   })
 
   it('a_session_picking_up_a_spec_reads_the_files_reports_where_it_stands_and_leaves_an_approved_spec_alone', () => {
-    const prompt = resumePlanPrompt('Order cancellation', { review: true, decisions: true })
+    const prompt = resumePlanPrompt('Order cancellation', '/work/repo', { review: true, decisions: true })
     expect(prompt).toContain('specs/order-cancellation.spec.md')
     expect(prompt).toContain('.kiwi/specs/order-cancellation.review.md')
     expect(prompt).toContain('.kiwi/specs/order-cancellation.decisions.md')
@@ -251,7 +267,7 @@ describe('the plan session knows what a review asks of it', () => {
   })
 
   it('a_session_picking_up_a_spec_is_sent_only_to_the_files_that_exist', () => {
-    const prompt = resumePlanPrompt('Order cancellation', { review: false, decisions: false })
+    const prompt = resumePlanPrompt('Order cancellation', '/work/repo', { review: false, decisions: false })
     expect(prompt).toContain('Read `specs/order-cancellation.spec.md` from disk')
     expect(prompt).not.toContain('review.md')
     expect(prompt).not.toContain('decisions.md')
@@ -266,7 +282,7 @@ describe('the revision the agent is asked for', () => {
     submitRound(r, '2026-01-01T00:00:00.000Z')
     return r
   })()
-  const prompt = reviewPrompt({ feature: 'Order cancellation', round: review.rounds[0]!, body, struck: ['Refund'] })
+  const prompt = reviewPrompt({ feature: 'Order cancellation', spec: 'specs/order-cancellation.spec.md', round: review.rounds[0]!, body, struck: ['Refund'] })
 
   it('names_the_struck_items_and_forbids_renaming_and_resurrection', () => {
     expect(prompt).toContain('Struck in this round, to be removed: Refund.')
@@ -311,7 +327,7 @@ describe('the revision the agent is asked for', () => {
       addComment(r, 'Cancel command', 'and this one too')
       return submitRound(r, '2026-01-02T00:00:00.000Z')
     })()
-    const text = reviewPrompt({ feature: 'Order cancellation', round: second, body, struck: ['Refund'] })
+    const text = reviewPrompt({ feature: 'Order cancellation', spec: 'specs/order-cancellation.spec.md', round: second, body, struck: ['Refund'] })
     expect(text).toContain('Struck in earlier rounds and still gone: Refund.')
     expect(text).toContain('Struck but still standing in the plan, to be marked removed: Refund.')
   })
@@ -326,7 +342,7 @@ describe('the revision the agent is asked for', () => {
       for (const name of ['Cancel command', 'Refund', 'Partial refund']) strikeItem(r, name)
       return submitRound(r, '2026-01-01T00:00:00.000Z')
     })()
-    const text = reviewPrompt({ feature: 'Order cancellation', round: all, body, struck: ['Cancel command', 'Refund', 'Partial refund'] })
+    const text = reviewPrompt({ feature: 'Order cancellation', spec: 'specs/order-cancellation.spec.md', round: all, body, struck: ['Cancel command', 'Refund', 'Partial refund'] })
     expect(text).toContain('Every item in the plan is now struck: nothing remains.')
     expect(text).toContain('report that nothing remains and stop')
   })

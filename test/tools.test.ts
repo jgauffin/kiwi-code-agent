@@ -13,6 +13,8 @@ import { globTool } from '../src/agent/openai-session/tools/glob'
 import { grepTool } from '../src/agent/openai-session/tools/grep'
 import { bashTool } from '../src/agent/openai-session/tools/bash'
 import { askUserSchema, askUserTool } from '../src/agent/openai-session/tools/ask-user'
+import { webFetchTool } from '../src/agent/openai-session/tools/web-fetch'
+import { webSearchTool } from '../src/agent/openai-session/tools/web-search'
 import { toDefinition, type ToolContext } from '../src/agent/openai-session/tools/tool'
 import { FileLedger } from '../src/agent/openai-session/file-ledger'
 
@@ -356,5 +358,63 @@ describe('AskUser', () => {
     const nobody = await askUserTool.execute(card, ctx)
     expect(nobody.isError).toBe(true)
     expect(nobody.text).toContain('nobody to ask')
+  })
+})
+
+describe('WebFetch', () => {
+  it('returns_the_pages_readable_text_stripped_of_tags_scripts_and_styles', async () => {
+    const html = '<html><head><style>body{color:red}</style></head><body><script>alert(1)</script><h1>Title</h1><p>Hello &amp; welcome</p></body></html>'
+    const fetchImpl = (async () => new Response(html, { status: 200, statusText: 'OK' })) as typeof fetch
+    const result = await webFetchTool(fetchImpl).execute({ url: 'https://example.test' }, ctx)
+    expect(result.isError).toBe(false)
+    expect(result.text).toContain('Title')
+    expect(result.text).toContain('Hello & welcome')
+    expect(result.text).not.toMatch(/<[a-z]/i)
+  })
+
+  it('an_unreachable_internet_is_reported_in_the_result_rather_than_thrown', async () => {
+    const fetchImpl = (async () => {
+      throw new Error('getaddrinfo ENOTFOUND')
+    }) as typeof fetch
+    const result = await webFetchTool(fetchImpl).execute({ url: 'https://example.test' }, ctx)
+    expect(result.isError).toBe(true)
+    expect(result.text).toContain('could not be reached')
+  })
+
+  it('a_non_ok_response_is_a_tool_error_naming_the_status', async () => {
+    const fetchImpl = (async () => new Response('', { status: 404, statusText: 'Not Found' })) as typeof fetch
+    const result = await webFetchTool(fetchImpl).execute({ url: 'https://example.test/missing' }, ctx)
+    expect(result.isError).toBe(true)
+    expect(result.text).toContain('404')
+  })
+})
+
+describe('WebSearch', () => {
+  it('without_a_key_configured_it_says_so_rather_than_searching', async () => {
+    const tool = webSearchTool({ apiKey: async () => undefined })
+    const result = await tool.execute({ query: 'x' }, ctx)
+    expect(result.isError).toBe(true)
+    expect(result.text).toContain('No search provider key')
+  })
+
+  it('lists_each_results_title_address_and_snippet', async () => {
+    const body = { web: { results: [{ title: 'A page', url: 'https://example.test/a', description: 'A snippet' }] } }
+    const fetchImpl = (async () => new Response(JSON.stringify(body), { status: 200 })) as typeof fetch
+    const tool = webSearchTool({ apiKey: async () => 'k', fetchImpl })
+    const result = await tool.execute({ query: 'x' }, ctx)
+    expect(result.isError).toBe(false)
+    expect(result.text).toContain('A page')
+    expect(result.text).toContain('https://example.test/a')
+    expect(result.text).toContain('A snippet')
+  })
+
+  it('an_unreachable_internet_is_reported_in_the_result_rather_than_thrown', async () => {
+    const fetchImpl = (async () => {
+      throw new Error('getaddrinfo ENOTFOUND')
+    }) as typeof fetch
+    const tool = webSearchTool({ apiKey: async () => 'k', fetchImpl })
+    const result = await tool.execute({ query: 'x' }, ctx)
+    expect(result.isError).toBe(true)
+    expect(result.text).toContain('could not be reached')
   })
 })

@@ -7,12 +7,16 @@ import { bareToolName } from './tool-server'
  *
  * Stateful because streaming deltas do not carry the message id they belong
  * to; `message_start` does, and the mapper remembers it until the next one.
+ * It is remembered per thread: subagents stream at the same time as the main
+ * thread and as each other, so one remembered id would hand a thread's deltas
+ * the message id of whichever thread happened to start a message last.
  *
  * User messages are not mapped: the host emits `user_message` when it sends,
  * and replays on resume are restored from the run log instead.
  */
 export class SdkEventMapper {
-  private currentMessageId = ''
+  /** The message each thread is streaming, the main thread under `''` and a subagent under the tool use that spawned it. */
+  private readonly streaming = new Map<string, string>()
 
   map(msg: SDKMessage): SessionEvent[] {
     switch (msg.type) {
@@ -66,11 +70,12 @@ export class SdkEventMapper {
   private mapStreamEvent(msg: Extract<SDKMessage, { type: 'stream_event' }>): SessionEvent[] {
     const event = msg.event
     const parent = parentOf(msg.parent_tool_use_id)
+    const thread = msg.parent_tool_use_id ?? ''
     if (event.type === 'message_start') {
-      this.currentMessageId = event.message.id
+      this.streaming.set(thread, event.message.id)
       return []
     }
-    const messageId = this.currentMessageId
+    const messageId = this.streaming.get(thread) ?? ''
     if (event.type === 'message_delta') {
       return [{ type: 'reply_usage', messageId, outputTokens: event.usage.output_tokens, ...parent }]
     }

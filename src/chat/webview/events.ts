@@ -109,6 +109,14 @@ export class SpecApprovedEvent extends Event {
   }
 }
 
+/** The toggle beside Approve: whether approving goes on to start the build by itself. */
+export class BuildStartToggledEvent extends Event {
+  static readonly type = 'build-start-toggled'
+  constructor(public readonly on: boolean) {
+    super(BuildStartToggledEvent.type, { bubbles: true })
+  }
+}
+
 /** The plan bar's "Send rulings": hand every pending ruling to the planner. */
 export class RulingsSentEvent extends Event {
   static readonly type = 'rulings-sent'
@@ -343,6 +351,7 @@ declare global {
     [FeatureNameSuggestionRequestedEvent.type]: FeatureNameSuggestionRequestedEvent
     [SessionSelectedEvent.type]: SessionSelectedEvent
     [SpecApprovedEvent.type]: SpecApprovedEvent
+    [BuildStartToggledEvent.type]: BuildStartToggledEvent
     [RulingsSentEvent.type]: RulingsSentEvent
     [ReviewSubmittedEvent.type]: ReviewSubmittedEvent
     [PlanStepSelectedEvent.type]: PlanStepSelectedEvent

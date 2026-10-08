@@ -1,7 +1,7 @@
 import { commandName, runCommand, unwrapCommand } from './command-wrappers'
 import { splitShellCommand, type ShellSegment } from './shell-split'
 import { subcommandArguments } from './subcommand-tools'
-import { sedScriptInspects } from './sed-script'
+import { sedScriptInspects, sedScriptRuns } from './sed-script'
 
 /**
  * Said to every session, so the model reaches for a command that runs unasked
@@ -46,18 +46,26 @@ const READ_ONLY_SUBCOMMANDS: Record<string, Set<string>> = {
   go: new Set(['version', 'env', 'list']),
 }
 
-/** Subcommands that still mutate given these flags or forms. */
-function subcommandMutates(command: string, sub: string, args: string[]): boolean {
-  if (command === 'git') {
-    if (sub === 'remote') return args.length > 0 && args[0] !== '-v' && args[0] !== 'show' && args[0] !== 'get-url'
-    if (sub === 'config') return !args.includes('--get') && !args.includes('--list') && !args.includes('-l') && !args.includes('--get-all')
-    if (sub === 'reflog') return args.some((a) => a === 'expire' || a === 'delete')
-    if (sub === 'log' || sub === 'show' || sub === 'diff' || sub === 'shortlog') return args.some((a) => longFlag(a, '--output'))
+const writesOutputFile = (args: string[]): boolean => args.some((a) => longFlag(a, '--output'))
+
+/** Read-only subcommands that still mutate given these flags or forms. */
+const SUBCOMMAND_MUTATES: Record<string, Record<string, (args: string[]) => boolean>> = {
+  git: {
+    remote: (args) => args.length > 0 && !['-v', 'show', 'get-url'].includes(args[0]!),
+    config: (args) => !args.some((a) => ['--get', '--list', '-l', '--get-all'].includes(a)),
+    reflog: (args) => args.some((a) => a === 'expire' || a === 'delete'),
+    log: writesOutputFile,
+    show: writesOutputFile,
+    diff: writesOutputFile,
+    shortlog: writesOutputFile,
     // `-O` opens the matches in a program it names.
-    if (sub === 'grep') return args.some((a) => longFlag(a, '--open-files-in-pager') || shortFlags(a, 'efABCm').includes('O'))
-  }
-  if (command === 'go' && sub === 'env') return args.some((a) => /^--?[wu](=|$)/.test(a))
-  return false
+    grep: (args) => args.some((a) => longFlag(a, '--open-files-in-pager') || shortFlags(a, 'efABCm').includes('O')),
+  },
+  go: { env: (args) => args.some((a) => /^--?[wu](=|$)/.test(a)) },
+}
+
+function subcommandMutates(command: string, sub: string, args: string[]): boolean {
+  return SUBCOMMAND_MUTATES[command]?.[sub]?.(args) ?? false
 }
 
 /**
@@ -68,11 +76,20 @@ function subcommandMutates(command: string, sub: string, args: string[]): boolea
 export type CommandEffect =
   | { kind: 'inspects' }
   | { kind: 'mutates'; reason: string }
+  | { kind: 'runs'; reason: string }
 
 const INSPECTS: CommandEffect = { kind: 'inspects' }
 
 /** The reason is shown to the user as why their answer is wanted, so it is in the command's own terms. */
 const mutates = (reason: string): CommandEffect => ({ kind: 'mutates', reason })
+
+/**
+ * The command is handed, by this very argument, a program to run: what runs
+ * is decided at the time, by data no rule can see ahead of it (a file `find`
+ * happens to match) or by a program named only here, so no place and no kept
+ * answer may stand for it; it is put to the person every time.
+ */
+const runs = (reason: string): CommandEffect => ({ kind: 'runs', reason })
 
 const effect = (mutating: boolean, reason: string): CommandEffect => (mutating ? mutates(reason) : INSPECTS)
 
@@ -86,13 +103,22 @@ type ArgumentRule = (args: string[]) => CommandEffect
  * that could fall out of step with it.
  */
 const BY_ARGUMENTS: Record<string, ArgumentRule> = {
-  find: (args) => effect(args.some((a) => FIND_ACTIONS.has(a)), 'deletes what it finds, runs a program over it, or writes the matches to a file'),
+  find: (args) => {
+    if (args.some((a) => FIND_RUN_ACTIONS.has(a))) return runs('runs a program over what it finds')
+    return effect(args.some((a) => FIND_WRITE_ACTIONS.has(a)), 'deletes what it finds, or writes the matches to a file')
+  },
   sed: sedEffect,
-  sort: (args) => effect(args.some((a) => longFlag(a, '--output', '--compress-program') || shortFlags(a, 'ktSTo').includes('o')), 'writes its output to a file, or pipes it through a program of its own'),
+  sort: (args) => {
+    if (args.some((a) => longFlag(a, '--compress-program'))) return runs('pipes its output through a program of its own')
+    return effect(args.some((a) => longFlag(a, '--output') || shortFlags(a, 'ktSTo').includes('o')), 'writes its output to a file')
+  },
   // `uniq IN OUT` writes OUT.
   uniq: (args) => effect(operands(args, 'fsw', ['--skip-fields', '--skip-chars', '--check-chars']).length > 1, 'writes its output to the second file it names'),
   tree: (args) => effect(args.some((a) => /[oR]/.test(shortFlags(a, 'LPIoHT'))), 'writes its listing to a file'),
-  less: (args) => effect(args.some((a) => a.startsWith('+') || longFlag(a, '--log-file', '--LOG-FILE') || /[oO]/.test(shortFlags(a, 'bhjkoOpPtTxyz'))), 'runs a command on what it opens, or writes a copy of it'),
+  less: (args) => {
+    if (args.some((a) => a.startsWith('+'))) return runs('runs a command on what it opens')
+    return effect(args.some((a) => longFlag(a, '--log-file', '--LOG-FILE') || /[oO]/.test(shortFlags(a, 'bhjkoOpPtTxyz'))), 'writes a copy of what it opens')
+  },
   // Setting the clock, and an operand that is not a `+FORMAT` is a time to set it to.
   date: (args) =>
     effect(
@@ -101,13 +127,15 @@ const BY_ARGUMENTS: Record<string, ArgumentRule> = {
     ),
   // A name, or a file to read one from, sets the hostname.
   hostname: (args) => effect(operands(args, '').length > 0 || args.some((a) => longFlag(a, '--file', '--boot') || /[Fb]/.test(shortFlags(a, 'F'))), "sets the machine's hostname"),
-  rg: (args) => effect(args.some((a) => longFlag(a, '--pre')), 'runs a program over every file it searches'),
-  ag: (args) => effect(args.some((a) => longFlag(a, '--pager')), 'pipes its matches through a program'),
+  rg: (args) => (args.some((a) => longFlag(a, '--pre')) ? runs('runs a program over every file it searches') : INSPECTS),
+  ag: (args) => (args.some((a) => longFlag(a, '--pager')) ? runs('pipes its matches through a program') : INSPECTS),
   yq: (args) => effect(args.some((a) => longFlag(a, '--inplace', '--split-exp') || /[is]/.test(shortFlags(a, 'op'))), 'edits the document in place, or splits it into files'),
   file: (args) => effect(args.some((a) => longFlag(a, '--compile') || shortFlags(a, 'eFfmP').includes('C')), 'compiles a magic file next to its source'),
 }
 
-const FIND_ACTIONS = new Set(['-delete', '-exec', '-execdir', '-ok', '-okdir', '-fprint', '-fprint0', '-fprintf', '-fls'])
+/** `-delete` and the `-fprint*`/`-fls` family write a path find is given; `-exec`, `-execdir`, `-ok` and `-okdir` run a program of find's own choosing over whatever it matches. */
+const FIND_WRITE_ACTIONS = new Set(['-delete', '-fprint', '-fprint0', '-fprintf', '-fls'])
+const FIND_RUN_ACTIONS = new Set(['-exec', '-execdir', '-ok', '-okdir'])
 
 /** Every word that is not a flag names a file this command reads. */
 const namedFiles = (args: string[]): string[] => operands(args, '')
@@ -172,6 +200,16 @@ export function fileOperands(command: string, args: string[]): string[] {
   return FILE_OPERANDS[command]?.(args) ?? []
 }
 
+/**
+ * Has this command nothing an argument could point at? It changes nothing
+ * whatever its arguments and reads no file it names, so words fed in by another
+ * command leave it the printing or counting it already was: `ls | xargs echo`
+ * reaches no further than `echo` typed by hand, which runs unasked too.
+ */
+function reachesNoFileThroughArguments(command: string): boolean {
+  return READ_ONLY.has(command) && FILE_OPERANDS[command] === undefined
+}
+
 /** What this command's own arguments make of it; undefined for a command they do not decide. */
 export function commandEffect(command: string, args: string[]): CommandEffect | undefined {
   return BY_ARGUMENTS[command]?.(args)
@@ -191,44 +229,71 @@ const SED_SCRIPT_UNREAD = 'has a script this cannot read, and sed scripts can ru
  */
 function sedEffect(args: string[]): CommandEffect {
   if (args.some((a) => longFlag(a, '--help', '--version'))) return INSPECTS
-  const scripts: string[] = []
-  const words: string[] = []
+  const parsed = sedArguments(args)
+  if ('kind' in parsed) return parsed
+  // Without `-e` the first operand is the script; the rest are files, which sed only reads.
+  const scripts = parsed.scripts.length ? parsed.scripts : parsed.operands.slice(0, 1)
+  if (scripts.length === 0) return mutates(SED_SCRIPT_UNREAD)
+  // sed joins its scripts with a newline, so a command split across two of them reads as one.
+  return sedScriptEffect(scripts.join('\n'))
+}
+
+function sedScriptEffect(script: string): CommandEffect {
+  if (sedScriptInspects(script)) return INSPECTS
+  if (sedScriptRuns(script)) return runs('has a script that may run a command with `e`')
+  return mutates('has a script beyond printing and substituting, which may write a path with `w`')
+}
+
+type SedArguments = { scripts: string[]; operands: string[] }
+/** What one flag word gives sed: a script, perhaps taken from the word after it. */
+type SedFlag = { script?: string; takesNext: boolean }
+
+/** The scripts `-e` gives sed and its other operands, or what a flag that settles it makes of it. */
+function sedArguments(args: string[]): SedArguments | CommandEffect {
+  const parsed: SedArguments = { scripts: [], operands: [] }
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!
     if (arg === '--') {
-      words.push(...args.slice(i + 1))
+      parsed.operands.push(...args.slice(i + 1))
       break
     }
-    if (arg.startsWith('--') && arg.length > 2) {
-      if (!longFlag(arg, '--expression')) {
-        if (!SED_LONG_FLAGS.some((flag) => longFlag(arg, flag))) return mutates(`is given ${arg}, whose effect is unknown here`)
-        continue
-      }
-      const equals = arg.indexOf('=')
-      const script = equals === -1 ? args[++i] : arg.slice(equals + 1)
-      if (script === undefined) return mutates(SED_SCRIPT_UNREAD)
-      scripts.push(script)
+    if (!isFlag(arg)) {
+      parsed.operands.push(arg)
       continue
     }
-    if (arg.length > 1 && arg.startsWith('-')) {
-      const letters = shortFlags(arg, 'e')
-      if (![...letters].every((letter) => letter === 'e' || SED_FLAGS.includes(letter))) return mutates(`is given ${arg}, which may edit in place or take its script from a file`)
-      if (letters.endsWith('e')) {
-        // `-e` takes the rest of its own word, or the word after when it ends there.
-        const inline = arg.slice(letters.length + 1)
-        const script = inline === '' ? args[++i] : inline
-        if (script === undefined) return mutates(SED_SCRIPT_UNREAD)
-        scripts.push(script)
-      }
-      continue
-    }
-    words.push(arg)
+    const flag = arg.startsWith('--') ? sedLongFlag(arg, args[i + 1]) : sedShortFlags(arg, args[i + 1])
+    if ('kind' in flag) return flag
+    if (flag.script !== undefined) parsed.scripts.push(flag.script)
+    if (flag.takesNext) i++
   }
-  // Without `-e` the first operand is the script; the rest are files, which sed only reads.
-  if (scripts.length === 0 && words[0] !== undefined) scripts.push(words[0])
-  if (scripts.length === 0) return mutates(SED_SCRIPT_UNREAD)
-  // sed joins its scripts with a newline, so a command split across two of them reads as one.
-  return effect(!sedScriptInspects(scripts.join('\n')), 'has a script beyond printing and substituting, which may run a command with `e` or write a path with `w`')
+  return parsed
+}
+
+function sedLongFlag(arg: string, next: string | undefined): SedFlag | CommandEffect {
+  if (longFlag(arg, '--expression')) {
+    const equals = arg.indexOf('=')
+    return equals === -1 ? scriptInNext(next) : { script: arg.slice(equals + 1), takesNext: false }
+  }
+  if (longFlag(arg, ...SED_LONG_FLAGS)) return { takesNext: false }
+  return mutates(`is given ${arg}, whose effect is unknown here`)
+}
+
+function sedShortFlags(arg: string, next: string | undefined): SedFlag | CommandEffect {
+  const letters = shortFlags(arg, 'e')
+  if (![...letters].every((letter) => letter === 'e' || SED_FLAGS.includes(letter))) return mutates(`is given ${arg}, which may edit in place or take its script from a file`)
+  if (!letters.endsWith('e')) return { takesNext: false }
+  // `-e` takes the rest of its own word, or the word after when it ends there.
+  const inline = arg.slice(letters.length + 1)
+  return inline === '' ? scriptInNext(next) : { script: inline, takesNext: false }
+}
+
+function scriptInNext(next: string | undefined): SedFlag | CommandEffect {
+  return next === undefined ? mutates(SED_SCRIPT_UNREAD) : { script: next, takesNext: true }
+}
+
+/** A word that sets a flag; a lone `-` names standard input. */
+function isFlag(arg: string): boolean {
+  return arg.length > 1 && arg.startsWith('-')
 }
 
 /** Does a `--name` word stand for one of these long flags? GNU tools take any unambiguous abbreviation of one. */
@@ -256,15 +321,18 @@ function operands(args: string[], valued: string, longValued: string[] = []): st
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!
     if (arg === '--') return [...found, ...args.slice(i + 1)]
-    if (arg.startsWith('--')) {
-      if (!arg.includes('=') && longFlag(arg, ...longValued)) i++
-    } else if (arg.length > 1 && arg.startsWith('-')) {
-      const letters = shortFlags(arg, valued)
-      // A value letter that ends the word takes the next one.
-      if (valued.includes(letters.at(-1) ?? '-') && letters.length + 1 === arg.length) i++
-    } else found.push(arg)
+    if (!isFlag(arg)) found.push(arg)
+    else if (valueFollows(arg, valued, longValued)) i++
   }
   return found
+}
+
+/** Does this flag word leave its value to the word after it? */
+function valueFollows(arg: string, valued: string, longValued: string[]): boolean {
+  if (arg.startsWith('--')) return !arg.includes('=') && longFlag(arg, ...longValued)
+  const letters = shortFlags(arg, valued)
+  // A value letter that ends the word takes the next one.
+  return valued.includes(letters.at(-1) ?? '-') && letters.length + 1 === arg.length
 }
 
 export type ReadOnlyContext = {
@@ -280,6 +348,28 @@ export type ReadOnlyContext = {
    * that leaves it out is asking only whether the command mutates.
    */
   canRead?: (path: string) => boolean
+  /**
+   * Is this path inside the project? Decides whether a write naming no other
+   * ground is the Allow writes switch's alone (inside) or a folder or file
+   * that may be kept for the session or the person (outside). Without it a
+   * write naming a path is judged exactly as it was before this question
+   * existed, by the rule that already covers whatever runs.
+   */
+  insideProject?: (path: string) => boolean
+  /** The person's home folder, which a leading `~` stands for. Without it `~` names no place. */
+  home?: string
+  /**
+   * The directories an answer about entering this one may be kept for, the
+   * one it names first. Empty where none may be kept, which leaves the
+   * answer to this call alone.
+   */
+  placesToKeep?: (path: string) => string[]
+  /**
+   * The absolute place a path names, read from where the shell stands. Undefined
+   * when the path depends on something the line does not settle: a variable,
+   * another command's output, or a `cd` that may or may not have run.
+   */
+  where?: (path: string) => string | undefined
 }
 
 /** Every file this segment reads lies where the session may read. */
@@ -297,18 +387,38 @@ export function isCdCommand(tokens: string[]): boolean {
 /**
  * The directory a segment changes to, when it is a plain `cd` to one place we
  * can name. An expansion is left out: a rule written for `$HOME` would say
- * nothing about where the session actually lands.
+ * nothing about where the session actually lands. A leading `~` is the home
+ * folder when `home` is known; `~user` and `-` (the previous directory) are
+ * nowhere this line shows.
  */
-export function cdTarget(tokens: string[]): string | undefined {
+export function cdTarget(tokens: string[], home?: string): string | undefined {
   const [raw, ...args] = unwrapCommand(tokens)
   if (!raw || commandName(raw) !== 'cd' || args.length !== 1) return undefined
   const target = args[0]!
+  if (target === '-') return undefined
+  const below = home !== undefined && /^~(\/|$)/.test(target) ? target.slice(1) : undefined
+  if (below !== undefined) return /[$~`]/.test(below) ? undefined : `${home!.split('\\').join('/')}${below}`
   return /[$~`]/.test(target) ? undefined : target
 }
 
 /** The directory a `cd` rule allows, or undefined for any other pattern. `cd:*` is not one: it names no directory. */
 export function cdRuleDirectory(pattern: string): string | undefined {
   return pattern.startsWith('cd ') ? pattern.slice(3).trim() || undefined : undefined
+}
+
+/** The directory a "read" rule allows reading in, or undefined for any other pattern. */
+export function readRuleDirectory(pattern: string): string | undefined {
+  return pattern.startsWith('read ') ? pattern.slice(5).trim() || undefined : undefined
+}
+
+/**
+ * The folder or file a "write" rule allows, or undefined for any other
+ * pattern: unlike a command rule, it names exactly the one place a write was
+ * granted for, covering what lies beneath it rather than standing for every
+ * command that might write somewhere else.
+ */
+export function writeRuleTarget(pattern: string): string | undefined {
+  return pattern.startsWith('write ') ? pattern.slice(6).trim() || undefined : undefined
 }
 
 /**
@@ -324,6 +434,21 @@ export function hidesCommandWord(segment: ShellSegment): boolean {
   return raw !== undefined && /\$\(|`|<\(|>\(/.test(raw)
 }
 
+/**
+ * Does this call run a program of its own that no place or kept answer may
+ * stand for: its command word comes from a substitution, or one of its own
+ * arguments hands it a program to run (`find -exec`, sed's `e`, `sort
+ * --compress-program`, `rg --pre`, `ag --pager`, `less`'s leading `+`). What
+ * runs is decided by data outside the line or by a program named only here,
+ * so it is asked about every time, never covered by a rule remembered for it.
+ */
+export function runsProgramOfItsOwn(segment: ShellSegment): boolean {
+  if (hidesCommandWord(segment)) return true
+  const [raw, ...args] = runCommand(segment.tokens).tokens
+  if (!raw) return false
+  return commandEffect(commandName(raw), args)?.kind === 'runs'
+}
+
 export function isReadOnlySegment(segment: ShellSegment, context: ReadOnlyContext = {}): boolean {
   if (segment.writesFile || hidesCommandWord(segment)) return false
   // A file fed in by `< path` is read as surely as one named as an argument.
@@ -334,9 +459,13 @@ export function isReadOnlySegment(segment: ShellSegment, context: ReadOnlyContex
   if (!raw) return true
   const command = commandName(raw)
   // Arguments nobody can read may name any file at all, so nothing here can be shown to stay in the project.
-  if (argumentsFromInput) return false
+  if (argumentsFromInput && !reachesNoFileThroughArguments(command)) return false
   // Moving around inside the project changes nothing; going anywhere else needs a rule for that directory.
-  if (command === 'cd') return args.length === 1 && (context.canEnter?.(args[0]!) ?? false)
+  // A target we cannot read at all (an expansion, `~`) is nowhere a rule can name, so it is never granted here.
+  if (command === 'cd') {
+    const target = cdTarget(segment.tokens, context.home)
+    return target !== undefined && (context.canEnter?.(target) ?? false)
+  }
   if (!readsWithin(fileOperands(command, args), context)) return false
   if (READ_ONLY.has(command)) return true
   const byArguments = commandEffect(command, args)
@@ -358,5 +487,72 @@ export function isGitWrite(segment: ShellSegment): boolean {
 
 /** True when every simple command in the line only inspects, the ones a substitution holds among them. */
 export function isReadOnlyCommand(command: string, context: ReadOnlyContext = {}): boolean {
-  return splitShellCommand(command).segments.every((s) => isReadOnlySegment(s, context))
+  const segments = splitShellCommand(command).segments
+  const contexts = segmentContexts(segments, context)
+  return segments.every((s, i) => isReadOnlySegment(s, contexts[i]))
+}
+
+/** Past this many places a line may stand in, a relative path is judged from none of them. */
+const MAX_PLACES = 64
+
+/**
+ * The context each command of a line is judged in: a relative path it names
+ * is read from where the `cd`s before it moved the shell. Along a plain `&&`
+ * chain from the start of the line that place is known, since a command there
+ * runs only once every `cd` before it has landed. Past anything else (`;`,
+ * `||`, a loop, a subshell) a command may stand in any place the line has
+ * reached, so a path must hold from each of them. A `cd` in a pipeline runs
+ * in a subshell of its own and moves nothing after it.
+ */
+export function segmentContexts(segments: ShellSegment[], context: ReadOnlyContext): ReadOnlyContext[] {
+  let here = ''
+  let followed = true
+  let reached: string[] | undefined = [here]
+  return segments.map((segment, i) => {
+    followed &&= segment.joined !== undefined
+    const places = followed ? [here] : reached
+    const target = cdTarget(segment.tokens, context.home)
+    if (target !== undefined && reached !== undefined) {
+      if (!followed) reached = [...new Set([...reached, ...reached.map((place) => joinPath(place, target))])]
+      else if (segment.joined !== '|' && segments[i + 1]?.joined !== '|') {
+        here = joinPath(here, target)
+        reached = [...new Set([...reached, here])]
+      }
+      if (reached.length > MAX_PLACES) reached = undefined
+    }
+    return standingIn(places, context)
+  })
+}
+
+/** The context as seen from these places, every one of which a path must hold from; none known leaves only absolute paths to judge. */
+function standingIn(places: string[] | undefined, context: ReadOnlyContext): ReadOnlyContext {
+  if (places?.length === 1 && places[0] === '') return context
+  const from = (check: (path: string) => boolean) => (path: string) =>
+    isAbsolutePath(path) ? check(path) : (places?.every((place) => check(joinPath(place, path))) ?? false)
+  const { canEnter, canRead, placesToKeep, where } = context
+  const standing = where
+    ? (path: string) => (isAbsolutePath(path) ? where(path) : places?.length === 1 ? where(joinPath(places[0]!, path)) : undefined)
+    : undefined
+  // A directory reached from more than one place is no single place to keep an answer for.
+  const keep = placesToKeep
+    ? (path: string) => (isAbsolutePath(path) ? placesToKeep(path) : places?.length === 1 ? placesToKeep(joinPath(places[0]!, path)) : [])
+    : undefined
+  // Where a write lands is still read from the project root, so `insideProject` is left as it was.
+  return {
+    ...context,
+    ...(canEnter ? { canEnter: from(canEnter) } : {}),
+    ...(canRead ? { canRead: from(canRead) } : {}),
+    ...(keep ? { placesToKeep: keep } : {}),
+    ...(standing ? { where: standing } : {}),
+  }
+}
+
+/** `place` is relative to the project root or absolute; the empty place is the root itself. */
+function joinPath(place: string, path: string): string {
+  return place === '' || isAbsolutePath(path) ? path : `${place}/${path}`
+}
+
+/** `/x`, `\x` and `D:` name a place of their own; Git Bash's `/d/x` is among the first. */
+function isAbsolutePath(path: string): boolean {
+  return /^([\\/]|[A-Za-z]:)/.test(path)
 }

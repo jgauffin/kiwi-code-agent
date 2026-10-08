@@ -96,6 +96,14 @@ describe('splitShellCommand', () => {
       expect(writes('cmd {fd}>out.txt')).toBe(true)
     })
 
+    it('a_redirect_keeps_the_target_it_names_so_a_write_can_be_judged_at_that_path', () => {
+      const targets = (c: string) => splitShellCommand(c).segments[0]!.writes
+      expect(targets('echo hi > out.txt')).toEqual(['out.txt'])
+      expect(targets('cmd 2> err.txt >> out.txt')).toEqual(['err.txt', 'out.txt'])
+      expect(targets('echo hi > "$DIR/out.txt"')).toEqual(['$DIR/out.txt'])
+      expect(targets('ls 2>/dev/null')).toEqual([])
+    })
+
     it('a_redirect_target_is_never_a_word_of_the_command_nor_a_command_of_its_own', () => {
       expect(tokens('echo hi > out.txt')).toEqual([['echo', 'hi']])
       expect(tokens('echo hi >| out.txt; ls')).toEqual([['echo', 'hi'], ['ls']])

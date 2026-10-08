@@ -1,13 +1,23 @@
 import type { ReasoningControl } from '../../agent/session/effort'
-import type { Engine, Provider } from '../../agent/session/model-profile'
-import type { SettingsSnapshot } from '../protocol'
+import { isClaudeEngine, type Engine, type Provider } from '../../agent/session/model-profile'
+import { SEARCH_PROVIDER_SECRET_NAME, type SettingsSnapshot } from '../protocol'
 import { ApiKeySetEvent, ModelsRefreshRequestedEvent, ProviderRemovedEvent, ProviderSavedEvent } from './events'
 import { button, el, field, heading, note, select, settingsFileLink, textInput } from './fields'
 
 const ENGINES: { value: Engine; label: string }[] = [
   { value: 'claude-sdk', label: 'Claude (Agent SDK)' },
+  { value: 'claude-installed', label: 'Claude (the Claude Code installed on this machine)' },
   { value: 'openai-compatible', label: 'OpenAI-compatible (own loop, API key)' },
 ]
+
+/**
+ * The engines this machine can actually run. The installed-Claude engine is
+ * left out while no Claude Code is found, rather than offered and then failing
+ * every session it is chosen for; a provider already saved on it keeps its
+ * engine, so the option stays visible where it is in use.
+ */
+const enginesFor = (snapshot: SettingsSnapshot, chosen: Engine): { value: Engine; label: string }[] =>
+  ENGINES.filter((e) => e.value !== 'claude-installed' || snapshot.installedClaude !== undefined || chosen === 'claude-installed')
 
 const REASONING_CONTROLS: { value: ReasoningControl | ''; label: string }[] = [
   { value: '', label: 'As known for the model' },
@@ -20,7 +30,7 @@ const engineLabel = (engine: Engine): string => ENGINES.find((e) => e.value === 
 type KeyState = 'stored' | 'missing' | 'login'
 
 /** A Claude provider with no key is not missing one: it runs on the editor's Claude login. */
-const keyState = (engine: Engine | undefined, stored: boolean): KeyState => (stored ? 'stored' : engine === 'claude-sdk' ? 'login' : 'missing')
+const keyState = (engine: Engine | undefined, stored: boolean): KeyState => (stored ? 'stored' : engine && isClaudeEngine(engine) ? 'login' : 'missing')
 
 /** A class for the chip or badge that shows a key's state; the login state is neutral, neither good nor bad. */
 const keyClass = (state: KeyState): string => (state === 'login' ? '' : state)
@@ -93,7 +103,7 @@ export class ProvidersTab extends HTMLElement {
   private form(index: number, provider: Provider, snapshot: SettingsSnapshot): HTMLElement {
     const form = document.createElement('form')
     form.className = 'provider editing'
-    const engine = select('engine', ENGINES, provider.engine)
+    const engine = select('engine', enginesFor(snapshot, provider.engine), provider.engine)
     const openai = el('div', 'openai')
     openai.hidden = provider.engine !== 'openai-compatible'
     const key = snapshot.keys.find((k) => k.name === provider.name)
@@ -148,7 +158,7 @@ export class ProvidersTab extends HTMLElement {
     const keyField = field('API key', apiKeyValue, { hint: ' ' })
     const keyHint = keyField.querySelector<HTMLElement>('.hint')!
     const describeKey = () => {
-      const claude = engine.value === 'claude-sdk'
+      const claude = isClaudeEngine(engine.value as Engine)
       keyHint.textContent = key?.stored
         ? `Stored under this provider’s name. Leave blank to keep it${claude ? ', or remove it to use the editor’s Claude login' : ''}.`
         : claude
@@ -161,9 +171,19 @@ export class ProvidersTab extends HTMLElement {
       const removeKey = button('Remove key', () => this.dispatchEvent(new ApiKeySetEvent(provider.name, '')), 'remove')
       keyControls.push(removeKey)
     }
+    const engineHint = el('span', 'hint')
+    const describeEngine = () => {
+      engineHint.textContent =
+        engine.value === 'claude-installed'
+          ? `Runs ${snapshot.installedClaude ?? 'the Claude Code on this machine'}, so the models it serves are the ones that install knows. Set kiwiAgent.claudeCodePath to run another.`
+          : ''
+      engineHint.hidden = engineHint.textContent === ''
+    }
+    describeEngine()
     engine.addEventListener('change', () => {
       openai.hidden = engine.value !== 'openai-compatible'
       describeKey()
+      describeEngine()
     })
     const cancel = button('Cancel', () => {
       this.editing = undefined
@@ -178,6 +198,7 @@ export class ProvidersTab extends HTMLElement {
     form.append(
       field('Name', name),
       field('Engine', engine),
+      engineHint,
       openai,
       ...keyControls,
       field('Models', models, { hint: 'Beside each model, the conversation size in tokens at which it compacts: every request re-sends the whole conversation, so a pricier model may be worth compacting sooner. Blank follows the global setting.' }),
@@ -202,8 +223,10 @@ export class ProvidersTab extends HTMLElement {
   private keys(snapshot: SettingsSnapshot): HTMLElement {
     const section = el('section', 'keys')
     section.append(el('h3', '', 'API keys'))
-    if (snapshot.keys.length === 0) section.append(note('No provider is configured. Keys are stored in the editor’s secret storage, never in settings.'))
-    for (const key of snapshot.keys) {
+    // The research sub agent's search key lives here too, but is not a provider's: shown on the Advanced tab instead.
+    const providerKeys = snapshot.keys.filter((k) => k.name !== SEARCH_PROVIDER_SECRET_NAME)
+    if (providerKeys.length === 0) section.append(note('No provider is configured. Keys are stored in the editor’s secret storage, never in settings.'))
+    for (const key of providerKeys) {
       const state = keyState(snapshot.providers.find((p) => p.name === key.name)?.engine, key.stored)
       const row = el('div', 'key')
       row.append(el('strong', 'name', key.name), el('span', `badge ${keyClass(state)}`.trim(), state === 'login' ? 'editor login' : state))

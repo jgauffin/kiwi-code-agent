@@ -13,29 +13,29 @@ import {
   type Provider,
 } from '../src/agent/session/model-profile'
 
-const claude: Provider = { name: 'Claude', engine: 'claude-sdk', models: ['claude-opus-5', 'claude-sonnet-5'] }
+const claude: Provider = { name: 'Claude', engine: 'claude-sdk', models: ['claude-opus-5-5', 'claude-sonnet-5-5'] }
 const berget: Provider = { name: 'berget', engine: 'openai-compatible', baseUrl: 'https://api.berget.ai/v1', models: ['moonshotai/Kimi-K3'] }
 
 const profile: Profile = {
   name: 'Balanced',
-  default: { provider: 'Claude', model: 'claude-sonnet-5' },
-  steps: { plan: { provider: 'Claude', model: 'claude-opus-5', effort: 'high' } },
+  default: { provider: 'Claude', model: 'claude-sonnet-5-5' },
+  steps: { plan: { provider: 'Claude', model: 'claude-opus-5-5', effort: 'high' } },
 }
 
 const cheap: Profile = { name: 'Cheap', default: { provider: 'berget', model: 'moonshotai/Kimi-K3' } }
 
 describe('resolveStep', () => {
   it('a_step_with_no_entry_of_its_own_runs_the_default', () => {
-    expect(resolveStep(profile, [claude], 'implement')).toMatchObject({ name: 'Balanced', engine: 'claude-sdk', model: 'claude-sonnet-5' })
+    expect(resolveStep(profile, [claude], 'implement')).toMatchObject({ name: 'Balanced', engine: 'claude-sdk', model: 'claude-sonnet-5-5' })
   })
 
   it('a_step_with_an_entry_overrides_the_default', () => {
-    expect(resolveStep(profile, [claude], 'plan')).toMatchObject({ name: 'Balanced', engine: 'claude-sdk', model: 'claude-opus-5', effort: 'high' })
+    expect(resolveStep(profile, [claude], 'plan')).toMatchObject({ name: 'Balanced', engine: 'claude-sdk', model: 'claude-opus-5-5', effort: 'high' })
   })
 
   it('a_claude_provider_names_its_optional_key_so_a_stored_one_replaces_the_editor_login', () => {
-    expect(resolveStep(profile, [claude], 'chat')).toEqual({ name: 'Balanced', engine: 'claude-sdk', model: 'claude-sonnet-5', apiKeySecret: 'Claude' })
-    expect(providerModel(claude, 'claude-opus-5').apiKeySecret).toBe('Claude')
+    expect(resolveStep(profile, [claude], 'chat')).toEqual({ name: 'Balanced', engine: 'claude-sdk', model: 'claude-sonnet-5-5', apiKeySecret: 'Claude' })
+    expect(providerModel(claude, 'claude-opus-5-5').apiKeySecret).toBe('Claude')
   })
 
   it('an_openai_compatible_provider_carries_its_endpoint_and_its_own_name_as_the_key_into_the_resolved_profile', () => {
@@ -55,8 +55,8 @@ describe('resolveStep', () => {
   })
 
   it('choiceFor_names_which_model_a_step_would_run_on_without_resolving_it', () => {
-    expect(choiceFor(profile, 'plan')?.model).toBe('claude-opus-5')
-    expect(choiceFor(profile, 'cleanup')?.model).toBe('claude-sonnet-5')
+    expect(choiceFor(profile, 'plan')?.model).toBe('claude-opus-5-5')
+    expect(choiceFor(profile, 'cleanup')?.model).toBe('claude-sonnet-5-5')
   })
 })
 
@@ -75,7 +75,7 @@ describe('effort', () => {
 
   it('a_step_can_set_its_own_effort_and_still_run_the_default_model', () => {
     const own: Profile = { ...profile, steps: { implement: { effort: 'low' } } }
-    expect(resolveStep(own, [claude], 'implement')).toMatchObject({ model: 'claude-sonnet-5', effort: 'low' })
+    expect(resolveStep(own, [claude], 'implement')).toMatchObject({ model: 'claude-sonnet-5-5', effort: 'low' })
   })
 
   it('chat_has_no_suggestion_and_runs_the_effort_of_the_profile_default', () => {
@@ -152,29 +152,29 @@ describe('the models the chat offers, with the effort levels each takes', () => 
 
   it('B14_a_claude_model_offers_every_level_and_an_openai_compatible_one_only_what_its_endpoint_takes', () => {
     expect(offeredModels([claude, gpt]).map((m) => [m.profile.name, m.efforts])).toEqual([
-      ['Claude · claude-opus-5', ['low', 'medium', 'high', 'xhigh', 'max']],
-      ['Claude · claude-sonnet-5', ['low', 'medium', 'high', 'xhigh', 'max']],
+      ['Claude · claude-opus-5-5', ['low', 'medium', 'high', 'xhigh', 'max']],
+      ['Claude · claude-sonnet-5-5', ['low', 'medium', 'high', 'xhigh', 'max']],
       ['OpenAI · gpt-5', ['low', 'medium', 'high']],
       ['OpenAI · gpt-4o', []],
     ])
   })
 
   it('B15_a_session_left_at_the_models_own_default_names_no_effort_at_all', () => {
-    const picked = atEffort(providerModel(claude, 'claude-opus-5'), 'max')
+    const picked = atEffort(providerModel(claude, 'claude-opus-5-5'), 'max')
     expect(picked.effort).toBe('max')
     expect('effort' in atEffort(picked, undefined)).toBe(false)
   })
 
   it('B16_the_effort_picked_survives_a_model_switch_brought_down_to_the_highest_level_the_new_model_takes', () => {
-    const on = atEffort(providerModel(claude, 'claude-opus-5'), 'max')
+    const on = atEffort(providerModel(claude, 'claude-opus-5-5'), 'max')
     const offers = offeredModels([claude, gpt])
 
     expect(switchedTo(on, offers.find((m) => m.profile.model === 'gpt-5')!).effort).toBe('high')
-    expect(switchedTo(on, offers.find((m) => m.profile.model === 'claude-sonnet-5')!).effort).toBe('max')
+    expect(switchedTo(on, offers.find((m) => m.profile.model === 'claude-sonnet-5-5')!).effort).toBe('max')
   })
 
   it('B16_a_switch_to_a_model_that_takes_no_effort_leaves_it_to_the_model', () => {
-    const on = atEffort(providerModel(claude, 'claude-opus-5'), 'high')
+    const on = atEffort(providerModel(claude, 'claude-opus-5-5'), 'high')
     const plain = offeredModels([gpt]).find((m) => m.profile.model === 'gpt-4o')!
 
     expect('effort' in switchedTo(on, plain)).toBe(false)

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode'
 import { listDraftPlans, type PlanSummary } from '../agent/phases/plan-list'
-import { SPECS_DIR } from '../agent/phases/blind-plan'
+import { SPECS_ANY_GLOB, SPECS_DIR } from '../agent/phases/blind-plan'
 import type { ChatViewProvider } from './chat-view-provider'
 import { errorMessage } from '../error-message'
 
@@ -17,7 +17,7 @@ export function openDraftPlanAction(chat: ChatViewProvider, workspaceRoot: strin
     output.appendLine(`draft plans under ${workspaceRoot}/${SPECS_DIR}: ${drafts.map((d) => d.feature).join(', ') || 'none'}`)
     await vscode.commands.executeCommand('setContext', HAS_DRAFTS, drafts.length > 0)
   }
-  const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(workspaceRoot, `${SPECS_DIR}/*.spec.md`))
+  const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(workspaceRoot, SPECS_ANY_GLOB))
   const onChange = () => void refresh().catch(report)
   void refresh().catch(report)
 

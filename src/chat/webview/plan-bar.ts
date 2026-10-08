@@ -1,6 +1,7 @@
 import type { PlanState } from '../protocol'
 import { el } from './dom'
 import {
+  BuildStartToggledEvent,
   ChangeRequestedEvent,
   CleanupStoppedEvent,
   ImplementRequestedEvent,
@@ -117,6 +118,25 @@ export class PlanBar extends HTMLElement {
     ]
   }
 
+  /**
+   * Whether approving goes on to build: off, the feature is checked, mapped
+   * and left waiting for Implement, which is how several features are taken to
+   * build-ready while one is built at a time. Remembered for the workspace, so
+   * it stands for the next approval too.
+   */
+  private buildStart(on: boolean): HTMLElement {
+    const label = document.createElement('label')
+    label.className = 'build-start'
+    label.title =
+      'Checked: approving the spec checks it against the code and, when that comes back clean, starts the build by itself. Unchecked: the feature is checked and mapped, then waits for you to press Implement, so several features can be taken to build-ready while one is built at a time. Your choice is remembered for this workspace.'
+    const box = document.createElement('input')
+    box.type = 'checkbox'
+    box.checked = on
+    box.addEventListener('change', () => this.dispatchEvent(new BuildStartToggledEvent(box.checked)))
+    label.append(box, document.createTextNode(' Build after approval'))
+    return label
+  }
+
   private next(plan: PlanState): HTMLElement[] {
     const step = planStep(plan)
     const next = step.next
@@ -133,6 +153,8 @@ export class PlanBar extends HTMLElement {
           node.title = next.busy
           nodes.push(node)
         }
+        // What approval leads to is settled beside the button that takes it, so the person chooses it with the act in front of them.
+        if (next.action === 'approve') nodes.push(this.buildStart(plan.startBuildOnApproval))
         // The busy line is what the person should read while a run works, so the act is muted beside it; it stays theirs to press.
         nodes.push(button(next.label, () => this.dispatchEvent(eventFor(next.action)), `next ${next.action}${next.busy ? ' busy' : ''}`, next.hint))
         break

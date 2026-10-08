@@ -46,6 +46,9 @@ function courier(): PlanPickupCourier & { delivered: Delivery[]; owed: string[] 
       return 'started-1'
     },
     say: async (sessionId, note) => void delivered.push({ kind: 'say', sessionId, note }),
+    tell: async () => {
+      throw new Error('An update hears the description in the developer\'s own words, never a prompt of the extension\'s.')
+    },
     critiqueOwed: (feature) => void owed.push(feature),
   }
 }
@@ -83,6 +86,15 @@ describe('picking a spec to update', () => {
       expect(prompt).not.toContain('ask what the developer wants changed')
       expect(prompt).toContain('specs/order-cancellation.spec.md')
       expect(post.delivered[1]).toEqual({ kind: 'say', sessionId: 'started-1', note: 'Drop the refund rule' })
+    })
+  })
+
+  it('a_settled_spec_filed_in_a_domain_folder_is_found_and_updated_like_any_other', async () => {
+    await withWorkspace({ 'specs/orders/order-cancellation.spec.md': settled }, async (dir) => {
+      const post = courier()
+      await startUpdate({ courier: post, cwd: dir, feature: FEATURE, description: 'Drop the refund rule' })
+      expect(post.delivered[0]).toMatchObject({ kind: 'start', feature: FEATURE, label: 'Updating the spec' })
+      expect((post.delivered[0] as { prompt: string }).prompt).toContain('specs/orders/order-cancellation.spec.md')
     })
   })
 

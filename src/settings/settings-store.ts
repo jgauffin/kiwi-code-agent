@@ -1,12 +1,14 @@
 import { DEFAULT_TEST_GLOBS, type Limits } from '../agent/cleanup/oversized'
 import type { AppliedBundle, Bundle, BundleScope } from '../agent/instructions/bundles'
 import type { MemoryEntry, MemoryScope } from '../agent/memory/memories'
-import { choiceFor, type ModelChoice, type Profile, type Provider, type StepChoice } from '../agent/session/model-profile'
+import { choiceFor, isClaudeEngine, type ModelChoice, type Profile, type Provider, type StepChoice } from '../agent/session/model-profile'
+import { installedClaude } from '../agent/sdk-session/installed-claude'
+import { modelUpgrade } from './model-upgrade'
 import { STEPS, stepTitle } from '../agent/session/session-manager'
 import type { VerifyRule } from '../agent/phases/verification'
 import { DEFAULT_COMPACT_AT_TOKENS } from '../agent/session/compaction-point'
 import { migrateModelSettings, needsMigration, type LegacyProfile, type ModelSettings } from './model-settings'
-import type { EditableSettings, SettingKey, SettingsSnapshot, SettingsTarget } from './protocol'
+import { SEARCH_PROVIDER_SECRET_NAME, type EditableSettings, type SettingKey, type SettingsSnapshot, type SettingsTarget } from './protocol'
 import { DEFAULT_SERVICE_URL } from '../remote-control/remote-link'
 import type { PairedPhone } from '../remote-control/pairing'
 import type { PairingCode } from '../remote-control/remote-control-service'
@@ -39,6 +41,12 @@ export type ProfileDefaults = { names: string[]; active: string }
 export type MemoryPort = {
   list(): Promise<{ project: MemoryEntry[]; user: MemoryEntry[] }>
   forget(scope: MemoryScope, title: string): Promise<void>
+}
+
+/** The permission rules kept for the person rather than any one workspace, honoured in every workspace that reaches the same ground. */
+export type PersonRulesPort = {
+  get(): { allow: string[]; deny: string[] }
+  set(kind: 'allow' | 'deny', rules: string[]): Promise<void>
 }
 
 /** The paired phones and the pairing in progress, closed over this workspace's own link to the forwarding service. */
@@ -133,20 +141,28 @@ export class SettingsStore {
     private readonly memory: MemoryPort,
     private readonly bundles: BundlePort,
     private readonly remoteControl: RemoteControlPort,
+    private readonly personRules: PersonRulesPort,
+    /** Where the machine keeps its own Claude Code; passed in so a test decides what is installed. */
+    private readonly findClaude: (configured: string) => string | undefined = installedClaude,
   ) {}
 
   async snapshot(): Promise<SettingsSnapshot> {
     const { providers, profiles, activeProfile } = this.models()
     const names = providers.map((p) => p.name)
+    const claudeCode = this.findClaude(this.config.get('claudeCodePath', ''))
+    const upgrade = this.pendingModelUpgrade(claudeCode, providers, profiles)
     return {
       providers,
       profiles,
       activeProfile,
-      keys: await Promise.all(names.map(async (name) => ({ name, stored: await this.secrets.has(name) }))),
+      keys: await Promise.all(
+        [...names, SEARCH_PROVIDER_SECRET_NAME].map(async (name) => ({ name, stored: await this.secrets.has(name) })),
+      ),
       permissions: {
         allow: this.config.get<string[]>('permissions.allow', []),
         deny: this.config.get<string[]>('permissions.deny', []),
         denyGitWrites: this.config.get('permissions.denyGitWrites', false),
+        person: this.personRules.get(),
       },
       verify: this.config.get<VerifyRule[]>('verify', []),
       verifyFailureBudget: this.config.get('verifyFailureBudget', 3),
@@ -156,6 +172,8 @@ export class SettingsStore {
       memories: await this.memory.list(),
       bundles: await this.bundleSnapshot(),
       nodePath: this.config.get('nodePath', ''),
+      ...(claudeCode ? { installedClaude: claudeCode } : {}),
+      ...(upgrade ? { modelUpgrade: { provider: upgrade.provider.name, providerIsNew: upgrade.providerIsNew, moves: upgrade.moves } } : {}),
       traceEngine: this.config.get('traceEngine', false),
       compactAtTokens: this.config.get('compactAtTokens', DEFAULT_COMPACT_AT_TOKENS),
       hasWorkspace: this.config.hasWorkspace(),
@@ -177,6 +195,11 @@ export class SettingsStore {
     const target = TARGETS[key]
     if (target === 'workspace' && !this.config.hasWorkspace()) throw new Error(`"${key}" is a workspace setting; open a folder to change it.`)
     await this.config.update(key, cleaned(value), target)
+  }
+
+  /** Kept for the person rather than this workspace, so it is honoured wherever they next reach the same ground. */
+  async savePersonRules(kind: 'allow' | 'deny', rules: string[]): Promise<void> {
+    await this.personRules.set(kind, cleaned(rules))
   }
 
   /** Saves the provider at `index`, or adds it at the end; a rename follows into the profiles that chose it and carries its stored key along. */
@@ -248,6 +271,35 @@ export class SettingsStore {
 
   async removeBundle(scope: BundleScope, source: string, name: string): Promise<void> {
     await this.bundles.remove(scope, source, name)
+  }
+
+  /**
+   * The newer models waiting to be offered: only where this machine has a
+   * Claude Code to run them, the person has not turned the offer down, and
+   * some profile still runs a model the bundled engine has outlived.
+   */
+  private pendingModelUpgrade(claudeCode: string | undefined, providers: Provider[], profiles: Profile[]): ReturnType<typeof modelUpgrade> {
+    if (claudeCode === undefined || this.config.get('modelUpgradeDismissed', false)) return undefined
+    return modelUpgrade(providers, profiles)
+  }
+
+  /**
+   * Takes the upgrade: saves the provider on the installed engine, then points
+   * every profile that ran a superseded model at it. The provider goes first,
+   * since a profile naming one that settings do not hold is refused.
+   */
+  async upgradeModels(): Promise<void> {
+    const { providers, profiles } = this.models()
+    const upgrade = modelUpgrade(providers, profiles)
+    if (!upgrade) return
+    const at = providers.findIndex((p) => p.name === upgrade.provider.name)
+    await this.saveProvider(at === -1 ? providers.length : at, upgrade.provider)
+    for (const { index, profile } of upgrade.profiles) await this.saveProfile(index, profile)
+  }
+
+  /** Turns the newer-models offer down for good; the models are the person's own settings, so the answer is theirs too, not this workspace's. */
+  async dismissModelUpgrade(): Promise<void> {
+    await this.config.update('modelUpgradeDismissed', true, 'user')
   }
 
   /** Ends the one-time suggestion for this workspace; a workspace setting so it is remembered per workspace, not per person. */
@@ -332,7 +384,7 @@ function validProvider(provider: Provider): Provider {
   // A limit for a model the provider no longer lists, or one that is no size, would only linger unseen.
   const limits = Object.entries(provider.compactAtTokens ?? {}).filter(([model, tokens]) => models.includes(model) && Number.isInteger(tokens) && tokens >= 0)
   const base: Provider = { name, engine: provider.engine, models, ...(limits.length > 0 ? { compactAtTokens: Object.fromEntries(limits) } : {}) }
-  if (provider.engine === 'claude-sdk') return base
+  if (isClaudeEngine(provider.engine)) return base
   const baseUrl = provider.baseUrl?.trim()
   if (!baseUrl) throw new Error(`Provider "${name}" needs a base URL.`)
   return { ...base, baseUrl, ...(provider.reasoningControl ? { reasoningControl: provider.reasoningControl } : {}) }

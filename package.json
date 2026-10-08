@@ -211,6 +211,27 @@
           "default": [],
           "description": "Workspace-relative globs a Plan session must not read, carved out of docs/**, the root README and specs/*.spec.md. Example: docs/api/**."
         },
+        "kiwiAgent.specFolders": {
+          "type": "string",
+          "enum": [
+            "default",
+            "by-domain",
+            "flat"
+          ],
+          "enumDescriptions": [
+            "Follows the workspace: a new spec gets a proposed domain folder once the workspace already has one, and stays at the root of specs/ while none does.",
+            "A planning session always proposes a domain folder for a new spec, read from the feature's description.",
+            "A new spec is always written straight to the root of specs/; no folder is proposed."
+          ],
+          "default": "default",
+          "description": "Whether a new feature's spec lands in a domain folder under specs/, proposed with the planning session's direction (or with the docs cleanup job's draft list) for the person to keep or change."
+        },
+        "kiwiAgent.startBuildOnApproval": {
+          "type": "boolean",
+          "default": true,
+          "scope": "resource",
+          "description": "When a spec is approved and the check against the code comes back clean, the build starts by itself. Off: the feature is checked and mapped and then waits for Implement, so several features can be taken to build-ready while one is built at a time. The toggle beside Approve on the plan bar writes this."
+        },
         "kiwiAgent.cutCoveredDocs": {
           "type": "boolean",
           "default": false,
@@ -272,6 +293,16 @@
           "type": "boolean",
           "default": false,
           "description": "Log every message from the Claude engine (one line each) to the Kiwipow Agent output channel. Applies to sessions started after the change."
+        },
+        "kiwiAgent.modelUpgradeDismissed": {
+          "type": "boolean",
+          "default": false,
+          "description": "Set when you turn down the offer of newer Claude models, so it is not put to you again. Clear it to be offered them once more."
+        },
+        "kiwiAgent.claudeCodePath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the Claude Code that a provider on the installed-Claude engine runs. Empty: whichever is on PATH, else the one the native installer puts in your home folder. A path that names nothing leaves that engine unavailable rather than falling back to another install."
         },
         "kiwiAgent.nodePath": {
           "type": "string",
@@ -412,8 +443,6 @@
               "name": "Claude",
               "engine": "claude-sdk",
               "models": [
-                "claude-opus-5-5[1m]",
-                "claude-sonnet-5-5[1m]",
                 "claude-opus-5[1m]",
                 "claude-sonnet-5[1m]"
               ]
@@ -434,6 +463,7 @@
                 "type": "string",
                 "enum": [
                   "claude-sdk",
+                  "claude-installed",
                   "openai-compatible"
                 ]
               },
@@ -473,14 +503,14 @@
               "name": "Claude",
               "default": {
                 "provider": "Claude",
-                "model": "claude-opus-5-5[1m]"
+                "model": "claude-opus-5[1m]"
               }
             },
             {
               "name": "Claude Sonnet",
               "default": {
                 "provider": "Claude",
-                "model": "claude-sonnet-5-5[1m]"
+                "model": "claude-sonnet-5[1m]"
               }
             }
           ],

@@ -2,15 +2,15 @@ import { describe, expect, it } from 'vitest'
 import { migrateModelSettings, needsMigration, type LegacyProfile } from '../src/settings/model-settings'
 import { resolveStep } from '../src/agent/session/model-profile'
 
-const opus: LegacyProfile = { name: 'Claude', engine: 'claude-sdk', model: 'claude-opus-5' }
-const sonnet: LegacyProfile = { name: 'Claude Sonnet', engine: 'claude-sdk', model: 'claude-sonnet-5' }
+const opus: LegacyProfile = { name: 'Claude', engine: 'claude-sdk', model: 'claude-opus-5-5' }
+const sonnet: LegacyProfile = { name: 'Claude Sonnet', engine: 'claude-sdk', model: 'claude-sonnet-5-5' }
 const kimi: LegacyProfile = { name: 'Kimi', engine: 'openai-compatible', model: 'moonshotai/Kimi-K3', baseUrl: 'https://api.berget.ai/v1', apiKeySecret: 'berget' }
 
 describe('migrating the one-model-per-profile settings', () => {
   it('profiles_sharing_an_endpoint_become_one_provider_holding_both_models', () => {
     const { providers } = migrateModelSettings([opus, sonnet, kimi], 'Claude Sonnet', '')
     expect(providers).toEqual([
-      { name: 'Claude', engine: 'claude-sdk', models: ['claude-opus-5', 'claude-sonnet-5'] },
+      { name: 'Claude', engine: 'claude-sdk', models: ['claude-opus-5-5', 'claude-sonnet-5-5'] },
       { name: 'berget', engine: 'openai-compatible', baseUrl: 'https://api.berget.ai/v1', models: ['moonshotai/Kimi-K3'] },
     ])
   })
@@ -26,14 +26,14 @@ describe('migrating the one-model-per-profile settings', () => {
     const { providers, profiles } = migrateModelSettings([sonnet, opus], 'Claude Sonnet', 'Claude')
     const active = profiles.find((p) => p.name === 'Claude Sonnet')!
     expect(Object.keys(active.steps ?? {}).sort()).toEqual(['code-plan', 'doc-migration', 'file-decisions', 'plan', 'reconcile'])
-    expect(resolveStep(active, providers, 'plan').model).toBe('claude-opus-5')
-    expect(resolveStep(active, providers, 'implement').model).toBe('claude-sonnet-5')
+    expect(resolveStep(active, providers, 'plan').model).toBe('claude-opus-5-5')
+    expect(resolveStep(active, providers, 'implement').model).toBe('claude-sonnet-5-5')
   })
 
   it('no_plan_model_leaves_every_step_on_the_one_model_that_was_configured', () => {
     const { providers, profiles } = migrateModelSettings([opus], 'Claude', '')
     expect(profiles[0]!.steps).toBeUndefined()
-    expect(resolveStep(profiles[0]!, providers, 'plan').model).toBe('claude-opus-5')
+    expect(resolveStep(profiles[0]!, providers, 'plan').model).toBe('claude-opus-5-5')
   })
 
   it('effort_and_the_prompt_file_follow_the_model_they_were_set_for', () => {

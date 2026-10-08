@@ -27,6 +27,35 @@ const updateChoice = (u: UpdatableSpec) => {
   return { feature: u.feature, disabled: !pickable, label: pickable ? `${u.feature} (${u.status})` : `${u.feature} (${u.status}) — waiting: ${u.waiting}` }
 }
 
+/** One folder's specs, in the Update spec picker: an `<optgroup>` of its own, named after it. */
+type UpdateGroup = { folder: string; items: ReturnType<typeof updateChoice>[] }
+
+/**
+ * `folder`-carrying items, root first as they always sorted, then one
+ * `<optgroup>` per folder: the folder groups specs, so the ones it holds sit
+ * together, named by their feature same as any other.
+ */
+function groupUpdates(updates: UpdatableSpec[]): { rootUpdates: ReturnType<typeof updateChoice>[]; updateGroups: UpdateGroup[] } {
+  const rootUpdates = updates.filter((u) => !u.folder).map(updateChoice)
+  const byFolder = new Map<string, UpdatableSpec[]>()
+  for (const u of updates) if (u.folder) byFolder.set(u.folder, [...(byFolder.get(u.folder) ?? []), u])
+  const groups = [...byFolder.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([folder, items]) => ({ folder, items: items.map(updateChoice) }))
+  return { rootUpdates, updateGroups: groups }
+}
+
+/**
+ * The pick-up list's plans, root first as they always sorted, then grouped by
+ * folder: a `heading` on the group's first item names the folder it opens,
+ * the same flat list of buttons otherwise so picking one is unchanged.
+ */
+function withFolderHeadings<T extends { folder?: string }>(items: T[]): (T & { heading?: string })[] {
+  const root = items.filter((i) => !i.folder)
+  const byFolder = new Map<string, T[]>()
+  for (const item of items) if (item.folder) byFolder.set(item.folder, [...(byFolder.get(item.folder) ?? []), item])
+  const grouped = [...byFolder.entries()].sort(([a], [b]) => a.localeCompare(b))
+  return [...root, ...grouped.flatMap(([folder, group]) => group.map((item, i) => ({ ...item, ...(i === 0 ? { heading: folder } : {}) })))]
+}
+
 const STATUS_HINT: Record<NonNullable<ResumablePlan['status']>, string> = {
   draft: 'draft: review, check or approve',
   approved: 'approved: ready to implement',
@@ -107,9 +136,9 @@ function renderData(screen: Screen, mode: Card, profileDefaults: ProfileDefaults
     unfiled,
     nothingUnfiled: unfiled === 0,
     filingHint: unfiled > 0 ? `${unfiled} decided, not yet in the specs or docs` : 'Nothing waiting to be filed',
-    plans: plans.map((p) => ({ ...p, stage: p.status ?? 'unwritten', hint: planHint(p) })),
+    plans: withFolderHeadings(plans).map((p) => ({ ...p, stage: p.status ?? 'unwritten', hint: planHint(p) })),
     chats: chats.map(chatPick),
-    updates: updates.map(updateChoice),
+    ...groupUpdates(updates),
     noUpdates: updates.length === 0,
     onCode: screen === 'code',
     onMaintenance: screen === 'maintenance',
@@ -232,7 +261,10 @@ export class NewSessionView extends HTMLElement {
       <label>Which spec?
         <select name="feature" required r-change="edit('feature', event)">
           <option value="" disabled selected hidden>Pick a spec</option>
-          <option loop="u in updates" value="{{u.feature}}" disabled="{{u.disabled}}">{{u.label}}</option>
+          <option loop="u in rootUpdates" value="{{u.feature}}" disabled="{{u.disabled}}">{{u.label}}</option>
+          <optgroup loop="g in updateGroups" label="{{g.folder}}">
+            <option loop="u in g.items" value="{{u.feature}}" disabled="{{u.disabled}}">{{u.label}}</option>
+          </optgroup>
         </select>
       </label>
       <label>What should change, and why?
@@ -256,6 +288,7 @@ export class NewSessionView extends HTMLElement {
       <h3>Pick up where you left off</h3>
       <ul class="picks">
         <li loop="p in plans">
+          <h4 class="folder-heading" if="p.heading">{{p.heading}}</h4>
           <button type="button" class="pick plan {{p.stage}}" r-click="resume(p)">
             <span class="icon">📐</span>
             <span class="what"><strong>{{p.feature}}</strong><span class="hint">{{p.hint}}</span></span>

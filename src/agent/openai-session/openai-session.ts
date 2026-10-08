@@ -1,7 +1,7 @@
 import { permissionResolved, type CodeSession, type FileEditChange, type McpControl, type PermissionDecision, type SessionEvent, type TurnUsage } from '../session/code-session'
 import type { QuestionOutcome, UserQuestionRequest } from '../session/user-question'
 import type { SessionHooks, ToolUse } from '../session/hooks'
-import { confirmReason, denyReason, gateCall, reviewEdits } from '../permissions/gate'
+import { confirmReason, denyReason, gateCall, noteCall, reviewEdits, type AskPermission, type PermissionAsker } from '../permissions/gate'
 import type { ModelProfile } from '../session/model-profile'
 import { AsyncQueue } from '../session/async-queue'
 import type { McpServers } from '../mcp/mcp-config'
@@ -37,6 +37,8 @@ export type OpenAiSessionOptions = {
   /** The conversation this session carries on: the id it reports as its engine session, and the messages so far. */
   resume?: { engineSessionId: string; history: ChatMessage[] }
   hooks?: SessionHooks
+  /** Asks the user as this session's own prompt would; a delegated run takes the caller's own instead of a prompt nobody could answer. */
+  ask?: PermissionAsker
   /** Tool rounds per user turn before the engine gives up; a runaway loop costs money. */
   maxRoundsPerTurn?: number
   /** Tokens this model's context holds; a model nobody configured is treated as 128k. */
@@ -230,8 +232,15 @@ export class OpenAiSession implements CodeSession {
         if (assistant.toolCalls.length === 0) return this.finishTurn(usage, started, false, [])
         for (const call of assistant.toolCalls) {
           if (signal.aborted) throw new InterruptedError()
-          const result = await this.runTool(call, signal)
-          this.emit({ type: 'tool_result', toolUseId: call.id, text: result.text, isError: result.isError, ...(result.context ? { context: result.context } : {}) })
+          const result = await this.runTool(call, signal, usage)
+          this.emit({
+            type: 'tool_result',
+            toolUseId: call.id,
+            text: result.text,
+            isError: result.isError,
+            ...(result.context ? { context: result.context } : {}),
+            ...(result.subAgent ? { subAgent: result.subAgent } : {}),
+          })
           this.messages.push({ role: 'tool', toolCallId: call.id, content: modelText(result) })
         }
         if (signal.aborted) throw new InterruptedError()
@@ -372,7 +381,7 @@ export class OpenAiSession implements CodeSession {
     return summary
   }
 
-  private async runTool(call: ToolCall, signal: AbortSignal): Promise<ToolOutput> {
+  private async runTool(call: ToolCall, signal: AbortSignal, usage: TurnUsage): Promise<ToolOutput> {
     const tool = this.tools.find((t) => t.name === call.name)
     if (!tool) return { text: `Unknown tool: ${call.name}`, isError: true }
     const raw = parseArguments(call.arguments)
@@ -388,7 +397,7 @@ export class OpenAiSession implements CodeSession {
     const pre = gate.pre
     let output: ToolOutput
     try {
-      output = await tool.execute(parsed.data, this.contextFor(call.id, signal))
+      output = await tool.execute(parsed.data, this.contextFor(call.id, signal, usage))
     } catch (error) {
       output = { text: `${tool.name} failed: ${errorMessage(error)}`, isError: true }
     }
@@ -400,11 +409,14 @@ export class OpenAiSession implements CodeSession {
 
   /** The permission decision every call passes, whether the model or a running script makes it. */
   private gate(tool: Tool, use: ToolUse, signal: AbortSignal) {
-    return gateCall(this.options.hooks, (id, name, input, shown) => this.askPermission(id, name, input, signal, shown), tool, use)
+    const ask: AskPermission = this.options.ask
+      ? (_id, name, input, shown) => this.options.ask!(name, input, shown)
+      : (id, name, input, shown) => this.askPermission(id, name, input, signal, shown)
+    return gateCall(this.options.hooks, ask, tool, use)
   }
 
   /** What a tool gets to work with; a script's calls back into other tools take the same gate as the model's own. */
-  private contextFor(callId: string, signal: AbortSignal): ToolContext {
+  private contextFor(callId: string, signal: AbortSignal, usage: TurnUsage): ToolContext {
     let nested = 0
     const nextId = () => `${callId}/${++nested}`
     return {
@@ -413,7 +425,7 @@ export class OpenAiSession implements CodeSession {
       files: this.files,
       ledger: this.ledger,
       ask: (request) => this.askUser(callId, request),
-      call: async (name, input) => folded(await this.runTool({ id: nextId(), name, arguments: JSON.stringify(input) }, signal)),
+      call: async (name, input) => folded(await this.runTool({ id: nextId(), name, arguments: JSON.stringify(input) }, signal, usage)),
       authorize: (name, input) => denyReason(this.options.hooks, { toolName: name, input, toolUseId: nextId() }),
       confirm: (name, input) =>
         confirmReason(this.options.hooks, (id, n, v, shown) => this.askPermission(id, n, v, signal, shown), { toolName: name, input, toolUseId: nextId() }),
@@ -424,6 +436,17 @@ export class OpenAiSession implements CodeSession {
           { toolName: 'RunScript', input: { files: edits.map((e) => e.label) }, toolUseId: nextId() },
           { title, edits },
         ),
+      observed: (name, input) => noteCall(this.options.hooks, { toolName: name, input, toolUseId: nextId() }),
+      askPermission: (toolName, input, shown) => this.askPermission(nextId(), toolName, input, signal, shown),
+      // A delegated run's spend is the caller's own, so it folds into this turn's total rather than one of its own.
+      addUsage: (added) => {
+        usage.inputTokens += added.inputTokens
+        usage.outputTokens += added.outputTokens
+        usage.cacheReadTokens += added.cacheReadTokens
+        usage.cacheWriteTokens += added.cacheWriteTokens
+        if (added.costUsd) usage.costUsd = (usage.costUsd ?? 0) + added.costUsd
+      },
+      report: (event) => this.emit({ ...event, parentToolUseId: callId } as SessionEvent),
     }
   }
 

@@ -262,6 +262,25 @@ export function provenBy(tasks: Task[], item: string): Proof | undefined {
   return liveTasks(tasks).flatMap((t) => t.proves).find((p) => sameName(p.item, item))
 }
 
+/**
+ * The live rules of a spec the board has not built as they now read: none of
+ * its tasks delivers them, or the task that does was derived from different
+ * wording. A rule whose task predates the wording snapshot counts as built,
+ * as the board's own derivation reads it.
+ */
+export function rulesNotBuilt(spec: Spec, tasks: Task[]): string[] {
+  return spec.scenarios
+    .flatMap((s) => s.behaviours.flatMap((b) => [b, ...b.edges]))
+    .filter((rule) => !rule.removed)
+    .filter((rule) => {
+      const task = deliveredBy(tasks, rule.name)
+      if (!task) return true
+      const known = task.rulesText && textOf(task.rulesText, rule.name)
+      return known !== undefined && known !== rule.text
+    })
+    .map((rule) => rule.name)
+}
+
 /** Rules a task marked tested without naming a test for: a finish the evidence does not back. */
 export function unprovenItems(tasks: Task[]): string[] {
   return liveTasks(tasks)

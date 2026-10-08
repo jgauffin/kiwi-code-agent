@@ -59,6 +59,21 @@ describe('PlanBar next step', () => {
     expect(next(bar(plan({ approvable: true, atWork: false })))!.classList.contains('busy')).toBe(false)
   })
 
+  it('whether_approving_goes_on_to_build_is_a_toggle_beside_approve_and_nowhere_else', () => {
+    const node = bar(plan({ approvable: true, startBuildOnApproval: false }))
+    const box = node.querySelector<HTMLInputElement>('.build-start input')!
+    expect(box.checked).toBe(false)
+    let on: boolean | undefined
+    node.addEventListener(events.BuildStartToggledEvent.type, (e) => (on = (e as InstanceType<typeof events.BuildStartToggledEvent>).on))
+    box.checked = true
+    box.dispatchEvent(new Event('change'))
+    expect(on).toBe(true)
+
+    expect(bar(plan({ approvable: true })).querySelector<HTMLInputElement>('.build-start input')!.checked).toBe(true)
+    // The act it qualifies is Approve: no other step carries it.
+    expect(bar(plan({ stage: 'under_development', status: 'approved', implementable: true })).querySelector('.build-start')).toBeNull()
+  })
+
   it('submit_review_and_send_rulings_are_bar_buttons', () => {
     const submit = bar(plan({ stage: 'under_review', review: { rounds: [{ number: 1, comments: [{ target: 'Cancel', text: 'no' }], strikes: [] }] } }))
     expect(next(submit)!.textContent).toBe('Submit review (1)')

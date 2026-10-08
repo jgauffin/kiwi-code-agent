@@ -1,7 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { ASK_USER_TOOL } from '../src/agent/openai-session/tools/ask-user'
-import { DOC_MIGRATION_TOOLS, docMigrationPrompt, docMigrationScope } from '../src/agent/phases/doc-migration'
+import { DOC_MIGRATION_TOOLS, docMigrationPrompt, docMigrationScope, specsWithWorkInFlight } from '../src/agent/phases/doc-migration'
 import { ScopeGuard } from '../src/agent/phases/scope-guard'
+import { board, task } from './task-board-fixture'
+import { renderBoard } from '../src/agent/phases/tasks-file'
 import { UNFILED_DECISIONS } from '../src/agent/phases/unfiled-decisions'
 
 const cwd = process.platform === 'win32' ? 'D:\\work\\repo' : '/work/repo'
@@ -57,7 +62,17 @@ describe('what a doc migration may touch', () => {
   })
 
   it('the_session_gets_the_tools_a_reader_and_a_confirmed_edit_need_and_no_others', () => {
-    expect(DOC_MIGRATION_TOOLS).toEqual(['Read', 'Glob', 'MarkdownSearch', 'SpecSearch', 'Write', 'Edit', 'MultiEdit', ASK_USER_TOOL])
+    expect(DOC_MIGRATION_TOOLS).toEqual(['Read', 'Glob', 'MarkdownSearch', 'SpecSearch', 'Write', 'Edit', 'MultiEdit', 'Move', ASK_USER_TOOL])
+  })
+
+  it('a_picked_move_is_allowed_outright_one_folder_deep_but_a_deeper_or_outside_move_is_not', async () => {
+    const domainGuard = new ScopeGuard(cwd, docMigrationScope([], 'by-domain'))
+    const domainUse = (toolName: string, input: unknown) => domainGuard.preToolUse({ toolName, input, toolUseId: 't' })
+    expect(await domainUse('Move', { source: 'specs/order-cancellation.spec.md', destination: 'specs/orders/order-cancellation.spec.md' })).toMatchObject({ allow: true })
+    expect(await domainUse('Move', { source: 'docs/intent/agent.md', destination: 'specs/orders/agent.spec.md' })).toMatchObject({ deny: expect.any(String) })
+    expect(await domainUse('Move', { source: 'specs/orders/order-cancellation.spec.md', destination: 'specs/orders/sub/order-cancellation.spec.md' })).toMatchObject({
+      deny: expect.any(String),
+    })
   })
 })
 
@@ -224,5 +239,125 @@ describe('migrating the remaining feature docs into specs', () => {
     expect(prompt).toContain('**Reviewed as any draft.**')
     expect(prompt).toContain('reviewed and approved in the plan view like any other spec')
     expect(prompt).toContain('you never set its status to `approved` yourself')
+  })
+})
+
+describe('a migrated draft lands its folder the same way as a planning session', () => {
+  it('flat_mode_proposes_no_folder_and_writes_straight_to_the_root', () => {
+    const prompt = docMigrationPrompt(cwd, 'flat')
+    expect(prompt).not.toContain('domain folder')
+    expect(prompt).toContain('write `specs/<slug>.spec.md` with Write')
+  })
+
+  it('by_domain_mode_proposes_a_folder_per_feature_reusing_what_the_workspace_already_has', () => {
+    const prompt = docMigrationPrompt(cwd, 'by-domain', ['orders'])
+    expect(prompt).toContain('propose the domain folder its spec would land in')
+    expect(prompt).toContain('`orders`')
+    expect(prompt).toContain('rather than coining a synonym of it')
+    expect(prompt).toContain('write `specs/<folder>/<slug>.spec.md` with Write')
+  })
+
+  it('by_domain_mode_writes_are_allowed_one_folder_deep_but_not_two', async () => {
+    const domainGuard = new ScopeGuard(cwd, docMigrationScope(['docs/api/**'], 'by-domain'))
+    const domainUse = (toolName: string, input: unknown) => domainGuard.preToolUse({ toolName, input, toolUseId: 't' })
+    expect(await domainUse('Write', { file_path: 'specs/orders/order-cancellation.spec.md' })).toMatchObject({ allow: true })
+    expect(await domainUse('Write', { file_path: 'specs/orders/sub/order-cancellation.spec.md' })).toMatchObject({ deny: expect.any(String) })
+  })
+})
+
+describe('organising the specs that already exist', () => {
+  it('nothing_moves_on_its_own_a_flat_workspace_is_never_offered_the_sort', () => {
+    const prompt = docMigrationPrompt(cwd, 'flat')
+    expect(prompt).not.toContain('sort the specs that already exist into domain folders')
+  })
+
+  it('offered_by_the_docs_cleanup_job_asked_on_its_own_apart_from_the_three_stages', () => {
+    const prompt = docMigrationPrompt(cwd, 'by-domain')
+    expect(prompt).toContain('Separately from the three stages above, and never as one of them, ask once at the start whether to sort the specs that already exist into domain folders')
+    expect(prompt).toContain('taking the offer or declining it leaves the three stages and their order untouched')
+    expect(prompt).toContain('you move on to stage one either way')
+  })
+
+  it('proposal_before_any_move_names_each_spec_and_the_folder_reusing_what_exists_and_moves_only_what_is_picked', () => {
+    const prompt = docMigrationPrompt(cwd, 'by-domain', ['orders'])
+    expect(prompt).toContain('**Proposal before any move.**')
+    expect(prompt).toContain('name every spec and the domain folder it would go to, reusing a folder the workspace already has (`orders`) rather than coining a synonym of it')
+    expect(prompt).toContain('Nothing moves until the person says which proposed moves to make; only those are made.')
+  })
+
+  it('already_in_a_folder_is_proposed_for_a_move_only_on_a_mismatch', () => {
+    const prompt = docMigrationPrompt(cwd, 'by-domain')
+    expect(prompt).toContain('**Already in a folder.**')
+    expect(prompt).toContain('proposed for a move only where its folder does not match the domain the others sorted into')
+    expect(prompt).toContain('one already in the right folder is left alone')
+  })
+
+  it('feature_with_work_in_flight_is_named_as_not_movable_with_what_it_waits_for', () => {
+    const prompt = docMigrationPrompt(cwd, 'by-domain', [], [{ feature: 'Order cancellation', path: 'specs/order-cancellation.spec.md', waiting: 'a review in flight' }])
+    expect(prompt).toContain('**Feature with work in flight.**')
+    expect(prompt).toContain('a review in flight, a decision to rule or an unfinished board is listed as not movable now, saying what it waits for')
+    expect(prompt).toContain('"Order cancellation" (specs/order-cancellation.spec.md), waiting on a review in flight')
+  })
+
+  it('a_move_keeps_the_feature_moved_with_move_never_write_or_edit', () => {
+    const prompt = docMigrationPrompt(cwd, 'by-domain')
+    expect(prompt).toContain('**A move keeps the feature.**')
+    expect(prompt).toContain('Make a picked move with `Move`, never `Write` or `Edit`')
+    expect(prompt).toContain('its name, status, rules and their names, and its review and board are unchanged by the move')
+  })
+
+  it('citations_follow_the_move_found_with_spec_search_and_rewritten_in_the_same_change', () => {
+    const prompt = docMigrationPrompt(cwd, 'by-domain')
+    expect(prompt).toContain('**Citations follow the move.**')
+    expect(prompt).toContain('search with SpecSearch for every citation of its path and rewrite each to the new path with Edit, as part of the same change')
+  })
+})
+
+describe('specs with work in flight are found for the sorting offer', () => {
+  let dir: string
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  async function workspace(files: Record<string, string>): Promise<string> {
+    dir = await mkdtemp(join(tmpdir(), 'doc-migration-'))
+    for (const [path, text] of Object.entries(files)) {
+      const file = join(dir, path)
+      await mkdir(dirname(file), { recursive: true })
+      await writeFile(file, text)
+    }
+    return dir
+  }
+
+  it('a_draft_with_an_open_comment_waits_on_a_review_in_flight', async () => {
+    await workspace({
+      'specs/order-cancellation.spec.md': '---\nfeature: Order cancellation\nstatus: draft\n---\n# Order cancellation\n\n## Cancelling\n- **Cancel command**: an order can be cancelled\n',
+      '.kiwi/specs/order-cancellation.review.md': '# Review\n\n## Round 1, pending\n- on Cancel command: too vague\n',
+    })
+    expect(await specsWithWorkInFlight(dir)).toEqual([{ feature: 'Order cancellation', path: 'specs/order-cancellation.spec.md', waiting: 'a review in flight' }])
+  })
+
+  it('an_approved_spec_with_a_pending_decision_waits_on_a_decision_to_rule', async () => {
+    await workspace({
+      'specs/order-cancellation.spec.md': '---\nfeature: Order cancellation\nstatus: approved\n---\n# Order cancellation\n\n## Cancelling\n- **Cancel command**: an order can be cancelled\n',
+      '.kiwi/specs/order-cancellation.decisions.md': '# Decisions\n\n### Cancel timing\n- on: Cancel command\n- finding: the code waits before cancelling\n',
+    })
+    expect(await specsWithWorkInFlight(dir)).toEqual([{ feature: 'Order cancellation', path: 'specs/order-cancellation.spec.md', waiting: 'a decision to rule' }])
+  })
+
+  it('an_approved_spec_with_an_unfinished_task_waits_on_an_unfinished_board', async () => {
+    await workspace({
+      'specs/order-cancellation.spec.md': '---\nfeature: Order cancellation\nstatus: approved\n---\n# Order cancellation\n\n## Cancelling\n- **Cancel command**: an order can be cancelled\n',
+      '.kiwi/specs/order-cancellation.tasks.json': renderBoard(board(task('Cancel command'))),
+    })
+    expect(await specsWithWorkInFlight(dir)).toEqual([{ feature: 'Order cancellation', path: 'specs/order-cancellation.spec.md', waiting: 'an unfinished board' }])
+  })
+
+  it('a_spec_in_a_folder_with_nothing_in_flight_is_left_out', async () => {
+    await workspace({
+      'specs/orders/order-cancellation.spec.md': '---\nfeature: Order cancellation\nstatus: approved\n---\n# Order cancellation\n\n## Cancelling\n- **Cancel command**: an order can be cancelled\n',
+    })
+    expect(await specsWithWorkInFlight(dir)).toEqual([])
   })
 })

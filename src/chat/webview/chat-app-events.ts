@@ -6,6 +6,7 @@ import type { Step } from './plan-step'
 import {
   AgentsMdAnsweredEvent,
   AllowWritesToggledEvent,
+  BuildStartToggledEvent,
   ChangeRequestedEvent,
   ChatTargetChangedEvent,
   CleanupDecidedEvent,
@@ -60,6 +61,7 @@ function runOf(target: EventTarget | null): string | undefined {
 /** Turns the chat UI's own events into messages for the host; the few that need the app's state go through `actions`. */
 export function wireChatEvents(el: HTMLElement, actions: ChatAppActions): void {
   el.addEventListener(SpecApprovedEvent.type, () => post({ type: 'approve_spec' }))
+  el.addEventListener(BuildStartToggledEvent.type, (e) => post({ type: 'set_start_build', on: e.on }))
   el.addEventListener(RulingsSentEvent.type, () => post({ type: 'send_rulings' }))
   el.addEventListener(ReviewSubmittedEvent.type, () => post({ type: 'submit_review' }))
   el.addEventListener(ReviewActionEvent.type, (e) => post(e.action))

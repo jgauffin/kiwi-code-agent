@@ -1,6 +1,7 @@
+import type { Dirent } from 'node:fs'
 import { readdir, readFile } from 'node:fs/promises'
-import { join } from 'node:path'
-import { SPECS_DIR, WORK_DIR, featureSlug, specPath } from './blind-plan'
+import { basename, join } from 'node:path'
+import { SPECS_DIR, WORK_DIR, featureSlug } from './blind-plan'
 import { draftStage, type PlanStage } from './plan-stage'
 import { readReview, reviewPath } from './plan-review'
 import { authorshipOf, bodyOf, builtOf, statusOf } from './spec-file'
@@ -18,30 +19,52 @@ export type ReviewProgress = Extract<PlanStage, 'created' | 'under_review' | 'fi
  * came to be and how far its review got; they mean nothing once a spec is
  * settled, so they are left out past `draft`.
  */
-export type PlanSummary = { feature: string; path: string; status: PlanStatus; authored?: Authorship; review?: ReviewProgress }
+export type PlanSummary = { feature: string; path: string; status: PlanStatus; authored?: Authorship; review?: ReviewProgress; folder?: string }
 
 const SPEC_SUFFIX = '.spec.md'
 
-/** Every spec in the plan directory, by file name; the slug stands in when the front matter names no feature. */
+/**
+ * Every spec file under the plan directory, any depth: a person may file one
+ * deeper than the single domain folder a session ever proposes, and it is
+ * still found. `rel` orders them so a folder lists in the same place its
+ * files would sort at the root, and root-only files keep the order
+ * `listPlans` always gave. `folder` is the first path segment under `specs/`,
+ * absent for a spec at the root.
+ */
+export async function specFiles(dir: string): Promise<{ slug: string; path: string; folder?: string }[]> {
+  const files: { slug: string; path: string; folder?: string; rel: string }[] = []
+  async function walk(current: string, relDir: string): Promise<void> {
+    let entries: Dirent[]
+    try {
+      entries = await readdir(current, { withFileTypes: true })
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+      throw error
+    }
+    for (const entry of entries) {
+      const rel = relDir ? `${relDir}/${entry.name}` : entry.name
+      if (entry.isFile() && entry.name.endsWith(SPEC_SUFFIX)) {
+        files.push({ slug: entry.name.slice(0, -SPEC_SUFFIX.length), path: join(current, entry.name), ...(relDir ? { folder: relDir } : {}), rel })
+      } else if (entry.isDirectory()) {
+        await walk(join(current, entry.name), rel)
+      }
+    }
+  }
+  await walk(dir, '')
+  return files.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0)).map(({ slug, path, folder }) => ({ slug, path, ...(folder ? { folder } : {}) }))
+}
+
+/** Every spec in the plan directory, at the root or any folder beneath it; the slug stands in when the front matter names no feature. */
 export async function listPlans(cwd: string): Promise<PlanSummary[]> {
   const dir = join(cwd, SPECS_DIR)
-  let names: string[]
-  try {
-    names = await readdir(dir)
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
-    throw error
-  }
   const plans: PlanSummary[] = []
-  for (const name of names.filter((n) => n.endsWith(SPEC_SUFFIX)).sort()) {
-    const path = join(dir, name)
-    const slug = name.slice(0, -SPEC_SUFFIX.length)
+  for (const { slug, path, folder } of await specFiles(dir)) {
     const text = await readFile(path, 'utf8')
     const rawStatus = statusOf(text)
     const tasks = await readTasks(join(cwd, WORK_DIR, `${slug}${TASKS_SUFFIX}`))
     const status = finished(rawStatus, tasks) ? 'verified' : rawStatus
     const draft = status === 'draft' ? { authored: authorshipOf(text), review: await reviewProgress(cwd, slug, text) } : {}
-    plans.push({ feature: featureOf(text) ?? slug, path, status, ...draft })
+    plans.push({ feature: featureOf(text) ?? slug, path, status, ...(folder ? { folder } : {}), ...draft })
   }
   return plans
 }
@@ -62,15 +85,18 @@ export async function takenFeatureNames(cwd: string, planned: string[]): Promise
 }
 
 /**
- * The feature already answering to a name, matched by the spec file the name
- * resolves to rather than by its spelling. `planned` are the names feature
- * planning sessions hold, which covers one that has yet to write its spec.
+ * The feature already answering to a name, matched by the slug the name
+ * resolves to rather than by its spelling or by where its spec sits: a spec
+ * in a domain folder answers to its name exactly as a root one does, since
+ * the folder groups specs and never identifies the feature. `planned` are
+ * the names feature planning sessions hold, which covers one that has yet to
+ * write its spec.
  */
 export async function featureAlreadyNamed(cwd: string, feature: string, planned: string[]): Promise<string | undefined> {
-  const path = specPath(cwd, feature)
-  const spec = (await listPlans(cwd)).find((p) => p.path === path)
+  const slug = featureSlug(feature)
+  const spec = (await listPlans(cwd)).find((p) => basename(p.path).slice(0, -SPEC_SUFFIX.length) === slug)
   if (spec) return spec.feature
-  return planned.find((name) => specPath(cwd, name) === path)
+  return planned.find((name) => featureSlug(name) === slug)
 }
 
 /** How far a draft's review has got, read from its review file (none yet counts as never reviewed). */
@@ -90,7 +116,8 @@ export async function listDraftPlans(cwd: string): Promise<PlanSummary[]> {
   return (await listPlans(cwd)).filter((p) => p.status === 'draft')
 }
 
-function featureOf(text: string): string | undefined {
+/** The feature name a spec's front matter carries, read straight off its raw text. */
+export function featureOf(text: string): string | undefined {
   const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)
   const line = match?.[1]?.split(/\r?\n/).find((l) => /^feature:/.test(l))
   const value = line?.slice('feature:'.length).trim()

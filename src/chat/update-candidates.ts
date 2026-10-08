@@ -26,7 +26,7 @@ export async function updatableSpecs(workspaceRoot: string, sessions: UpdateCand
   const result: UpdatableSpec[] = []
   for (const spec of specs) {
     if (spec.status === 'draft') {
-      result.push({ feature: spec.feature, status: spec.status })
+      result.push({ feature: spec.feature, status: spec.status, ...(spec.folder ? { folder: spec.folder } : {}) })
       continue
     }
     const state = await readSpecState(spec.path)
@@ -35,7 +35,13 @@ export async function updatableSpecs(workspaceRoot: string, sessions: UpdateCand
     const atWork = sessions.list().some((r) => r.feature === spec.feature && sessions.isLive(r.id))
     const settled = isChangeable(state, tasks, decisions)
     const changeable = settled && !atWork
-    result.push({ feature: spec.feature, status: spec.status, changeable, ...(changeable ? {} : { waiting: settled ? 'a run at work' : waitingFor(tasks, decisions) }) })
+    result.push({
+      feature: spec.feature,
+      status: spec.status,
+      changeable,
+      ...(spec.folder ? { folder: spec.folder } : {}),
+      ...(changeable ? {} : { waiting: settled ? 'a run at work' : waitingFor(tasks, decisions) }),
+    })
   }
   return result
 }

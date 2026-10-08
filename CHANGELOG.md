@@ -2,16 +2,40 @@
 
 ## 0.2.8
 
-- Opus 5.5 and Sonnet 5.5 are in the Claude provider's model list and are what the two built-in profiles run on; Opus 5 and Sonnet 5 stay there to pick.
+- A folder you allowed for writing can now also be read unasked, and a folder you denied for reading or for changing into refuses reads and writes below it, in shell commands and file tools alike.
+- Every permission prompt now offers "Allow" for this call alone beside any remembered-rule button, pre-selected so a plain Allow or Enter settles it without picking a scope. A copy or move command lists what it reads from and what it writes to, and marks whichever one is why it is asking.
+- A rule about a folder or a file outside every one of your repositories (a `cd` into it, or a shell command that writes to it) can now be kept for you rather than for one workspace, so granting it once covers every project that reaches the same ground. The Permissions settings page has a new "For you, in every workspace" section listing what you have kept, in a file of your own (`~/.kiwi/permissions.json`); a write there is always asked, the way a write to a workspace's own settings already is.
+- A provider can now run the Claude Code installed on your own machine instead of the one bundled with the extension, which is how you reach a model the bundled engine refuses: Opus 5.5 and Sonnet 5.5 need a Claude Code newer than it. Pick *Claude (the Claude Code installed on this machine)* as a provider's engine and list the models that install serves. It is offered once a Claude Code is found on PATH, in your home folder, or at the path you name in `kiwiAgent.claudeCodePath`, and it runs on the same Claude login, tools, skills and permissions as the bundled engine.
+- Where that install can run newer models than your profiles do, the newer ones are offered: once as a notification, and on the Models settings page until you take it or turn it down. Taking it adds the provider on that install and points your profiles at Opus 5.5 or Sonnet 5.5, leaving what you ran before configured so you can switch back.
+- A read or a write outside the project, by a shell command or a file tool, is now asked about as the directory it reaches and whether it reads there or writes there, with the full path shown and the choice of how far up to keep the answer. Commands are no longer offered as the thing to remember for such calls, and a path that depends on a variable or an earlier `cd` that may not have run is asked every time.
+- Sessions that write code or docs no longer cite specs in them: only a spec cites the docs, so a renamed or moved spec leaves no stale reference behind.
+- The agent no longer rewrites files from the shell (`sed -i`, `awk -i inplace`, or output written to a temporary file and moved back): it makes the change with Edit, or with RunScript when more than two lines change, so it reaches you as a diff and other sessions see it.
 - A copy button on each message in the conversation, on hover: it puts the message on the clipboard as the Markdown it was written in, not as the formatted text you see.
 - Reading outside the project is now asked for, the way writing already was: a session reads, lists and searches freely inside the project, and a file anywhere else — your keys, another workspace, the rest of the disk — needs your say-so once, by allowing that call or that folder.
+- Loading a skill, and reading the files it ships, no longer asks: a session reads its own instructions — skills, sub agent definitions, memory notes, your `AGENTS.md` — without a prompt wherever they are kept. Writing there still asks.
 - A command that only inspects is judged by where it reads: `cat ../other/.env`, `grep -rn secret /`, `git -C ../other log` and `cat < ../other/.env` all ask, while `echo`, `basename` and a `grep` pattern that merely looks like a path do not.
-- A command fed its arguments by `xargs` now asks, since the files it will touch are named nowhere on the line.
+- After `cd sub/folder &&`, the paths a command names are read from that folder, so `cd src && ls ../tests` no longer asks as if it left the project.
+- A `cd` outside the project asks about the directory, never `cd` itself: click a part of its path to choose how far up the grant reaches. `~` is your home folder, which is never offered; `cd -` and `$VAR` targets ask every time.
+- A command fed its arguments by `xargs` now asks, unless no argument could make it touch a file.
+- CodeOutline gives each file's length in lines, so a session sizes up the code without a `find | xargs wc -l` that would stop for a prompt.
+- Picking a built feature whose spec you have edited back to draft no longer just reopens its planning tab on the old conversation: the planner names the rules nothing on the task board builds yet, weighs whether they make sense, and plans them before writing anything.
 - Feature planning refuses a name another feature already holds, naming that feature and pointing you at picking it up or *Update spec*, instead of quietly starting a second planning session inside the first one's tab and over its spec.
 - The plan bar no longer offers *Continue implementing* in the moment between two tasks: while the build hands one task's run over to the next it keeps showing the board's progress, and the button comes back only when the build really has stopped on you.
 - *Suggest a name* on the Feature planning card: describe the feature and the model names it for you, clear of the names already taken. The name lands in the field as yours to keep or edit.
 - The Decisions tab's "waiting for the planner to propose" now pulses, so it reads as something still happening.
 - A reopened conversation no longer says "Waiting on model" when nothing is running.
+- Subagents running at the same time no longer mix their text into each other's messages.
+- Each subagent's messages and steps are tagged with the agent they came from.
+- A permission prompt raised inside a subagent now appears in that agent's step.
+- The activity row stays on the step the main thread waits on instead of flickering between subagents.
+- While Claude Code starts your MCP servers, the activity row says "Connecting the MCP servers" rather than an earlier start-up step.
+- A session on an OpenAI-compatible endpoint that may read the code can now delegate a self-contained task to a sub agent through a new `Delegate` tool: the built-in quote-only lookup, one defined under `.claude/agents` or `.kiwi/agents` (person or workspace, alongside skills), or one described in the call itself.
+- A toggle beside *Approve*, `kiwiAgent.startBuildOnApproval`: off, an approved feature is checked and mapped and then waits for *Implement*.
+- A task run is told which of its mapped files another hand changed since the check, with the line ranges.
+- A chat session checks what it coded against the specs and names the ones that need updating.
+- A script's `replace` no longer needs the agent to have read each file first, so sweeping a rename across many files costs one script instead of a read per file; the diff of what was written comes back to the agent to check. `write` and `edit` inside a script, whose text is the agent's own rather than the file's, still need the file read.
+- A delegation can set a budget (tool calls, tokens) and what it wants back; a sub agent that runs out of budget reports what it found so far instead of failing. The transcript shows a delegation as one row naming the task, its status and what it spent, expanding to the sub agent's own messages and tool calls. A sub agent's spend counts toward the session's own totals, and interrupting the session ends every delegation in flight. A defined sub agent can name its own model in its frontmatter; the built-in one runs on the active profile's own entry for it.
+- Feature planning can now research the open internet through a `research` sub agent: it searches and fetches, and answers in verbatim excerpts with where each came from rather than a summary. Approving the delegation approves the whole research, with no further prompt per page; an allow rule for `Delegate` lets a workspace skip that prompt too. A new "Search provider key" field under Advanced settings holds the Brave Search API key it searches with.
 
 ## 0.2.7
 

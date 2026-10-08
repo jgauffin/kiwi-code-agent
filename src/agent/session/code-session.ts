@@ -64,8 +64,19 @@ export type SessionEvent =
   /**
    * `edit` is set on a file edit that changed something: the diff the step made, as the chat shows it.
    * `context` is what the model reads after `text` and the chat never shows: hook context, a skill's body.
+   * `subAgent` is set on a delegation's own call: whether it answered in full or had to stop at its
+   * budget, and what it spent, for the row to show beside the task.
    */
-  | { type: 'tool_result'; toolUseId: string; text: string; isError: boolean; parentToolUseId?: string; edit?: FileEditChange; context?: string }
+  | {
+      type: 'tool_result'
+      toolUseId: string
+      text: string
+      isError: boolean
+      parentToolUseId?: string
+      edit?: FileEditChange
+      context?: string
+      subAgent?: { status: 'complete' | 'partial'; toolCalls: number; tokens: number }
+    }
   | {
       type: 'permission_request'
       requestId: string
@@ -111,6 +122,9 @@ export type SessionEvent =
   | { type: 'ended' }
   /** A paired phone's command, carried out through the same call a desk act would make; logged beside it so the record says where it came from. */
   | { type: 'remote_action'; note: string }
+
+/** An event that can come from inside a delegated run, nested in the transcript under the call that spawned it. */
+export type NestedEvent = Extract<SessionEvent, { parentToolUseId?: string }>
 
 /**
  * A coding session on one engine. Session-centric on purpose: the extension

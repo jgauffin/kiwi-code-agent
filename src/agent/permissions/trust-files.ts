@@ -18,3 +18,15 @@ const WORKSPACE_FILE = /^[^/]+\.code-workspace$/
 export function isTrustFile(relPath: string): boolean {
   return TRUST_FILES.has(relPath) || WORKSPACE_FILE.test(relPath)
 }
+
+/**
+ * Is this the file the person's own permission rules are kept in? It lies
+ * outside every project, so it is judged by its absolute path rather than
+ * one relative to a project root; a write to it is guarded the same way a
+ * write to the workspace's own settings already is.
+ */
+export function isPersonRulesFile(absolutePath: string, personRulesFile: string | undefined): boolean {
+  return personRulesFile !== undefined && forwardSlashes(absolutePath) === forwardSlashes(personRulesFile)
+}
+
+const forwardSlashes = (path: string): string => path.split('\\').join('/')

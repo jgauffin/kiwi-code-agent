@@ -44,6 +44,24 @@ describe('SdkEventMapper', () => {
     expect(events).toEqual([{ type: 'reply_usage', messageId: 'msg_2', outputTokens: 40, parentToolUseId: 'tu_agent' }])
   })
 
+  it('interleaved_threads_each_keep_the_message_id_their_own_stream_started', () => {
+    const mapper = new SdkEventMapper()
+    mapper.map(streamEvent({ type: 'message_start', message: { id: 'msg_main' } }))
+    mapper.map(streamEvent({ type: 'message_start', message: { id: 'msg_a' } }, 'tu_a'))
+    mapper.map(streamEvent({ type: 'message_start', message: { id: 'msg_b' } }, 'tu_b'))
+    const delta = (text: string, parent: string | null = null): SDKMessage =>
+      streamEvent({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } }, parent)
+    expect(mapper.map(delta('from a', 'tu_a'))).toEqual([
+      { type: 'assistant_text', messageId: 'msg_a', delta: 'from a', parentToolUseId: 'tu_a' },
+    ])
+    expect(mapper.map(delta('from b', 'tu_b'))).toEqual([
+      { type: 'assistant_text', messageId: 'msg_b', delta: 'from b', parentToolUseId: 'tu_b' },
+    ])
+    expect(mapper.map(delta('from the main thread'))).toEqual([
+      { type: 'assistant_text', messageId: 'msg_main', delta: 'from the main thread' },
+    ])
+  })
+
   it('assistant_message_yields_tool_calls_and_final_text', () => {
     const msg = {
       type: 'assistant',

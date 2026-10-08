@@ -6,6 +6,7 @@ import { specPath } from '../agent/phases/blind-plan'
 import { decisionsPath, readDecisions } from '../agent/phases/decisions'
 import { contextPath, readScenarioContext } from '../agent/phases/scenario-context'
 import { TASK_CARRY_ON, fixKickoff, fixRetry, implementationStarts, taskKickoff, taskReassess, taskRetry, taskSettled } from '../agent/phases/implement'
+import { mappedFiles, mappingDrift, readMappingSnapshot } from '../agent/phases/mapping-snapshot'
 import { tasksStale } from '../agent/phases/plan-stage'
 import { readSpecState } from '../agent/phases/spec-file'
 import { parseSpec } from '../agent/phases/spec-model'
@@ -288,7 +289,9 @@ export class FeatureBuild {
     allowWrites.setEnabled(run.id, true)
     await this.deps.refresh.sendState()
     const decisions = await readDecisions(decisionsPath(workspaceRoot, feature))
-    const kickoff = taskKickoff(started, task.name, parseSpec(spec.body), decisions)
+    // The mapping may be days and another feature's work old by the time the build is started.
+    const drift = await mappingDrift(workspaceRoot, await readMappingSnapshot(workspaceRoot, feature), mappedFiles(started.tasks))
+    const kickoff = taskKickoff(started, task.name, parseSpec(spec.body), decisions, drift)
     await sessions.send(run.id, why !== undefined ? `${kickoff}\n\n${why}` : kickoff, `Started ${task.name}`)
   }
 

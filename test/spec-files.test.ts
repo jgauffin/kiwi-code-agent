@@ -22,8 +22,13 @@ describe('spec badges in the explorer', () => {
     expect(isSpecPath('D:/work/app', 'D:/work/app/specs/orders.spec.md')).toBe(true)
     expect(isSpecPath('D:/work/app', 'D:/work/app/specs/notes.md')).toBe(false)
     expect(isSpecPath('D:/work/app', 'D:/work/app/docs/orders.spec.md')).toBe(false)
-    expect(isSpecPath('D:/work/app', 'D:/work/app/specs/old/orders.spec.md')).toBe(false)
     expect(isSpecPath('D:/work/app', 'D:/other/specs/orders.spec.md')).toBe(false)
+  })
+
+  it('a_spec_filed_in_a_folder_is_badged_like_any_other_however_deep', () => {
+    expect(isSpecPath('D:/work/app', 'D:/work/app/specs/old/orders.spec.md')).toBe(true)
+    expect(isSpecPath('D:/work/app', 'D:/work/app/specs/old/archive/orders.spec.md')).toBe(true)
+    expect(isSpecPath('D:/work/app', 'D:/work/app/specs/old/notes.md')).toBe(false)
   })
 })
 

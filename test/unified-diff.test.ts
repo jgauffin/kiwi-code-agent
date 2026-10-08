@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { diffStats, firstChangedLine, splitLines, unifiedDiff } from '../src/agent/edits/unified-diff'
+import { changedRanges, diffStats, firstChangedLine, splitLines, unifiedDiff } from '../src/agent/edits/unified-diff'
 
 const lines = (...text: string[]) => text.join('\n') + '\n'
 
@@ -51,5 +51,39 @@ describe('unifiedDiff', () => {
     expect(splitLines('a\nb')).toEqual(['a', 'b'])
     expect(splitLines('')).toEqual([])
     expect(unifiedDiff('a\n', 'a')).toEqual([])
+  })
+})
+
+describe('changedRanges', () => {
+  it('a_file_that_reads_the_same_has_no_changed_ranges', () => {
+    expect(changedRanges(lines('a', 'b'), lines('a', 'b'))).toEqual([])
+  })
+
+  it('ranges_are_the_line_numbers_of_the_file_as_it_now_stands', () => {
+    const before = lines(...Array.from({ length: 30 }, (_, i) => `line ${i + 1}`))
+    const after = before.replace('line 10', 'changed')
+    expect(changedRanges(before, after)).toEqual([{ from: 10, to: 10 }])
+  })
+
+  it('changes_far_apart_are_separate_ranges_and_neighbouring_ones_are_joined', () => {
+    const before = lines(...Array.from({ length: 30 }, (_, i) => `line ${i + 1}`))
+    const far = before.replace('line 4', 'changed').replace('line 25', 'changed too')
+    expect(changedRanges(before, far)).toEqual([
+      { from: 4, to: 4 },
+      { from: 25, to: 25 },
+    ])
+
+    const near = before.replace('line 4', 'changed').replace('line 6', 'changed too')
+    expect(changedRanges(before, near)).toEqual([{ from: 4, to: 6 }])
+  })
+
+  it('lines_only_removed_are_reported_at_the_line_now_standing_in_their_place', () => {
+    expect(changedRanges(lines('a', 'b', 'c', 'd'), lines('a', 'd'))).toEqual([{ from: 2, to: 2 }])
+    // Nothing follows a deletion at the end, so it is reported at the last line left.
+    expect(changedRanges(lines('a', 'b', 'c'), lines('a', 'b'))).toEqual([{ from: 2, to: 2 }])
+  })
+
+  it('a_trailing_newline_alone_is_not_a_change', () => {
+    expect(changedRanges('a\nb\n', 'a\nb')).toEqual([])
   })
 })

@@ -1,5 +1,5 @@
 import type { SessionEvent } from '../../agent/session/code-session'
-import { isShellTool } from '../../agent/permissions/tool-classes'
+import { isShellTool, isSubagentTool } from '../../agent/permissions/tool-classes'
 import { splitShellCommand } from '../../agent/permissions/shell-split'
 import { renderAnsi } from './ansi'
 import { editDiffView, fileLink } from './edit-diff'
@@ -34,6 +34,10 @@ export class ChatTranscript extends HTMLElement {
   scrollHost: HTMLElement = this
   private readonly bubbles = new Map<string, AssistantBubble>()
   private readonly tools = new Map<string, HTMLDetailsElement>()
+  /** The agent each subagent step runs, by the call that spawned it: what the output nested under it is named after. */
+  private readonly agents = new Map<string, string>()
+  /** The thread each call belongs to, so a prompt about one lands where the call sits and not at the end of the transcript. */
+  private readonly toolThreads = new Map<string, string | undefined>()
   private readonly permissions = new Map<string, PermissionCard>()
   private readonly questions = new Map<string, QuestionCard>()
   /** Tool calls of the question tool: the card says what they ask, so their own rows say nothing. */
@@ -76,6 +80,8 @@ export class ChatTranscript extends HTMLElement {
     this.replaceChildren(this.statusLine)
     this.bubbles.clear()
     this.tools.clear()
+    this.agents.clear()
+    this.toolThreads.clear()
     this.permissions.clear()
     this.questions.clear()
     this.questionCalls.clear()
@@ -138,18 +144,21 @@ export class ChatTranscript extends HTMLElement {
         }
         this.activity = atWork(WAITING_ON_MODEL)
         break
+      // What a subagent is doing never renames the row: the main thread is waiting on
+      // the step that spawned it, and several threads renaming the one row in turn reads
+      // as a stall, the time spent restarting at every change of name.
       case 'assistant_text': {
         const bubble = this.bubble(event.messageId, event.parentToolUseId)
         bubble.streamed += event.delta
         if (live && bubble.finalParts.length === 0) renderMarkdown(bubble.streamed, bubble.text, false)
-        this.activity = atWork('Writing')
+        if (!event.parentToolUseId) this.activity = atWork('Writing')
         break
       }
       case 'assistant_thinking': {
         const bubble = this.bubble(event.messageId, event.parentToolUseId)
         bubble.thinking.hidden = false
         bubble.thinking.textContent += event.delta
-        this.activity = atWork('Thinking')
+        if (!event.parentToolUseId) this.activity = atWork('Thinking')
         break
       }
       case 'assistant_message': {
@@ -157,7 +166,7 @@ export class ChatTranscript extends HTMLElement {
         bubble.finalParts.push(event.text)
         renderMarkdown(bubble.finalParts.join(''), bubble.text, true)
         // The tool calls the message carries, if any, follow right after and take over.
-        this.activity = atWork(WAITING_ON_MODEL)
+        if (!event.parentToolUseId) this.activity = atWork(WAITING_ON_MODEL)
         break
       }
       case 'tool_call': {
@@ -168,8 +177,10 @@ export class ChatTranscript extends HTMLElement {
         }
         const details = this.toolCall(event)
         this.insert(details, event.parentToolUseId)
-        this.pendingTools.set(event.toolUseId, `Running ${details.querySelector('summary')?.textContent ?? event.name}`)
-        this.activity = this.currentActivity()
+        if (!event.parentToolUseId) {
+          this.pendingTools.set(event.toolUseId, `Running ${details.querySelector('summary')?.textContent ?? event.name}`)
+          this.activity = this.currentActivity()
+        }
         break
       }
       case 'tool_result':
@@ -182,7 +193,9 @@ export class ChatTranscript extends HTMLElement {
       case 'permission_request': {
         const card = new PermissionCard()
         card.className = 'permission'
-        this.insert(card)
+        // A prompt stands where the call it asks about stands, so one raised inside a
+        // subagent is read in that agent's step and not at the foot of the transcript.
+        this.insert(card, event.toolUseId ? this.toolThreads.get(event.toolUseId) : undefined)
         card.show(event)
         this.permissions.set(event.requestId, card)
         this.activity = this.currentActivity()
@@ -313,6 +326,10 @@ export class ChatTranscript extends HTMLElement {
     text.className = 'text'
     const bubble: AssistantBubble = { element, text, thinking, streamed: '', finalParts: [] }
     element.append(thinking, text, copyButton(() => bubble.finalParts.join('') || bubble.streamed))
+    if (parentToolUseId) {
+      element.classList.add('from-subagent')
+      element.prepend(agentTag(this.agentLabel(parentToolUseId)))
+    }
     this.insert(element, parentToolUseId)
     this.bubbles.set(messageId, bubble)
     return bubble
@@ -325,17 +342,30 @@ export class ChatTranscript extends HTMLElement {
     const input = document.createElement('pre')
     input.className = 'input'
     const shell = isShellTool(event.name) ? shellCall(event.input) : undefined
+    const spawns = isSubagentTool(event.name) ? subagentName(event.input) : undefined
+    if (spawns) this.agents.set(event.toolUseId, spawns)
     if (shell) {
       // A shell step is named by what it is for; its body is the commands it runs, one per line.
       summary.textContent = shell.description ?? summarizeInput(event.input)
       fillCode(input, shell.lines.join('\n'), 'bash')
     } else {
-      summary.textContent = `${event.name} ${summarizeInput(event.input)}${lineRange(event.input)}`
+      // A step that spawns an agent is named with the agent, so the thread it opens is read as that agent's.
+      summary.textContent = `${spawns ? `${event.name} (${spawns})` : event.name} ${summarizeInput(event.input)}${lineRange(event.input)}`
       fillCode(input, JSON.stringify(event.input, null, 2), 'json')
+    }
+    if (event.parentToolUseId) {
+      details.classList.add('from-subagent')
+      summary.prepend(agentTag(this.agentLabel(event.parentToolUseId)))
     }
     details.append(summary, input)
     this.tools.set(event.toolUseId, details)
+    this.toolThreads.set(event.toolUseId, event.parentToolUseId)
     return details
+  }
+
+  /** The agent whose thread this output came from; one whose spawning step never arrived is named only as a subagent. */
+  private agentLabel(parentToolUseId: string): string {
+    return this.agents.get(parentToolUseId) ?? 'subagent'
   }
 
   /** A result goes into its call's step; one whose call is not shown stands on its own. */
@@ -350,6 +380,8 @@ export class ChatTranscript extends HTMLElement {
     }
     details.classList.add('done')
     details.classList.toggle('failed', event.isError)
+    // A delegation's row names its status and what it spent beside its task, not only inside the expanded result.
+    if (event.subAgent) details.querySelector('summary')?.appendChild(subAgentStatus(event.subAgent))
     // A written file speaks through its diff; the tool's confirmation says nothing more.
     if (event.edit && !event.isError) {
       // An edit the user allowed at a prompt has already been read; one that ran on its own has not.
@@ -485,11 +517,41 @@ function shellCall(input: unknown): { description?: string; lines: string[] } | 
   return { ...(description ? { description } : {}), lines: lines.length ? lines : [record['command']] }
 }
 
+/**
+ * The agent a subagent call spawns: the name it is addressable under, else
+ * the type it was asked for. Our own delegating tool names it with `agent`,
+ * or inside `define` for a one-off sub agent.
+ */
+function subagentName(input: unknown): string | undefined {
+  if (typeof input !== 'object' || input === null) return undefined
+  const record = input as Record<string, unknown>
+  const define = typeof record['define'] === 'object' && record['define'] !== null ? (record['define'] as Record<string, unknown>) : undefined
+  const named = [record['name'], record['subagent_type'], record['agent'], define?.['name']].find((value) => typeof value === 'string' && value.trim())
+  return typeof named === 'string' ? named : undefined
+}
+
+/** Whose thread a step or a message belongs to, as a tag it carries ahead of its own text. */
+function agentTag(label: string): HTMLElement {
+  const tag = document.createElement('span')
+  tag.className = 'agent-name'
+  tag.textContent = label
+  return tag
+}
+
+/** What a delegation's row adds once it reports back: whether it answered in full, and what it spent. */
+function subAgentStatus(outcome: { status: 'complete' | 'partial'; toolCalls: number; tokens: number }): HTMLElement {
+  const tag = document.createElement('span')
+  tag.className = `sub-agent-status ${outcome.status}`
+  const spend = `${outcome.toolCalls} call${outcome.toolCalls === 1 ? '' : 's'} · ${outcome.tokens} tokens`
+  tag.textContent = outcome.status === 'partial' ? `partial · ${spend}` : spend
+  return tag
+}
+
 function summarizeInput(input: unknown): string {
   if (typeof input !== 'object' || input === null) return ''
   const record = input as Record<string, unknown>
   if (typeof record['source'] === 'string' && typeof record['destination'] === 'string') return `${record['source']} → ${record['destination']}`
-  const key =['command', 'file_path', 'pattern', 'path', 'query', 'description'].find((k) => typeof record[k] === 'string')
+  const key = ['command', 'file_path', 'pattern', 'path', 'query', 'description', 'task'].find((k) => typeof record[k] === 'string')
   if (!key) return ''
   const value = key === 'pattern' && typeof record['path'] === 'string' ? `${record[key]} in ${record['path']}` : (record[key] as string)
   return value.length > 80 ? value.slice(0, 77) + '...' : value

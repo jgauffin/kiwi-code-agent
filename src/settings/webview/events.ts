@@ -108,6 +108,17 @@ export class RuleListChangedEvent extends Event {
   }
 }
 
+/** A person-wide allow or deny list edited: replaces the whole list, empty rows left out. */
+export class PersonRulesChangedEvent extends Event {
+  static readonly type = 'person-rules-changed'
+  constructor(
+    public readonly kind: 'allow' | 'deny',
+    public readonly values: string[],
+  ) {
+    super(PersonRulesChangedEvent.type, { bubbles: true })
+  }
+}
+
 export class SettingsFileRequestedEvent extends Event {
   static readonly type = 'settings-file-requested'
   constructor(public readonly scope: SettingsTarget) {
@@ -168,6 +179,22 @@ export class BundleOfferDismissedEvent extends Event {
   }
 }
 
+/** "Use them" on the newer-models offer. */
+export class ModelUpgradeTakenEvent extends Event {
+  static readonly type = 'model-upgrade-taken'
+  constructor() {
+    super(ModelUpgradeTakenEvent.type, { bubbles: true })
+  }
+}
+
+/** "No thanks" on the newer-models offer. */
+export class ModelUpgradeDismissedEvent extends Event {
+  static readonly type = 'model-upgrade-dismissed'
+  constructor() {
+    super(ModelUpgradeDismissedEvent.type, { bubbles: true })
+  }
+}
+
 /** "Pair a phone": asks the host for a fresh code. */
 export class PairingCodeRequestedEvent extends Event {
   static readonly type = 'pairing-code-requested'
@@ -197,12 +224,15 @@ declare global {
     [ModelsRefreshRequestedEvent.type]: ModelsRefreshRequestedEvent
     [ApiKeySetEvent.type]: ApiKeySetEvent
     [RuleListChangedEvent.type]: RuleListChangedEvent
+    [PersonRulesChangedEvent.type]: PersonRulesChangedEvent
     [SettingsFileRequestedEvent.type]: SettingsFileRequestedEvent
     [MemoryOpenedEvent.type]: MemoryOpenedEvent
     [MemoryForgottenEvent.type]: MemoryForgottenEvent
     [BundleAppliedEvent.type]: BundleAppliedEvent
     [BundleRemovedEvent.type]: BundleRemovedEvent
     [BundleOfferDismissedEvent.type]: BundleOfferDismissedEvent
+    [ModelUpgradeTakenEvent.type]: ModelUpgradeTakenEvent
+    [ModelUpgradeDismissedEvent.type]: ModelUpgradeDismissedEvent
     [PairingCodeRequestedEvent.type]: PairingCodeRequestedEvent
     [PhoneUnpairedEvent.type]: PhoneUnpairedEvent
   }

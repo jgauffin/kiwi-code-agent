@@ -18,24 +18,28 @@ export function hostExecutableAsNode(execPath: string): NodeRuntime {
 }
 
 /**
- * Spawn function for `Options.spawnClaudeCodeProcess`. The SDK passes the
- * cli path as the first argument; only the runtime is swapped.
+ * Spawn function for `Options.spawnClaudeCodeProcess`. With a runtime, the
+ * engine is a JavaScript file the SDK passes as the first argument and the
+ * runtime runs it; without one the engine is a native Claude Code that starts
+ * itself, and only the command it was given is swapped for nothing.
  *
  * The SDK reports every ENOENT as "executable not found at <cli path>", so
  * the things that can actually be missing are checked here first and named.
  */
-export function spawnWithRuntime(runtime: NodeRuntime, onStderr: (line: string) => void) {
+export function spawnWithRuntime(runtime: NodeRuntime | undefined, onStderr: (line: string) => void) {
   return (options: SpawnOptions): SpawnedProcess => {
-    const cliPath = options.args[0]
-    if (cliPath && !existsSync(cliPath)) throw new Error(`Engine script missing: ${cliPath}`)
+    const enginePath = runtime ? options.args[0] : options.command
+    if (enginePath && !existsSync(enginePath)) throw new Error(`Engine missing: ${enginePath}`)
     if (options.cwd && !existsSync(options.cwd)) throw new Error(`Working directory missing: ${options.cwd}`)
-    if (runtime.command.includes('/') || runtime.command.includes('\\')) {
+    if (runtime && (runtime.command.includes('/') || runtime.command.includes('\\'))) {
       if (!existsSync(runtime.command)) throw new Error(`Node runtime missing: ${runtime.command}`)
     }
-    onStderr(`[spawn] ${runtime.command} ${[...runtime.args, ...options.args].join(' ')} (cwd ${options.cwd})\n`)
-    const child = spawn(runtime.command, [...runtime.args, ...options.args], {
+    const command = runtime?.command ?? options.command
+    const args = runtime ? [...runtime.args, ...options.args] : options.args
+    onStderr(`[spawn] ${command} ${args.join(' ')} (cwd ${options.cwd})\n`)
+    const child = spawn(command, args, {
       cwd: options.cwd,
-      env: { ...options.env, ...runtime.env },
+      env: { ...options.env, ...(runtime?.env ?? {}) },
       stdio: ['pipe', 'pipe', 'pipe'],
       signal: options.signal,
       windowsHide: true,

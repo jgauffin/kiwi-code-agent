@@ -3,9 +3,8 @@ import type { ShellSegment } from './shell-split'
 import { TRANSFER_TOOLS } from './tool-classes'
 
 /**
- * Commands that only create, remove, move or copy files. A shell says with
- * these what a file tool says by being called, so both are read into the same
- * list of paths and judged by the one rule below.
+ * Commands that only create, remove or touch files: every path they name is
+ * one they write, judged by the one rule below.
  */
 const WRITE_COMMANDS = new Set([
   'mkdir',
@@ -15,19 +14,18 @@ const WRITE_COMMANDS = new Set([
   'del',
   'erase',
   'touch',
-  'cp',
-  'copy',
-  'mv',
-  'move',
-  'ren',
-  'rename',
   // PowerShell's item cmdlets. Their flags take paths too, so judging every operand as a path holds here.
   'new-item',
   'remove-item',
-  'copy-item',
-  'move-item',
-  'rename-item',
 ])
+
+/**
+ * Commands that copy or move: every path but the last is where they read
+ * from, judged by the rules for a read, and the last is where they write,
+ * judged by the rules for a write. PowerShell's item cmdlets take the same
+ * two paths, named or not by `-Path` and `-Destination`.
+ */
+const TRANSFER_COMMANDS = new Set(['cp', 'copy', 'mv', 'move', 'ren', 'rename', 'copy-item', 'move-item', 'rename-item'])
 
 /**
  * A word whose target cannot be read here: an expansion or a home reference may
@@ -75,18 +73,34 @@ export function toolWriteTargets(toolName: string, input: unknown): WriteTargets
   }
 }
 
-/** The same for one simple command of a shell call. */
+/** The paths a copying or moving command reads from: every operand but the last, which it writes to instead. */
+export function commandReadTargets(segment: ShellSegment): string[] {
+  const { tokens } = runCommand(segment.tokens)
+  const [raw, ...args] = tokens
+  if (!raw || !TRANSFER_COMMANDS.has(commandName(raw).toLowerCase())) return []
+  const operands = args.filter((arg) => arg !== '--' && !arg.startsWith('-'))
+  return operands.slice(0, -1)
+}
+
+/** The same for one simple command of a shell call: what it writes through a redirect, and what it writes or copies to by its own words. */
 export function commandWriteTargets(segment: ShellSegment): WriteTargets {
-  // The redirect target is a second write this segment's words do not name.
-  if (segment.writesFile) return undefined
+  if (segment.writes.some((target) => UNRESOLVABLE.test(target))) return []
+  const targets = [...segment.writes]
   const { tokens, argumentsFromInput } = runCommand(segment.tokens)
   const [raw, ...args] = tokens
-  if (!raw) return undefined
-  if (!WRITE_COMMANDS.has(commandName(raw).toLowerCase())) return undefined
-  // `xargs rm` removes whatever its input names.
-  if (argumentsFromInput) return []
-  const operands = args.filter((arg) => arg !== '--' && !arg.startsWith('-'))
-  return operands.some((operand) => UNRESOLVABLE.test(operand)) ? [] : operands
+  if (raw) {
+    const name = commandName(raw).toLowerCase()
+    const transfer = TRANSFER_COMMANDS.has(name)
+    if (transfer || WRITE_COMMANDS.has(name)) {
+      // `xargs rm` removes whatever its input names.
+      if (argumentsFromInput) return []
+      const operands = args.filter((arg) => arg !== '--' && !arg.startsWith('-'))
+      const written = transfer ? operands.slice(-1) : operands
+      if (written.some((operand) => UNRESOLVABLE.test(operand))) return []
+      targets.push(...written)
+    }
+  }
+  return targets.length > 0 ? targets : undefined
 }
 
 /**

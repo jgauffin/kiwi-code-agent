@@ -149,6 +149,15 @@ chat-app {
       border: 1px solid var(--vscode-inputValidation-warningBorder);
     }
 
+    /* What approval leads to, settled beside the button that takes it: quieter than the act itself. */
+    & .build-start {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      white-space: nowrap;
+      color: var(--vscode-descriptionForeground);
+    }
+
     /* The one next step: a button when it moves the plan on, green when it is the gate; a link when the act is on a row; text while someone else works. */
     & .next {
       white-space: nowrap;
@@ -1699,6 +1708,26 @@ chat-app {
       }
     }
 
+    /*
+     * Whose thread the output came from, on the message as well as on the step:
+     * a subagent's work nests under the call that spawned it, but that call can
+     * be scrolled far above, and the agent is the part worth reading first.
+     */
+    & .agent-name {
+      display: inline-block;
+      margin-right: 0.4rem;
+      padding: 0 0.3rem;
+      border-radius: 0.2rem;
+      font-family: var(--vscode-editor-font-family);
+      font-size: 0.85em;
+      color: var(--vscode-badge-foreground);
+      background: var(--vscode-badge-background);
+    }
+
+    & .assistant.from-subagent > .agent-name {
+      margin-bottom: 0.2rem;
+    }
+
     & .tool {
       border-left: 2px solid var(--vscode-panel-border);
       padding-left: 0.5rem;
@@ -1896,12 +1925,54 @@ chat-app {
           gap: 0.4rem;
         }
 
+        /* A change of directory: its path in parts, the ones a kept answer would cover standing out from those deeper down. */
+        & .places {
+          flex: 1 1 100%;
+          margin: 0;
+          font-family: var(--vscode-editor-font-family);
+          word-break: break-all;
+
+          & .place {
+            background: none;
+            border: none;
+            padding: 0;
+            font: inherit;
+            color: inherit;
+            cursor: pointer;
+
+            &.covered {
+              text-decoration: underline;
+            }
+
+            &.beyond {
+              opacity: 0.5;
+            }
+          }
+        }
+
         & .line-status {
           opacity: 0.8;
 
           &.denied {
             color: var(--vscode-errorForeground);
             opacity: 1;
+          }
+        }
+
+        /* A copy or move: what it reads from and what it writes to, the latter bold where that is why it asks. */
+        & .effects {
+          flex: 1 1 100%;
+          list-style: none;
+          margin: 0;
+          padding: 0;
+          opacity: 0.8;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0 0.6rem;
+
+          & .asked {
+            opacity: 1;
+            font-weight: 600;
           }
         }
       }

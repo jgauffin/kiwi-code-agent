@@ -1,7 +1,7 @@
 import * as vscode from 'vscode'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { SPECS_DIR, docsAfterApprovalPrompt, featureSlug, rulingsHandoffPrompt } from '../agent/phases/blind-plan'
+import { docsAfterApprovalPrompt, rulingsHandoffPrompt, specRelPath } from '../agent/phases/blind-plan'
 import { assertAllRuled, assertRulingsSent, decisionsPath, pendingDecisions, readDecisions, withRuling } from '../agent/phases/decisions'
 import { assertApprovable, assertCommentable, readReview, reviewPath, writeReview, type Review } from '../agent/phases/plan-review'
 import { checkDue, isApprovable, planStage } from '../agent/phases/plan-stage'
@@ -18,6 +18,8 @@ const DOCS_REVIEW_LABEL = 'Spec approved: listing the docs it touches'
 
 /** Read when a spec is approved, so a change in settings applies to the next approval. */
 const cutCoveredDocs = (): boolean => vscode.workspace.getConfiguration('kiwiAgent').get<boolean>('cutCoveredDocs', false)
+
+const START_BUILD_SETTING = 'startBuildOnApproval'
 
 export type PlanApprovalsDeps = {
   workspaceRoot: string
@@ -43,6 +45,22 @@ export class PlanApprovals {
 
   isReviewingDocs(feature: string): boolean {
     return this.reviewingDocs.has(feature)
+  }
+
+  /**
+   * Whether approving a spec goes on to start the build by itself. Off, the
+   * feature is planned, checked and mapped and then waits for the person to
+   * start it, which is how several features are taken to build-ready while one
+   * is built at a time. The toggle beside Approve writes it; it is read when
+   * the build would start, so flipping it mid-check still counts.
+   */
+  startsOnApproval(): boolean {
+    return vscode.workspace.getConfiguration('kiwiAgent').get<boolean>(START_BUILD_SETTING, true)
+  }
+
+  async setStartsOnApproval(on: boolean): Promise<void> {
+    await vscode.workspace.getConfiguration('kiwiAgent').update(START_BUILD_SETTING, on, vscode.ConfigurationTarget.Workspace)
+    await this.deps.sendState()
   }
 
   async approveSpec(record: SessionRecord, path: string): Promise<void> {
@@ -99,7 +117,7 @@ export class PlanApprovals {
     const review = await readReview(file)
     change(review, state)
     await mkdir(dirname(file), { recursive: true })
-    await writeReview(file, review, `${SPECS_DIR}/${featureSlug(feature)}.spec.md`)
+    await writeReview(file, review, specRelPath(this.deps.workspaceRoot, feature))
     await this.deps.sendState()
   }
 

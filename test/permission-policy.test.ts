@@ -1,7 +1,11 @@
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { instructionPlaces } from '../src/agent/permissions/instruction-places'
+import { projectMemoryDir } from '../src/agent/memory/memories'
 import { commandEffect, isReadOnlyCommand } from '../src/agent/permissions/read-only-commands'
 import { PermissionPolicy, type PermissionRules } from '../src/agent/permissions/permission-policy'
-import { commandLines, projectRuleFor, ruleLabel } from '../src/agent/permissions/permission-rules'
+import { commandLines } from '../src/agent/permissions/permission-rules'
+import { projectRuleFor, ruleLabel } from '../src/agent/permissions/rule-text'
 import { readOnlyTools } from '../src/agent/permissions/tool-classes'
 import { reviewEdits } from '../src/agent/permissions/gate'
 import type { SessionHooks } from '../src/agent/session/hooks'
@@ -106,10 +110,18 @@ describe('commandEffect', () => {
 
   it('a_command_judged_by_its_arguments_says_what_it_would_do_not_only_that_it_asks', () => {
     expect(effectOf('sed', '-n', '1p', 'f')).toEqual({ kind: 'inspects' })
-    expect(effectOf('sed', '1e rm -rf x', 'f')).toEqual({ kind: 'mutates', reason: expect.stringContaining('run a command') })
+    expect(effectOf('sed', '1e rm -rf x', 'f')).toEqual({ kind: 'runs', reason: expect.stringContaining('run a command') })
     expect(effectOf('sed', '-i', 's/a/b/', 'f')).toEqual({ kind: 'mutates', reason: expect.stringContaining('edit in place') })
     expect(effectOf('sort', '-o', 'out', 'x')).toEqual({ kind: 'mutates', reason: expect.stringContaining('writes its output to a file') })
     expect(effectOf('find', '.', '-delete')).toEqual({ kind: 'mutates', reason: expect.stringContaining('deletes what it finds') })
+  })
+
+  it('a_command_handed_a_program_to_run_by_one_of_its_own_arguments_is_never_covered_by_a_rule', () => {
+    expect(effectOf('find', '.', '-exec', 'rm', '{}', ';')).toEqual({ kind: 'runs', reason: expect.stringContaining('runs a program') })
+    expect(effectOf('sort', '--compress-program=sh', 'x')).toEqual({ kind: 'runs', reason: expect.stringContaining('program') })
+    expect(effectOf('rg', '--pre', './run.sh', 'foo')).toEqual({ kind: 'runs', reason: expect.stringContaining('program') })
+    expect(effectOf('ag', '--pager=sh', 'foo')).toEqual({ kind: 'runs', reason: expect.stringContaining('program') })
+    expect(effectOf('less', '+G', 'f')).toEqual({ kind: 'runs', reason: expect.stringContaining('runs a command') })
   })
 
   it('a_command_its_arguments_cannot_turn_into_a_write_is_not_judged_by_them_at_all', () => {
@@ -141,6 +153,13 @@ describe('commands that wrap another command', () => {
       'ls | xargs git log', 'ls | xargs cd', 'ls | xargs -I{} sh -c "cat {}"', 'ls | xargs --unknown cat', 'ls | xargs timeout 5 rm', 'timeout 5 xargs sort',
     ])
       expect(isReadOnlyCommand(c), c).toBe(false)
+  })
+
+  it('a_command_no_argument_could_point_at_a_file_runs_unasked_however_its_arguments_reached_it', () => {
+    for (const c of ['ls | xargs echo', 'ls | xargs -I{} echo {}', 'ls | xargs printf', 'ls | xargs basename', 'ls | xargs test -f', 'ls | xargs timeout 5 echo'])
+      expect(isReadOnlyCommand(c), c).toBe(true)
+    // One word further and the same line reads a file it never names.
+    expect(isReadOnlyCommand('ls | xargs cat')).toBe(false)
   })
 
   it('an_exact_rule_does_not_allow_a_command_xargs_may_hand_more_arguments_but_still_denies_it', async () => {
@@ -244,6 +263,24 @@ describe('commandLines', () => {
     expect(commandLines('Bash', '$(which rm) -rf x', ['Bash(rm:*)'])).toEqual([{ text: '$(which rm) -rf x' }, { text: 'which rm', passes: 'read-only' }])
   })
 
+  it('a_copy_or_move_names_what_it_reads_and_what_it_writes_and_marks_the_write_as_why_it_asks', () => {
+    expect(commandLines('Bash', 'cp a.txt /tmp/b.txt', [])).toEqual([
+      {
+        text: 'cp a.txt /tmp/b.txt',
+        rule: 'Bash(cp:*)',
+        effects: [
+          { kind: 'reads', path: 'a.txt', asked: false },
+          { kind: 'writes', path: '/tmp/b.txt', asked: true },
+        ],
+      },
+    ])
+  })
+
+  it('a_write_inside_the_project_is_offered_the_rule_of_its_command_whatever_lies_outside', () => {
+    const context = { canRead: () => true, insideProject: (path: string) => !path.startsWith('/outside') }
+    expect(commandLines('Bash', 'rm dist/old.txt', [], context)).toEqual([{ text: 'rm dist/old.txt', rule: 'Bash(rm:*)' }])
+  })
+
   it('other_tools_are_remembered_by_tool_and_a_file_write_never_for_the_project', () => {
     expect(projectRuleFor('WebFetch')).toBe('WebFetch')
     for (const tool of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']) expect(projectRuleFor(tool), tool).toBeUndefined()
@@ -265,6 +302,19 @@ const readOnly = readOnlyTools(() => [
 describe('PermissionPolicy', () => {
   const policy = (rules: Partial<PermissionRules>) => new PermissionPolicy(cwd, () => ({ allow: [], deny: [], ...rules }), { readOnly })
   const use = (p: PermissionPolicy, toolName: string, input: unknown) => p.preToolUse({ toolName, input, toolUseId: 't' })
+  const home = process.platform === 'win32' ? 'E:/home/me' : '/home/me'
+  const withHome = (rules: Partial<PermissionRules>) => new PermissionPolicy(cwd, () => ({ allow: [], deny: [], ...rules }), { readOnly, home })
+  /** The lines a shell prompt shows for this command. */
+  const lines = (p: PermissionPolicy, command: string) => {
+    const shown = p.decorate({ type: 'permission_request', requestId: 'r', toolName: 'Bash', input: { command } })
+    return shown.type === 'permission_request' ? shown.commands : undefined
+  }
+  /** What a change of directory offers to keep: these directories, the first pre-selected, for the person. */
+  const offer = (...directories: string[]) => ({
+    rule: `Bash(cd ${directories[0]})`,
+    places: directories.map((directory) => ({ directory, rule: `Bash(cd ${directory})` })),
+    scope: 'person',
+  })
 
   it('read_only_tools_and_read_only_commands_pass_without_a_prompt', async () => {
     const p = policy({})
@@ -309,6 +359,27 @@ describe('PermissionPolicy', () => {
     expect(await use(policy({ allow: [`Read(${outside}/**)`] }), 'Read', { file_path: `${outside}/notes.md` })).toEqual({ allow: true })
   })
 
+  it('a_sessions_own_instructions_are_read_without_a_prompt_wherever_they_are_kept_and_written_with_one', async () => {
+    const home = process.platform === 'win32' ? 'D:\\home\\jonas' : '/home/jonas'
+    const p = new PermissionPolicy(cwd, () => ({ allow: [], deny: [] }), { readOnly, readable: instructionPlaces(cwd, [], home) })
+    const call = (toolName: string, input: unknown) => p.preToolUse({ toolName, input, toolUseId: 't' })
+    const skill = join(home, '.claude', 'skills', 'spec-writing')
+    // Loading a skill names no path at all; the files it refers to are read where it lies.
+    expect(await call('Skill', { skill: 'spec-writing' })).toEqual({ allow: true })
+    expect(await call('Read', { file_path: join(skill, 'SKILL.md') })).toEqual({ allow: true })
+    expect(await call('Glob', { pattern: join(skill, 'templates', '*.md') })).toEqual({ allow: true })
+    expect(await call('Bash', { command: `cat ${skill.split('\\').join('/')}/SKILL.md` })).toEqual({ allow: true })
+    // A sub agent's definition, the memory notes and the person's own instructions, the same way.
+    expect(await call('Read', { file_path: join(home, '.kiwi', 'agents', 'reviewer.md') })).toEqual({ allow: true })
+    expect(await call('Read', { file_path: join(projectMemoryDir(cwd, home), 'no-git-commands.md') })).toEqual({ allow: true })
+    expect(await call('Read', { file_path: join(home, 'AGENTS.md') })).toEqual({ allow: true })
+    // Nothing else of the person's opens up alongside them.
+    expect(await call('Read', { file_path: join(home, '.claude', '.credentials.json') })).toBeUndefined()
+    expect(await call('Read', { file_path: join(home, 'notes.md') })).toBeUndefined()
+    // Writing there is a write like any other.
+    expect(await call('Write', { file_path: join(skill, 'SKILL.md'), content: 'x' })).toBeUndefined()
+  })
+
   it('a_command_that_only_inspects_is_asked_about_when_it_reads_outside_the_project', async () => {
     const p = policy({})
     const outside = process.platform === 'win32' ? 'E:/elsewhere' : '/elsewhere'
@@ -336,7 +407,28 @@ describe('PermissionPolicy', () => {
     expect(await use(p, 'Bash', { command: 'cd src && ls' })).toEqual({ allow: true })
     expect(await use(p, 'Bash', { command: 'cd .. && ls' })).toBeUndefined()
     expect(await use(p, 'Bash', { command: 'cd && ls' })).toBeUndefined()
-    expect(commandLines('Bash', 'cd .. && ls', [])).toEqual([{ text: 'cd ..', rule: 'Bash(cd ..)' }, { text: 'ls', passes: 'read-only' }])
+    // Reaching here means the directory is not ground the project already stands on, so it is kept for the person rather than the workspace.
+    const parent = process.platform === 'win32' ? 'D:/work' : '/work'
+    expect(lines(p, 'cd .. && ls')).toEqual([{ text: 'cd ..', ...offer(parent) }, { text: 'ls', passes: 'read-only' }])
+  })
+
+  it('paths_after_a_cd_inside_the_project_are_read_from_where_the_shell_stands', async () => {
+    const p = policy({})
+    const command =
+      'cd v2/backend/BankBook.Api/Features/Bankkoppling && wc -l * && cat BankkopplingController.cs Bankkoppling.cs && ls ../../../BankBook.Api.Tests/Features ../../../BankBook.Core.Tests'
+    expect(await use(p, 'Bash', { command })).toEqual({ allow: true })
+    expect(await use(p, 'Bash', { command: 'cd src && cd .. && ls src' })).toEqual({ allow: true })
+    expect(await use(p, 'Bash', { command: 'cd src && cat ../../sibling/.env' })).toBeUndefined()
+    // The prompt lists the same lines as read-only, the `cd` among them.
+    const shown = p.decorate({ type: 'permission_request', requestId: 'r', toolName: 'Bash', input: { command } })
+    expect(shown.type === 'permission_request' && shown.commands?.every((line) => line.passes === 'read-only')).toBe(true)
+  })
+
+  it('a_cd_the_next_command_may_run_without_leaves_its_paths_read_from_every_place_it_could_stand', async () => {
+    const p = policy({})
+    // `../x` lies outside the project from the root, where each of these may still stand when `cat` runs.
+    for (const c of ['cd src; cat ../x', 'cd src || cat ../x', 'cd src | cat ../x', '(cd src) && cat ../x', 'false || cd src && cat ../x', 'for d in a; do cd src && cat ../x; done'])
+      expect(await use(p, 'Bash', { command: c }), c).toBeUndefined()
   })
 
   it.runIf(process.platform === 'win32')('git_bash_drive_paths_stand_for_the_windows_drive_they_name', async () => {
@@ -358,10 +450,73 @@ describe('PermissionPolicy', () => {
     expect(await use(p, 'Bash', { command: `cd ${outside}/../other && ls` })).toBeUndefined()
     expect(await use(p, 'Bash', { command: 'cd .. && ls' })).toBeUndefined()
     expect(await use(p, 'PowerShell', { command: `cd ${outside}; ls` })).toBeUndefined()
+  })
+
+  it('a_cd_offers_its_directory_and_each_one_above_it_up_to_below_the_drive_root', () => {
+    const outside = process.platform === 'win32' ? 'E:/elsewhere' : '/elsewhere'
     // The prompt offers the directory, not `cd` as such, so allowing one place is not allowing every place.
-    expect(commandLines('Bash', `cd ${outside}`, [])).toEqual([{ text: `cd ${outside}`, rule: `Bash(cd ${outside})` }])
-    // A target we cannot read is no directory to name, so the blunt rule is all that is left.
-    expect(commandLines('Bash', 'cd $HOME', [])).toEqual([{ text: 'cd $HOME', rule: 'Bash(cd:*)' }])
+    // Ground outside the project is kept for the person: a rule about it says nothing in any other workspace.
+    expect(lines(policy({}), `cd ${outside}/a/b`)).toEqual([{ text: `cd ${outside}/a/b`, ...offer(`${outside}/a/b`, `${outside}/a`, outside) }])
+  })
+
+  it('a_relative_cd_offers_the_absolute_place_it_reaches_from_where_the_shell_stands', () => {
+    const outside = process.platform === 'win32' ? 'E:/elsewhere' : '/elsewhere'
+    expect(lines(policy({}), `cd ${outside} && cd deep`)?.[1]).toEqual({ text: 'cd deep', ...offer(`${outside}/deep`, outside) })
+  })
+
+  it('a_cd_whose_target_cannot_be_named_offers_no_rule_rather_than_every_directory', () => {
+    for (const c of ['cd $HOME', 'cd -', 'cd ~other/x'])
+      expect(lines(withHome({}), c), c).toEqual([{ text: c }])
+  })
+
+  it('cd_to_the_previous_directory_is_asked_every_time', async () => {
+    expect(await use(policy({}), 'Bash', { command: 'cd - && ls' })).toBeUndefined()
+  })
+
+  it('a_wildcard_in_a_cd_offers_only_the_directories_above_it_and_a_grant_there_covers_it', async () => {
+    const command = 'cd ~/.cargo/registry/src/*/v8/src'
+    expect(lines(withHome({}), command)).toEqual([{ text: command, ...offer(`${home}/.cargo/registry/src`, `${home}/.cargo/registry`, `${home}/.cargo`) }])
+    expect(await use(withHome({ allow: [`Bash(cd ${home}/.cargo/registry)`] }), 'Bash', { command: `${command} && ls` })).toEqual({ allow: true })
+    expect(await use(withHome({ allow: [`Bash(cd ${home}/.cargo/registry)`] }), 'Bash', { command: 'cd ~/.cargo && ls' })).toBeUndefined()
+  })
+
+  it('the_home_folder_and_every_directory_holding_it_are_never_offered', () => {
+    const above = home.slice(0, home.lastIndexOf('/'))
+    for (const c of ['cd ~', `cd ${home}`, `cd ${above}`]) expect(lines(withHome({}), c), c).toEqual([{ text: c }])
+    expect(lines(withHome({}), 'cd ~/projects/x')).toEqual([{ text: 'cd ~/projects/x', ...offer(`${home}/projects/x`, `${home}/projects`) }])
+  })
+
+  it('a_denied_directory_refuses_every_cd_into_its_tree_whatever_a_narrower_allow_says', async () => {
+    const outside = process.platform === 'win32' ? 'E:/elsewhere' : '/elsewhere'
+    const p = policy({ deny: [`Bash(cd ${outside})`], allow: [`Bash(cd ${outside}/deep)`] })
+    expect(await use(p, 'Bash', { command: `cd ${outside}/deep/x && ls` })).toMatchObject({ deny: expect.stringContaining(`cd ${outside}`) })
+    expect(await use(p, 'Bash', { command: `cd ${outside}/../other && ls` })).toBeUndefined()
+  })
+
+  it('a_command_naming_no_path_is_judged_by_where_the_shell_stands', async () => {
+    const outside = process.platform === 'win32' ? 'E:/elsewhere' : '/elsewhere'
+    const sibling = process.platform === 'win32' ? 'E:/other' : '/other'
+    const p = policy({ allow: [`Bash(cd ${outside})`] })
+    // `pwd` and `ls` name no path at all, so their place is wherever the line already stands: the project by default, and the directory a `cd` carried it to.
+    expect(await use(p, 'Bash', { command: 'pwd' })).toEqual({ allow: true })
+    expect(await use(p, 'Bash', { command: `cd ${outside} && pwd` })).toEqual({ allow: true })
+    // Standing there is still carried to a further move beneath it.
+    expect(await use(p, 'Bash', { command: `cd ${outside} && cd deep/nested && pwd` })).toEqual({ allow: true })
+    // A sibling is not granted by the first `cd`, so moving there still asks before any of the line runs.
+    expect(await use(p, 'Bash', { command: `cd ${outside} && cd ${sibling} && pwd` })).toBeUndefined()
+  })
+
+  it('a_command_not_known_to_inspect_still_asks_wherever_the_shell_stands', async () => {
+    const outside = process.platform === 'win32' ? 'E:/elsewhere' : '/elsewhere'
+    const p = policy({ allow: [`Bash(cd ${outside})`] })
+    // Standing in ground the person has granted says nothing about the network or the person's own configuration.
+    expect(await use(p, 'Bash', { command: `cd ${outside} && dotnet build` })).toBeUndefined()
+  })
+
+  it('a_cd_whose_target_cannot_be_read_is_asked_about_before_any_of_the_line_runs', async () => {
+    const p = policy({})
+    for (const c of ['cd $HOME && ls', 'cd ~ && ls'])
+      expect(await use(p, 'Bash', { command: c }), c).toBeUndefined()
   })
 
   it('a_writes_rule_covers_every_write_tool_on_the_paths_its_glob_names_and_nothing_else', async () => {
@@ -373,6 +528,76 @@ describe('PermissionPolicy', () => {
     // A rule for writes says nothing about reading, and nothing about what a shell command writes.
     expect(await use(p, 'Bash', { command: 'echo x > docs/product.md' })).toBeUndefined()
     expect(await use(policy({ deny: ['Writes(docs/**)'] }), 'Write', { file_path: 'docs/a.md' })).toMatchObject({ deny: expect.stringContaining('Writes(docs/**)') })
+  })
+
+  it('a_write_rule_names_one_folder_outside_the_project_and_covers_what_lies_beneath_it', async () => {
+    const outside = process.platform === 'win32' ? 'E:/elsewhere' : '/elsewhere'
+    const p = policy({ allow: [`Bash(write ${outside}/data)`] })
+    expect(await use(p, 'Bash', { command: `cp a.txt ${outside}/data/out.txt` })).toEqual({ allow: true })
+    expect(await use(p, 'Bash', { command: `cp a.txt ${outside}/data/deep/out.txt` })).toEqual({ allow: true })
+    // A sibling folder is not granted by naming this one.
+    expect(await use(p, 'Bash', { command: `cp a.txt ${outside}/other/out.txt` })).toBeUndefined()
+    // Naming where a write may land says nothing about where it may read from.
+    expect(await use(p, 'Bash', { command: `cp ${outside}/src.txt ${outside}/data/out.txt` })).toBeUndefined()
+    // The rule names a shell's write; a file tool's own write is judged by the rules for that kind instead.
+    expect(await use(p, 'Write', { file_path: `${outside}/data/out.txt` })).toBeUndefined()
+    const denied = await use(policy({ deny: [`Bash(write ${outside}/data)`] }), 'Bash', { command: `cp a.txt ${outside}/data/out.txt` })
+    expect(denied).toMatchObject({ deny: expect.stringContaining(`write ${outside}/data`) })
+  })
+
+  describe('what a kept directory covers', () => {
+    const outside = process.platform === 'win32' ? 'E:/elsewhere' : '/elsewhere'
+    const other = process.platform === 'win32' ? 'E:/other' : '/other'
+
+    it('a_kept_read_directory_covers_shell_and_file_tools_in_it_and_below_it_but_not_a_sibling_or_the_parent', async () => {
+      const p = policy({ allow: [`Bash(read ${outside}/a)`, `Read(read ${outside}/a)`] })
+      expect(await use(p, 'Bash', { command: `cat ${outside}/a/x.txt` })).toEqual({ allow: true })
+      expect(await use(p, 'Bash', { command: `ls ${outside}/a/deep/er` })).toEqual({ allow: true })
+      expect(await use(p, 'Read', { file_path: `${outside}/a/deep/x.txt` })).toEqual({ allow: true })
+      expect(await use(p, 'Bash', { command: `cat ${outside}/b/x.txt` })).toBeUndefined()
+      expect(await use(p, 'Bash', { command: `cat ${outside}/x.txt` })).toBeUndefined()
+      expect(await use(p, 'Read', { file_path: `${outside}/b/x.txt` })).toBeUndefined()
+    })
+
+    it('a_kept_write_directory_covers_writes_beneath_it_and_a_sibling_is_still_asked', async () => {
+      const p = policy({ allow: [`Bash(write ${outside}/a)`] })
+      expect(await use(p, 'Bash', { command: `touch ${outside}/a/deep/x` })).toEqual({ allow: true })
+      expect(await use(p, 'Bash', { command: `touch ${outside}/b/x` })).toBeUndefined()
+    })
+
+    it('a_directory_the_session_may_change_into_is_one_it_may_read_through_shell_and_file_tools', async () => {
+      const p = policy({ allow: [`Bash(cd ${outside}/a)`, `Read(cd ${outside}/a)`] })
+      expect(await use(p, 'Bash', { command: `cat ${outside}/a/x.txt` })).toEqual({ allow: true })
+      expect(await use(p, 'Read', { file_path: `${outside}/a/x.txt` })).toEqual({ allow: true })
+    })
+
+    it('a_write_grant_allows_reading_in_the_same_place', async () => {
+      const p = policy({ allow: [`Bash(write ${outside}/a)`, `Edit(write ${outside}/a)`] })
+      expect(await use(p, 'Bash', { command: `cat ${outside}/a/x.txt` })).toEqual({ allow: true })
+      expect(await use(p, 'Read', { file_path: `${outside}/a/x.txt` })).toEqual({ allow: true })
+      expect(await use(p, 'Bash', { command: `cat ${outside}/b/x.txt` })).toBeUndefined()
+    })
+
+    it('a_kept_read_denial_refuses_reads_and_writes_in_its_tree_whatever_a_narrower_allow_says', async () => {
+      const p = policy({ deny: [`Bash(read ${outside})`, `Read(read ${outside})`], allow: [`Bash(read ${outside}/a)`] })
+      expect(await use(p, 'Bash', { command: `cat ${outside}/a/x.txt` })).toMatchObject({ deny: expect.any(String) })
+      expect(await use(p, 'Bash', { command: `touch ${outside}/a/x.txt` })).toMatchObject({ deny: expect.any(String) })
+      expect(await use(p, 'Bash', { command: `cd ${outside}/a && ls` })).toMatchObject({ deny: expect.any(String) })
+      expect(await use(p, 'Read', { file_path: `${outside}/a/x.txt` })).toMatchObject({ deny: expect.any(String) })
+      expect(await use(p, 'Bash', { command: `cat ${other}/x.txt` })).toBeUndefined()
+    })
+
+    it('a_write_denial_refuses_writes_only_and_the_directory_may_still_be_read', async () => {
+      const p = policy({ deny: [`Bash(write ${outside})`, `Write(write ${outside})`], allow: [`Bash(read ${outside})`] })
+      expect(await use(p, 'Bash', { command: `touch ${outside}/a/x` })).toMatchObject({ deny: expect.any(String) })
+      expect(await use(p, 'Write', { file_path: `${outside}/a/x` })).toMatchObject({ deny: expect.any(String) })
+      expect(await use(p, 'Bash', { command: `cat ${outside}/a/x` })).toEqual({ allow: true })
+    })
+
+    it('a_kept_cd_denial_refuses_reading_in_the_same_tree', async () => {
+      const p = policy({ deny: [`Bash(cd ${outside})`] })
+      expect(await use(p, 'Bash', { command: `cat ${outside}/a/x.txt` })).toMatchObject({ deny: expect.any(String) })
+    })
   })
 
   it('a_write_prompt_is_left_as_it_came_since_its_answer_reaches_no_further_than_the_call', () => {
@@ -437,6 +662,17 @@ describe('PermissionPolicy', () => {
     expect(ruleLabel('mcp__docs-server__*')).toBe('mcp__docs-server__*')
   })
 
+  it('a_delegation_naming_the_research_sub_agent_is_asked_about_unless_a_rule_allows_it_once_for_the_project', async () => {
+    expect(await use(policy({}), 'Delegate', { agent: 'research', task: 'look it up' })).toBeUndefined()
+    expect(await use(policy({ allow: ['Delegate'] }), 'Delegate', { agent: 'research', task: 'look it up' })).toEqual({ allow: true })
+  })
+
+  it('a_delegation_naming_any_other_sub_agent_is_never_asked_about_however_the_rules_stand', async () => {
+    const p = policy({})
+    expect(await use(p, 'Delegate', { agent: 'retrieve', task: 'look it up' })).toEqual({ allow: true })
+    expect(await use(p, 'Delegate', { define: { name: 'x', description: 'd', instructions: 'i' }, task: 'look it up' })).toEqual({ allow: true })
+  })
+
   it('deny_rules_win_over_read_only_and_allow_rules_and_name_the_rule', async () => {
     const p = policy({ allow: ['Bash'], deny: ['Read(**/.env)', 'Bash(curl:*)'] })
     expect(await use(p, 'Read', { file_path: 'config/.env' })).toMatchObject({ deny: expect.stringContaining('Read(**/.env)') })
@@ -454,6 +690,14 @@ describe('PermissionPolicy', () => {
     expect(await use(policy({ allow: ['Bash'] }), 'Bash', { command: '$(which rm) -rf x' })).toBeUndefined()
     // A deny rule reaches inside a substitution too.
     expect(await use(policy({ allow: ['Bash'], deny: ['Bash(rm:*)'] }), 'Bash', { command: 'echo $(rm x)' })).toMatchObject({ deny: expect.stringContaining('Bash(rm:*)') })
+  })
+
+  it('a_command_handed_a_program_to_run_by_its_own_arguments_is_asked_about_even_when_a_rule_would_otherwise_cover_it', async () => {
+    expect(await use(policy({ allow: ['Bash(find:*)'] }), 'Bash', { command: 'find . -exec rm {} \\;' })).toBeUndefined()
+    expect(await use(policy({ allow: ['Bash(sed:*)'] }), 'Bash', { command: "sed '1e rm -rf x' f" })).toBeUndefined()
+    // The same command without that argument is an ordinary mutation, which the rule still covers.
+    expect(await use(policy({ allow: ['Bash(find:*)'] }), 'Bash', { command: 'find . -delete' })).toEqual({ allow: true })
+    expect(commandLines('Bash', 'find . -exec rm {} \\;', ['Bash(find:*)'])).toEqual([{ text: 'find . -exec rm {} \\;' }])
   })
 
   it('asking_the_user_a_question_is_never_put_to_a_permission_prompt_first', async () => {
@@ -523,7 +767,9 @@ describe('the Allow writes switch', () => {
     expect(await use(p, 'NotebookEdit', { notebook_path: 'src/a.ipynb' })).toEqual({ allow: true })
     // The switch is for the project's own files: a write anywhere else is still a question.
     expect(await use(p, 'Write', { file_path: '../other/a.ts' })).toBeUndefined()
-    expect(await use(p, 'Bash', { command: 'echo hi > f' })).toBeUndefined()
+    // A redirect is a write to the file it names, in the project like any other.
+    expect(await use(p, 'Bash', { command: 'echo hi > f' })).toEqual({ allow: true })
+    expect(await use(p, 'Bash', { command: 'echo hi > ../other/f' })).toBeUndefined()
   })
 
   it('a_write_to_a_file_that_decides_what_runs_unasked_is_always_asked', async () => {
@@ -537,6 +783,17 @@ describe('the Allow writes switch', () => {
     // Only the root package.json's scripts run unasked, so a nested one is an ordinary file.
     expect(await use(p, 'Edit', { file_path: 'frontend/package.json' })).toEqual({ allow: true })
     expect(await use(p, 'Edit', { file_path: 'src/a.ts' })).toEqual({ allow: true })
+  })
+
+  it('a_write_to_where_the_persons_own_rules_are_kept_is_always_asked_like_the_workspaces_settings', async () => {
+    const home = process.platform === 'win32' ? 'D:\\home\\jonas' : '/home/jonas'
+    const kiwiDir = join(home, '.kiwi')
+    const rulesFile = join(kiwiDir, 'permissions.json')
+    const p = new PermissionPolicy(cwd, () => ({ allow: [`Bash(write ${kiwiDir})`], deny: [] }), { readOnly, personRulesFile: rulesFile })
+    // A folder grant covering that same folder still does not reach the one file that decides what runs unasked.
+    expect(await use(p, 'Bash', { command: `echo x > ${join(kiwiDir, 'notes.md').split('\\').join('/')}` })).toEqual({ allow: true })
+    expect(await use(p, 'Bash', { command: `echo x > ${rulesFile.split('\\').join('/')}` })).toBeUndefined()
+    expect(await use(p, 'Edit', { file_path: rulesFile })).toBeUndefined()
   })
 
   it('a_deny_rule_still_blocks_a_write_to_a_trust_file', async () => {
@@ -600,6 +857,15 @@ describe('the Allow writes switch', () => {
     expect(projectRuleFor('Move')).toBeUndefined()
   })
 
+  it('a_shell_copy_or_move_is_judged_as_a_read_at_its_source_and_a_write_at_its_destination', async () => {
+    const p = switched(() => true)
+    expect(await use(p, 'Bash', { command: 'cp src/a.ts src/b.ts' })).toEqual({ allow: true })
+    // The destination is in the project, but the source is not something the session may read.
+    expect(await use(p, 'Bash', { command: 'cp ../other/a.ts src/b.ts' })).toBeUndefined()
+    // The source is readable, but the destination is not something the switch may write.
+    expect(await use(p, 'Bash', { command: 'cp src/a.ts ../other/b.ts' })).toBeUndefined()
+  })
+
   it('file_changing_commands_pass_under_the_switch_when_every_path_is_inside_the_project', async () => {
     let on = false
     const p = switched(() => on)
@@ -617,8 +883,10 @@ describe('the Allow writes switch', () => {
     expect(await use(p, 'Bash', { command: 'rm -rf ~/cache' })).toBeUndefined()
     // xargs adds paths the line does not name.
     expect(await use(p, 'Bash', { command: 'echo ../other | xargs rm -rf src/a' })).toBeUndefined()
-    // A redirect writes a file the words do not name, and a command that is neither read-only nor a write still asks.
-    expect(await use(p, 'Bash', { command: 'mkdir dist > log.txt' })).toBeUndefined()
+    // A redirect is a write to the file it names, so one inside the project passes with the rest of the line.
+    expect(await use(p, 'Bash', { command: 'mkdir dist > log.txt' })).toEqual({ allow: true })
+    expect(await use(p, 'Bash', { command: 'mkdir dist > ../other/log.txt' })).toBeUndefined()
+    // A command that is neither read-only nor a write still asks.
     expect(await use(p, 'Bash', { command: 'rm -rf dist && dotnet restore' })).toBeUndefined()
   })
 
@@ -629,7 +897,7 @@ describe('the Allow writes switch', () => {
     expect(await use(p, 'Bash', { command: `cd ${outside} && rm -rf data` })).toBeUndefined()
     expect(await use(p, 'Bash', { command: 'cd src && rm -rf data' })).toEqual({ allow: true })
     const request = { type: 'permission_request' as const, requestId: 'r', toolName: 'Bash', input: { command: `cd ${outside} && rm -rf data` } }
-    expect(p.decorate(request)).toMatchObject({ commands: [{ text: `cd ${outside}`, passes: 'read-only' }, { text: 'rm -rf data', rule: 'Bash(rm:*)' }] })
+    expect(p.decorate(request)).toMatchObject({ commands: [{ text: `cd ${outside}`, passes: 'read-only' }, { text: 'rm -rf data', rule: `Bash(write ${outside}/data)` }] })
   })
 
   it('a_deny_rule_still_blocks_a_command_the_switch_would_allow_and_the_prompt_names_the_switch', async () => {
@@ -699,4 +967,120 @@ describe('the scratch folder', () => {
     expect(await use(p, 'Write', { file_path: 'src/a.ts' })).toEqual({ allow: true })
     expect(await use(p, 'Write', { file_path: `${scratch}/a.mjs` })).toEqual({ allow: true })
   })
+})
+
+describe('a read or a write outside the project', () => {
+  const outside = process.platform === 'win32' ? 'E:/elsewhere' : '/elsewhere'
+  const parent = process.platform === 'win32' ? 'D:/work' : '/work'
+  const home = process.platform === 'win32' ? 'E:/home/me' : '/home/me'
+  const policy = (allow: string[] = []) => new PermissionPolicy(cwd, () => ({ allow, deny: [] }), { readOnly, home })
+  const lines = (command: string, allow: string[] = []) => {
+    const shown = policy(allow).decorate({ type: 'permission_request', requestId: 'r', toolName: 'Bash', input: { command } })
+    return shown.type === 'permission_request' ? shown.commands : undefined
+  }
+  /** What a place offers to keep: this directory and each above it, for the person. */
+  const keep = (verb: string, ...directories: string[]) => ({
+    rule: `Bash(${verb} ${directories[0]})`,
+    places: directories.map((directory) => ({ directory, rule: `Bash(${verb} ${directory})` })),
+    scope: 'person',
+  })
+
+  it('is_asked_about_as_the_directory_it_reaches_and_never_as_the_command', () => {
+    expect(lines(`cat ${outside}/a/b.txt`)).toEqual([
+      { text: `cat ${outside}/a/b.txt`, access: { kind: 'reads', directory: `${outside}/a` }, ...keep('read', `${outside}/a`, outside) },
+    ])
+    expect(lines(`ls ${outside}/a`)?.[0]).toMatchObject({ access: { kind: 'reads', directory: `${outside}/a` } })
+    expect(lines(`rm ${outside}/a/old.txt`)).toEqual([
+      { text: `rm ${outside}/a/old.txt`, access: { kind: 'writes', directory: `${outside}/a` }, ...keep('write', `${outside}/a/old.txt`, `${outside}/a`, outside) },
+    ])
+  })
+
+  it('a_write_may_be_kept_for_its_file_ahead_of_the_directory_holding_it', () => {
+    const asked = (toolName: string, input: unknown) => {
+      const shown = policy().decorate({ type: 'permission_request', requestId: 'r', toolName, input })
+      return shown.type === 'permission_request' ? shown.commands : undefined
+    }
+    expect(asked('Edit', { file_path: `${outside}/a/b.ts` })?.[0]).toMatchObject(tool('Edit', 'write', `${outside}/a/b.ts`, `${outside}/a`, outside))
+    // A read has no file to keep, and two files in one directory leave the directory alone.
+    expect(asked('Read', { file_path: `${outside}/a/b.ts` })?.[0]?.places?.[0]?.directory).toBe(`${outside}/a`)
+    expect(lines(`rm ${outside}/a/x.txt ${outside}/a/y.txt`)?.[0]?.places?.[0]?.directory).toBe(`${outside}/a`)
+  })
+
+  it('a_write_directly_in_the_home_folder_keeps_nothing_beyond_the_file_itself', () => {
+    expect(lines(`rm ${home}/notes.txt`)?.[0]?.places?.map((p) => p.directory)).toEqual([`${home}/notes.txt`])
+    expect(lines(`cat ${home}/notes.txt`)?.[0]).toMatchObject({ access: { kind: 'reads', directory: home } })
+    expect(lines(`cat ${home}/notes.txt`)?.[0]?.places).toBeUndefined()
+  })
+
+  it('a_file_tool_is_asked_about_as_the_directory_holding_the_file_it_reaches', () => {
+    const asked = (toolName: string, input: unknown) => {
+      const shown = policy().decorate({ type: 'permission_request', requestId: 'r', toolName, input })
+      return shown.type === 'permission_request' ? shown.commands : undefined
+    }
+    expect(asked('Read', { file_path: `${outside}/a/b.ts` })).toEqual([
+      { text: `Read ${outside}/a`, access: { kind: 'reads', directory: `${outside}/a` }, ...tool('Read', 'read', `${outside}/a`, outside) },
+    ])
+    expect(asked('Edit', { file_path: `${outside}/a/b.ts` })?.[0]).toMatchObject({ access: { kind: 'writes', directory: `${outside}/a` } })
+    expect(asked('Read', { file_path: 'src/a.ts' })).toBeUndefined()
+  })
+
+  it('running_a_program_of_its_own_is_asked_about_as_before_with_no_directory_to_keep', () => {
+    const command = `find ${outside} -exec rm {} ;`
+    const [only, ...rest] = lines(command) ?? []
+    expect(rest).toEqual([])
+    expect(Object.keys(only!)).toEqual(['text'])
+  })
+
+  it('a_call_that_reads_and_writes_the_same_place_is_asked_about_as_a_write', () => {
+    expect(lines(`cp ${outside}/a/x.txt ${outside}/a/y.txt`)).toMatchObject([{ access: { kind: 'writes', directory: `${outside}/a` } }])
+  })
+
+  it('a_relative_path_names_the_absolute_directory_from_where_the_shell_stands', () => {
+    expect(lines('cat ../sibling/f.txt')?.[0]).toMatchObject({ access: { kind: 'reads', directory: `${parent}/sibling` } })
+    expect(lines(`cd ${outside} && rm sub/f.txt`, [`Bash(cd ${outside})`])).toMatchObject([
+      { passes: 'read-only' },
+      { access: { kind: 'writes', directory: `${outside}/sub` } },
+    ])
+  })
+
+  it('a_path_starting_at_the_home_folder_is_read_as_the_home_folder', () => {
+    expect(lines('cat ~/.cargo/registry/x.txt')).toMatchObject([
+      { access: { kind: 'reads', directory: `${home}/.cargo/registry` }, ...keep('read', `${home}/.cargo/registry`, `${home}/.cargo`) },
+    ])
+  })
+
+  it('a_path_that_depends_on_something_unsettled_is_asked_every_time_with_nothing_to_keep', () => {
+    expect(lines('cat $FILE')).toEqual([{ text: 'cat $FILE', access: { kind: 'reads' } }])
+    expect(lines('rm $FILE')).toEqual([{ text: 'rm $FILE', access: { kind: 'writes' } }])
+    // A change of directory that may not have run leaves every later relative path in doubt.
+    expect(lines(`cd ${outside}; cat f.txt`)?.at(-1)).toEqual({ text: 'cat f.txt', access: { kind: 'reads' } })
+  })
+
+  it('a_wildcard_names_the_directories_above_it_and_only_those_are_offered_to_keep', () => {
+    expect(lines(`cat ${outside}/a/*/f.txt`)).toMatchObject([
+      { access: { kind: 'reads', directory: `${outside}/a` }, ...keep('read', `${outside}/a`, outside) },
+    ])
+  })
+
+  it('a_line_missing_more_than_one_grant_asks_about_each_directory_and_kind_in_turn', () => {
+    expect(lines(`cp ${outside}/src/x.txt ${outside}/dst/y.txt`)).toMatchObject([
+      { access: { kind: 'reads', directory: `${outside}/src` } },
+      { access: { kind: 'writes', directory: `${outside}/dst` } },
+    ])
+  })
+
+  it('a_directory_kept_for_reading_lets_the_command_read_beneath_it_unasked', async () => {
+    const use = (p: PermissionPolicy, command: string) => p.preToolUse({ toolName: 'Bash', input: { command }, toolUseId: 't' })
+    expect(await use(policy([`Bash(read ${outside}/a)`]), `cat ${outside}/a/deep/b.txt`)).toEqual({ allow: true })
+    expect(await use(policy([`Bash(read ${outside}/a)`]), `cat ${outside}/b/b.txt`)).toBeUndefined()
+    expect(await use(policy([`Bash(write ${outside}/a)`]), `rm ${outside}/a/x.txt ${outside}/a/y.txt`)).toEqual({ allow: true })
+  })
+
+  function tool(name: string, verb: string, ...directories: string[]) {
+    return {
+      rule: `${name}(${verb} ${directories[0]})`,
+      places: directories.map((directory) => ({ directory, rule: `${name}(${verb} ${directory})` })),
+      scope: 'person',
+    }
+  }
 })

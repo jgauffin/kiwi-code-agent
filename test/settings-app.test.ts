@@ -21,11 +21,11 @@ const events = await import('../src/settings/webview/events')
 
 export function snapshot(over: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
   return {
-    providers: [{ name: 'Claude', engine: 'claude-sdk', models: ['claude-opus-5'] }],
-    profiles: [{ name: 'Claude', default: { provider: 'Claude', model: 'claude-opus-5' } }],
+    providers: [{ name: 'Claude', engine: 'claude-sdk', models: ['claude-opus-5-5'] }],
+    profiles: [{ name: 'Claude', default: { provider: 'Claude', model: 'claude-opus-5-5' } }],
     activeProfile: 'Claude',
     keys: [],
-    permissions: { allow: ['Edit'], deny: [], denyGitWrites: false },
+    permissions: { allow: ['Edit'], deny: [], denyGitWrites: false, person: { allow: [], deny: [] } },
     verify: [{ match: 'src/**/*.ts', project: 'package.json', command: 'npm test' }],
     verifyFailureBudget: 3,
     cleanup: {
@@ -91,6 +91,21 @@ describe('SettingsApp', () => {
     expect(posted).toContainEqual({ type: 'save', key: 'traceEngine', value: true })
     app.remove()
   })
+
+  it('editing_a_rule_kept_for_the_person_is_posted_as_its_own_message_rather_than_a_workspace_save', () => {
+    posted.length = 0
+    const app = new SettingsApp()
+    document.body.appendChild(app)
+    window.dispatchEvent(new MessageEvent('message', { data: { type: 'settings', snapshot: snapshot() } }))
+    const tab = [...app.querySelectorAll<HTMLButtonElement>('.tabs .tab')].find((t) => t.textContent === 'Permissions')!
+    tab.click()
+    const list = app.querySelectorAll<HTMLElement>('.person rule-list')[0]!
+    list.querySelector<HTMLButtonElement>('.add')!.click()
+    const input = list.querySelector<HTMLInputElement>('input')!
+    change(input, 'Bash(cd D:/data)')
+    expect(posted).toContainEqual({ type: 'save_person_rules', kind: 'allow', values: ['Bash(cd D:/data)'] })
+    app.remove()
+  })
 })
 
 describe('AdvancedTab', () => {
@@ -128,14 +143,14 @@ describe('PermissionsTab', () => {
 
   it('removing_a_rule_saves_the_list_without_it', () => {
     const tab = new PermissionsTab()
-    tab.update(snapshot({ permissions: { allow: ['Edit', 'Bash(npm test)'], deny: [], denyGitWrites: false } }))
+    tab.update(snapshot({ permissions: { allow: ['Edit', 'Bash(npm test)'], deny: [], denyGitWrites: false, person: { allow: [], deny: [] } } }))
     const remove = tab.querySelector<HTMLButtonElement>('rule-list .remove')!
     expect(saved(tab, () => remove.click())).toEqual({ key: 'permissions.allow', value: ['Bash(npm test)'] })
   })
 
   it('an_added_row_is_not_a_rule_until_it_has_text', () => {
     const tab = new PermissionsTab()
-    tab.update(snapshot({ permissions: { allow: [], deny: [], denyGitWrites: false } }))
+    tab.update(snapshot({ permissions: { allow: [], deny: [], denyGitWrites: false, person: { allow: [], deny: [] } } }))
     const list = tab.querySelector<HTMLElement>('rule-list')!
     list.querySelector<HTMLButtonElement>('.add')!.click()
     const input = list.querySelector<HTMLInputElement>('input')!
@@ -152,11 +167,26 @@ describe('PermissionsTab', () => {
     expect(saved(tab, () => box.dispatchEvent(new Event('change', { bubbles: true })))).toEqual({ key: 'permissions.denyGitWrites', value: true })
   })
 
+  it('editing_a_rule_kept_for_the_person_saves_that_whole_list_rather_than_a_workspace_setting', () => {
+    const tab = new PermissionsTab()
+    tab.update(snapshot({ permissions: { allow: ['Edit'], deny: [], denyGitWrites: false, person: { allow: ['Bash(cd D:/data)'], deny: [] } } }))
+    const list = tab.querySelectorAll<HTMLElement>('.person rule-list')[0]!
+    const input = list.querySelector<HTMLInputElement>('input')!
+    let seen: { kind: string; values: string[] } | undefined
+    tab.addEventListener('person-rules-changed', (e) => {
+      seen = { kind: (e as unknown as { kind: string }).kind, values: (e as unknown as { values: string[] }).values }
+    })
+    change(input, 'Read(D:/data/**)')
+    expect(seen).toEqual({ kind: 'allow', values: ['Read(D:/data/**)'] })
+  })
+
   it('fields_are_disabled_without_a_folder_open', () => {
     const tab = new PermissionsTab()
     tab.update(snapshot({ hasWorkspace: false }))
     expect(tab.textContent).toContain('Open a folder')
-    expect([...tab.querySelectorAll<HTMLInputElement>('input, button.add')].every((i) => i.disabled)).toBe(true)
+    expect([...tab.querySelectorAll<HTMLInputElement>('.workspace input, .workspace button.add')].every((i) => i.disabled)).toBe(true)
+    // The person's own rules have nowhere else to live, so they stay open without a workspace.
+    expect([...tab.querySelectorAll<HTMLInputElement>('.person input, .person button.add')].some((i) => i.disabled)).toBe(false)
   })
 })
 

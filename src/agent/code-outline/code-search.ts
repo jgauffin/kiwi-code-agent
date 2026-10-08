@@ -19,7 +19,7 @@ const schema = z.object({
 type CodeMatch = { file: string; line: number; text: string; declaration: string | null; inDoc: boolean; start: number | null; end: number | null }
 
 /** Source files, each match filed under the declaration around it. */
-const sourceFiles: SearchSubject<CodeNode[], CodeMatch> = {
+export const sourceFiles: SearchSubject<CodeNode[], CodeMatch> = {
   fileNoun: 'source file',
   placeNoun: 'place',
   includes: (path) => languageOf(path) !== undefined,

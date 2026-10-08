@@ -67,6 +67,10 @@ export class ScopeGuard implements SessionHooks {
         return this.write(input['file_path'])
       case 'NotebookEdit':
         return this.write(input['notebook_path'])
+      case 'Move':
+        return this.transfer(input['source'], input['destination'], this.scope.writable, 'move')
+      case 'Copy':
+        return this.transfer(input['source'], input['destination'], this.scope.readable, 'copy')
       case 'Bash':
       case 'PowerShell':
         return { deny: `${tool.toolName} is not available in this phase.` }
@@ -88,6 +92,18 @@ export class ScopeGuard implements SessionHooks {
     if (this.creates(raw)) return { allow: true }
     if (this.scope.askable && this.check(raw, this.scope.askable, 'write') === undefined) return undefined
     return denied
+  }
+
+  /**
+   * A move takes its source out of the scope, so it is held to `writable` like
+   * any other write; a copy leaves the source standing, so `readable` is
+   * enough. Either way the destination is a write, held to the same rule as
+   * `Write` and `Edit`.
+   */
+  private transfer(source: unknown, destination: unknown, sourceGlobs: string[], verb: string): PreToolUseOutcome {
+    const denied = this.check(source, sourceGlobs, verb)
+    if (denied) return denied
+    return this.write(destination)
   }
 
   /** A file not there yet under `creatable`, or one this phase created there. */

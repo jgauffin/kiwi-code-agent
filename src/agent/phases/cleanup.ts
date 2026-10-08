@@ -3,6 +3,7 @@ import { EDIT_WRITING } from '../openai-session/tools/edit'
 import { CODE_READING } from '../code-outline/code-outline-gate'
 import { CODE_OUTLINE_TOOL } from '../code-outline/code-outline-tool'
 import { CODE_SEARCH_TOOL } from '../code-outline/code-search'
+import { DELEGATE_TOOL } from '../openai-session/tools/delegate'
 import type { Limits, Thresholds } from '../cleanup/oversized'
 import type { Scope } from './scope-guard'
 
@@ -14,7 +15,7 @@ import type { Scope } from './scope-guard'
  * stops. AskUser is there so code whose intent is unclear is asked about
  * instead of split on a guess.
  */
-export const CLEANUP_TOOLS = ['Read', 'Glob', 'Grep', 'CodeOutline', 'CodeSearch', 'Edit', 'MultiEdit', 'Write', 'Skill', ASK_USER_TOOL]
+export const CLEANUP_TOOLS = ['Read', 'Glob', 'Grep', 'CodeOutline', 'CodeSearch', 'Edit', 'MultiEdit', 'Write', 'Skill', ASK_USER_TOOL, DELEGATE_TOOL]
 
 /**
  * Split-out code that belongs in a file already there, with where it should
@@ -51,6 +52,26 @@ const describe = (thresholds: Thresholds, test: boolean): string[] => {
     .map((l) => `- ${l}`)
 }
 
+/**
+ * How each kind of breach comes down, given only for the limits in force so
+ * the run is never told how to fix what cannot be flagged.
+ */
+const strategies = (limits: Limits): string[] => {
+  const on = (kind: keyof Thresholds): boolean => limits.source[kind] > 0 || limits.tests[kind] > 0
+  const testsOn = Object.values(limits.tests).some((limit) => limit > 0)
+  return [
+    on('functionComplexity')
+      ? 'Function cognitive complexity (each branch, loop and catch costs one plus how deeply it is nested; each else and each change of boolean operator costs one): a nested branch or a loop body becomes a function of its own, a nested condition becomes an early return, a compound condition gets a name.'
+      : '',
+    on('functionLines') ? 'Function length: a function that does two things becomes two, one per step; a helper that does not need the enclosing state moves out.' : '',
+    on('typeLines') ? 'Type length: a type that has grown two roles becomes two types, each holding the state its role uses.' : '',
+    on('fileLines') ? 'File length: the file divides where its outline shows separate responsibilities, and each one that leaves goes to a new file.' : '',
+    testsOn ? 'Test files: a test file stays one file per tested file, so shorten it with shared setup and helpers, and move tests to another test file only when the code they test moved to another file.' : '',
+  ]
+    .filter((s) => s.length > 0)
+    .map((s) => `- ${s}`)
+}
+
 export function cleanupPrompt(feature: string, cwd: string, limits: Limits): string {
   const stated = [...describe(limits.source, false), ...describe(limits.tests, true)].join('\n')
   return `You are cleaning up after the implementation of the feature "${feature}" under ${cwd}: the units listed in the first message grew past these limits, and you split them.
@@ -59,7 +80,11 @@ ${stated}
 
 The feature is built and its tests pass. Nothing about what the code does changes here: same behaviour, same public API, same test outcomes. The only change is shape.
 
-Split by responsibility: a function that does two things becomes two, a helper that does not need the enclosing state moves out, a type that has grown two roles becomes two types. Cognitive complexity counts each branch, loop and catch as one plus how deeply it is nested, and each else and each change of boolean operator as one: a function over that limit comes down when a nested branch or a loop body becomes a function of its own, a nested condition becomes an early return, or a compound condition gets a name. A piece that belongs elsewhere goes into a new file named for what it holds, in the folder it belongs in: beside the one it came from when it serves the same thing, in a subfolder named for its concern when several pieces of it move out together, or in the folder that already holds code of its kind. The pieces keep the names and the style of the code around them; a new export exists only because a split forced it. A test file stays one file per tested file: shorten it with shared setup and helpers, and move tests to another test file only when the code they test moved to another file.
+Each unit in the first message names the limit it passed; bring it down with the strategy for that limit:
+
+${strategies(limits).join('\n')}
+
+Wherever a split lands, a piece that belongs elsewhere goes into a new file named for what it holds, in the folder it belongs in: beside the one it came from when it serves the same thing, in a subfolder named for its concern when several pieces of it move out together, or in the folder that already holds code of its kind. The pieces keep the names and the style of the code around them; a new export exists only because a split forced it.
 
 Plan the split from ${CODE_OUTLINE_TOOL} before reading any body: the outline of a listed file gives its types and functions with their line ranges, which is where its responsibilities show and where it divides. Find the callers and tests of what you move with its symbol parameter and ${CODE_SEARCH_TOOL}. Then Read the ranges you move and the lines around them. ${CODE_READING}
 

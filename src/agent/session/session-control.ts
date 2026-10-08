@@ -46,6 +46,14 @@ export class SessionControl {
     await this.saveRecords()
   }
 
+  /** In force from the next call on, the same way a session's own allow rules are. */
+  async denyForSession(id: string, rules: string[]): Promise<void> {
+    const record = this.requireRecord(id)
+    const current = record.denied ?? []
+    record.denied = [...current, ...rules.filter((r) => !current.includes(r))]
+    await this.saveRecords()
+  }
+
   async setAllowWrites(id: string, enabled: boolean): Promise<void> {
     const record = this.requireRecord(id)
     if (enabled) record.allowWrites = true
@@ -58,6 +66,13 @@ export class SessionControl {
   async setPushAllowed(id: string, allowed: boolean): Promise<void> {
     const record = this.requireRecord(id)
     record.pushAllowed = allowed
+    await this.saveRecords()
+  }
+
+  async noteSpecSeen(id: string, fingerprint: string): Promise<void> {
+    const record = this.requireRecord(id)
+    if (record.specSeen === fingerprint) return
+    record.specSeen = fingerprint
     await this.saveRecords()
   }
 

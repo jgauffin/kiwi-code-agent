@@ -10,13 +10,15 @@ import { board, task } from './task-board-fixture'
 const allTested = (name: string): TaskBoard => board(task(name, { state: 'tested' }))
 const passed = (b: TaskBoard): TaskBoard => withRecord(b, { at: '2026-09-14T10:00:00Z', ok: true, text: '' })
 
-/** Specs go under `specs/`, every other plan file among the working files. */
+/** Specs go under `specs/`, a spec name with a slash in a domain folder there; every other plan file among the working files. */
 async function workspace(files: Record<string, string>): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'plans-'))
   await mkdir(join(dir, 'specs'))
   await mkdir(join(dir, '.kiwi', 'specs'), { recursive: true })
   for (const [name, text] of Object.entries(files)) {
-    await writeFile(name.endsWith('.spec.md') ? join(dir, 'specs', name) : join(dir, '.kiwi', 'specs', name), text)
+    const path = name.endsWith('.spec.md') ? join(dir, 'specs', ...name.split('/')) : join(dir, '.kiwi', 'specs', name)
+    await mkdir(join(path, '..'), { recursive: true })
+    await writeFile(path, text)
   }
   return dir
 }
@@ -75,6 +77,37 @@ describe('plan list', () => {
     const dir = await workspace({ 'user-question.spec.md': '# User question\n' })
     try {
       expect(await listPlans(dir)).toMatchObject([{ feature: 'user-question', status: 'draft' }])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('a_spec_one_domain_folder_deep_is_listed_like_any_other', async () => {
+    const dir = await workspace({ 'orders/refunds.spec.md': '---\nfeature: Refunds\nstatus: approved\n---\n# Refunds\n' })
+    try {
+      expect(await listPlans(dir)).toMatchObject([{ feature: 'Refunds', path: join(dir, 'specs', 'orders', 'refunds.spec.md'), status: 'approved', folder: 'orders' }])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('a_spec_filed_deeper_than_one_folder_is_still_listed_though_nothing_proposes_such_a_folder', async () => {
+    const dir = await workspace({ 'orders/archive/refunds.spec.md': '---\nfeature: Refunds\nstatus: approved\n---\n# Refunds\n' })
+    try {
+      expect(await listPlans(dir)).toMatchObject([
+        { feature: 'Refunds', path: join(dir, 'specs', 'orders', 'archive', 'refunds.spec.md'), status: 'approved', folder: 'orders/archive' },
+      ])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('unfiled_decisions_and_future_work_at_the_root_are_never_listed_as_specs', async () => {
+    const dir = await workspace({ 'orders.spec.md': '---\nfeature: Orders\nstatus: draft\n---\n# Orders\n' })
+    try {
+      await writeFile(join(dir, 'specs', 'unfiled-decisions.md'), '# Unfiled\n')
+      await writeFile(join(dir, 'specs', 'future-work.md'), '# Future work\n')
+      expect(await listPlans(dir)).toMatchObject([{ feature: 'Orders' }])
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -208,6 +241,15 @@ describe('a feature name already taken', () => {
     const dir = await workspace({ 'order-cancellation.spec.md': '---\nfeature: Order cancellation\nstatus: draft\n---\n# Order cancellation\n' })
     try {
       expect(await featureAlreadyNamed(dir, 'Order refunds', ['Plan linked spec'])).toBeUndefined()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('names_the_feature_whose_spec_sits_in_a_domain_folder_the_folder_is_not_identity', async () => {
+    const dir = await workspace({ 'orders/order-cancellation.spec.md': '---\nfeature: Order cancellation\nstatus: draft\n---\n# Order cancellation\n' })
+    try {
+      expect(await featureAlreadyNamed(dir, 'Order cancellation', [])).toBe('Order cancellation')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

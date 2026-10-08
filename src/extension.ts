@@ -7,7 +7,7 @@ import { OpenAiClient } from './agent/openai-session/openai-client'
 import { MCP_CONFIG_FILE } from './agent/mcp/mcp-config'
 import type { McpServerSet } from './agent/mcp/mcp-servers'
 import type { PermissionPolicy } from './agent/permissions/permission-policy'
-import { SPECS_DIR } from './agent/phases/blind-plan'
+import { SPECS_ANY_GLOB } from './agent/phases/blind-plan'
 import { CHAT_PANEL_TYPE, ChatViewProvider, type PermissionStore } from './chat/chat-view-provider'
 import type { SessionSwitch, SizeLimits, Verifier } from './chat/feature-runs'
 import { openDraftPlanAction } from './chat/open-draft-plan'
@@ -32,6 +32,7 @@ import {
   createEngines,
   createMcp,
   createPermissionStore,
+  createPersonRulesStore,
   createPolicyFor,
   createProjectCommands,
   createSessionStore,
@@ -41,6 +42,7 @@ import {
   profileFor,
   registeredModels,
 } from './session-wiring'
+import type { PersonRulesStore } from './agent/permissions/person-rules'
 import { createRemoteControl, pushDefault, remoteAlertPort, remoteControlPort, syncRemoteControlConnection } from './remote-control/remote-control-wiring'
 
 function createMemoryPort(workspaceRoot: string): MemoryPort {
@@ -97,7 +99,13 @@ function createAgentsMdOffers(
   return agentsMd
 }
 
-function createSettings(context: vscode.ExtensionContext, memoryPort: MemoryPort, bundlesPort: BundlePort, remoteControlPort: RemoteControlPort): SettingsStore {
+function createSettings(
+  context: vscode.ExtensionContext,
+  memoryPort: MemoryPort,
+  bundlesPort: BundlePort,
+  remoteControlPort: RemoteControlPort,
+  personRules: PersonRulesStore,
+): SettingsStore {
   return new SettingsStore(
     configPort(),
     {
@@ -114,7 +122,35 @@ function createSettings(context: vscode.ExtensionContext, memoryPort: MemoryPort
     memoryPort,
     bundlesPort,
     remoteControlPort,
+    personRules,
   )
+}
+
+/**
+ * The newer Claude models, put to the person once: the settings page keeps the
+ * same offer until it is taken or turned down, so this is the nudge for someone
+ * who would otherwise never open that page. Remembered for the person rather
+ * than the workspace, since the models it would change are their own settings.
+ * An install made after the host came up is noticed at the next start.
+ */
+function offerNewerModels(context: vscode.ExtensionContext, settings: SettingsStore, output: vscode.OutputChannel): void {
+  const shown = 'modelUpgrade.notified'
+  void (async () => {
+    try {
+      const upgrade = (await settings.snapshot()).modelUpgrade
+      if (!upgrade || context.globalState.get(shown, false)) return
+      await context.globalState.update(shown, true)
+      const moves = upgrade.moves.map((m) => `${m.from} → ${m.to}`).join(', ')
+      const choice = await vscode.window.showInformationMessage(
+        `Kiwipow Agent: the Claude Code installed on this machine runs newer models (${moves}). Use them for your profiles?`,
+        'Use them',
+        'Not now',
+      )
+      if (choice === 'Use them') await settings.upgradeModels()
+    } catch (error: unknown) {
+      output.appendLine(`newer models: ${errorMessage(error)}`)
+    }
+  })()
 }
 
 function createSettingsPanel(context: vscode.ExtensionContext, settings: SettingsStore, workspaceRoot: string): SettingsPanel {
@@ -257,20 +293,22 @@ export function activate(context: vscode.ExtensionContext): void {
   let sessions: SessionManager
   const allowWritesControl = createAllowWritesControl(() => sessions, output)
   const projectCommands = createProjectCommands(workspaceRoot, verifier)
-  const policyFor = createPolicyFor(workspaceRoot, () => sessions, () => engines, projectCommands, allowWritesControl, policies)
+  const personRules = createPersonRulesStore()
+  const policyFor = createPolicyFor(workspaceRoot, context, () => sessions, () => engines, projectCommands, allowWritesControl, policies, personRules)
   /** Docs the blind planner must not see, so neither the map nor the evaluation may describe them. */
   const planIgnore = (): string[] => vscode.workspace.getConfiguration('kiwiAgent').get<string[]>('planIgnore', [])
 
   const mcp = createMcp(workspaceRoot, () => sessions, output)
   engines = createEngines({ context, output, workspaceRoot, mcp, verifier, policyFor, planIgnore, getChat: () => chat, getSessions: () => sessions })
   sessions = createSessions(store, engines, workspaceRoot, policyFor, () => chat)
-  const permissionStore = createPermissionStore(() => sessions)
+  const permissionStore = createPermissionStore(() => sessions, personRules)
   const memoryPort = createMemoryPort(workspaceRoot)
   const bundles = createBundles(output, workspaceRoot)
   const agentsMd = createAgentsMdOffers(context, workspaceRoot, output, () => chat)
   const remoteControl = createRemoteControl(context, output)
-  const settings = createSettings(context, memoryPort, bundles.port, remoteControlPort(remoteControl))
+  const settings = createSettings(context, memoryPort, bundles.port, remoteControlPort(remoteControl), personRules)
   const settingsPanel = createSettingsPanel(context, settings, workspaceRoot)
+  offerNewerModels(context, settings, output)
   // Naming a feature runs on what its planning would, so the one ask follows the profile rather than a model of its own.
   const ask = (prompt: string) => engines.ask(profileFor('plan'), prompt)
   chat = createChat(context, sessions, settings, verifier, sizeLimits, allowWritesControl, permissionStore, workspaceRoot, agentsMd, remoteControl, output, ask)
@@ -310,6 +348,6 @@ function watchMcpConfig(workspaceRoot: string, onChange: () => Promise<void>): v
 
 /** The Sessions view lists the specs on disk, so a spec written, approved or deleted outside a session shows there too. */
 function watchSpecs(workspaceRoot: string, onChange: () => void): vscode.Disposable {
-  const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(workspaceRoot, `${SPECS_DIR}/*.spec.md`))
+  const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(workspaceRoot, SPECS_ANY_GLOB))
   return vscode.Disposable.from(watcher, watcher.onDidCreate(onChange), watcher.onDidChange(onChange), watcher.onDidDelete(onChange))
 }

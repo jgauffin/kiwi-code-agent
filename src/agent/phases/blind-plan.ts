@@ -1,12 +1,16 @@
-import { join } from 'node:path'
+import { existsSync, readdirSync, type Dirent } from 'node:fs'
+import { join, relative } from 'node:path'
 import { KIWI_DIR } from '../kiwi-dir'
 import { ASK_USER_TOOL } from '../openai-session/tools/ask-user'
 import { MARKDOWN_SEARCH_TOOL } from '../openai-session/tools/markdown-search'
 import { DOC_READING } from '../openai-session/tools/markdown/outline-gate'
 import { EDIT_WRITING } from '../openai-session/tools/edit'
+import { DELEGATE_TOOL } from '../openai-session/tools/delegate'
+import { RESEARCH_SUB_AGENT } from '../sub-agents/sub-agent-index'
 import SPEC_CONTRACT from '../../../assets/plugin/skills/spec-writing/contract.md'
 import { KEEP_RULING } from './ruling'
 import type { Scope } from './scope-guard'
+import type { SpecFoldersMode } from './spec-folders'
 import type { Authorship } from './spec-status'
 import { DECISION_FILES, FUTURE_FILE, UNFILED_DECISIONS, UNFILED_FILE } from './unfiled-decisions'
 
@@ -28,8 +32,41 @@ export function featureSlug(feature: string): string {
   )
 }
 
+/**
+ * Where a feature's spec sits: at the root when it is there, or, failing
+ * that, wherever under `specs/` a person filed it, any depth, since nothing
+ * but the root is proposed but a person may put one deeper. Falls back to the
+ * root path when no such file exists anywhere, so a caller writing a new spec
+ * still gets a path to write to.
+ */
 export function specPath(cwd: string, feature: string): string {
-  return join(cwd, SPECS_DIR, `${featureSlug(feature)}.spec.md`)
+  const name = `${featureSlug(feature)}.spec.md`
+  const root = join(cwd, SPECS_DIR, name)
+  if (existsSync(root)) return root
+  return findSpecFile(join(cwd, SPECS_DIR), name) ?? root
+}
+
+/** Depth-first search for a spec file named `name` under `dir`. */
+function findSpecFile(dir: string, name: string): string | undefined {
+  let entries: Dirent[]
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return undefined
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    const candidate = join(dir, entry.name, name)
+    if (existsSync(candidate)) return candidate
+    const nested = findSpecFile(join(dir, entry.name), name)
+    if (nested) return nested
+  }
+  return undefined
+}
+
+/** `specPath`, relative to the workspace and forward-slashed: what a prompt or a citation shows instead of an absolute path. */
+export function specRelPath(cwd: string, feature: string): string {
+  return relative(cwd, specPath(cwd, feature)).replaceAll('\\', '/')
 }
 
 /** The product's front door counts as intent: what it says it is, not how it is built. */
@@ -38,6 +75,12 @@ export const README_GLOB = '{README,ReadMe,Readme,readme}.md'
 /** Every feature's spec: an approved one is that feature's definition, so a later planner reads it as it reads the docs. */
 export const SPECS_GLOB = `${SPECS_DIR}/*.spec.md`
 
+/** A spec one domain folder deep, the only nesting a proposed folder ever takes. */
+export const SPECS_FOLDER_GLOB = `${SPECS_DIR}/*/*.spec.md`
+
+/** Every spec, at the root or any folder beneath it: for reading and citing, never for where a new one lands. */
+export const SPECS_ANY_GLOB = `${SPECS_DIR}/**/*.spec.md`
+
 /**
  * The spec search tool by name. Spelled here rather than imported: the tool reads specs through the
  * spec model, which reads this module, and a constant taken back from it would be read before it is set.
@@ -45,23 +88,46 @@ export const SPECS_GLOB = `${SPECS_DIR}/*.spec.md`
 const SPEC_SEARCH = 'SpecSearch'
 
 /**
+ * Said wherever code or docs get written. Specs are rewritten, renamed and moved as features change, and
+ * nothing reports a reference to one that went stale; a spec citing the docs is checked when it is read.
+ */
+export const REFERENCE_DIRECTION = `References run one way: a spec cites the docs, but the code, its comments and the docs never cite a spec, a rule's name or a spec's path. Where code or a doc needs the reason behind a behaviour, state it in the domain's own words.`
+
+/**
  * Said to every session that changes code or plans a change, so a rule the user approved is not broken by
  * one that never knew it was there. Said even before the first spec exists: the specs are what blind
  * planning builds up, and a project has none only once.
  */
-export const SPEC_READING = `The approved specs under \`${SPECS_GLOB}\` define what the product does, one named rule per line; a draft is still a proposal. Before you change how something behaves, or plan to, find the rules that cover it with ${SPEC_SEARCH}: it returns each matching rule whole, with its edge cases, its scenario and its spec's status, so a spec needs reading only for what its rules leave out. Keep to those rules. Breaking one is the user's call: ask first.`
+export const SPEC_READING = `The approved specs under \`${SPECS_ANY_GLOB}\` define what the product does, one named rule per line; a draft is still a proposal. Before you change how something behaves, or plan to, find the rules that cover it with ${SPEC_SEARCH}: it returns each matching rule whole, with its edge cases, its scenario and its spec's status, so a spec needs reading only for what its rules leave out. Keep to those rules. Breaking one is the user's call: ask first. ${REFERENCE_DIRECTION}`
 
 /** Said to a session that can write the specs, after SPEC_READING: what follows once the user agrees. */
 export const SPEC_AMENDING = `Once the user agrees to break a rule, amend it in its spec, keeping its name, or record the decision as unfiled when it reaches features beyond the one you are changing.`
 
-/** `ignored` comes from the `kiwiAgent.planIgnore` setting: docs the planner must not see. */
-export function blindPlanScope(feature: string, ignored: string[] = []): Scope {
+/**
+ * Said after SPEC_AMENDING to a session that codes freely rather than from a
+ * board: what it built is held against the specs at the end, while the change
+ * is still in mind, since no later step looks for a spec that has gone out of
+ * date with the code.
+ */
+export const SPEC_CHECKING_AFTER_BUILD = `When you have finished coding something, check it against the specs before you report it done: with ${SPEC_SEARCH}, find the rules the behaviour you changed falls under, and say which specs no longer describe what the product now does, naming what in each is wrong or missing. Changing a settled spec is the user's call, and they ask for it as a change to that spec.`
+
+/**
+ * `ignored` comes from the `kiwiAgent.planIgnore` setting: docs the planner
+ * must not see. `mode` is `kiwiAgent.specFolders`, resolved: `by-domain`
+ * leaves the spec's own path open to one domain folder as well as the root,
+ * since the folder is settled in chat, during the session, not known up
+ * front; `flat` keeps it pinned to the root, so the direction never gets a
+ * folder to write outside of.
+ */
+export function blindPlanScope(feature: string, ignored: string[] = [], mode: SpecFoldersMode = 'flat'): Scope {
   const slug = featureSlug(feature)
+  const specGlobs = mode === 'by-domain' ? [`${SPECS_DIR}/${slug}.spec.md`, `${SPECS_DIR}/*/${slug}.spec.md`] : [`${SPECS_DIR}/${slug}.spec.md`]
   // The review file holds the human's comments and the planner's resolutions to them.
   // The decisions file holds what the mapping found; the planner proposes on it and reads the rulings from it.
-  const own = [`${SPECS_DIR}/${slug}.spec.md`, `${WORK_DIR}/${slug}.review.md`, `${WORK_DIR}/${slug}.decisions.md`]
+  // Both stay keyed by the slug alone, at their own fixed place, whatever folder the spec itself lands in.
+  const own = [...specGlobs, `${WORK_DIR}/${slug}.review.md`, `${WORK_DIR}/${slug}.decisions.md`]
   return {
-    readable: [`${DOCS_DIR}/**`, README_GLOB, SPECS_GLOB, ...DECISION_FILES, ...own],
+    readable: [`${DOCS_DIR}/**`, README_GLOB, SPECS_ANY_GLOB, ...DECISION_FILES, ...own],
     // An answer that reaches beyond this feature is recorded for the features it reaches, or as work for later.
     writable: [...own, ...DECISION_FILES],
     // The docs are the user's: the planner edits them only when asked, one confirmed write at a time.
@@ -73,17 +139,27 @@ export function blindPlanScope(feature: string, ignored: string[] = []): Scope {
 /**
  * Tools a blind planner gets, by name, on either engine. Edit is for answering
  * a comment in place; AskUser is how a gap in intent is settled by the user
- * mid-session instead of being written down and waited on.
+ * mid-session instead of being written down and waited on. Delegate offers
+ * the research sub agent and nothing else: reading no code, the planner may
+ * also define a one-off sub agent in the call itself, but never reaches the
+ * code through either.
  */
-export const BLIND_PLAN_TOOLS = ['Read', 'Glob', MARKDOWN_SEARCH_TOOL, SPEC_SEARCH, 'JsonSchema', 'JsonQuery', 'Write', 'Edit', 'MultiEdit', ASK_USER_TOOL]
+export const BLIND_PLAN_TOOLS = ['Read', 'Glob', MARKDOWN_SEARCH_TOOL, SPEC_SEARCH, 'JsonSchema', 'JsonQuery', 'Write', 'Edit', 'MultiEdit', ASK_USER_TOOL, DELEGATE_TOOL]
 
 /**
  * Phase 1 system prompt. Short on purpose: it states the job and the output
  * contract and leaves the reasoning to the model. Direction is proposed in
  * chat before any file is written, so the user steers while it is cheap.
  */
-export function blindPlanPrompt(feature: string, cwd: string): string {
+export function blindPlanPrompt(feature: string, cwd: string, mode: SpecFoldersMode = 'flat', existingFolders: string[] = []): string {
   const slug = featureSlug(feature)
+  const byDomain = mode === 'by-domain'
+  const folderDirection = byDomain
+    ? ` Also say which domain folder the spec will land in: a single folder under \`${SPECS_DIR}/\`, read from the feature's description and the domain language of the docs, never from the feature's name alone. Reuse one of the folders the workspace already has${existingFolders.length > 0 ? ` (${existingFolders.map((f) => `\`${f}\``).join(', ')})` : ''} where the feature belongs there, rather than coining a synonym of it. Whatever folder the user names in reply, kept or changed, is the one the spec is written to, whether or not that folder already holds a spec: the folder only groups specs, it never becomes part of the feature's name.`
+    : ''
+  const specFile = byDomain
+    ? `\`${SPECS_DIR}/<folder>/${slug}.spec.md\` under ${cwd} (\`<folder>\` the single folder settled in the direction, never a folder inside another)`
+    : `\`${SPECS_DIR}/${slug}.spec.md\` under ${cwd}`
   return `You are planning the feature "${feature}" for a software product, blind to its source code.
 
 A planner that reads the code inherits the code's mistakes as constraints, and the feature gets shaped to fit the defects. 
@@ -91,7 +167,7 @@ You derive what the feature should do from intent alone, so that a later phase c
 disagreement instead of silently absorbing it.
 
 What you may read: \`${DOCS_DIR}/**\` (product intent: goals, ubiquitous language, rules, constraints, feature descriptions), the README in the 
-workspace root (what the product is, in its own words), every feature's spec under \`${SPECS_GLOB}\` (a spec the user has approved is that
+workspace root (what the product is, in its own words), every feature's spec under \`${SPECS_ANY_GLOB}\` (a spec the user has approved is that
 feature's definition, as settled as a doc; a draft is a proposal still being planned), \`${UNFILED_FILE}\` (decisions the user made while building
 or in chat, not yet filed into the specs and docs they reach: the user's latest word, so an entry outweighs a doc or a spec that says otherwise),
 \`${FUTURE_FILE}\` (work the user decided on for later, not yet built or planned) and your own plan files. Nothing else exists for you; do not try.
@@ -99,17 +175,22 @@ The docs map in this prompt shows every doc; use Glob with path \`${SPECS_DIR}\`
 with ${SPEC_SEARCH} for the feature's terms rather than reading file after file. ${DOC_READING} ${EDIT_WRITING}
 Where a doc and an approved spec disagree, ask: the user knows which is current, you do not.
 
+When something outside the product itself is unsettled — an external standard, a library's behaviour, a term's accepted meaning — hand that one question to
+\`${DELEGATE_TOOL}\`'s \`${RESEARCH_SUB_AGENT.name}\` sub agent rather than guessing: it reaches the open internet and answers in verbatim excerpts with where each came from.
+Approving that delegation approves the research as a whole; it then reads whatever pages answering the question takes without being asked about each one. What it turns up
+is never a citation in the spec: fold it into your own default and name the research, not a page address, in your direction.
+
 Your input: the user's first message describes the feature or user story. Later messages steer, answer your questions or ask for changes.
 
-First, direction. In chat, not in a file: the few decisions that shape the feature (what it is, what it is not, where it could go two ways and which way 
+First, direction. In chat, not in a file: the few decisions that shape the feature (what it is, what it is not, where it could go two ways and which way
 you propose, with the reason) and the questions whose answer would change that, asked in the message itself. A short message, then stop and wait. Write nothing until the user says go:
-a full plan in the wrong direction is wasted, so the user steers first. \`${ASK_USER_TOOL}\` is for what comes up once you write the spec.
+a full plan in the wrong direction is wasted, so the user steers first. \`${ASK_USER_TOOL}\` is for what comes up once you write the spec.${folderDirection}
 
-Then, the spec. When the user accepts or adjusts the direction, write one file, \`${SPECS_DIR}/${slug}.spec.md\` under ${cwd}, with Write, its front matter carrying \`authored: planned\`: this draft was shaped with the user in conversation, the most complete of the ways a draft comes to be. ${SPEC_CONTRACT.trim().replaceAll('<feature>', feature)}
+Then, the spec. When the user accepts or adjusts the direction, write one file, ${specFile}, with Write, its front matter carrying \`authored: planned\`: this draft was shaped with the user in conversation, the most complete of the ways a draft comes to be. ${SPEC_CONTRACT.trim().replaceAll('<feature>', feature)}
 - Settle what you can. Where intent is silent but a sensible default exists, take it and say so in the direction; a question is for what only the user can answer, and you put it with the \`${ASK_USER_TOOL}\` tool and carry on with the answer rather than writing it down and stopping.
 - The user's answers become rules in this spec. The part of an answer that reaches features other than this one is recorded for them: ${UNFILED_DECISIONS}
 - Once approved, the spec is checked against the code by a separate run, which writes what stands in its way to \`${WORK_DIR}/${slug}.decisions.md\` for the user to rule on. Those decisions reach you as hand-offs that say what to do, proposing ways to settle them or applying the user's rulings. Change no rule until the user has ruled.
-- \`${DOCS_DIR}/\` is the user's. You edit it only when the user asks you to, and each write is confirmed by them.
+- \`${DOCS_DIR}/\` is the user's. You edit it only when the user asks you to, and each write is confirmed by them. ${REFERENCE_DIRECTION}
 - The user reviews a draft by commenting on its rules and striking the ones that should not be built, in \`${WORK_DIR}/${slug}.review.md\`. A submitted review reaches you as a hand-off that says what to do; a struck rule never comes back on your own.
 - If neither the docs nor the specs have anything on this feature, or the description is too thin to derive a direction, do not invent: ask with \`${ASK_USER_TOOL}\` and work from the answer.
 - After each write, summarise what changed in a few sentences and stop.`
@@ -120,17 +201,41 @@ Then, the spec. When the user accepts or adjusts the direction, write one file, 
  * wrote: the files are the state, so the planner reads them and reports where
  * the plan stands instead of starting the feature over.
  */
-export function resumePlanPrompt(feature: string, present: { review: boolean; decisions: boolean }): string {
+export function resumePlanPrompt(feature: string, cwd: string, present: { review: boolean; decisions: boolean }): string {
   const slug = featureSlug(feature)
+  const spec = specRelPath(cwd, feature)
   // Only the files that exist are named, so no Read is spent on one that is not there.
-  const files = [`\`${SPECS_DIR}/${slug}.spec.md\``, ...(present.review ? [`\`${WORK_DIR}/${slug}.review.md\``] : []), ...(present.decisions ? [`\`${WORK_DIR}/${slug}.decisions.md\``] : [])]
+  const files = [`\`${spec}\``, ...(present.review ? [`\`${WORK_DIR}/${slug}.review.md\``] : []), ...(present.decisions ? [`\`${WORK_DIR}/${slug}.decisions.md\``] : [])]
   const read = files.length === 1 ? files[0]! : `${files.slice(0, -1).join(', ')} and ${files.at(-1)!}`
   return [
-    `The spec for "${feature}" already exists at \`${SPECS_DIR}/${slug}.spec.md\`, written in an earlier session that is gone. Do not start over.`,
+    `The spec for "${feature}" already exists at \`${spec}\`, written in an earlier session that is gone. Do not start over.`,
     '',
     `Read ${read} from disk, in one reply. Then, in chat, where the plan stands in a few sentences: its status, open questions${present.decisions ? ', decisions without a ruling or with one not yet applied' : ''}${present.review ? ', comments not yet answered' : ''}. A spec the user has approved is settled: change nothing in it unless the user asks.`,
     '',
     'Then stop; the user says what happens next.',
+  ].join('\n')
+}
+
+/** The rules a revision added or reworded after the feature was built, and what planning them takes. */
+function unbuiltRulesStep(unbuilt: string[]): string {
+  const quoted = unbuilt.map((n) => `"${n}"`).join(', ')
+  return `The feature was built before this revision, and its task board has nothing built for ${quoted}: no task delivers ${unbuilt.length === 1 ? 'it' : 'them'} as ${unbuilt.length === 1 ? 'it reads' : 'they read'} now, and no test proves ${unbuilt.length === 1 ? 'it' : 'them'}. Plan ${unbuilt.length === 1 ? 'that rule' : 'those rules'}, never report the feature done: whether each makes sense beside the rest of the spec and the other specs, what you would amend, and what building it would change in the code that exists. Once approved, the check against the code reopens the board for them.`
+}
+
+/**
+ * Said to a feature's planning session brought back up on a draft that was
+ * revised after the feature was built: what the session remembers is the spec
+ * before the revision, so it reads the file again and plans what was added
+ * rather than reporting the feature done.
+ */
+export function revisedDraftPrompt(feature: string, cwd: string, unbuilt: string[]): string {
+  const spec = specRelPath(cwd, feature)
+  return [
+    `\`${spec}\` was revised since you last worked on "${feature}" and stands as a draft again. Read it from disk: what you remember is the spec before the revision.`,
+    '',
+    unbuiltRulesStep(unbuilt),
+    '',
+    'Say it in chat, a short message, then stop and wait. Write nothing until the user says go.',
   ].join('\n')
 }
 
@@ -146,11 +251,13 @@ const CRITIQUE_DEPTH: Record<Authorship, string> = {
  * read before anything else, but a draft buys a critique rather than a
  * status report, since nothing on it is settled yet. `authorship` decides
  * how deep that critique goes; a review already submitted and waiting on an
- * answer comes before any critique of the agent's own.
+ * answer comes before any critique of the agent's own. `unbuilt` are the
+ * rules of a draft revised after it was built that its board has not built:
+ * however complete the draft is, those are the change still to plan.
  */
-export function draftPickupPrompt(feature: string, authorship: Authorship, present: { review: boolean; decisions: boolean }): string {
+export function draftPickupPrompt(feature: string, cwd: string, authorship: Authorship, present: { review: boolean; decisions: boolean }, unbuilt: string[] = []): string {
   const slug = featureSlug(feature)
-  const spec = `${SPECS_DIR}/${slug}.spec.md`
+  const spec = specRelPath(cwd, feature)
   const files = [`\`${spec}\``, ...(present.review ? [`\`${WORK_DIR}/${slug}.review.md\``] : []), ...(present.decisions ? [`\`${WORK_DIR}/${slug}.decisions.md\``] : [])]
   const read = files.length === 1 ? files[0]! : `${files.slice(0, -1).join(', ')} and ${files.at(-1)!}`
   return [
@@ -165,6 +272,7 @@ export function draftPickupPrompt(feature: string, authorship: Authorship, prese
         ]
       : []),
     `Otherwise, critique the draft in chat before writing anything: what it settles, which of its rules you would amend, drop or add, and which questions it leaves open. ${CRITIQUE_DEPTH[authorship]}`,
+    ...(unbuilt.length > 0 ? [unbuiltRulesStep(unbuilt)] : []),
     `Where you judge the draft's whole shape wrong, not just its rules, say so instead: the direction you would take and why, and leave the spec untouched until the user chooses. If they keep the draft's direction, carry it on as it stands and do not raise this same redirect again in this session. If they take yours, rewrite \`${spec}\` itself to the contract: never a second spec for the same feature.`,
     `Search ${SPEC_SEARCH} for every other draft whose rules describe behaviour this one also claims; behaviour an approved spec already defines is no question of ownership, so let this draft's own rule stand or cite that spec instead, never name it as an overlap. Name each overlapping draft in the critique and propose which of the two features should own the behaviour. Write only \`${spec}\`, never the other draft's, whatever the overlap; once the user rules which feature owns it, record the ruling as an unfiled decision in \`${UNFILED_FILE}\` naming both features, so the other draft's own pickup takes it in.`,
     `Name any entry in \`${UNFILED_FILE}\` or \`${FUTURE_FILE}\` whose affects names "${feature}". Fold its words into the rules only once the user says so, and once they stand as rules, delete the entry from its file.`,
@@ -228,9 +336,9 @@ export function changePrompt(feature: string): string {
  * it never asks, since the developer's description is already on its way as
  * the next message, in their own words rather than folded into this kickoff.
  */
-export function updatePrompt(feature: string): string {
+export function updatePrompt(feature: string, cwd: string): string {
   const slug = featureSlug(feature)
-  const spec = `${SPECS_DIR}/${slug}.spec.md`
+  const spec = specRelPath(cwd, feature)
   return [
     `"${feature}" is already settled, at \`${spec}\`. This is a change to it, not a new feature: start from the spec as it stands, never from an earlier conversation about it.`,
     '',

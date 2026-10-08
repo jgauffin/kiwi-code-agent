@@ -85,7 +85,17 @@ describe('cleanup prompt', () => {
       testGlobs: ['**/*.test.*'],
     })
     expect(prompt).toContain('- Function length: 25 code lines\n- File length: 400 lines\n- Test function length: 60 code lines\n- Test file length: 1200 lines')
-    expect(prompt).toContain('A test file stays one file per tested file')
+    expect(prompt).toContain('- Test files: a test file stays one file per tested file')
+  })
+
+  it('only_the_limits_in_force_get_a_strategy', () => {
+    const off = { functionLines: 0, functionComplexity: 0, typeLines: 0, fileLines: 0 }
+    const prompt = cleanupPrompt('Order cancellation', cwd, { source: { ...off, typeLines: 200 }, tests: off, testGlobs: [] })
+    expect(prompt).toContain('- Type length: a type that has grown two roles becomes two types')
+    expect(prompt).not.toContain('- Function cognitive complexity (')
+    expect(prompt).not.toContain('- Function length: a function')
+    expect(prompt).not.toContain('- File length: the file divides')
+    expect(prompt).not.toContain('- Test files:')
   })
 
   it('a_complexity_limit_is_named_with_how_a_function_comes_back_under_it', () => {

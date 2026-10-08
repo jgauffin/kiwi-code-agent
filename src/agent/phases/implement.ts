@@ -1,5 +1,6 @@
-import { DOCS_DIR, SPECS_DIR, featureSlug } from './blind-plan'
+import { DOCS_DIR, specRelPath } from './blind-plan'
 import { ASK_USER_TOOL } from '../openai-session/tools/ask-user'
+import { DELEGATE_TOOL } from '../openai-session/tools/delegate'
 import { MARKDOWN_SEARCH_TOOL } from '../openai-session/tools/markdown-search'
 import { EDIT_WRITING } from '../openai-session/tools/edit'
 import { CODE_OUTLINE_TOOL } from '../code-outline/code-outline-tool'
@@ -8,6 +9,7 @@ import { CODE_SEARCH_TOOL } from '../code-outline/code-search'
 import { SCRIPT_WRITING } from '../script/script-gate'
 import { projectScriptsInstruction } from '../permissions/package-scripts'
 import { PIPE_WRITING } from '../permissions/read-only-commands'
+import { driftLines, type FileDrift } from './mapping-snapshot'
 import { rulingKind, type Decision } from './decisions'
 import { UNFILED_DECISIONS } from './unfiled-decisions'
 import { SPEC_SEARCH_TOOL } from './spec-search'
@@ -20,7 +22,7 @@ import { verificationHandoffPrompt, type VerificationFailure, type VerifyRule } 
 
 /** AskUser is here so a fork the plan does not settle is ruled on by the user instead of blocking the task. */
 export const IMPLEMENT_TOOLS = [
-  'Read', 'Write', 'Edit', 'MultiEdit', 'Move', 'Copy', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', MARKDOWN_SEARCH_TOOL, SPEC_SEARCH_TOOL, CODE_OUTLINE_TOOL, CODE_SEARCH_TOOL, 'Bash', 'RunScript', 'Skill', ASK_USER_TOOL,
+  'Read', 'Write', 'Edit', 'MultiEdit', 'Move', 'Copy', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', MARKDOWN_SEARCH_TOOL, SPEC_SEARCH_TOOL, CODE_OUTLINE_TOOL, CODE_SEARCH_TOOL, 'Bash', 'RunScript', 'Skill', ASK_USER_TOOL, DELEGATE_TOOL,
   READ_TASKS_TOOL, UPDATE_TASK_TOOL,
 ]
 
@@ -41,10 +43,10 @@ export function taskSettled(board: TaskBoard, name: string): boolean {
 
 /**
  * The first prompt of a task's run: the task in full, the text of its rules,
- * the findings the user ruled to keep on those rules, and what the tasks
- * before it left.
+ * the findings the user ruled to keep on those rules, what the tasks before it
+ * left, and where its own surface moved since the check mapped it.
  */
-export function taskKickoff(board: TaskBoard, name: string, spec: Spec, decisions: Decision[] = []): string {
+export function taskKickoff(board: TaskBoard, name: string, spec: Spec, decisions: Decision[] = [], drift: FileDrift[] = []): string {
   const task = board.tasks.find((t) => sameName(t.name, name))
   if (!task) throw new Error(`No task named "${name}" on the board.`)
   const rules = rulesOf(spec, task.delivers)
@@ -55,8 +57,21 @@ export function taskKickoff(board: TaskBoard, name: string, spec: Spec, decision
     lines.push('', 'Where the code disagrees with these rules, the user ruled that the spec stands and the code changes:', ...kept.map((d) => `- ${d.title} (on ${d.on.join(', ')}): ${d.finding}`))
   }
   lines.push(...handOff(board, [task]))
+  const moved = driftLines(driftOf(board, task, drift))
+  if (moved.length > 0) lines.push('', ...moved)
   lines.push('', `Do this task only. Move it along with ${UPDATE_TASK_TOOL}, and stop when it is tested or blocked.`)
   return lines.join('\n')
+}
+
+/**
+ * Of what moved since the mapping, what this task is told: its own files, and
+ * not one an earlier task of this feature rewrote, whose hand-off already says
+ * what it left there.
+ */
+function driftOf(board: TaskBoard, task: Task, drift: FileDrift[]): FileDrift[] {
+  const mine = new Set([...task.context, ...task.files])
+  const ours = new Set(liveTasks(board.tasks).filter((t) => t !== task && t.state !== 'open').flatMap((t) => t.files))
+  return drift.filter((d) => mine.has(d.file) && !ours.has(d.file))
 }
 
 /** A task run that stopped before its task was settled picks it up again. */
@@ -179,7 +194,7 @@ function placeholders(rules: VerifyRule[]): string[] {
  * prefix the engine has cached.
  */
 export function implementPrompt(feature: string, cwd: string, rules: VerifyRule[] = []): string {
-  const spec = `${SPECS_DIR}/${featureSlug(feature)}.spec.md`
+  const spec = specRelPath(cwd, feature)
   const scripts = projectScriptsInstruction(cwd)
   return `You are implementing one task of the feature "${feature}", from its approved spec at \`${spec}\` under ${cwd}.
 

@@ -1,3 +1,8 @@
+import { SimpleCommandBuilder } from './shell-command'
+import { redirectAt } from './shell-redirect'
+import { ansiQuoted, blanksEnd, closingBrace, doubleParenAt, heredocBodies, lineEnd, substitutionAt, type Heredoc } from './shell-scan'
+import { WordBuffer } from './shell-word'
+
 /**
  * Splits a shell command line the way a POSIX shell would (Shell Command
  * Language: 2.2 quoting, 2.3 token recognition, 2.6 expansions, 2.7
@@ -15,10 +20,20 @@ export type ShellSegment = {
   tokens: string[]
   /** A redirect to something other than /dev/null or a file descriptor. */
   writesFile: boolean
+  /** The targets of an output redirect, as written: a word that still holds an expansion names no path a rule can judge. */
+  writes: string[]
   /** Files fed in by `< path`: read as surely as a file named as an argument, and named nowhere in `tokens`. */
   reads: string[]
   /** A word of it came out of `$(…)`, backticks or `<(…)`: it holds the substitution as written, not what it will stand for. */
   substituted: boolean
+  /**
+   * How it is joined to the command before it, where the shell's directory can
+   * be followed across: `start` for the line's first command, `&&` or `|` for
+   * one joined by that operator alone along an unbroken chain from the start.
+   * Absent past anything else: another operator, a reserved word, a subshell,
+   * or a command written inside a substitution.
+   */
+  joined?: 'start' | '&&' | '|'
 }
 
 export type ShellCommand = {
@@ -30,185 +45,136 @@ export function splitShellCommand(command: string): ShellCommand {
   return new Splitter(command).run()
 }
 
-/** Reserved words that only open or close a construct; the command follows them. `time` may take `-p`. */
-const PREFIX_WORDS = new Set(['!', '{', '}', 'if', 'then', 'elif', 'else', 'fi', 'do', 'done', 'while', 'until', 'time', 'coproc'])
-/** Reserved words whose whole clause runs nothing: the words after them are names, patterns or lists, not a command. */
-const HEADER_WORDS = new Set(['for', 'select', 'case', 'esac', 'in'])
-const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*(\[[^\]]*\])?\+?$/
-const FD_PREFIX = /^(\d+|\{[A-Za-z_][A-Za-z0-9_]*\})$/
-
-type Word = { text: string; start: number; quoted: boolean; substituted: boolean; equalsAt: number }
-type Heredoc = { delimiter: string; stripTabs: boolean; owner: number }
-
+/** Reads the line a character at a time; the word being read and the command it belongs to keep their own state. */
 class Splitter {
   private readonly segments: ShellSegment[] = []
   /** Commands found in the substitutions of the segment being read; they are listed after it. */
   private nested: ShellSegment[] = []
-  private i = 0
-
-  private words: Word[] = []
-  private word = ''
-  private wordStart = 0
-  private inWord = false
-  private wordQuoted = false
-  private wordSubstituted = false
-  /** Offset in `word` of its first unquoted `=`, or -1. */
-  private equalsAt = -1
-  private redirectPending = false
-  private writesFile = false
-  /** The word being read is the file an input redirect feeds in, not a word of the command. */
-  private readPending = false
-  private reads: string[] = []
+  private readonly word = new WordBuffer()
+  private readonly command = new SimpleCommandBuilder()
   /** Heredocs opened on the current line; their bodies start on the next line, in order. */
   private heredocs: Heredoc[] = []
   /** Bodies of the current segment's heredocs, appended to its text when it closes. */
   private heredocText = ''
-  /** Inside `[[ … ]]`, where `<`, `>`, `&&`, `||`, `(` and `)` are comparisons and grouping, not operators. */
-  private inConditional = false
-  /** Open `case` constructs: whether the next words are a pattern or a clause body. */
-  private cases: ('pattern' | 'body')[] = []
+  /** How the next command is joined to the one before it; see `ShellSegment.joined`. */
+  private joinedBy: ShellSegment['joined'] = 'start'
+  private i = 0
 
   constructor(private readonly src: string) {}
 
   run(): ShellCommand {
-    const src = this.src
-    while (this.i < src.length) {
-      const c = src[this.i]!
-      const next = src[this.i + 1]
-      if (c === '\\') {
-        // A backslash-newline joins lines; any other escaped character is literal.
-        if (next === '\n') this.i += 2
-        else if (next === undefined) this.i++
-        else {
-          this.add(next)
-          this.i += 2
-        }
-        continue
-      }
-      if (c === "'") {
-        this.singleQuoted()
-        continue
-      }
-      if (c === '"') {
-        this.doubleQuoted()
-        continue
-      }
-      if (c === '$' && next === "'") {
-        this.ansiQuoted()
-        continue
-      }
-      if (c === '$' && next === '"') {
-        this.i++
-        this.doubleQuoted()
-        continue
-      }
-      if (this.expansion(c, next)) continue
-      if ((c === '<' || c === '>') && next === '(' && !this.inConditional) {
-        this.substitution()
-        continue
-      }
-      if (c === '#' && !this.inWord) {
-        while (this.i < src.length && src[this.i] !== '\n') this.i++
-        continue
-      }
-      if (c === ' ' || c === '\t') {
-        this.endWord()
-        this.i++
-        continue
-      }
-      if (c === '\n') {
-        this.newline()
-        continue
-      }
-      if (this.operator(c, next)) continue
-      this.add(c)
-      this.i++
-    }
-    this.endSegment(src.length, src.length)
+    while (this.i < this.src.length) this.step(this.src[this.i]!, this.src[this.i + 1])
+    this.endSegment(this.src.length, this.src.length)
     return { segments: this.segments }
   }
 
-  /** `$((…))`, `$(…)`, `${…}` and backticks, which keep their meaning inside double quotes too. True when one was read. */
-  private expansion(c: string, next: string | undefined): boolean {
-    if (c === '$' && next === '(' && this.src[this.i + 2] === '(') this.arithmeticExpansion()
-    else if (c === '$' && next === '(') this.substitution()
-    else if (c === '$' && next === '{') this.parameterExpansion()
-    else if (c === '`') this.backticks()
-    else return false
+  private step(c: string, next: string | undefined): void {
+    if (this.quoting(c, next) || this.expansion(c, next, !this.command.inConditional)) return
+    if (c === '#' && !this.word.isOpen) this.i = lineEnd(this.src, this.i)
+    else if (c === ' ' || c === '\t') {
+      this.endWord()
+      this.i++
+    } else if (c === '\n') this.newline()
+    else if (!this.operator(c, next)) {
+      this.add(c)
+      this.i++
+    }
+  }
+
+  /** Escapes and quotes. True when one was read. */
+  private quoting(c: string, next: string | undefined): boolean {
+    if (c === '\\') this.escaped(next)
+    else if (c === "'") this.singleQuoted()
+    else if (c === '"') this.doubleQuoted()
+    else if (c === '$' && next === "'") this.ansiQuoted()
+    else if (c === '$' && next === '"') {
+      this.i++
+      this.doubleQuoted()
+    } else return false
+    return true
+  }
+
+  /** A backslash-newline joins lines; any other escaped character is literal. */
+  private escaped(next: string | undefined): void {
+    if (next !== undefined && next !== '\n') this.add(next)
+    this.i += next === undefined ? 1 : 2
+  }
+
+  /** `$((…))`, `$(…)`, `${…}`, backticks, and `<(…)` or `>(…)` where `processes` allows. True when one was read. */
+  private expansion(c: string, next: string | undefined, processes: boolean): boolean {
+    if (c === '$' && next === '{') {
+      this.parameterExpansion()
+      return true
+    }
+    const found = substitutionAt(this.src, this.i, processes)
+    if (!found) return false
+    // `$((…))` runs nothing itself, but a `$(…)` inside it still does.
+    if (found.arithmetic) this.hideIn(found.inner)
+    else {
+      this.nested.push(...splitShellCommand(found.inner).segments)
+      this.markSubstituted()
+    }
+    this.add(this.src.slice(this.i, found.end), true)
+    this.i = found.end
     return true
   }
 
   /** Control and redirection operators, and what stands in for them inside `[[ … ]]`. True when one was read. */
   private operator(c: string, next: string | undefined): boolean {
-    const src = this.src
-    if (this.inConditional && (c === '<' || c === '>' || c === '(' || c === ')' || (c === '&' && next === '&') || (c === '|' && next === '|'))) {
-      // Comparisons and grouping inside `[[ … ]]`, not operators.
-      const two = (c === '&' || c === '|') && next === c
-      this.add(two ? c + c : c)
-      this.i += two ? 2 : 1
-    } else if (c === ';') {
-      // `;;`, `;&` and `;;&` end a case clause: a pattern comes next.
-      const clause = next === ';' || next === '&'
-      this.endSegment(this.i, this.i + (clause ? (src[this.i + 2] === '&' ? 3 : 2) : 1))
-      if (clause && this.cases.length) this.cases[this.cases.length - 1] = 'pattern'
-    } else if ((c === '&' && next === '&') || (c === '|' && (next === '|' || next === '&'))) this.endSegment(this.i, this.i + 2)
-    else if (c === '|') this.endSegment(this.i, this.i + 1)
-    else if (c === '&' && next === '>') {
-      // `&> file`, `&>> file`: both streams to a file.
-      this.endWord()
-      this.i += src[this.i + 2] === '>' ? 3 : 2
-      this.redirectPending = true
-    } else if (c === '&') this.endSegment(this.i, this.i + 1)
-    else if (c === '>') this.outputRedirect()
-    else if (c === '<') this.inputRedirect()
+    if (this.command.inConditional && this.conditionalWord(c, next)) return true
+    if (c === ';') this.semicolon(next)
+    else if (c === '&' || c === '|') this.controlOperator(c, next)
+    else if (c === '>' || c === '<') this.redirect()
     else if (c === '(') this.openParen()
     else if (c === ')') this.closeParen()
     else return false
     return true
   }
 
-  private add(c: string, quoted = false): void {
-    if (!this.inWord) {
-      this.inWord = true
-      this.wordStart = this.i
-      this.wordQuoted = false
-      this.wordSubstituted = false
-      this.equalsAt = -1
-    }
-    if (quoted) this.wordQuoted = true
-    if (c === '=' && !quoted && this.equalsAt === -1) this.equalsAt = this.word.length
-    this.word += c
+  /** Inside `[[ … ]]` `<`, `>`, `(`, `)`, `&&` and `||` compare and group. True when one was read. */
+  private conditionalWord(c: string, next: string | undefined): boolean {
+    const two = (c === '&' || c === '|') && next === c
+    if (!two && !'<>()'.includes(c)) return false
+    this.add(two ? c + c : c)
+    this.i += two ? 2 : 1
+    return true
   }
 
-  private addRaw(text: string): void {
-    for (const c of text) this.add(c, true)
+  /** `;`, and `;;`, `;&` or `;;&`, which end a case clause. */
+  private semicolon(next: string | undefined): void {
+    const clause = next === ';' || next === '&'
+    this.endSegment(this.i, this.i + (!clause ? 1 : this.src[this.i + 2] === '&' ? 3 : 2))
+    if (clause) this.command.endClause()
+  }
+
+  /** `&&`, `||`, `|&`, `|` and `&` end a command; `&>` and `&>>` send both streams to a file. */
+  private controlOperator(c: string, next: string | undefined): void {
+    if (c === '&' && next === '>') {
+      this.endWord()
+      this.i += this.src[this.i + 2] === '>' ? 3 : 2
+      this.command.redirectNextWord()
+      return
+    }
+    this.endSegment(this.i, this.i + (next === c || (c === '|' && next === '&') ? 2 : 1))
+  }
+
+  private add(text: string, quoted = false): void {
+    this.word.add(text, this.i, quoted)
   }
 
   private singleQuoted(): void {
     const end = this.src.indexOf("'", this.i + 1)
     const close = end === -1 ? this.src.length : end
     this.add('', true)
-    this.addRaw(this.src.slice(this.i + 1, close))
+    this.add(this.src.slice(this.i + 1, close), true)
     this.i = close + 1
   }
 
   /** `$'…'`: backslash escapes are resolved, so `\'` does not close it. */
   private ansiQuoted(): void {
-    const escapes: Record<string, string> = { n: '\n', t: '\t', r: '\r', '\\': '\\', "'": "'", '"': '"', a: '\x07', b: '\b', f: '\f', v: '\v', e: '\x1b', E: '\x1b' }
-    this.add('', true)
-    this.i += 2
-    while (this.i < this.src.length && this.src[this.i] !== "'") {
-      const c = this.src[this.i]!
-      if (c === '\\' && this.i + 1 < this.src.length) {
-        const escaped = this.src[this.i + 1]!
-        this.add(escapes[escaped] ?? `\\${escaped}`, true)
-        this.i += 2
-        continue
-      }
-      this.add(c, true)
-      this.i++
-    }
-    this.i++
+    const { text, end } = ansiQuoted(this.src, this.i)
+    this.add(text, true)
+    this.i = end
   }
 
   /** Inside double quotes only `\`, `$` and backticks keep meaning; a substitution is skipped whole so its quotes do not end ours. */
@@ -219,75 +185,23 @@ class Splitter {
     while (this.i < src.length && src[this.i] !== '"') {
       const c = src[this.i]!
       const next = src[this.i + 1]
-      if (c === '\\' && next === '\n') {
+      if (c === '\\' && next !== undefined && '\n"\\$`'.includes(next)) {
+        if (next !== '\n') this.add(next, true)
         this.i += 2
-        continue
+      } else if (!this.expansion(c, next, false)) {
+        this.add(c, true)
+        this.i++
       }
-      if (c === '\\' && next !== undefined && '"\\$`'.includes(next)) {
-        this.add(next, true)
-        this.i += 2
-        continue
-      }
-      if (this.expansion(c, next)) continue
-      this.add(c, true)
-      this.i++
     }
     this.i++
   }
 
-  /** `$(…)`, `<(…)` or `>(…)`: its text stays in the word, and the command it holds is listed on its own. */
-  private substitution(): void {
-    const end = matchingParen(this.src, this.i + 2)
-    this.hide(this.src.slice(this.i + 2, this.src[end - 1] === ')' ? end - 1 : end))
-    this.markSubstituted()
-    this.addRaw(this.src.slice(this.i, end))
-    this.i = end
-  }
-
-  /** `$((…))` runs nothing itself, but a `$(…)` inside it still does. */
-  private arithmeticExpansion(): void {
-    const inner = matchingParen(this.src, this.i + 3)
-    const end = this.src[inner] === ')' ? inner + 1 : inner
-    this.hideIn(this.src.slice(this.i + 3, Math.max(this.i + 3, inner - 1)))
-    this.addRaw(this.src.slice(this.i, end))
-    this.i = end
-  }
-
   private parameterExpansion(): void {
-    const src = this.src
-    let depth = 0
-    let j = this.i + 1
-    for (; j < src.length; j++) {
-      const c = src[j]
-      if (c === '\\') {
-        j++
-        continue
-      }
-      if (c === '{') depth++
-      else if (c === '}' && --depth === 0) {
-        j++
-        break
-      }
-    }
-    const inner = src.slice(this.i, j)
-    this.hideIn(inner)
-    this.addRaw(inner)
-    this.i = j
-  }
-
-  private backticks(): void {
-    let j = this.i + 1
-    while (j < this.src.length && this.src[j] !== '`') j += this.src[j] === '\\' ? 2 : 1
-    const end = Math.min(j + 1, this.src.length)
-    this.hide(this.src.slice(this.i + 1, Math.min(j, this.src.length)))
-    this.markSubstituted()
-    this.addRaw(this.src.slice(this.i, end))
+    const end = closingBrace(this.src, this.i)
+    const raw = this.src.slice(this.i, end)
+    this.hideIn(raw)
+    this.add(raw, true)
     this.i = end
-  }
-
-  /** The command a substitution holds: read on its own, and listed after the command whose word holds it. */
-  private hide(source: string): void {
-    this.nested.push(...splitShellCommand(source).segments)
   }
 
   /** An expansion is a word, but a `$(…)` or a backtick written inside one still runs. */
@@ -300,223 +214,83 @@ class Splitter {
 
   /** The word being read stands for what a substitution prints, not for its own text. */
   private markSubstituted(): void {
-    this.add('', true)
-    this.wordSubstituted = true
+    this.word.markSubstituted(this.i)
   }
 
-  /** `[n]>`, `>>`, `>|`, `>&m`, `>&-`, `{var}>`. */
-  private outputRedirect(): void {
-    const src = this.src
-    this.dropFdPrefix()
-    this.i++
-    if (src[this.i] === '>' || src[this.i] === '|') this.i++
-    if (src[this.i] === '&') {
-      // `>&2`, `>&-`: a descriptor dup or close, never a file.
-      this.i++
-      while (this.i < src.length && (/\d/.test(src[this.i]!) || src[this.i] === '-')) this.i++
-      return
-    }
-    this.redirectPending = true
-  }
-
-  /** `[n]<`, `<>`, `<&m`, `<<[-]WORD`, `<<<WORD`. */
-  private inputRedirect(): void {
-    const src = this.src
-    this.dropFdPrefix()
-    if (src[this.i + 1] === '<' && src[this.i + 2] === '<') {
-      // A here-string feeds a word, not lines.
-      this.i += 3
-      this.skipSpaces()
-      this.i = skipWord(src, this.i)
-      return
-    }
-    if (src[this.i + 1] === '<') {
-      this.i += 2
-      const stripTabs = src[this.i] === '-'
-      if (stripTabs) this.i++
-      this.skipSpaces()
-      const end = skipWord(src, this.i)
-      this.heredocs.push({ delimiter: src.slice(this.i, end).replace(/["'\\]/g, ''), stripTabs, owner: this.segments.length })
-      this.i = end
-      return
-    }
-    if (src[this.i + 1] === '&') {
-      this.i += 2
-      while (this.i < src.length && (/\d/.test(src[this.i]!) || src[this.i] === '-')) this.i++
-      return
-    }
-    if (src[this.i + 1] === '>') {
-      // `<>` opens for reading and writing.
-      this.i += 2
-      this.redirectPending = true
-      return
-    }
-    // The file it feeds in is read, so the word is taken like any other, quotes and expansions resolved.
-    this.i++
-    this.readPending = true
-  }
-
-  /** `2>`, `{fd}>`: the descriptor before the arrow belongs to the redirect, not to a word. */
-  private dropFdPrefix(): void {
-    if (this.inWord && !this.wordQuoted && FD_PREFIX.test(this.word)) {
-      this.word = ''
-      this.inWord = false
-    } else this.endWord()
-  }
-
-  private skipSpaces(): void {
-    while (this.i < this.src.length && (this.src[this.i] === ' ' || this.src[this.i] === '\t')) this.i++
+  /** `[n]>`, `{var}>` and every other redirect: the descriptor before the arrow belongs to it, not to a word. */
+  private redirect(): void {
+    if (!this.word.dropFdPrefix()) this.endWord()
+    const found = redirectAt(this.src, this.i)
+    if (found.kind === 'writes') this.command.redirectNextWord()
+    else if (found.kind === 'reads') this.command.readNextWord()
+    else if (found.kind === 'heredoc') this.heredocs.push({ delimiter: found.delimiter, stripTabs: found.stripTabs, owner: this.segments.length })
+    this.i = found.end
   }
 
   private openParen(): void {
-    const src = this.src
-    if (src[this.i + 1] === '(') {
-      // `(( … ))`: an arithmetic command, which runs nothing of its own; a `$(…)` written inside it still runs.
-      this.endWord()
-      const end = matchingParen(src, this.i + 2)
-      this.nested.push(...hiddenCommands(src.slice(this.i + 2, Math.max(this.i + 2, end - 1))))
-      this.i = src[end] === ')' ? end + 1 : end
-      this.words = []
-      return
-    }
     this.endWord()
-    if (this.cases[this.cases.length - 1] === 'pattern') {
+    if (this.src[this.i + 1] === '(') return this.arithmeticCommand()
+    if (this.command.inCasePattern) {
       // `(pattern)`: the optional opening of a pattern list.
       this.i++
       return
     }
-    const named = this.words.filter((w) => !(w.text === 'function' && !w.quoted))
-    let j = this.i + 1
-    while (j < src.length && (src[j] === ' ' || src[j] === '\t')) j++
-    if (named.length === 1 && src[j] === ')') {
+    const close = blanksEnd(this.src, this.i + 1)
+    if (this.src[close] === ')' && this.command.namesFunction()) {
       // `name()`: a function definition; its body is listed when it comes.
-      this.words = []
-      this.i = j + 1
+      this.command.dropWords()
+      this.i = close + 1
       return
     }
     // A subshell: its commands are commands.
     this.endSegment(this.i, this.i + 1)
   }
 
+  /** `(( … ))` runs nothing of its own; a `$(…)` written inside it still runs. */
+  private arithmeticCommand(): void {
+    const found = doubleParenAt(this.src, this.i)
+    this.nested.push(...hiddenCommands(found.inner))
+    this.i = found.end
+    this.command.dropWords()
+  }
+
   private closeParen(): void {
     this.endWord()
-    if (this.cases[this.cases.length - 1] === 'pattern') {
-      // The words so far were the pattern; the clause body follows.
-      this.words = []
-      this.cases[this.cases.length - 1] = 'body'
-      this.i++
-      return
-    }
-    this.endSegment(this.i, this.i + 1)
+    if (!this.command.inCasePattern) return this.endSegment(this.i, this.i + 1)
+    this.command.endPattern()
+    this.i++
   }
 
   private newline(): void {
-    if (this.heredocs.length === 0) {
-      this.endSegment(this.i, this.i + 1)
-      return
-    }
+    if (this.heredocs.length === 0) return this.endSegment(this.i, this.i + 1)
     // The bodies are data, not commands: they go to the command that opened them and are not scanned.
-    const textEnd = this.i
-    let j = this.i + 1
-    for (const { delimiter, stripTabs, owner } of this.heredocs) {
-      const bodyStart = j
-      while (j < this.src.length) {
-        const eol = this.src.indexOf('\n', j)
-        const end = eol === -1 ? this.src.length : eol
-        const line = stripTabs ? this.src.slice(j, end).replace(/^\t+/, '') : this.src.slice(j, end)
-        j = eol === -1 ? this.src.length : eol + 1
-        if (line === delimiter) break
-      }
-      const body = '\n' + this.src.slice(bodyStart, j).replace(/\n$/, '')
-      if (owner < this.segments.length) this.segments[owner]!.text += body
-      else this.heredocText += body
-    }
+    const { bodies, end } = heredocBodies(this.src, this.i + 1, this.heredocs)
+    this.heredocs.forEach(({ owner }, n) => {
+      if (owner < this.segments.length) this.segments[owner]!.text += bodies[n]
+      else this.heredocText += bodies[n]
+    })
     this.heredocs = []
-    this.endSegment(textEnd, j)
+    this.endSegment(this.i, end)
   }
 
   private endWord(): void {
-    if (!this.inWord) return
-    const word: Word = { text: this.word, start: this.wordStart, quoted: this.wordQuoted, substituted: this.wordSubstituted, equalsAt: this.equalsAt }
-    this.word = ''
-    this.inWord = false
-    this.wordSubstituted = false
-    if (this.redirectPending) {
-      if (!isHarmlessRedirectTarget(word.text)) this.writesFile = true
-      this.redirectPending = false
-      return
-    }
-    if (this.readPending) {
-      if (!isHarmlessRedirectTarget(word.text)) this.reads.push(word.text)
-      this.readPending = false
-      return
-    }
-    this.words.push(word)
-    if (word.quoted) return
-    if (word.text === '[[') this.inConditional = true
-    if (word.text === ']]') this.inConditional = false
-    // `case WORD in` is closed by `in`, not by an operator: the patterns follow on the same line.
-    const head = this.words.length - 3
-    if (word.text === 'in' && head >= 0 && isReserved(this.words[head], 'case') && this.words.slice(0, head).every((w) => isReserved(w) && PREFIX_WORDS.has(w.text))) {
-      this.cases.push('pattern')
-      this.words = []
-    }
+    const word = this.word.take()
+    if (word) this.command.accept(word)
   }
 
   /** Closes the segment whose text ends at `textEnd`; the next one starts at `nextStart`. */
   private endSegment(textEnd: number, nextStart: number): void {
     this.endWord()
-    const command = this.commandWords()
-    if (command) {
-      const text = this.src.slice(command.from, textEnd).trim() + this.heredocText
-      const substituted = command.words.some((w) => w.substituted)
-      this.segments.push({ text, tokens: command.words.map((w) => w.text), writesFile: this.writesFile, reads: this.reads, substituted })
-    }
-    // What a substitution hides runs too, whether or not the command holding it turned out to be one.
-    this.segments.push(...this.nested)
+    const segment = this.command.close(this.src, textEnd, this.heredocText, this.joinedBy)
+    if (segment) this.segments.push(segment)
+    const operator = this.src.slice(textEnd, nextStart).trim()
+    this.joinedBy = segment?.joined !== undefined && (operator === '&&' || operator === '|') ? operator : undefined
+    // What a substitution hides runs too, whether or not the command holding it turned out to be one. It runs wherever its holder stands, which is no link in the chain.
+    this.segments.push(...this.nested.map(({ joined: _joined, ...nested }) => nested))
     this.nested = []
-    this.words = []
-    this.writesFile = false
-    this.redirectPending = false
-    this.reads = []
-    this.readPending = false
     this.heredocText = ''
-    this.inConditional = false
     this.i = nextStart
   }
-
-  /** The simple command in this segment, once the grammar around it is taken away; nothing when the segment runs no command. */
-  private commandWords(): { words: Word[]; from: number } | undefined {
-    let words = this.words
-    for (;;) {
-      const first = words[0]
-      if (isReserved(first) && PREFIX_WORDS.has(first.text)) {
-        words = words.slice(1)
-        if (first.text === 'time' && words[0]?.text === '-p') words = words.slice(1)
-      } else if (isReserved(first, 'function')) {
-        // `function NAME`: the name is not a command; the body follows.
-        words = words.slice(2)
-      } else break
-    }
-    const first = words[0]
-    if (!first) return undefined
-    if (isReserved(first) && HEADER_WORDS.has(first.text)) {
-      if (first.text === 'esac') this.cases.pop()
-      return undefined
-    }
-    if (this.cases[this.cases.length - 1] === 'pattern') return undefined
-    const from = first.start
-    while (words[0] && isAssignment(words[0])) words = words.slice(1)
-    return words.length ? { words, from } : undefined
-  }
-}
-
-function isReserved(word: Word | undefined, text?: string): word is Word {
-  return word !== undefined && !word.quoted && (text === undefined || word.text === text)
-}
-
-function isAssignment(word: Word): boolean {
-  return word.equalsAt > 0 && ASSIGNMENT.test(word.text.slice(0, word.equalsAt))
 }
 
 /**
@@ -529,92 +303,13 @@ function hiddenCommands(raw: string): ShellSegment[] {
   const found: ShellSegment[] = []
   let i = 0
   while (i < raw.length) {
-    const c = raw[i]!
-    const next = raw[i + 1]
-    if (c === '$' && next === '(' && raw[i + 2] === '(') {
-      const inner = matchingParen(raw, i + 3)
-      found.push(...hiddenCommands(raw.slice(i + 3, Math.max(i + 3, inner - 1))))
-      i = inner
+    const substitution = substitutionAt(raw, i, true)
+    if (!substitution) {
+      i += raw[i] === '\\' ? 2 : 1
       continue
     }
-    if ((c === '$' || c === '<' || c === '>') && next === '(') {
-      const end = matchingParen(raw, i + 2)
-      found.push(...splitShellCommand(raw.slice(i + 2, raw[end - 1] === ')' ? end - 1 : end)).segments)
-      i = end
-      continue
-    }
-    if (c === '`') {
-      let j = i + 1
-      while (j < raw.length && raw[j] !== '`') j += raw[j] === '\\' ? 2 : 1
-      found.push(...splitShellCommand(raw.slice(i + 1, Math.min(j, raw.length))).segments)
-      i = j + 1
-      continue
-    }
-    i += c === '\\' ? 2 : 1
+    found.push(...(substitution.arithmetic ? hiddenCommands(substitution.inner) : splitShellCommand(substitution.inner).segments))
+    i = substitution.end
   }
   return found
-}
-
-/** The index just past the `)` that closes a group opened before `from`, or the end; quotes are skipped, nesting counted. */
-function matchingParen(src: string, from: number): number {
-  let depth = 1
-  let i = from
-  while (i < src.length) {
-    const c = src[i]!
-    if (c === '\\') {
-      i += 2
-      continue
-    }
-    if (c === "'") {
-      const close = src.indexOf("'", i + 1)
-      i = close === -1 ? src.length : close + 1
-      continue
-    }
-    if (c === '"') {
-      i = closingDoubleQuote(src, i + 1)
-      continue
-    }
-    if (c === '(') depth++
-    else if (c === ')' && --depth === 0) return i + 1
-    i++
-  }
-  return src.length
-}
-
-/** The index just past the `"` that closes a string opened before `from`; a `$(…)` inside may hold quotes of its own. */
-function closingDoubleQuote(src: string, from: number): number {
-  let i = from
-  while (i < src.length) {
-    const c = src[i]!
-    if (c === '\\') {
-      i += 2
-      continue
-    }
-    if (c === '"') return i + 1
-    if (c === '$' && src[i + 1] === '(') {
-      i = matchingParen(src, i + 2)
-      continue
-    }
-    i++
-  }
-  return src.length
-}
-
-/** The end of the word starting at `from`: quotes inside it are skipped as text, not resolved. */
-function skipWord(src: string, from: number): number {
-  let i = from
-  while (i < src.length && !/[\s;|&<>()]/.test(src[i]!)) {
-    const c = src[i]!
-    if (c === "'" || c === '"') {
-      const close = src.indexOf(c, i + 1)
-      i = close === -1 ? src.length : close + 1
-      continue
-    }
-    i += c === '\\' ? 2 : 1
-  }
-  return Math.min(i, src.length)
-}
-
-function isHarmlessRedirectTarget(target: string): boolean {
-  return target === '/dev/null' || target === 'NUL' || target === 'nul' || /^&\d+$/.test(target)
 }

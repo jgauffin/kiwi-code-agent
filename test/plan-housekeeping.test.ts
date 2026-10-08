@@ -58,6 +58,31 @@ describe('plan housekeeping', () => {
     expect(report.recorded).toEqual([{ path: 'specs/audit.spec.md', status: 'verified' }])
   })
 
+  it('a_spec_filed_in_a_domain_folder_records_its_status_at_its_own_path_not_the_root', async () => {
+    await workspace(
+      {
+        'specs/finance/audit.spec.md': approvedSpec,
+        '.kiwi/specs/audit.tasks.json': finishedBoard,
+      },
+      8,
+    )
+    const report = await sweepPlans(dir, NOW)
+    expect(await readFile(join(dir, 'specs/finance/audit.spec.md'), 'utf8')).toContain('status: verified')
+    expect(report.recorded).toEqual([{ path: 'specs/finance/audit.spec.md', status: 'verified' }])
+  })
+
+  it('a_feature_whose_spec_moved_into_a_folder_is_not_swept_as_if_its_spec_were_gone', async () => {
+    await workspace(
+      {
+        'specs/finance/audit.spec.md': approvedSpec,
+        '.kiwi/specs/audit.tasks.json': renderBoard(board(task('Log', { state: 'in_progress' }))),
+      },
+      90,
+    )
+    await sweepPlans(dir, NOW)
+    expect(await exists('.kiwi/specs/audit.tasks.json')).toBe(true)
+  })
+
   it('finished_feature_is_marked_verified_without_waiting_for_its_working_files_to_be_due', async () => {
     await workspace({ 'specs/audit.spec.md': approvedSpec, '.kiwi/specs/audit.tasks.json': finishedBoard }, 6)
     await sweepPlans(dir, NOW)

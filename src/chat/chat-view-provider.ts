@@ -24,10 +24,17 @@ import { wireCollaborators } from './chat-collaborators'
 
 export { CHAT_PANEL_TYPE }
 
-/** Where a prompt's allowances go: the workspace's permission allow list, or the session's own, kept with the session. */
+/**
+ * Where a prompt's answer goes to be kept: the workspace's permission list,
+ * the session's own, or the person's own, honoured in every workspace.
+ */
 export interface PermissionStore {
   allowForProject(rules: string[]): Promise<void>
   allowForSession(sessionId: string, rules: string[]): Promise<void>
+  allowForPerson(rules: string[]): Promise<void>
+  denyForProject(rules: string[]): Promise<void>
+  denyForSession(sessionId: string, rules: string[]): Promise<void>
+  denyForPerson(rules: string[]): Promise<void>
 }
 
 /** What new sessions run on, as the new-session screen shows and sets it. */

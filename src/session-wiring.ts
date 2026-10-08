@@ -10,6 +10,9 @@ import { packageScripts } from './agent/permissions/package-scripts'
 import { PermissionPolicy, type PermissionRules } from './agent/permissions/permission-policy'
 import type { ProjectCommands } from './agent/permissions/project-commands'
 import { readOnlyTools } from './agent/permissions/tool-classes'
+import { instructionPlaces } from './agent/permissions/instruction-places'
+import { personRulesFile, PersonRulesStore } from './agent/permissions/person-rules'
+import { shippedPluginDir, skillsMirrorDir } from './extension-paths'
 import { scratchDir } from './agent/scratch/scratch-folder'
 import type { VerifyRule } from './agent/phases/verification'
 import type { ChatViewProvider, PermissionStore } from './chat/chat-view-provider'
@@ -66,14 +69,16 @@ export function createProjectCommands(workspaceRoot: string, verifier: Verifier)
   })
 }
 
-/** Per session, the rules in force: the project's plus the session's own. `engines` and `sessions` are resolved when a policy is actually asked for, well after both exist. */
+/** Per session, the rules in force: the project's, the person's own and the session's own. `engines` and `sessions` are resolved when a policy is actually asked for, well after both exist. */
 export function createPolicyFor(
   workspaceRoot: string,
+  context: vscode.ExtensionContext,
   getSessions: () => SessionManager,
   getEngines: () => SessionEngines,
   projectCommands: () => ProjectCommands,
   allowWritesControl: SessionSwitch,
   policies: Map<string, PermissionPolicy>,
+  personRules: PersonRulesStore,
 ): (sessionId: string) => PermissionPolicy {
   return (sessionId) => {
     const existing = policies.get(sessionId)
@@ -81,14 +86,21 @@ export function createPolicyFor(
     const policy = new PermissionPolicy(
       workspaceRoot,
       () => {
-        const rules = permissionRules()
-        return { ...rules, allow: [...rules.allow, ...(getSessions().get(sessionId)?.allowed ?? [])] }
+        const rules = permissionRules(personRules)
+        const session = getSessions().get(sessionId)
+        return {
+          ...rules,
+          allow: [...rules.allow, ...(session?.allowed ?? [])],
+          deny: [...rules.deny, ...(session?.denied ?? [])],
+        }
       },
       {
         readOnly: readOnlyTools(() => getEngines().toolsOf(sessionId)),
         project: projectCommands,
         writesAllowed: () => allowWritesControl.isEnabled(sessionId),
         scratch: scratchDir(sessionId),
+        readable: instructionPlaces(workspaceRoot, [shippedPluginDir(context), skillsMirrorDir(context, sessionId)]),
+        personRulesFile: personRulesFile(),
       },
     )
     policies.set(sessionId, policy)
@@ -163,15 +175,22 @@ export function createSessions(
   )
 }
 
-export function createPermissionStore(getSessions: () => SessionManager): PermissionStore {
+/** Adds rules not already in the named workspace list, which is read fresh so two writes in a row never lose one. */
+async function addWorkspaceRules(key: 'permissions.allow' | 'permissions.deny', rules: string[]): Promise<void> {
+  const config = vscode.workspace.getConfiguration('kiwiAgent')
+  const current = config.get<string[]>(key, [])
+  const merged = [...current, ...rules.filter((r) => !current.includes(r))]
+  await config.update(key, merged, vscode.ConfigurationTarget.Workspace)
+}
+
+export function createPermissionStore(getSessions: () => SessionManager, personRules: PersonRulesStore): PermissionStore {
   return {
-    allowForProject: async (rules) => {
-      const config = vscode.workspace.getConfiguration('kiwiAgent')
-      const current = permissionRules().allow
-      const merged = [...current, ...rules.filter((r) => !current.includes(r))]
-      await config.update('permissions.allow', merged, vscode.ConfigurationTarget.Workspace)
-    },
+    allowForProject: (rules) => addWorkspaceRules('permissions.allow', rules),
     allowForSession: (sessionId, rules) => getSessions().allowForSession(sessionId, rules),
+    allowForPerson: (rules) => personRules.add('allow', rules),
+    denyForProject: (rules) => addWorkspaceRules('permissions.deny', rules),
+    denyForSession: (sessionId, rules) => getSessions().denyForSession(sessionId, rules),
+    denyForPerson: (rules) => personRules.add('deny', rules),
   }
 }
 
@@ -191,12 +210,18 @@ export function registeredModels(): ModelOffer[] {
   return offeredModels(readModelSettings(configPort()).providers)
 }
 
-/** Read on every tool call, so a rule just written applies at once. */
-export function permissionRules(): PermissionRules {
+/** Read on every tool call, so a rule just written applies at once: the workspace's own rules, with the person's own beside them. */
+export function permissionRules(personRules: PersonRulesStore): PermissionRules {
   const config = vscode.workspace.getConfiguration('kiwiAgent')
+  const person = personRules.get()
   return {
-    allow: config.get<string[]>('permissions.allow', []),
-    deny: config.get<string[]>('permissions.deny', []),
+    allow: [...config.get<string[]>('permissions.allow', []), ...person.allow],
+    deny: [...config.get<string[]>('permissions.deny', []), ...person.deny],
     denyGitWrites: config.get('permissions.denyGitWrites', false),
   }
+}
+
+/** The person's own permission rules, read once at start-up and kept in memory from then on. */
+export function createPersonRulesStore(): PersonRulesStore {
+  return new PersonRulesStore()
 }

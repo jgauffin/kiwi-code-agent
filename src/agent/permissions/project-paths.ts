@@ -14,6 +14,8 @@ export type ProjectPaths = {
   below(path: string): boolean
   /** Is the path that directory or below it? Both are read from the project root first. */
   under(directory: string, path: string): boolean
+  /** The path resolved from the project root to an absolute one; a path already absolute is left as it is. */
+  absolute(path: string): string
 }
 
 export function projectPaths(root: string): ProjectPaths {
@@ -28,5 +30,6 @@ export function projectPaths(root: string): ProjectPaths {
       return rel !== '' && contains(rel)
     },
     under: (directory, path) => contains(from(isAbsolute(directory) ? directory : resolve(root, directory), path)),
+    absolute: (path) => (isAbsolute(path) ? path : resolve(root, path)),
   }
 }

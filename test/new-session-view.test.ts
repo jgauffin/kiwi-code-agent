@@ -282,6 +282,20 @@ describe('NewSessionView pick-up list', () => {
     node.remove()
   })
 
+  it('a_plan_sitting_in_a_folder_is_headed_by_it_while_a_root_plan_stays_unheaded', () => {
+    const node = view(undefined, {
+      ...waiting,
+      chats: [],
+      plans: [
+        { feature: 'Orders', status: 'approved' },
+        { feature: 'Refunds', status: 'approved', folder: 'orders' },
+      ],
+    })
+    const items = picks(node)
+    expect(items.map((i) => i.closest('li')!.querySelector('.folder-heading')?.textContent)).toEqual([undefined, 'orders'])
+    node.remove()
+  })
+
   it('picking_a_plan_asks_for_it_by_feature', () => {
     const node = view(undefined, waiting)
     let seen: unknown
@@ -423,6 +437,25 @@ describe('NewSessionView Update spec card', () => {
     const node = view(undefined, updates)
     card(node, 'update-spec').click()
     expect(updateOptions(node).map((o) => o.value)).toEqual(['Orders', 'Dashboards', 'Refunds'])
+    node.remove()
+  })
+
+  it('a_spec_sitting_in_a_folder_is_grouped_under_it_while_a_root_spec_stays_ungrouped', () => {
+    const node = view(undefined, {
+      plans: [],
+      chats: [],
+      unfiled: 0,
+      updates: [
+        { feature: 'Orders', status: 'draft' },
+        { feature: 'Refunds', status: 'approved', changeable: true, folder: 'orders' },
+      ],
+    })
+    card(node, 'update-spec').click()
+    const select = node.querySelector<HTMLSelectElement>('.update-fields select[name=feature]')!
+    expect([...select.children].map((c) => c.tagName)).toEqual(['OPTION', 'OPTION', 'OPTGROUP'])
+    const group = select.querySelector('optgroup')!
+    expect(group.label).toBe('orders')
+    expect([...group.querySelectorAll('option')].map((o) => o.value)).toEqual(['Refunds'])
     node.remove()
   })
 

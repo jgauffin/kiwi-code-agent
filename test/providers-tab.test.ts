@@ -12,7 +12,7 @@ vi.resetModules()
 const { ProvidersTab } = await import('../src/settings/webview/providers-tab')
 const events = await import('../src/settings/webview/events')
 
-const claude: Provider = { name: 'Claude', engine: 'claude-sdk', models: ['claude-opus-5'] }
+const claude: Provider = { name: 'Claude', engine: 'claude-sdk', models: ['claude-opus-5-5'] }
 const berget: Provider = { name: 'berget', engine: 'openai-compatible', baseUrl: 'https://api.berget.ai/v1', models: ['moonshotai/Kimi-K3'] }
 
 function snapshot(over: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
@@ -21,7 +21,7 @@ function snapshot(over: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     profiles: [],
     activeProfile: '',
     keys: [{ name: 'berget', stored: false }],
-    permissions: { allow: [], deny: [], denyGitWrites: false },
+    permissions: { allow: [], deny: [], denyGitWrites: false, person: { allow: [], deny: [] } },
     verify: [],
     verifyFailureBudget: 3,
     cleanup: { functionLines: 60, functionComplexity: 15, typeLines: 200, fileLines: 400, tests: [], testFunctionLines: 120, testFunctionComplexity: 15, testTypeLines: 600, testFileLines: 1200, ignore: [] },
@@ -56,6 +56,34 @@ const set = (form: HTMLFormElement, name: string, value: string) => {
   control.dispatchEvent(new Event('input', { bubbles: true }))
   control.dispatchEvent(new Event('change', { bubbles: true }))
 }
+
+const engineOptions = (form: HTMLFormElement) => [...form.querySelectorAll<HTMLOptionElement>('[name=engine] option')].map((o) => o.value)
+
+describe('ProvidersTab the engine on offer', () => {
+  it('the_installed_claude_engine_is_not_offered_on_a_machine_with_no_claude_code', () => {
+    expect(engineOptions(edit(tab(), 0))).toEqual(['claude-sdk', 'openai-compatible'])
+  })
+
+  it('a_machine_with_claude_code_offers_it_and_names_the_binary_it_would_run', () => {
+    const node = tab(snapshot({ installedClaude: '/usr/local/bin/claude' }))
+    const form = edit(node, 0)
+    expect(engineOptions(form)).toEqual(['claude-sdk', 'claude-installed', 'openai-compatible'])
+    set(form, 'engine', 'claude-installed')
+    expect(form.querySelector('.hint')!.textContent).toContain('/usr/local/bin/claude')
+  })
+
+  it('a_provider_already_on_the_installed_engine_keeps_the_option_though_the_binary_is_gone', () => {
+    const node = tab(snapshot({ providers: [{ name: 'Claude next', engine: 'claude-installed', models: ['claude-opus-5-5'] }] }))
+    expect(engineOptions(edit(node, 0))).toContain('claude-installed')
+  })
+
+  it('the_installed_engine_needs_no_base_url_and_runs_on_the_editor_login_without_a_key', () => {
+    const node = tab(snapshot({ providers: [{ name: 'Claude next', engine: 'claude-installed', models: ['claude-opus-5-5'] }], keys: [] }))
+    const form = edit(node, 0)
+    expect(form.querySelector<HTMLElement>('.openai')!.hidden).toBe(true)
+    expect(form.textContent).toContain('editor’s Claude login')
+  })
+})
 
 describe('ProvidersTab cards', () => {
   it('base_url_shows_only_for_the_openai_engine', () => {
@@ -140,12 +168,12 @@ describe('ProvidersTab cards', () => {
     node.addEventListener(events.ProviderSavedEvent.type, (e) => (seen = e.provider))
     set(form, 'compactAtTokens', '300000')
     form.dispatchEvent(new Event('submit', { cancelable: true }))
-    expect(seen).toEqual({ ...claude, compactAtTokens: { 'claude-opus-5': 300_000 } })
+    expect(seen).toEqual({ ...claude, compactAtTokens: { 'claude-opus-5-5': 300_000 } })
     node.remove()
   })
 
   it('a_blank_limit_is_not_saved_so_the_model_follows_the_global_setting_shown_in_its_place', () => {
-    const node = tab(snapshot({ providers: [{ ...claude, compactAtTokens: { 'claude-opus-5': 250_000 } }, berget] }))
+    const node = tab(snapshot({ providers: [{ ...claude, compactAtTokens: { 'claude-opus-5-5': 250_000 } }, berget] }))
     const form = edit(node, 0)
     const limit = form.querySelector<HTMLInputElement>('input[name=compactAtTokens]')!
     expect(limit.value).toBe('250000')

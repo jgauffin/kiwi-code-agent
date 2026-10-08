@@ -62,7 +62,7 @@ describe('implement phase', () => {
     expect(prompt).toContain('one entry per delivered rule')
     expect(prompt).toContain('docs/')
     expect(IMPLEMENT_TOOLS).toEqual([
-      'Read', 'Write', 'Edit', 'MultiEdit', 'Move', 'Copy', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'MarkdownSearch', 'SpecSearch', 'CodeOutline', 'CodeSearch', 'Bash', 'RunScript', 'Skill', 'AskUser',
+      'Read', 'Write', 'Edit', 'MultiEdit', 'Move', 'Copy', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'MarkdownSearch', 'SpecSearch', 'CodeOutline', 'CodeSearch', 'Bash', 'RunScript', 'Skill', 'AskUser', 'Delegate',
       'ReadTasks', 'UpdateTask',
     ])
   })
@@ -261,6 +261,21 @@ describe('the hand-off a task run starts from', () => {
     expect(kickoff).toContain('- Contract [tested]: `Order.cancel()` in src/order.ts (files: src/order.ts)')
     expect(kickoff).toContain('- Stuck [blocked: no db]')
     expect(kickoff).not.toContain('never shown')
+  })
+
+  it('names_where_the_tasks_own_files_moved_since_the_mapping_and_no_other_tasks', () => {
+    const drift = [
+      { file: 'src/ship.ts', ranges: [{ from: 40, to: 58 }] },
+      { file: 'src/order.ts', ranges: [{ from: 3, to: 3 }] },
+    ]
+    const kickoff = taskKickoff(onBoard, 'Cancel', spec, [], drift)
+    expect(kickoff).toContain('- src/ship.ts: lines 40-58')
+    // src/order.ts is the finished Contract task's own work, which its hand-off already reports.
+    expect(kickoff).not.toContain('src/order.ts: lines')
+  })
+
+  it('a_mapping_nothing_has_moved_under_adds_nothing_to_the_hand_off', () => {
+    expect(taskKickoff(onBoard, 'Cancel', spec, [], [])).toBe(taskKickoff(onBoard, 'Cancel', spec))
   })
 
   it('the_fix_run_gets_the_tasks_whose_files_the_failure_names_in_full', () => {

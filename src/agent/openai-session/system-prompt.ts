@@ -5,7 +5,7 @@ import { readOptional } from '../workspace-files'
 import { DOC_READING } from './tools/markdown/outline-gate'
 import { CODE_READING } from '../code-outline/code-outline-gate'
 import { CHAT_DECISIONS } from '../phases/unfiled-decisions'
-import { SPEC_AMENDING, SPEC_READING } from '../phases/blind-plan'
+import { SPEC_AMENDING, SPEC_CHECKING_AFTER_BUILD, SPEC_READING } from '../phases/blind-plan'
 import { SCRIPT_WRITING } from '../script/script-gate'
 import { EDIT_WRITING } from './tools/edit'
 import { memoryWritingInstructions } from '../memory/memories'
@@ -38,6 +38,7 @@ export async function buildSystemPrompt(cwd: string, profilePromptFile?: string,
     'When the task is done, say what changed in a few sentences. When something is unclear, ask instead of guessing.',
     SPEC_READING,
     SPEC_AMENDING,
+    SPEC_CHECKING_AFTER_BUILD,
     CHAT_DECISIONS,
     memoryWritingInstructions(cwd, home),
     memorySection(await readMemorySources(cwd, home)) ?? '',

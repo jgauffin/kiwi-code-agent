@@ -1,5 +1,21 @@
 # Unfiled decisions
 
+### A built feature's spec edited back to draft is planned in its own tab
+- decided: Picking a draft that was revised after its feature was built brings the feature's existing planning tab back, and the planner names the rules the task board has nothing built for (new, or reworded since), says whether each makes sense and how it would be built, and writes nothing until the user says go; a revision that session already saw is not raised again.
+- affects: Spec drafts, Changing an implemented spec
+
+### The research sub agent searches through Brave Search by default
+- decided: The research sub agent's searching runs against the Brave Search API by default; its key is configured the same way a model provider's key is, under Advanced settings, stored in the editor's secret storage rather than settings.json. Fetching one address needs no key at all.
+- affects: sub agent support, docs/settings.md
+
+### A subagent's output is named with the agent it came from
+- decided: Every message and every step produced inside a subagent carries the agent it came from, taken from the call that spawned it, and that call names its agent too, so output from several agents running at once is never read as the main thread's. A message whose spawning step is not on screen still says it came from a subagent. Subagents run on the Claude engine only.
+- affects: sessions and tabs, parallel session support
+
+### The activity row follows the main thread, not the subagents under it
+- decided: The row saying what a session is doing names what the main thread waits on, which while agents run is the step that spawned them, and what an agent is doing inside that step never renames it; the time spent is the step's, not restarted at each change of name. A permission prompt raised inside a subagent is shown in that agent's step rather than at the foot of the conversation.
+- affects: sessions and tabs, parallel session support
+
 ### A spec's state shows on its file in the explorer
 - decided: Every spec file carries its status in the file explorer as a symbol badge (draft, approved, implemented, verified) with the full word on hover, kept current as the file changes, so where a feature stands is visible without opening the spec or the Sessions view. The badge never uses a letter and never colours the file name, both of which belong to git's own marks in that place.
 - affects: spec drafts, sessions and tabs
@@ -44,13 +60,9 @@
 - decided: The changes a script stages are an ordinary write: the "Allow writes" switch, an allow rule covering every staged file, or a deny rule answers for them, and the combined diff is put to the user only when the rules leave the decision open.
 - affects: running a script, permissions and the Allow writes switch, file edit diff
 
-### The Allow writes switch is the only standing answer a write prompt leads to
-- decided: A write prompt for a file in the project is answered Allow or Deny for that call alone; it no longer offers the file or its folder as a rule to remember, since the "Allow writes" switch is how the person stops being asked. Turning the switch on while a prompt waits answers every prompt it covers, so the switch replaces the click rather than being asked for twice.
-- affects: permissions and the Allow writes switch, running a script
-
 ### Reading before editing is enforced, not instructed
-- decided: The extension refuses a write to a file the session never read or that changed since the session last saw it, naming what changed it, and the phase instructions no longer tell the model to read before editing.
-- affects: parallell session support, own-loop compaction, instructions and skills, docs/intent/agent.md
+- decided: The extension refuses a write to a file the session never read or that changed since the session last saw it, naming what changed it, and the phase instructions no longer tell the model to read before editing. A change a script derives from its own read of that same file is the exception: that read counts as the session having seen the file, and in return the agent is given the diff of what the script changed, whole while it fits the output budget and otherwise cut per file with what was left out named, so verification lands after the change on the lines that changed rather than before it on whole files.
+- affects: parallell session support, own-loop compaction, running a script, file edit diff, instructions and skills, docs/intent/agent.md
 
 ### A failure in code the feature never touched is not the feature's failure
 - decided: Verification separates its failures by whose change they stand on: a failing test in a file only another hand changed is foreign, it is retried after a wait rather than handed to the implementer, it spends none of the verify failure budget, and a feature left with foreign failures waits for the user instead of reaching verified.
@@ -104,10 +116,6 @@
 - decided: The new-session screen's Code tab carries *Update spec*, where the person picks any spec, whatever state it is in, and describes in their own words what should change; the pick routes by state, a settled spec into a change of that spec and a draft into a draft pickup, nothing starts until the change is described, and a spec opened from that screen always shows the act that changes it.
 - affects: changing an implemented spec, change feature, spec drafts, starting a new session, picking up a plan, docs/plan-sessions.md
 
-### Reading outside the project is asked for, the way writing is
-- decided: A call that only inspects runs unasked only while every file it names lies in the project, or under a directory an allow rule already grants; one reaching outside is put to the person like any other call, and may be allowed for the project from that prompt. This holds for the tools that read a file, list a folder or search for one as much as for a shell command that only inspects, closing the asymmetry where a write was confined to the project while a read could reach the person's keys, another workspace's source or anything else on the machine. A file fed in by a redirect counts as named, and a command handed its arguments by another command cannot be shown to stay inside, so it is asked for too. A call naming no path at all is working in the project and is not asked about.
-- affects: permissions and the Allow writes switch, running a script, docs/settings.md
-
 ### A change is never answered by the phase conversation the tab is showing
 - decided: Asking for a change on a feature opens the describe-the-change step and plans it in a feature-planning session, never handing the request to the cleanup, implement or check conversation its tab happens to show; a feature whose only open step is an unsettled cleanup is changeable, and that cleanup waits for the change's own build.
 - affects: changing an implemented spec, change feature, cleanup phase, sessions and tabs, docs/intent/agent.md
@@ -120,7 +128,47 @@
 - decided: A spec may live in a folder named after the domain it belongs to rather than only at the root of the specs folder; the planning session proposes that folder with its direction, read from the feature's description and the folders the workspace already has, and the person keeps or changes it before anything is written. The folder is grouping only: a feature is still identified by its name alone, every spec is read, searched and cited wherever it sits with its folder in the citation, and the working files stay keyed by the feature's name. Whether folders are used follows the workspace by default, and the docs cleanup job offers once to sort the specs that already exist into folders, citations following each move.
 - affects: spec folders, doc migration, changing an implemented spec, spec drafts, docs/intent/agent.md, docs/plan-sessions.md, docs/settings.md
 
+### The blind planner reaches the internet through a research sub agent
+- decided: A feature-planning session may research on the internet, but only by handing one question to a research sub agent whose tools are its own blind set plus searching and fetching, so the planner stays blind to the code while its question is answered; the person approves the research rather than each site visited, and a workspace may allow it outright. What research turns up is never a citation on a rule: a rule it informed is the planner's own default. This takes phase 1 research off the parked list.
+- affects: sub agent support, feature planning, docs/intent/agent.md
+
+### A sub agent is a delegate a code-reading session can call on the engine we own
+- decided: Work a session wants done without filling its own context is handed to a sub agent: one the product ships, one defined in the person's or the workspace's files alongside skills, or one the calling session defines in the call itself together with what it wants back. A sub agent's tools are capped by what its caller is offered, it cannot delegate further, it spends a budget the caller sets, and it reports once. That is the delegation of a session on an OpenAI-compatible endpoint; a session on the Claude engine keeps that engine's own way of handing work on, which the product does not list, cap or replace. The quote-only lookup is one of the sub agents the product ships.
+- affects: sub agent support, retrieval sub-session, instructions and skills, choosing models, session cost, docs/intent/agent.md, docs/settings.md
+
 ### A feature can be named by the model from its description
 - decided: Naming a feature is offered rather than left to the person: from the description they have written, the model proposes a name clear of the ones already taken, and it lands in the name field as theirs to keep or edit, never as a name applied behind their back. Pressing it with nothing described asks for a description instead of guessing. The ask is one prompt on the model the feature's planning would run on, holding no conversation and keeping nothing.
 - affects: starting a new session, choosing models
+
+### Whether approval starts the build is chosen at approval
+- decided: Approving a spec carries a switch for what follows, standing beside the act itself and remembered for the workspace: the check against the code, the docs listing and the board happen either way, and the build then either begins by itself as it does today or the feature stops there, planned and mapped, waiting for the person to start it. That is how several features are planned ahead while one is built at a time: each is taken to build-ready and sits until its turn.
+- affects: feature planning, finishing the build, sessions and tabs, docs/intent/agent.md, docs/plan-sessions.md
+
+### The mapping is diffed against the code when the build is started
+- decided: The check that maps a feature to the code keeps a snapshot of the files its tasks name, and starting the build compares them against the code as it then stands; what changed in the meantime reaches the implementer as the changed line ranges of those files, so a mapping made before another feature landed is corrected rather than trusted. Nothing is re-checked and no decision is reopened: the implementer is told, and reads those places again itself.
+- affects: feature planning, parallell session support, docs/intent/agent.md
+
+### The person's own permission rules live in a file of their own under their home directory
+- decided: An answer kept for the person rather than the workspace is held in a small file of its own under the person's home directory, the way `~/.mcp.json` already mirrors a workspace's `.mcp.json` for the person; a write to that file is always put to the person, the way a write to the workspace's own settings already is.
+- affects: permission decisions, docs/settings.md
+
+### A chat checks the specs against what it built, by instruction alone
+- decided: A chat session that finishes coding something goes over the specs for rules its change touched and says which should be updated, as a rule in its instructions rather than a step the tab offers; what it finds is taken further through the ordinary described change to that spec.
+- affects: bundles, instructions and skills, changing an implemented spec, docs/intent/agent.md
+
+### A session may run on the Claude Code installed on the machine
+- decided: Beside the Claude Code bundled with the extension, a provider may run the one installed on the person's own machine, so a model newer than the bundled engine knows is reached by updating that install rather than waiting for a release of this extension. The two are one engine in every other respect: the same session plumbing, tools, instructions, skills, memories, permissions and Claude login, and a session switching between them keeps what any cross-engine switch keeps. The installed engine is offered only once a Claude Code is found — the path the person named, else one on PATH, else where the native installer puts it — and a named path that holds nothing leaves the engine unavailable rather than falling back to another install. A provider lists the models its own engine serves, so Opus 5.5 and Sonnet 5.5 are reachable on the installed engine while the bundled engine keeps Opus 5 and Sonnet 5.
+- affects: choosing models, bundles, moving to this agent, project and user wide memories, docs/settings.md, docs/intent/agent.md
+
+### Newer models are offered rather than shipped as the default
+- decided: What a fresh install runs is a model the bundled engine can run, so the product works before the person has a Claude Code of their own; reaching a newer model is an offer instead. Where the installed Claude Code can run a newer model than a profile names, the move is put to the person once as a notification and, until they take it or turn it down, on the models settings page, which says which models would move and which provider they would move to. Taking it adds the provider on that install and repoints only the profiles that named a superseded model, leaving the models they ran configured so the move can be undone; turning it down is remembered for the person, since the models are their own settings rather than a workspace’s. A model a profile is pointed at is never swapped for another without being asked.
+- affects: choosing models, docs/settings.md
+
+### Every read or write outside the project is asked about as a folder and a kind
+- decided: A read or a write outside the project, by any shell command or file tool and not only by a change of directory, is asked about as the folder it reaches and whether it reads or writes there, with the person choosing how far up the grant reaches (a write may also be kept for its file), and the kept read or write grant then answers for every command and file tool doing that kind of thing beneath it; how that prompt and its grants behave is Directory permission's, while what counts as a read, a write or running a program stays Permission decisions'.
+- affects: directory permission, permission decisions
+
+### References run from specs to docs, never back
+- decided: A spec cites the docs, but the code, its comments and the docs never cite a spec, a rule's name or a spec's path, and every session that writes code or docs is told so; a behaviour's reason is stated there in the domain's own words instead.
+- affects: feature planning, doc migration, implementing a feature, chat, code planning
 

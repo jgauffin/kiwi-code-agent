@@ -96,6 +96,7 @@ export class StateBroadcaster {
         ...(p.lastActiveAt ? { lastActiveAt: p.lastActiveAt } : {}),
         ...(p.authored ? { authored: p.authored } : {}),
         ...(p.review ? { review: p.review } : {}),
+        ...(p.folder ? { folder: p.folder } : {}),
       })),
       chats: this.pastChats(groups.chats),
       updates: await updatableSpecs(workspaceRoot, sessions, plans),

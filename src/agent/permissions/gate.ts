@@ -9,6 +9,15 @@ export type PermissionShown = { title?: string; edits?: FileEditChange[] }
 export type AskPermission = (toolUseId: string, toolName: string, input: unknown, shown?: PermissionShown) => Promise<PermissionDecision>
 
 /**
+ * Asks the user about one call as a session's own ordinary prompt would,
+ * carrying no toolUseId of its own: the session that answers it mints one
+ * itself. A delegated run takes the caller's own instead of asking through a
+ * prompt nobody could answer, and no hook of the caller's stands in the way a
+ * second time, since the call it is asked about already ran them once.
+ */
+export type PermissionAsker = (toolName: string, input: unknown, shown?: PermissionShown) => Promise<PermissionDecision>
+
+/**
  * The decision every call passes, whether the model or a running script makes
  * it: a deny rule blocks, a read-only or already allowed call goes through,
  * anything else is asked. The rules themselves live in the hooks; this is only
@@ -33,6 +42,16 @@ export async function gateCall(
 export async function denyReason(hooks: SessionHooks | undefined, use: ToolUse): Promise<string | undefined> {
   const pre = await hooks?.preToolUse?.(use)
   return pre && 'deny' in pre ? `Blocked: ${pre.deny}` : undefined
+}
+
+/**
+ * Puts a call a tool made inside its own work past the hooks that watch what
+ * already happened. There is no result to carry and nothing to decide: a script
+ * reading a file has to count as the session seeing it, or the write it derives
+ * from that read would be refused as written from memory.
+ */
+export async function noteCall(hooks: SessionHooks | undefined, use: ToolUse): Promise<void> {
+  await hooks?.postToolUse?.({ ...use, output: '', isError: false })
 }
 
 /** The same decision for a call a tool makes on its own account, one the rules may leave to the user. */

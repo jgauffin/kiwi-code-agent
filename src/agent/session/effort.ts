@@ -1,4 +1,4 @@
-import type { Effort, ModelProfile, Provider, Step } from './model-profile'
+import { isClaudeEngine, type Effort, type ModelProfile, type Provider, type Step } from './model-profile'
 
 /** Every level, weakest first. */
 export const EFFORTS: readonly Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
@@ -49,7 +49,7 @@ export function knownReasoningControl(model: string): ReasoningControl | undefin
  * failing the turn.
  */
 export function effortLevels(provider: Provider, model: string): readonly Effort[] {
-  if (provider.engine === 'claude-sdk') return EFFORTS
+  if (isClaudeEngine(provider.engine)) return EFFORTS
   const control = provider.reasoningControl ?? knownReasoningControl(model) ?? 'none'
   return control === 'reasoning_effort' ? REASONING_EFFORT : []
 }

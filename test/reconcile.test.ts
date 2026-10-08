@@ -63,7 +63,7 @@ describe('reconcile prompt', () => {
     // The kind of a finding is nothing the user acts on, so it is not written into the file.
     expect(prompt).not.toContain('- kind:')
     expect(prompt).not.toContain('amendment')
-    expect(RECONCILE_TOOLS).toEqual(['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'MarkdownSearch', 'CodeOutline', 'CodeSearch', 'Edit', 'Write', 'Skill'])
+    expect(RECONCILE_TOOLS).toEqual(['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'MarkdownSearch', 'CodeOutline', 'CodeSearch', 'Edit', 'Write', 'Skill', 'Delegate'])
   })
 
   it('a_run_continuing_the_last_check_is_told_the_spec_changed_and_keeps_what_it_read', () => {
@@ -77,7 +77,7 @@ describe('reconcile prompt', () => {
   })
 
   it('the_spec_stands_in_for_the_docs_and_the_other_specs_so_the_check_does_not_read_them_again', () => {
-    expect(prompt).toContain('specs/*.spec.md')
+    expect(prompt).toContain('specs/**/*.spec.md')
     expect(prompt).toContain('do not browse those')
     expect(prompt).toContain('docs/intent/orders.md#Cancellation')
     expect(blindPlanPrompt('Order cancellation', cwd)).toContain('ends with its citation in parentheses')

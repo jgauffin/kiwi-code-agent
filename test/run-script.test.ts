@@ -5,7 +5,10 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { runScriptTool } from '../src/agent/openai-session/tools/run-script'
 import { ReadTracker } from '../src/agent/openai-session/tools/read-tracker'
-import { ok, truncate, type ToolContext, type ToolOutput } from '../src/agent/openai-session/tools/tool'
+import { MAX_OUTPUT_CHARS, ok, truncate, type ToolContext, type ToolOutput } from '../src/agent/openai-session/tools/tool'
+import { denyReason, noteCall } from '../src/agent/permissions/gate'
+import { FileHands } from '../src/agent/session/file-hands'
+import { StaleWriteGuard } from '../src/agent/session/stale-write-guard'
 
 type Call = { name: string; input: unknown }
 
@@ -256,6 +259,66 @@ describe('RunScript', () => {
       const script = 'try { await edit({ file_path: "a.ts", old_string: "x", new_string: "y" }) } catch (e) { return e.message }'
       const result = await runScriptTool().execute({ script }, ctx)
       expect(result.text).toContain('occurs 2 times')
+    })
+  })
+
+  describe('under the stale write guard', () => {
+    async function guarded(): Promise<{ ctx: ToolContext; dir: string }> {
+      const { ctx, dir } = await context({ review: async () => ({ kind: 'allow' }) })
+      const guard = new StaleWriteGuard(dir, new FileHands(dir, 'session-1', 'chat', undefined))
+      const use = (toolName: string, input: unknown) => ({ toolName, input, toolUseId: 'call-1' })
+      return {
+        dir,
+        ctx: {
+          ...ctx,
+          authorize: (name, input) => denyReason(guard, use(name, input)),
+          observed: (name, input) => noteCall(guard, use(name, input)),
+        },
+      }
+    }
+
+    it('a_replace_needs_no_prior_read_because_it_matched_what_was_on_disk', async () => {
+      const { ctx, dir } = await guarded()
+      await writeFile(join(dir, 'a.ts'), 'foo\n')
+      const result = await runScriptTool().execute({ script: 'await replace("a.ts", "foo", "bar")' }, ctx)
+      expect(result.isError).toBe(false)
+      expect(await readFile(join(dir, 'a.ts'), 'utf8')).toBe('bar\n')
+    })
+
+    it('a_write_of_the_models_own_text_still_needs_the_file_to_have_been_read', async () => {
+      const { ctx, dir } = await guarded()
+      await writeFile(join(dir, 'a.ts'), 'foo\n')
+      const result = await runScriptTool().execute({ script: 'try { await write("a.ts", "guessed") } catch (e) { return e.message }' }, ctx)
+      expect(result.text).toContain('has not been read')
+      expect(await readFile(join(dir, 'a.ts'), 'utf8')).toBe('foo\n')
+    })
+
+    it('an_edit_following_a_scripts_own_write_is_not_refused_as_unread', async () => {
+      const { ctx, dir } = await guarded()
+      await writeFile(join(dir, 'a.ts'), 'foo\n')
+      await runScriptTool().execute({ script: 'await replace("a.ts", "foo", "bar")' }, ctx)
+      expect(await ctx.authorize!('Edit', { file_path: join(dir, 'a.ts') })).toBeUndefined()
+    })
+  })
+
+  describe('the diff of what was applied', () => {
+    it('comes_back_whole_while_it_fits_what_is_left_of_the_budget', async () => {
+      const { ctx, dir } = await context({ review: async () => ({ kind: 'allow' }) })
+      await writeFile(join(dir, 'a.ts'), 'foo\n')
+      const result = await runScriptTool().execute({ script: 'await replace("a.ts", "foo", "bar")' }, ctx)
+      expect(result.text).toContain('--- a.ts')
+      expect(result.text).toContain('-foo')
+      expect(result.text).toContain('+bar')
+    })
+
+    it('keeps_every_file_visible_by_cutting_per_file_and_naming_the_hunks_it_left_out', async () => {
+      const { ctx, dir } = await context({ review: async () => ({ kind: 'allow' }) })
+      const spread = Array.from({ length: 200 }, (_, i) => (i % 10 === 0 ? 'foo' : `line ${i}`)).join('\n')
+      await writeFile(join(dir, 'a.ts'), `${spread}\n`)
+      const script = `console.log("x".repeat(${MAX_OUTPUT_CHARS - 400})); await replace("a.ts", "foo", "bar")`
+      const result = await runScriptTool().execute({ script }, ctx)
+      expect(result.text).toContain('--- a.ts')
+      expect(result.text).toMatch(/\[\d+ more hunks not shown\]/)
     })
   })
 

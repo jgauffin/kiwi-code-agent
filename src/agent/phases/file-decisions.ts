@@ -2,7 +2,7 @@ import { ASK_USER_TOOL } from '../openai-session/tools/ask-user'
 import { MARKDOWN_SEARCH_TOOL } from '../openai-session/tools/markdown-search'
 import { DOC_READING } from '../openai-session/tools/markdown/outline-gate'
 import { EDIT_WRITING } from '../openai-session/tools/edit'
-import { DOCS_DIR, README_GLOB, SPECS_GLOB } from './blind-plan'
+import { DOCS_DIR, README_GLOB, SPECS_ANY_GLOB } from './blind-plan'
 import type { Scope } from './scope-guard'
 import { SPEC_SEARCH_TOOL } from './spec-search'
 import { DECISION_FILES, FUTURE_FILE, UNFILED_FILE } from './unfiled-decisions'
@@ -16,11 +16,11 @@ import { DECISION_FILES, FUTURE_FILE, UNFILED_FILE } from './unfiled-decisions'
 /** `ignored` comes from the `kiwiAgent.planIgnore` setting: docs the planner must not see are not the filing's to write. */
 export function fileDecisionsScope(ignored: string[] = []): Scope {
   return {
-    readable: [`${DOCS_DIR}/**`, README_GLOB, SPECS_GLOB, ...DECISION_FILES],
+    readable: [`${DOCS_DIR}/**`, README_GLOB, SPECS_ANY_GLOB, ...DECISION_FILES],
     // Deleting an entry that is filed is the session's own bookkeeping.
     writable: [...DECISION_FILES],
     // The specs and docs are the user's: each change is one confirmed write.
-    askable: [`${DOCS_DIR}/**`, SPECS_GLOB],
+    askable: [`${DOCS_DIR}/**`, SPECS_ANY_GLOB],
     ignored,
   }
 }
@@ -35,7 +35,7 @@ export function fileDecisionsKickoff(): string {
 export function fileDecisionsPrompt(cwd: string): string {
   return `You are filing the user's decisions into the intent of a software product, under ${cwd}.
 
-Two files hold what the user decided while a feature was built, or in chat, that reaches beyond the work at hand. \`${UNFILED_FILE}\` holds how the product works, to be filed into the specs it reaches. \`${FUTURE_FILE}\` holds work decided for later, to be planned as features of their own. A feature here is planned blind: the planner reads \`${DOCS_DIR}/**\`, the workspace README, the specs under \`${SPECS_GLOB}\` and these two files, never the code. An entry stays in its file until what it decided stands where a planner looks for it.
+Two files hold what the user decided while a feature was built, or in chat, that reaches beyond the work at hand. \`${UNFILED_FILE}\` holds how the product works, to be filed into the specs it reaches. \`${FUTURE_FILE}\` holds work decided for later, to be planned as features of their own. A feature here is planned blind: the planner reads \`${DOCS_DIR}/**\`, the workspace README, the specs under \`${SPECS_ANY_GLOB}\` and these two files, never the code. An entry stays in its file until what it decided stands where a planner looks for it.
 
 Each entry is \`### Title\` with a \`decided\` line and an \`affects\` line. The \`affects\` line names the features it reaches, and says \`docs\` for what no spec holds yet.
 

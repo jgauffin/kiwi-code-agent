@@ -102,11 +102,20 @@ export class SettingsPanel {
         case 'dismiss_bundle_offer':
           await this.store.dismissBundleOffer()
           return
+        case 'upgrade_models':
+          await this.store.upgradeModels()
+          return
+        case 'dismiss_model_upgrade':
+          await this.store.dismissModelUpgrade()
+          return
         case 'request_pairing_code':
           await this.requestPairingCode()
           return
         case 'unpair_phone':
           this.store.unpairPhone(message.id)
+          return
+        case 'save_person_rules':
+          await this.store.savePersonRules(message.kind, message.values)
           return
       }
     } finally {

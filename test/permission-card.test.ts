@@ -61,14 +61,96 @@ describe('a shell call on the permission card', () => {
     expect(rows(c).map(rowText)).toEqual(['npm run build', 'npx vitest run', 'ls -la'])
   })
 
-  it('a_command_that_needs_an_answer_offers_session_project_and_deny_and_one_that_passes_says_why', () => {
+  it('a_command_that_needs_an_answer_offers_allow_session_project_and_deny_and_one_that_passes_says_why', () => {
     const { card: c } = card(shellRequest())
     const [build, test, list] = rows(c)
 
-    expect(buttons(build!)).toEqual(['Allow npm run for session', 'Allow npm run for project', 'Deny'])
-    expect(buttons(test!)).toEqual(['Allow npx vitest for session', 'Allow npx vitest for project', 'Deny'])
+    expect(buttons(build!)).toEqual([
+      'Allow', 'Allow npm run for session', 'Allow npm run for project', 'Deny', 'Deny npm run for session', 'Deny npm run for project',
+    ])
+    expect(buttons(test!)).toEqual([
+      'Allow', 'Allow npx vitest for session', 'Allow npx vitest for project', 'Deny', 'Deny npx vitest for session', 'Deny npx vitest for project',
+    ])
     expect(buttons(list!)).toEqual([])
     expect(status(list!)).toBe('read-only')
+  })
+
+  it('a_rule_naming_ground_outside_the_project_offers_for_me_in_place_of_for_project', () => {
+    const request = shellRequest()
+    request.commands = [{ text: 'cd D:/data', rule: 'Bash(cd D:/data)', scope: 'person' }]
+    const { card: c, decisions } = card(request)
+
+    expect(buttons(rows(c)[0]!)).toEqual([
+      'Allow', 'Allow cd D:/data for session', 'Allow cd D:/data for me', 'Deny', 'Deny cd D:/data for session', 'Deny cd D:/data for me',
+    ])
+    click(rows(c)[0]!, 'Allow cd D:/data for me')
+    expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'allow', remember: { session: [], project: [], person: ['Bash(cd D:/data)'] } }])
+  })
+
+  it('a_change_of_directory_keeps_its_answer_for_the_place_picked_from_its_path', () => {
+    const request = shellRequest()
+    const place = (directory: string) => ({ directory, rule: `Bash(cd ${directory})` })
+    const places = [place('D:/data/crates/v8'), place('D:/data/crates'), place('D:/data')]
+    request.commands = [{ text: 'cd D:/data/crates/v8', rule: places[0]!.rule, places, scope: 'person' }]
+    const { card: c, decisions } = card(request)
+    const parts = () => [...rows(c)[0]!.querySelectorAll('.places button')]
+
+    // Shallowest first; the directory itself is what the answer is kept for until another part is picked.
+    expect(parts().map((p) => p.textContent)).toEqual(['D:/data', '/crates', '/v8'])
+    expect(parts().map((p) => p.classList.contains('covered'))).toEqual([true, true, true])
+    click(rows(c)[0]!, '/crates')
+    expect(parts().map((p) => p.classList.contains('covered'))).toEqual([true, true, false])
+    click(rows(c)[0]!, 'Allow directory for me')
+
+    expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'allow', remember: { session: [], project: [], person: ['Bash(cd D:/data/crates)'] } }])
+  })
+
+  it('a_change_of_directory_is_denied_for_the_place_picked', () => {
+    const request = shellRequest()
+    const places = [{ directory: 'D:/data/x', rule: 'Bash(cd D:/data/x)' }, { directory: 'D:/data', rule: 'Bash(cd D:/data)' }]
+    request.commands = [{ text: 'cd D:/data/x', rule: places[0]!.rule, places, scope: 'person' }]
+    const { card: c, decisions } = card(request)
+
+    click(rows(c)[0]!, 'D:/data')
+    click(rows(c)[0]!, 'Deny directory for session')
+
+    expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'deny', denyRemember: { session: ['Bash(cd D:/data)'], project: [], person: [] } }])
+  })
+
+  it('the_plain_allow_beside_the_remembered_scopes_is_what_is_pre_selected', () => {
+    const { card: c } = card(shellRequest())
+    const [build] = rows(c)
+
+    const allow = [...build!.querySelectorAll('button')].find((b) => b.textContent === 'Allow')!
+    expect(allow.hasAttribute('autofocus')).toBe(true)
+  })
+
+  it('allowing_a_ruled_line_for_this_call_only_leaves_it_unremembered', () => {
+    const { card: c, decisions } = card(shellRequest())
+
+    click(rows(c)[0]!, 'Allow')
+    click(rows(c)[1]!, 'Allow')
+
+    expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'allow' }])
+  })
+
+  it('a_line_that_reads_and_writes_names_each_place_and_marks_the_write_as_why_it_asks', () => {
+    const request = shellRequest()
+    request.commands = [
+      {
+        text: 'cp a.txt /tmp/b.txt',
+        rule: 'Bash(cp:*)',
+        effects: [
+          { kind: 'reads', path: 'a.txt', asked: false },
+          { kind: 'writes', path: '/tmp/b.txt', asked: true },
+        ],
+      },
+    ]
+    const { card: c } = card(request)
+
+    const effects = [...rows(c)[0]!.querySelectorAll('.effects li')]
+    expect(effects.map((e) => e.textContent)).toEqual(['reads a.txt', 'writes /tmp/b.txt'])
+    expect(effects.map((e) => e.classList.contains('asked'))).toEqual([false, true])
   })
 
   it('the_call_is_allowed_once_every_command_is_and_the_answers_are_remembered_by_scope', () => {
@@ -77,12 +159,30 @@ describe('a shell call on the permission card', () => {
     click(rows(c)[0]!, 'Allow npm run for session')
     expect(decisions).toHaveLength(0)
     expect(status(rows(c)[0]!)).toBe('allowed for session: npm run')
-    expect(buttons(rows(c)[1]!)).toHaveLength(3)
+    expect(buttons(rows(c)[1]!)).toHaveLength(6)
 
     click(rows(c)[1]!, 'Allow npx vitest for project')
     expect(decisions).toHaveLength(1)
     expect(decisions[0]!.requestId).toBe('r1')
-    expect(decisions[0]!.decision).toEqual({ kind: 'allow', remember: { session: ['Bash(npm run:*)'], project: ['Bash(npx vitest:*)'] } })
+    expect(decisions[0]!.decision).toEqual({ kind: 'allow', remember: { session: ['Bash(npm run:*)'], project: ['Bash(npx vitest:*)'], person: [] } })
+  })
+
+  it('a_denial_may_be_kept_the_same_three_ways_an_allow_may', () => {
+    const { card: c, decisions } = card(shellRequest())
+
+    click(rows(c)[0]!, 'Deny npm run for project')
+
+    expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'deny', denyRemember: { session: [], project: ['Bash(npm run:*)'], person: [] } }])
+  })
+
+  it('a_rule_naming_ground_outside_the_project_may_be_denied_for_me_in_place_of_for_project', () => {
+    const request = shellRequest()
+    request.commands = [{ text: 'cd D:/data', rule: 'Bash(cd D:/data)', scope: 'person' }]
+    const { card: c, decisions } = card(request)
+
+    click(rows(c)[0]!, 'Deny cd D:/data for me')
+
+    expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'deny', denyRemember: { session: [], project: [], person: ['Bash(cd D:/data)'] } }])
   })
 
   it('one_denied_command_denies_the_call_and_the_others_keep_what_they_were_answered', () => {
@@ -91,7 +191,7 @@ describe('a shell call on the permission card', () => {
     click(rows(c)[0]!, 'Allow npm run for project')
     click(rows(c)[1]!, 'Deny')
 
-    expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'deny', remember: { session: [], project: ['Bash(npm run:*)'] } }])
+    expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'deny', remember: { session: [], project: ['Bash(npm run:*)'], person: [] } }])
     c.resolve('deny')
     expect(status(rows(c)[0]!)).toBe('allowed for project: npm run')
     expect(status(rows(c)[1]!)).toBe('denied')
@@ -109,7 +209,7 @@ describe('a shell call on the permission card', () => {
 
     click(rows(c)[0]!, 'Allow npm run for session')
 
-    expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'allow', remember: { session: ['Bash(npm run:*)'], project: [] } }])
+    expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'allow', remember: { session: ['Bash(npm run:*)'], project: [], person: [] } }])
   })
 
   it('a_command_no_rule_can_stand_for_is_allowed_for_this_call_only', () => {
@@ -162,7 +262,20 @@ describe('a call that is not a shell command', () => {
   it('is_allowed_for_the_tool_whatever_its_arguments_for_the_session_or_the_project', () => {
     const { card: c } = card(mcpRequest())
 
-    expect(labels(c)).toEqual(['Allow mcp__docs__search for session', 'Allow mcp__docs__search for project', 'Deny'])
+    expect(labels(c)).toEqual(['Allow', 'Allow mcp__docs__search for session', 'Allow mcp__docs__search for project', 'Deny'])
+  })
+
+  it('a_call_naming_neither_a_file_nor_a_command_is_led_by_the_tool_name_and_what_it_was_asked_to_do', () => {
+    const { card: c } = card(mcpRequest())
+
+    expect(c.querySelector('strong')?.textContent).toBe('mcp__docs__search')
+    expect(c.querySelector('pre.input')?.textContent).toBe(JSON.stringify({ query: 'x' }, null, 2))
+  })
+
+  it('a_call_naming_a_file_leads_with_what_it_would_do_and_where', () => {
+    const { card: c } = card({ type: 'permission_request', requestId: 'e1', toolName: 'Edit', input: { file_path: 'a.ts' }, title: 'Claude wants to edit a.ts' })
+
+    expect(c.querySelector('strong')?.textContent).toBe('Claude wants to edit a.ts')
   })
 
   it('allowing_for_the_session_remembers_the_tool_as_a_rule_without_arguments', () => {
@@ -170,7 +283,15 @@ describe('a call that is not a shell command', () => {
 
     press(c, 'Allow mcp__docs__search for session')
 
-    expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'allow', remember: { session: ['mcp__docs__search'], project: [] } }])
+    expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'allow', remember: { session: ['mcp__docs__search'], project: [], person: [] } }])
+  })
+
+  it('pressing_the_plain_allow_beside_a_remembered_rule_allows_this_call_alone', () => {
+    const { card: c, decisions } = card(mcpRequest())
+
+    press(c, 'Allow')
+
+    expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'allow' }])
   })
 
   it('a_file_write_is_allowed_per_call_since_the_session_switch_covers_the_rest', () => {
@@ -280,7 +401,7 @@ describe('the reason for a denial', () => {
     click(rows(c)[1]!, 'Deny')
 
     expect(decisions.map((d) => d.decision)).toEqual([
-      { kind: 'deny', message: 'run the narrow test', remember: { session: ['Bash(npm run:*)'], project: [] } },
+      { kind: 'deny', message: 'run the narrow test', remember: { session: ['Bash(npm run:*)'], project: [], person: [] } },
     ])
   })
 
@@ -306,5 +427,83 @@ describe('a shell step in the transcript', () => {
     expect(step.querySelector('pre.input')?.textContent).toBe('npm run build\nnpx vitest run')
     expect(step.textContent).not.toContain('Bash')
     expect(step.textContent).not.toContain('{')
+  })
+})
+
+describe('a read or a write outside the project on the permission card', () => {
+  const place = (verb: string, directory: string) => ({ directory, rule: `Bash(${verb} ${directory})` })
+  const accessOf = (row: Element) => row.querySelector('.access')?.textContent
+
+  it('says_whether_it_reads_or_writes_and_the_whole_directory', () => {
+    const request = shellRequest()
+    request.commands = [
+      { text: 'cat D:/data/a/f.txt', access: { kind: 'reads', directory: 'D:/data/a' }, rule: 'Bash(read D:/data/a)', places: [place('read', 'D:/data/a'), place('read', 'D:/data')], scope: 'person' },
+      { text: 'rm D:/x/f.txt', access: { kind: 'writes', directory: 'D:/x' }, rule: 'Bash(write D:/x)', places: [place('write', 'D:/x')], scope: 'person' },
+    ]
+    const { card: c } = card(request)
+
+    expect(rows(c).map(accessOf)).toEqual(['Reads in D:/data/a', 'Writes to D:/x'])
+  })
+
+  it('a_path_that_names_no_place_is_allowed_for_this_call_only', () => {
+    const request = shellRequest()
+    request.commands = [{ text: 'cat $FILE', access: { kind: 'reads' } }]
+    const { card: c, decisions } = card(request)
+
+    expect(accessOf(rows(c)[0]!)).toBe('Reads in a place this call decides when it runs')
+    expect(buttons(rows(c)[0]!)).toEqual(['Allow', 'Deny'])
+    click(rows(c)[0]!, 'Allow')
+    expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'allow' }])
+  })
+
+  it('each_missing_grant_is_answered_in_turn_and_denying_any_one_refuses_the_whole_call', () => {
+    const request = shellRequest()
+    request.commands = [
+      { text: 'cp D:/a/x D:/b/y', access: { kind: 'reads', directory: 'D:/a' }, rule: 'Bash(read D:/a)', places: [place('read', 'D:/a')], scope: 'person' },
+      { text: 'cp D:/a/x D:/b/y', access: { kind: 'writes', directory: 'D:/b' }, rule: 'Bash(write D:/b)', places: [place('write', 'D:/b')], scope: 'person' },
+    ]
+    const { card: c, decisions } = card(request)
+
+    click(rows(c)[0]!, 'Allow')
+    expect(decisions).toHaveLength(0)
+    click(rows(c)[1]!, 'Deny')
+    expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'deny' }])
+  })
+
+  it('a_directory_grant_is_offered_for_the_session_and_the_person_never_the_workspace_and_reads_back_the_place', () => {
+    const request = shellRequest()
+    const places = [place('write', 'D:/x/a.ts'), place('write', 'D:/x')]
+    request.commands = [
+      { text: 'rm D:/x/a.ts', access: { kind: 'writes', directory: 'D:/x' }, rule: places[0]!.rule, places, scope: 'person' },
+      { text: 'cat D:/y/b', access: { kind: 'reads', directory: 'D:/y' }, rule: 'Bash(read D:/y)', places: [place('read', 'D:/y')], scope: 'person' },
+    ]
+    const { card: c, decisions } = card(request)
+
+    expect(buttons(rows(c)[0]!).filter((b) => b?.includes('project'))).toEqual([])
+    expect(buttons(rows(c)[0]!)).toContain('Allow directory for session')
+    click(rows(c)[0]!, 'D:/x')
+    click(rows(c)[0]!, 'Allow directory for session')
+    expect(status(rows(c)[0]!)).toBe('allowed for session: write D:/x')
+    click(rows(c)[1]!, 'Deny directory for me')
+    expect(decisions.map((d) => d.decision)).toEqual([
+      { kind: 'deny', remember: { session: ['Bash(write D:/x)'], project: [], person: [] }, denyRemember: { session: [], project: [], person: ['Bash(read D:/y)'] } },
+    ])
+  })
+
+  it('a_file_write_still_shows_its_change_beside_the_choice_of_place_to_keep', () => {
+    const change = { path: 'D:/x/a.ts', label: 'a.ts', diffs: ['@@ -1 +1 @@\n-a\n+b'], omitted: 0 }
+    const { card: c, decisions } = card({
+      type: 'permission_request',
+      requestId: 'e1',
+      toolName: 'Edit',
+      input: { file_path: 'D:/x/a.ts' },
+      edit: change,
+      commands: [{ text: 'Edit D:/x', access: { kind: 'writes', directory: 'D:/x' }, rule: 'Edit(write D:/x)', places: [{ directory: 'D:/x', rule: 'Edit(write D:/x)' }], scope: 'person' }],
+    })
+
+    expect(c.querySelector('.edit')).not.toBeNull()
+    expect(accessOf(rows(c)[0]!)).toBe('Writes to D:/x')
+    click(rows(c)[0]!, 'Allow directory for me')
+    expect(decisions.map((d) => d.decision)).toEqual([{ kind: 'allow', remember: { session: [], project: [], person: ['Edit(write D:/x)'] } }])
   })
 })

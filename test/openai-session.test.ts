@@ -450,6 +450,69 @@ describe('OpenAiSession', () => {
     await s.dispose()
   })
 
+  it('a_session_given_its_own_ask_answers_a_write_the_hooks_leave_open_through_it_rather_than_a_prompt_of_its_own', async () => {
+    const model = new ScriptedModel(toolCall('c1', 'Danger', '{"value":"a"}'), text('ok'))
+    const asked: unknown[] = []
+    const s = new OpenAiSession({
+      id: 's1',
+      profile: { name: 'GLM', engine: 'openai-compatible', model: 'glm' },
+      cwd: process.cwd(),
+      client: model,
+      tools: [dangerTool as Tool],
+      systemPrompt: 'sys',
+      ask: async (toolName, input) => {
+        asked.push({ toolName, input })
+        return { kind: 'allow' }
+      },
+    })
+    s.send('go')
+    const events = await untilTurnDone(s)
+    expect(events.filter((e) => e.type === 'permission_request')).toHaveLength(0)
+    expect(asked).toEqual([{ toolName: 'Danger', input: { value: 'a' } }])
+    expect(events).toContainEqual({ type: 'tool_result', toolUseId: 'c1', text: 'echo:a', isError: false })
+    await s.dispose()
+  })
+
+  it('ctx_askPermission_puts_the_ordinary_prompt_without_running_a_hook_of_its_own', async () => {
+    let hookCalls = 0
+    const asking: Tool<typeof echoSchema> = {
+      name: 'Asking',
+      description: '',
+      schema: echoSchema,
+      readOnly: true,
+      async execute(input, ctx) {
+        const decision = await ctx.askPermission!('Danger', input)
+        return { text: decision.kind, isError: false }
+      },
+    }
+    const model = new ScriptedModel(toolCall('c1', 'Asking', '{"value":"a"}'), text('ok'))
+    const s = new OpenAiSession({
+      id: 's1',
+      profile: { name: 'GLM', engine: 'openai-compatible', model: 'glm' },
+      cwd: process.cwd(),
+      client: model,
+      tools: [asking as Tool],
+      systemPrompt: 'sys',
+      hooks: {
+        async preToolUse() {
+          hookCalls++
+          return undefined
+        },
+      },
+    })
+    s.send('go')
+    const events: SessionEvent[] = []
+    for await (const e of s.events()) {
+      events.push(e)
+      if (e.type === 'permission_request') s.respondToPermission(e.requestId, { kind: 'allow' })
+      if (e.type === 'turn_done') break
+    }
+    expect(events.filter((e) => e.type === 'permission_request')).toHaveLength(1)
+    expect(hookCalls).toBe(1)
+    expect(events).toContainEqual({ type: 'tool_result', toolUseId: 'c1', text: 'allow', isError: false })
+    await s.dispose()
+  })
+
   it('pre_hook_can_deny_a_tool_and_post_hook_context_reaches_the_model_beside_the_result', async () => {
     const model = new ScriptedModel(toolCall('c1', 'Echo', '{"value":"a"}'), toolCall('c2', 'Echo', '{"value":"b"}'), text('ok'))
     const s = new OpenAiSession({

@@ -29,7 +29,7 @@ Reading and searching, no prompt:
 - `markdownSearch({ query, path?, regex?, case_sensitive? })`: every match as
   `{ file, line, text, heading, start, end }`, `heading` being the section it sits in (null before the first).
 - `specSearch({ query, regex?, case_sensitive? })`: every matching rule, open question or goal in
-  `specs/*.spec.md` as `{ file, feature, status, kind, scenario, name, text, citation, edges }`,
+  `specs/**/*.spec.md` as `{ file, feature, status, kind, scenario, name, text, citation, edges }`,
   `kind` being `rule`, `question` or `goal` and `edges` a rule's edge cases as `{ name, text, citation }`.
 - `jsonQuery(args)`, `jsonSchema(args)`, `codeOutline({ path, symbol })`: the same as the tools of that name.
 - A denied or failing call throws; catch it to carry on.
@@ -40,7 +40,12 @@ Changing files, staged:
   `replace(path, pattern, replacement, flags = 'g')`, `move(source, destination)`,
   `copy(source, destination)`, `remove(path)`.
 - Nothing is written while the script runs. Changes are collected, and when the script ends the
-  user sees every changed file as one diff and approves or declines the whole set.
+  user sees every changed file as one diff and approves or declines the whole set. What was
+  written comes back to you as that diff, so check your own pattern against it.
+- `replace` needs no prior read of the file: it matched what was on disk, and the script's read
+  counts as the session seeing it. `write` and `edit` carry text of your own rather than the
+  file's, so those still need the file read first. To sweep many files you never read, use
+  `replace`, or read just the line ranges a first script reported.
 - `read` returns the staged content of a file the script has already changed.
 - `replace` takes a regular expression and `$1`-style groups; it returns
   `{ path, matches, changed }`. No match stages nothing.

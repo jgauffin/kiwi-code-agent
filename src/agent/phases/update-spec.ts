@@ -40,6 +40,6 @@ export async function startUpdate(options: {
     await pickUpPlan({ courier, cwd, feature, note: description })
     return
   }
-  const started = await courier.start(feature, updatePrompt(feature), 'Updating the spec')
+  const started = await courier.start(feature, updatePrompt(feature, cwd), 'Updating the spec')
   if (started) await courier.say(started, description)
 }

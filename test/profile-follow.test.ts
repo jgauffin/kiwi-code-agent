@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { takesProfile } from '../src/agent/session/session-status'
 import type { ModelProfile } from '../src/agent/session/model-profile'
 
-const fast: ModelProfile = { name: 'Fast', engine: 'claude-sdk', model: 'claude-sonnet-5' }
-const balanced: ModelProfile = { name: 'Balanced', engine: 'claude-sdk', model: 'claude-opus-5' }
+const fast: ModelProfile = { name: 'Fast', engine: 'claude-sdk', model: 'claude-sonnet-5-5' }
+const balanced: ModelProfile = { name: 'Balanced', engine: 'claude-sdk', model: 'claude-opus-5-5' }
 
 describe('a feature run follows its profile', () => {
   it('a_turn_already_in_flight_finishes_on_the_model_it_started_on', () => {

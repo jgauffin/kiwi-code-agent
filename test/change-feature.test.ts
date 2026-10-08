@@ -32,7 +32,7 @@ describe('starting a change', () => {
   it('a_change_session_is_blind_like_any_other_plan_session_scoped_to_the_same_files', () => {
     // Change reuses the ordinary blind-planning scope and tool set: no new way to reach the code.
     const scope = blindPlanScope('Order cancellation')
-    expect(scope.readable).toEqual(expect.arrayContaining(['docs/**', expect.stringContaining('README'), 'specs/*.spec.md', UNFILED_FILE, FUTURE_FILE, 'specs/order-cancellation.spec.md']))
+    expect(scope.readable).toEqual(expect.arrayContaining(['docs/**', expect.stringContaining('README'), 'specs/**/*.spec.md', UNFILED_FILE, FUTURE_FILE, 'specs/order-cancellation.spec.md']))
     expect(scope.writable).toEqual(expect.arrayContaining(['specs/order-cancellation.spec.md', UNFILED_FILE, FUTURE_FILE]))
   })
 })

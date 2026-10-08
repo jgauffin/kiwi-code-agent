@@ -10,8 +10,11 @@ import {
   BundleRemovedEvent,
   MemoryForgottenEvent,
   MemoryOpenedEvent,
+  ModelUpgradeDismissedEvent,
+  ModelUpgradeTakenEvent,
   ModelsRefreshRequestedEvent,
   PairingCodeRequestedEvent,
+  PersonRulesChangedEvent,
   PhoneUnpairedEvent,
   ProfileRemovedEvent,
   ProfileSavedEvent,
@@ -84,6 +87,9 @@ export class SettingsApp extends HTMLElement {
     this.addEventListener(BundleAppliedEvent.type, (e) => post({ type: 'apply_bundle', scope: e.scope, bundle: e.bundle }))
     this.addEventListener(BundleRemovedEvent.type, (e) => post({ type: 'remove_bundle', scope: e.scope, source: e.source, name: e.name }))
     this.addEventListener(BundleOfferDismissedEvent.type, () => post({ type: 'dismiss_bundle_offer' }))
+    this.addEventListener(ModelUpgradeTakenEvent.type, () => post({ type: 'upgrade_models' }))
+    this.addEventListener(ModelUpgradeDismissedEvent.type, () => post({ type: 'dismiss_model_upgrade' }))
+    this.addEventListener(PersonRulesChangedEvent.type, (e) => post({ type: 'save_person_rules', kind: e.kind, values: e.values }))
     this.addEventListener(PairingCodeRequestedEvent.type, () => post({ type: 'request_pairing_code' }))
     this.addEventListener(PhoneUnpairedEvent.type, (e) => post({ type: 'unpair_phone', id: e.id }))
 

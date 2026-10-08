@@ -1,4 +1,4 @@
-import { SPECS_DIR, featureSlug, specPath } from './blind-plan'
+import { specPath, specRelPath } from './blind-plan'
 import {
   PLAN_TARGET,
   findItem,
@@ -70,12 +70,13 @@ export function emptied(body: string, struck: string[]): boolean {
  */
 export function reviewPrompt(options: {
   feature: string
+  /** The plan's path, relative to the workspace, as it now sits: folder included when it has one. */
+  spec: string
   round: ReviewRound
   body: string
   struck: string[]
 }): string {
-  const { feature, round, body, struck } = options
-  const spec = `${SPECS_DIR}/${featureSlug(feature)}.spec.md`
+  const { feature, spec, round, body, struck } = options
   const review = reviewFile(feature)
   const comments = carry(round, body)
   const lines = [
@@ -133,17 +134,17 @@ export async function submitReview(options: {
   now?: string
 }): Promise<ReviewRound> {
   const { courier, cwd, feature, owner } = options
-  const spec = specPath(cwd, feature)
-  const state = await readSpecState(spec)
+  const spec = specRelPath(cwd, feature)
+  const state = await readSpecState(specPath(cwd, feature))
   if (!state.exists) throw new Error('No plan to review yet.')
   if (state.status !== 'draft') throw new Error('An approved plan is not commentable: reopen or supersede it.')
 
   const path = reviewPath(cwd, feature)
   const review = await readReview(path)
   const round = submitRound(review, options.now ?? new Date().toISOString())
-  await writeReview(path, review, `${SPECS_DIR}/${featureSlug(feature)}.spec.md`)
+  await writeReview(path, review, spec)
 
-  const prompt = reviewPrompt({ feature, round, body: state.body, struck: struckItems(review) })
+  const prompt = reviewPrompt({ feature, spec, round, body: state.body, struck: struckItems(review) })
   const label = `Review round ${round.number} sent`
   if (courier.isLive(owner.sessionId)) await courier.send(owner.sessionId, prompt, label)
   else await courier.start(feature, prompt, label)

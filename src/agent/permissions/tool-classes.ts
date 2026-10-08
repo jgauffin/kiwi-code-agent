@@ -23,6 +23,15 @@ const SHELL_TOOLS: ReadonlySet<string> = new Set(['Bash', 'PowerShell'])
 
 export const isShellTool = (toolName: string): boolean => SHELL_TOOLS.has(toolName)
 
+/**
+ * Tools that spawn a subagent, under both the name the engine used to carry
+ * and the one it uses now, and our own delegating tool. Their input names
+ * the agent, which is what the output produced inside them is labelled with.
+ */
+const SUBAGENT_TOOLS: ReadonlySet<string> = new Set(['Agent', 'Task', 'Delegate'])
+
+export const isSubagentTool = (toolName: string): boolean => SUBAGENT_TOOLS.has(toolName)
+
 /** Tools whose input names a path, so a rule's glob has something to match. */
 export const FILE_TOOLS: ReadonlySet<string> = new Set([
   'Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'NotebookRead', 'Glob', 'Grep',
@@ -48,7 +57,7 @@ export const WITHIN_PROJECT_TOOLS: ReadonlySet<string> = new Set(['ReadDir', 'Ex
  * Only looking is not on its own leave to run: a call is judged by where it
  * looks as well, so reading stays inside the project exactly as writing does.
  */
-const BUILT_IN_READ_ONLY: ReadonlySet<string> = new Set(['Read', 'Glob', 'Grep', 'LS', 'NotebookRead', 'TodoRead', 'TodoWrite'])
+const BUILT_IN_READ_ONLY: ReadonlySet<string> = new Set(['Read', 'Glob', 'Grep', 'LS', 'NotebookRead', 'TodoRead', 'TodoWrite', 'Skill'])
 
 /** Does this tool only look? Asked by name, because a hook is given the name and not the tool. */
 export type ReadOnlyTools = (toolName: string) => boolean

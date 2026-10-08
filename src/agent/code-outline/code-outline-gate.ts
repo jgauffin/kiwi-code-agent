@@ -1,5 +1,5 @@
 import { isAbsolute, resolve } from 'node:path'
-import { readSource } from '../code-structure/source-files'
+import { lineCount, readSource } from '../code-structure/source-files'
 import type { PostToolUseOutcome, PreToolUseOutcome, SessionHooks, ToolUse } from '../session/hooks'
 import { countTests } from '../test-outline/scan'
 import { CODE_OUTLINE_TOOL } from './code-outline-tool'
@@ -46,7 +46,7 @@ export class CodeOutlineGate implements SessionHooks {
       deny: [
         `${path} has ${file.lines} lines${tests !== undefined ? ` and ${tests} tests` : ''}. Its outline instead of the whole file:`,
         '',
-        renderFiles([{ path, ...file.outline }], []),
+        renderFiles([{ path, lines: file.lines, ...file.outline }], []),
         '',
         'Read a line range (offset and limit) for what you need, or Read it again for the whole file.',
         ...(tests !== undefined ? [SUITE_HINT] : []),
@@ -80,5 +80,5 @@ async function outlined(full: string): Promise<{ outline: Outline; lines: number
   const text = await readSource(full).catch(() => undefined)
   if (text === undefined) return undefined
   const outline = outlineFile(full, text)
-  return outline ? { outline, lines: text.split(/\r?\n/).length } : undefined
+  return outline ? { outline, lines: lineCount(text) } : undefined
 }

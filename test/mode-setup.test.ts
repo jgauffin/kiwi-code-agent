@@ -9,6 +9,7 @@ const ctx: ModeContext = {
   workspaceRoot: tmpdir(),
   verifyRules: () => [],
   planIgnore: () => [],
+  specFoldersSetting: () => 'default',
   cleanupLimits: () => ({
     source: { functionLines: 0, functionComplexity: 0, typeLines: 0, fileLines: 0 },
     tests: { functionLines: 0, functionComplexity: 0, typeLines: 0, fileLines: 0 },
@@ -130,5 +131,15 @@ describe('modeSetup', () => {
   it('the blind planner never carries the Skill tool: it decides what to build, not how code is written', async () => {
     const setup = await modeSetup(record('plan', { feature: 'f' }), ctx)
     expect(setup.toolNames).not.toContain('Skill')
+  })
+
+  it('the blind planner is offered the research sub agent on its own, reading no code', async () => {
+    const setup = await modeSetup(record('plan', { feature: 'f' }), ctx)
+    expect(setup.subAgents).toEqual([{ name: 'research', description: expect.any(String), prompt: expect.any(String), kind: 'shipped' }])
+  })
+
+  it.each(['implement', 'code-plan', 'reconcile', 'cleanup'] as const)('the %s session names no sub agent of its own: a code-reading session is offered the shipped catalogue instead', async (mode) => {
+    const setup = await modeSetup(record(mode, { feature: 'f', files: ['a.ts'] }), ctx)
+    expect(setup.subAgents).toBeUndefined()
   })
 })

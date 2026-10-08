@@ -1,9 +1,9 @@
 import { mkdir, rename, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { exists, namesIn, readOptional } from '../workspace-files'
-import { SPECS_DIR, WORK_DIR } from './blind-plan'
+import { SPECS_DIR, WORK_DIR, specPath } from './blind-plan'
 import { emptyReview } from './plan-review'
-import { finished } from './plan-list'
+import { finished, specFiles } from './plan-list'
 import { planStage, statusForStage } from './plan-stage'
 import { alignSpecStatus, readSpecState, statusOf } from './spec-file'
 import type { SpecStatus } from './spec-status'
@@ -18,7 +18,7 @@ import { convertLegacyBoard, LEGACY_TASKS_SUFFIX } from './legacy-tasks'
  */
 export const WORKING_FILES_KEPT_MS = 7 * 24 * 60 * 60 * 1000
 
-const WORKING_FILE = /^(.+)\.(review\.md|decisions\.md|tasks\.md|tasks\.json)$/
+const WORKING_FILE = /^(.+)\.(review\.md|decisions\.md|tasks\.md|tasks\.json|mapping\.json)$/
 
 const SPEC_SUFFIX = '.spec.md'
 
@@ -46,31 +46,59 @@ export async function sweepPlans(cwd: string, now: Date): Promise<SweepReport> {
   const report: SweepReport = { converted: [], moved: [], blocked: [], recorded: [], removed: [] }
   await moveLegacyFiles(cwd, report)
   const workDir = join(cwd, WORK_DIR)
+  await convertLegacyBoards(workDir, report)
+  await recordStatuses(cwd, report)
+  for (const [slug, files] of bySlug(await namesIn(workDir))) {
+    await sweepSlug(cwd, workDir, slug, files, now, report)
+  }
+  return report
+}
+
+async function convertLegacyBoards(workDir: string, report: SweepReport): Promise<void> {
   for (const name of (await namesIn(workDir)).filter((n) => n.endsWith(LEGACY_TASKS_SUFFIX))) {
     if (await convertLegacyBoard(join(workDir, name))) report.converted.push(`${WORK_DIR}/${name}`)
   }
-  await recordStatuses(cwd, report)
-  for (const [slug, files] of bySlug(await namesIn(workDir))) {
-    const touched = await Promise.all(files.map(async (f) => (await stat(join(workDir, f))).mtimeMs))
-    if (now.getTime() - Math.max(...touched) < WORKING_FILES_KEPT_MS) continue
-    const text = await readOptional(join(cwd, SPECS_DIR, `${slug}${SPEC_SUFFIX}`))
-    if (text !== undefined) {
-      const tasks = await readTasks(join(workDir, `${slug}${TASKS_SUFFIX}`))
-      // A postponed cleanup is the dev's word to come back to it, and the board holds what to come back to.
-      if (!finished(statusOf(text), tasks) || (tasks.exists && tasks.cleanup === 'postponed')) continue
-    }
-    for (const file of files) {
-      await rm(join(workDir, file))
-      report.removed.push(`${WORK_DIR}/${file}`)
-    }
-    // A copy the move could not take, such as one an older branch brought back, goes with the feature it duplicates.
-    for (const copy of report.blocked.filter((b) => WORKING_FILE.exec(b.slice(SPECS_DIR.length + 1))?.[1] === slug)) {
-      await rm(join(cwd, copy))
-      report.blocked.splice(report.blocked.indexOf(copy), 1)
-      report.removed.push(copy)
-    }
+}
+
+/**
+ * Whether a feature's working files must be kept: its spec, found by its slug
+ * wherever it now sits, is not finished yet, or a postponed cleanup is the
+ * dev's word to come back to it and the board holds what to come back to.
+ * There is nothing to keep them for once the spec itself is gone.
+ */
+async function specBlocksRemoval(cwd: string, workDir: string, slug: string): Promise<boolean> {
+  const text = await readOptional(specPath(cwd, slug))
+  if (text === undefined) return false
+  const tasks = await readTasks(join(workDir, `${slug}${TASKS_SUFFIX}`))
+  return !finished(statusOf(text), tasks) || (tasks.exists && tasks.cleanup === 'postponed')
+}
+
+async function recentlyTouched(workDir: string, files: string[], now: Date): Promise<boolean> {
+  const touched = await Promise.all(files.map(async (f) => (await stat(join(workDir, f))).mtimeMs))
+  return now.getTime() - Math.max(...touched) < WORKING_FILES_KEPT_MS
+}
+
+async function removeWorkingFiles(workDir: string, files: string[], report: SweepReport): Promise<void> {
+  for (const file of files) {
+    await rm(join(workDir, file))
+    report.removed.push(`${WORK_DIR}/${file}`)
   }
-  return report
+}
+
+// A copy the move could not take, such as one an older branch brought back, goes with the feature it duplicates.
+async function removeBlockedCopies(cwd: string, slug: string, report: SweepReport): Promise<void> {
+  for (const copy of report.blocked.filter((b) => WORKING_FILE.exec(b.slice(SPECS_DIR.length + 1))?.[1] === slug)) {
+    await rm(join(cwd, copy))
+    report.blocked.splice(report.blocked.indexOf(copy), 1)
+    report.removed.push(copy)
+  }
+}
+
+async function sweepSlug(cwd: string, workDir: string, slug: string, files: string[], now: Date, report: SweepReport): Promise<void> {
+  if (await recentlyTouched(workDir, files, now)) return
+  if (await specBlocksRemoval(cwd, workDir, slug)) return
+  await removeWorkingFiles(workDir, files, report)
+  await removeBlockedCopies(cwd, slug, report)
 }
 
 /**
@@ -81,14 +109,13 @@ export async function sweepPlans(cwd: string, now: Date): Promise<SweepReport> {
  */
 async function recordStatuses(cwd: string, report: SweepReport): Promise<void> {
   const specDir = join(cwd, SPECS_DIR)
-  for (const name of (await namesIn(specDir)).filter((n) => n.endsWith(SPEC_SUFFIX))) {
-    const path = join(specDir, name)
+  for (const { slug, path, folder } of await specFiles(specDir)) {
     const spec = await readSpecState(path)
     if (!spec.exists) continue
-    const tasks = await readTasks(join(cwd, WORK_DIR, `${name.slice(0, -SPEC_SUFFIX.length)}${TASKS_SUFFIX}`))
+    const tasks = await readTasks(join(cwd, WORK_DIR, `${slug}${TASKS_SUFFIX}`))
     // `implemented` was the terminal status before it came to name the build, and only a sweep of a verified feature ever wrote it with no board left.
     const status = spec.status === 'implemented' && !tasks.exists ? 'verified' : statusForStage(planStage(spec, emptyReview(), tasks))
-    if (status !== undefined && (await alignSpecStatus(path, status))) report.recorded.push({ path: `${SPECS_DIR}/${name}`, status })
+    if (status !== undefined && (await alignSpecStatus(path, status))) report.recorded.push({ path: `${SPECS_DIR}/${folder ? `${folder}/` : ''}${slug}${SPEC_SUFFIX}`, status })
   }
 }
 

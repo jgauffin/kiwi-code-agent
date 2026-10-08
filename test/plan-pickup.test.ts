@@ -4,6 +4,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { specPath } from '../src/agent/phases/blind-plan'
 import { pickUpPlan, type PlanPickupCourier } from '../src/agent/phases/plan-pickup'
+import { readSpecState } from '../src/agent/phases/spec-file'
+import { parseSpec, specFingerprint } from '../src/agent/phases/spec-model'
+import { deriveBoard, tasksPath, writeBoard } from '../src/agent/phases/tasks-file'
 
 const spec = `---
 feature: Order cancellation
@@ -20,6 +23,7 @@ type Delivery =
   | { kind: 'open'; sessionId: string }
   | { kind: 'start'; feature: string; prompt: string; label: string }
   | { kind: 'say'; sessionId: string; note: string }
+  | { kind: 'tell'; sessionId: string; prompt: string; label: string }
 
 function courier(): PlanPickupCourier & { delivered: Delivery[]; owed: string[] } {
   const delivered: Delivery[] = []
@@ -33,8 +37,44 @@ function courier(): PlanPickupCourier & { delivered: Delivery[]; owed: string[] 
       return 'started-1'
     },
     say: async (sessionId, note) => void delivered.push({ kind: 'say', sessionId, note }),
+    tell: async (sessionId, prompt, label) => void delivered.push({ kind: 'tell', sessionId, prompt, label }),
     critiqueOwed: (feature) => void owed.push(feature),
   }
+}
+
+/** The spec as it was approved and built. */
+const built = `---
+feature: Order cancellation
+status: verified
+authored: planned
+---
+
+# Order cancellation
+
+## Goal
+Orders can be cancelled.
+
+## Cancelling an order
+- **Cancel before shipping**: an order not yet shipped can be cancelled
+- **Cancel reason**: the buyer gives a reason when cancelling
+`
+
+/** Revised by hand afterwards and back to draft: one rule amended, one added, one left alone. */
+const revised = built
+  .replace('status: verified', 'status: draft')
+  .replace('an order not yet shipped can be cancelled', 'an order not yet packed can be cancelled')
+  .replace('when cancelling\n', 'when cancelling\n- **Refund on cancel**: a cancelled order is refunded in full\n')
+
+/** A workspace whose board was derived from `built` and finished, holding `now` as a draft spec. */
+async function builtThenRevised(now = revised): Promise<string> {
+  const dir = await workspace({ 'order-cancellation.spec.md': built })
+  const state = await readSpecState(specPath(dir, 'Order cancellation'))
+  if (!state.exists) throw new Error('spec not written')
+  const board = deriveBoard(parseSpec(state.body))
+  await mkdir(join(dir, '.kiwi', 'specs'), { recursive: true })
+  await writeBoard(tasksPath(dir, 'Order cancellation'), { ...board, tasks: board.tasks.map((t) => ({ ...t, state: 'tested' as const })) })
+  await writeFile(specPath(dir, 'Order cancellation'), now.replace('status: verified', 'status: draft'))
+  return dir
 }
 
 async function workspace(files: Record<string, string> = {}): Promise<string> {
@@ -57,6 +97,75 @@ describe('picking up a plan', () => {
     }
   })
 
+  it('a_revised_draft_brought_up_in_its_open_session_names_the_rules_nothing_has_built_yet', async () => {
+    const dir = await builtThenRevised()
+    try {
+      const post = courier()
+      await pickUpPlan({ courier: post, cwd: dir, feature: 'Order cancellation', owner: { sessionId: 'owner-1', specSeen: 'older-version' } })
+      expect(post.delivered[0]).toEqual({ kind: 'open', sessionId: 'owner-1' })
+      expect(post.delivered[1]).toMatchObject({ kind: 'tell', sessionId: 'owner-1', label: 'Planning the revised spec' })
+      const told = (post.delivered[1] as { prompt: string }).prompt
+      expect(told).toContain('specs/order-cancellation.spec.md')
+      expect(told).toContain('"Refund on cancel"')
+      expect(told).toContain('"Cancel before shipping"')
+      // A rule the board already delivers as it stands is built: naming it would send the planner over finished work.
+      expect(told).not.toContain('"Cancel reason"')
+      expect(told).toContain('Write nothing until the user says go')
+      expect(post.owed).toEqual(['Order cancellation'])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('a_revised_draft_its_open_session_already_saw_brings_the_tab_up_with_nothing_said_again', async () => {
+    const dir = await builtThenRevised()
+    try {
+      const post = courier()
+      const seen = await readSpecState(specPath(dir, 'Order cancellation'))
+      const specSeen = seen.exists ? specFingerprint(parseSpec(seen.body)) : ''
+      await pickUpPlan({ courier: post, cwd: dir, feature: 'Order cancellation', owner: { sessionId: 'owner-1', specSeen } })
+      expect(post.delivered).toEqual([{ kind: 'open', sessionId: 'owner-1' }])
+      expect(post.owed).toEqual([])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('a_draft_with_no_board_brought_up_in_its_open_session_is_left_to_the_conversation_it_has', async () => {
+    const dir = await workspace({ 'order-cancellation.spec.md': revised })
+    try {
+      const post = courier()
+      await pickUpPlan({ courier: post, cwd: dir, feature: 'Order cancellation', owner: { sessionId: 'owner-1' } })
+      expect(post.delivered).toEqual([{ kind: 'open', sessionId: 'owner-1' }])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('a_revised_draft_whose_rules_are_all_built_has_nothing_to_plan_in_its_open_session', async () => {
+    const dir = await builtThenRevised(built.replace('Orders can be cancelled.', 'Orders can be cancelled by the buyer.'))
+    try {
+      const post = courier()
+      await pickUpPlan({ courier: post, cwd: dir, feature: 'Order cancellation', owner: { sessionId: 'owner-1' } })
+      expect(post.delivered).toEqual([{ kind: 'open', sessionId: 'owner-1' }])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('a_revised_draft_picked_up_in_a_fresh_session_is_told_which_rules_nothing_has_built_yet', async () => {
+    const dir = await builtThenRevised()
+    try {
+      const post = courier()
+      await pickUpPlan({ courier: post, cwd: dir, feature: 'Order cancellation' })
+      const started = (post.delivered[0] as { prompt: string }).prompt
+      expect(started).toContain('"Refund on cancel"')
+      expect(started).not.toContain('"Cancel reason"')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('a_draft_with_no_tab_open_starts_a_session_with_no_conversation_of_its_own_pointed_at_the_files', async () => {
     const dir = await workspace({ 'order-cancellation.spec.md': spec })
     try {
@@ -69,6 +178,21 @@ describe('picking up a plan', () => {
       expect((started as { prompt: string }).prompt).toContain('specs/order-cancellation.spec.md')
       expect((started as { prompt: string }).prompt).toContain('from disk')
       expect((started as { prompt: string }).prompt).toContain('Do not start over')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('a_draft_filed_in_a_domain_folder_is_picked_up_the_same_as_any_other', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'pickup-'))
+    try {
+      await mkdir(join(dir, 'specs', 'orders'), { recursive: true })
+      await writeFile(join(dir, 'specs', 'orders', 'order-cancellation.spec.md'), spec)
+      const post = courier()
+      await pickUpPlan({ courier: post, cwd: dir, feature: 'Order cancellation' })
+      const started = post.delivered[0] as { prompt: string }
+      expect(started.prompt).toContain('specs/orders/order-cancellation.spec.md')
+      expect(started.prompt).toContain('Do not start over')
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

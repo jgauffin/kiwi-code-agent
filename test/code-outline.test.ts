@@ -64,12 +64,18 @@ describe('finding declarations by name', () => {
 
 describe('rendering outlines of several files', () => {
   const files = [
-    { path: 'src/a.ts', nodes: outlineCode('a.ts', CART) },
-    { path: 'src/b.ts', nodes: outlineCode('b.ts', CART) },
+    { path: 'src/a.ts', lines: 19, nodes: outlineCode('a.ts', CART) },
+    { path: 'src/b.ts', lines: 19, nodes: outlineCode('b.ts', CART) },
   ]
 
   it('files_render_in_full_with_summaries_while_they_fit', () => {
-    expect(renderFiles(files.slice(0, 1), [])).toBe(['## src/a.ts', outline('cart.ts', CART)].join('\n'))
+    expect(renderFiles(files.slice(0, 1), [])).toBe(['## src/a.ts (19 lines)', outline('cart.ts', CART)].join('\n'))
+  })
+
+  it('every_file_keeps_its_length_when_nothing_but_names_fit_so_sizes_need_no_shell', () => {
+    const namesOnly = renderFiles(files, [], 50)
+    expect(namesOnly).toContain('file names only')
+    expect(namesOnly).toContain('## src/a.ts (19 lines)\n## src/b.ts (19 lines)')
   })
 
   it('over_budget_the_summaries_go_first_then_the_members', () => {
@@ -77,7 +83,7 @@ describe('rendering outlines of several files', () => {
     expect(noDocs).toContain('names and line ranges only')
     expect(noDocs).toContain('  addLine (3-10)\n')
     expect(noDocs).not.toContain('Adds a line')
-    const topLevel = renderFiles(files, [], 90)
+    const topLevel = renderFiles(files, [], 110)
     expect(topLevel).toContain('top level only')
     expect(topLevel).not.toContain('addLine')
   })
@@ -90,7 +96,12 @@ describe('the CodeOutline tool', () => {
   it('a_folder_lists_its_source_files_and_leaves_out_what_declares_nothing', () =>
     withWorkspace({ 'src/cart.ts': CART, 'src/consts.ts': 'export const a = 1\n', 'src/notes.md': '# Cart\n' }, async (dir) => {
       const out = await codeOutlineTool.execute({ path: 'src' }, ctx(dir))
-      expect(out.text).toBe(['## src/cart.ts', outline('cart.ts', CART)].join('\n'))
+      expect(out.text).toBe(['## src/cart.ts (19 lines)', outline('cart.ts', CART)].join('\n'))
+    }))
+
+  it('a_final_newline_ends_the_last_line_rather_than_counting_as_another', () =>
+    withWorkspace({ 'src/cart.ts': `${CART}\n` }, async (dir) => {
+      expect((await codeOutlineTool.execute({ path: 'src/cart.ts' }, ctx(dir))).text).toContain('## src/cart.ts (19 lines)')
     }))
 
   it('symbol_finds_where_a_declaration_lives_across_files', () =>
@@ -128,7 +139,7 @@ describe('the code outline gate', () => {
   it('a_long_test_file_is_outlined_by_its_tests_rather_than_its_declarations', () =>
     withWorkspace({ 'test/big.test.ts': bigSpec() }, async (dir) => {
       const text = denied(await new CodeOutlineGate(dir).preToolUse(read('test/big.test.ts')))
-      expect(text).toContain('253 lines and 250 tests')
+      expect(text).toContain('252 lines and 250 tests')
       expect(text).toContain('rule 0 (line 2)')
     }))
 })

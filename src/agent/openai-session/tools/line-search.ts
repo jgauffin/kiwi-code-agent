@@ -52,7 +52,7 @@ export class LineSearch<Parsed extends object, Item> {
     private readonly canRead: (relPath: string) => boolean = () => true,
   ) {}
 
-  async execute(input: FileSearchInput, ctx: ToolContext): Promise<ToolOutput> {
+  async execute(input: FileSearchInput, ctx: Pick<ToolContext, 'cwd' | 'signal'>): Promise<ToolOutput> {
     let pattern: RegExp
     try {
       pattern = searchPattern(input)

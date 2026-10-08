@@ -1,7 +1,18 @@
 import { effortLevels, fitEffort, STEP_EFFORT, type ReasoningControl } from './effort'
 import type { SessionMode } from './session-manager'
 
-export type Engine = 'claude-sdk' | 'openai-compatible'
+/**
+ * What a thread runs on. Both Claude engines speak the Agent SDK and share
+ * every piece of session plumbing; they differ in which Claude Code runs the
+ * thread. `claude-sdk` runs the one bundled with the extension, whose models
+ * are fixed at the version it was built against. `claude-installed` runs the
+ * Claude Code already on the machine, so a model newer than the bundled engine
+ * knows is reachable by updating that install rather than this extension.
+ */
+export type Engine = 'claude-sdk' | 'claude-installed' | 'openai-compatible'
+
+/** Whether the engine is a Claude one: it takes every effort level, needs no base URL, and runs on the editor login when no key is stored. */
+export const isClaudeEngine = (engine: Engine): boolean => engine === 'claude-sdk' || engine === 'claude-installed'
 
 export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
@@ -33,8 +44,10 @@ export type Provider = {
  * The step a session runs as: what it is for decides which model it gets. A
  * fix of a failed test run is an implement session, but a step of its own, as
  * is the build of an approved plan, which carries on in the plan's session.
+ * A shipped sub agent is a step of its own too, named after it, so the profile
+ * that names its model needs no settings surface beyond the one steps already have.
  */
-export type Step = SessionMode | 'fix' | 'code-build'
+export type Step = SessionMode | 'fix' | 'code-build' | 'retrieve'
 
 /** One model to run a step on, named by its provider. */
 export type ModelChoice = {

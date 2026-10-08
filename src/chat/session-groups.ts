@@ -17,6 +17,8 @@ export type PlanEntry = {
   lastActiveAt: string | undefined
   authored: Authorship | undefined
   review: ReviewProgress | undefined
+  /** The domain folder its spec sits in, absent for one at the root. */
+  folder: string | undefined
 }
 
 /** What the Sessions view offers to open again: the chats, and one entry per planned feature. */
@@ -58,13 +60,13 @@ export function sessionGroups(records: SessionRecord[], specs: PlanSummary[]): S
     const slug = featureSlug(r.feature)
     if (plans.has(slug)) continue
     const spec = bySlug.get(slug)
-    plans.set(slug, { feature: spec?.feature ?? r.feature, status: spec?.status, record: r, lastActiveAt: touched.get(slug), authored: spec?.authored, review: spec?.review })
+    plans.set(slug, { feature: spec?.feature ?? r.feature, status: spec?.status, record: r, lastActiveAt: touched.get(slug), authored: spec?.authored, review: spec?.review, folder: spec?.folder })
   }
   const opened = [...plans.values()].sort((a, b) => newestFirst(a.lastActiveAt, b.lastActiveAt))
   const unopened: PlanEntry[] = []
   for (const [slug, spec] of bySlug) {
     if (spec.status === 'verified' || plans.has(slug)) continue
-    unopened.push({ feature: spec.feature, status: spec.status, record: undefined, lastActiveAt: undefined, authored: spec.authored, review: spec.review })
+    unopened.push({ feature: spec.feature, status: spec.status, record: undefined, lastActiveAt: undefined, authored: spec.authored, review: spec.review, folder: spec.folder })
   }
   return { chats, plans: [...opened, ...unopened] }
 }

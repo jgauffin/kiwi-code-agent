@@ -11,7 +11,7 @@ import { COMPACT_COMMAND } from '../src/agent/sdk-session/compaction'
  * machine's Claude login and costs a few small requests, so it is opt-in.
  */
 const enabled = process.env.KIWI_CLAUDE_INTEGRATION === '1'
-const model = process.env.KIWI_CLAUDE_MODEL ?? 'claude-sonnet-5'
+const model = process.env.KIWI_CLAUDE_MODEL ?? 'claude-sonnet-5-5'
 
 async function engine(env: Record<string, string> = {}) {
   const input = new AsyncQueue<SDKUserMessage>()

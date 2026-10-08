@@ -6,7 +6,7 @@ import { fileEditChange, type FileEditChange } from '../../edits/file-edit-diff'
 import { unifiedDiff } from '../../edits/unified-diff'
 import { DEFAULT_SANDBOX_OPTIONS, runSandboxed, type HostCall } from '../../script/sandbox'
 import { MARKDOWN_SEARCH_TOOL } from './markdown-search'
-import { fail, ok, truncate, type Tool, type ToolContext } from './tool'
+import { fail, MAX_OUTPUT_CHARS, ok, truncate, type Tool, type ToolContext } from './tool'
 
 const schema = z.object({
   script: z.string().describe('The body of an async JavaScript function. `await` and `return` work at the top level.'),
@@ -61,7 +61,7 @@ export function runScriptTool(): Tool<typeof schema> {
   return {
     name: 'RunScript',
     description:
-      'Runs a JavaScript program (the body of an async function) that reads and analyses files, or changes many files, in one step: the tool for the same change across files, for reading many files to answer one question, and for what you would otherwise write in python, node or powershell through the shell. Its functions: read(path), readdir(path), exists(path); staged changes write(path, content), edit({ file_path, old_string, new_string, replace_all }), replace(path, regex, replacement, flags), move(source, destination), copy(source, destination), remove(path), preview(); and the tools glob({ pattern, path }), grep({ pattern, path, include, output_mode }), codeSearch({ query, path, regex }), markdownSearch({ query, path, regex }), specSearch({ query, regex }), codeOutline({ path, symbol }), jsonQuery(args), jsonSchema(args). glob, grep, codeSearch, markdownSearch and specSearch return arrays with every match. String, RegExp, JSON and the rest of plain JavaScript work; shell commands, Node modules and the network do not. It returns only what the program returns or logs, and changes are shown to the user together and applied only once approved. The run-script skill has the details and examples.',
+      'Runs a JavaScript program (the body of an async function) that reads and analyses files, or changes many files, in one step: the tool for the same change across files, for reading many files to answer one question, and for what you would otherwise write in python, node or powershell through the shell. Its functions: read(path), readdir(path), exists(path); staged changes write(path, content), edit({ file_path, old_string, new_string, replace_all }), replace(path, regex, replacement, flags), move(source, destination), copy(source, destination), remove(path), preview(); and the tools glob({ pattern, path }), grep({ pattern, path, include, output_mode }), codeSearch({ query, path, regex }), markdownSearch({ query, path, regex }), specSearch({ query, regex }), codeOutline({ path, symbol }), jsonQuery(args), jsonSchema(args). glob, grep, codeSearch, markdownSearch and specSearch return arrays with every match. String, RegExp, JSON and the rest of plain JavaScript work; shell commands, Node modules and the network do not. It returns only what the program returns or logs, and changes are shown to the user together and applied only once approved, with the diff of what was written coming back to you. `replace` needs no prior read of the file, since it matches what is on disk; `write` and `edit`, whose text is yours rather than the file\'s, still need one. The run-script skill has the details and examples.',
     schema,
     // A script can do nothing on its own; every call it makes is gated when made.
     readOnly: true,
@@ -78,7 +78,8 @@ export function runScriptTool(): Tool<typeof schema> {
       )
       if (!result.ok) return fail(truncate([...lines, `Script failed: ${result.error}`].join('\n')))
       const value = result.value === null || result.value === undefined ? [] : [typeof result.value === 'string' ? result.value : JSON.stringify(result.value, null, 2)]
-      const outcome = await applyStaged(ctx, staged)
+      const spent = [...lines, ...value].join('\n').length
+      const outcome = await applyStaged(ctx, staged, Math.max(0, MAX_OUTPUT_CHARS - spent))
       const text = [...lines, ...value, ...(outcome.text ? [outcome.text] : [])].join('\n') || 'Script finished without output.'
       return outcome.isError ? fail(truncate(text)) : ok(truncate(text))
     },
@@ -177,14 +178,20 @@ async function onDisk(full: string): Promise<string | null> {
   }
 }
 
-/** The file as the script has left it so far: its own staged version when it has one, else what is on disk. */
+/**
+ * The file as the script has left it so far: its own staged version when it has
+ * one, else what is on disk. A read from disk is put to the hooks, so a change
+ * the script derives from it counts as seen rather than as written from memory.
+ */
 async function currentContent(ctx: ToolContext, staged: Map<string, Staged>, path: string): Promise<string> {
   await refuse(ctx, 'Read', { file_path: path })
   const full = absolute(ctx, path)
   const held = staged.get(full)
   if (held && held.after === null) throw new Error(`${path} does not exist: the script removed it`)
   if (held) return held.after!
-  return readFile(full, 'utf8')
+  const content = await readFile(full, 'utf8')
+  await ctx.observed?.('Read', { file_path: path })
+  return content
 }
 
 async function stage(ctx: ToolContext, staged: Map<string, Staged>, path: string, content: string): Promise<null> {
@@ -253,9 +260,45 @@ const changed = (staged: Map<string, Staged>) =>
 function preview(ctx: ToolContext, staged: Map<string, Staged>): string {
   const files = changed(staged)
   if (files.length === 0) return 'No changes staged.'
-  return files
-    .map(([path, s]) => (s.after === null ? `--- ${label(ctx, path)} (removed)` : [`--- ${label(ctx, path)}`, ...unifiedDiff(s.before, s.after, 3)].join('\n')))
-    .join('\n\n')
+  return stagedDiff(ctx, files, MAX_OUTPUT_CHARS)
+}
+
+/**
+ * What the script changed, for the model to check its own work against. Whole
+ * while it fits what is left of the budget; past that each file keeps the hunks
+ * its equal share holds and says how many it left out, so every file stays
+ * visible rather than the last ones falling off the end unnamed.
+ */
+function stagedDiff(ctx: ToolContext, files: [string, Staged][], budget: number): string {
+  const whole = files.map(([path, s]) => fileDiff(ctx, path, s, Number.POSITIVE_INFINITY)).join('\n\n')
+  if (whole.length <= budget) return whole
+  const share = Math.floor(budget / files.length)
+  return files.map(([path, s]) => fileDiff(ctx, path, s, share)).join('\n\n')
+}
+
+/** One file's diff, cut between hunks and never inside one; the first hunk is kept whatever the budget. */
+function fileDiff(ctx: ToolContext, path: string, file: Staged, budget: number): string {
+  const head = `--- ${label(ctx, path)}`
+  if (file.after === null) return `${head} (removed)`
+  const hunks = splitHunks(unifiedDiff(file.before, file.after, 3))
+  const kept: string[] = []
+  let size = head.length
+  for (const hunk of hunks) {
+    if (kept.length > 0 && size + hunk.length + 1 > budget) break
+    kept.push(hunk)
+    size += hunk.length + 1
+  }
+  const left = hunks.length - kept.length
+  return [head, ...kept, ...(left > 0 ? [`[${left} more hunk${left === 1 ? '' : 's'} not shown]`] : [])].join('\n')
+}
+
+function splitHunks(lines: string[]): string[] {
+  const hunks: string[][] = []
+  for (const line of lines) {
+    if (line.startsWith('@@') || hunks.length === 0) hunks.push([])
+    hunks[hunks.length - 1]!.push(line)
+  }
+  return hunks.map((hunk) => hunk.join('\n'))
 }
 
 const label = (ctx: ToolContext, path: string) => {
@@ -263,7 +306,7 @@ const label = (ctx: ToolContext, path: string) => {
   return rel && !rel.startsWith('..') ? rel : path
 }
 
-async function applyStaged(ctx: ToolContext, staged: Map<string, Staged>): Promise<{ text: string; isError: boolean }> {
+async function applyStaged(ctx: ToolContext, staged: Map<string, Staged>, budget: number): Promise<{ text: string; isError: boolean }> {
   const files = changed(staged)
   if (files.length === 0) return { text: '', isError: false }
   if (!ctx.review) return { text: 'The script staged changes, but this session cannot put them to the user; nothing was written.', isError: true }
@@ -286,6 +329,8 @@ async function applyStaged(ctx: ToolContext, staged: Map<string, Staged>): Promi
     await writeFile(path, s.after, 'utf8')
     await ctx.files.markRead(path)
     ctx.ledger?.written(path)
+    await ctx.observed?.('Write', { file_path: path, content: s.after })
   }
-  return { text: `Applied changes to ${files.length} file${files.length === 1 ? '' : 's'}: ${files.map(([p]) => label(ctx, p)).join(', ')}`, isError: false }
+  const header = `Applied changes to ${files.length} file${files.length === 1 ? '' : 's'}:`
+  return { text: `${header}\n\n${stagedDiff(ctx, files, Math.max(0, budget - header.length - 2))}`, isError: false }
 }

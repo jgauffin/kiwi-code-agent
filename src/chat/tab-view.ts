@@ -187,6 +187,7 @@ function buildPlanState(inputs: PlanStateInputs): PlanState {
     tasks: tasks.exists ? tasks.tasks : [],
     review,
     commentable: isCommentable(state),
+    startBuildOnApproval: planActions.startsOnApproval(),
     decisions,
     pendingDecisions: pendingDecisions(decisions).length,
     applyingRulings: planActions.isApplying(feature),

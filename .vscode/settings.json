@@ -8,6 +8,9 @@
         "mcp__html-analytics__element_styles",
         "mcp__html-analytics__html_outline",
         "Bash(npm audit:*)",
-        "WebSearch"
+        "WebSearch",
+        "Read",
+        "mcp__typescript__calculate_metrics",
+        "JsonQuery"
     ]
 }

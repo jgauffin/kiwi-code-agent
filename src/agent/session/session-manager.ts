@@ -105,6 +105,10 @@ export type SessionRecord = {
   allowWrites?: true
   /** Permission rules the person allowed for this session, in force beside the project's. Kept across engines and hosts. */
   allowed?: string[]
+  /** Permission rules the person denied for this session, in force beside the project's. Kept across engines and hosts. */
+  denied?: string[]
+  /** On a plan session: the spec as its last turn ended on it, by fingerprint, so a revision made by another hand is told apart from its own. */
+  specSeen?: string
   /** Where the session began: one started from the phone may push to the paired phones regardless of the workspace's standing default. Absent means the desk. */
   startedFrom?: 'phone' | 'desk'
   /** The person's own choice for this session, overriding the default for where it started: whether a turn stopped mid-way on them may push to the paired phones. */
@@ -169,6 +173,7 @@ export function continuationOf(previous: SessionRecord, profile: ModelProfile): 
   if (previous.engineSessionId === undefined || previous.profile.engine !== profile.engine) return undefined
   switch (profile.engine) {
     case 'claude-sdk':
+    case 'claude-installed':
       return previous.engineSessionId
     case 'openai-compatible':
       return previous.id
@@ -299,6 +304,11 @@ export class SessionManager {
     await this.control.allowForSession(id, rules)
   }
 
+  /** In force from the next call on, the same way a session's own allow rules are. */
+  async denyForSession(id: string, rules: string[]): Promise<void> {
+    await this.control.denyForSession(id, rules)
+  }
+
   async setAllowWrites(id: string, enabled: boolean): Promise<void> {
     await this.control.setAllowWrites(id, enabled)
   }
@@ -306,6 +316,10 @@ export class SessionManager {
   /** The person's own choice for this session, overriding the default for where it started. */
   async setPushAllowed(id: string, allowed: boolean): Promise<void> {
     await this.control.setPushAllowed(id, allowed)
+  }
+
+  async noteSpecSeen(id: string, fingerprint: string): Promise<void> {
+    await this.control.noteSpecSeen(id, fingerprint)
   }
 
   /** `label` marks text the extension wrote: the chat and the title show it in the text's place. */

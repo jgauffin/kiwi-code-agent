@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import type { SessionRecord } from './agent/session/session-manager'
 import type { CodeSession, SessionEvent } from './agent/session/code-session'
 import type { ModelProfile } from './agent/session/model-profile'
-import { modeSetup, type ModeContext, type ModeSetup } from './agent/session/mode-setup'
+import { mayReadCode, modeSetup, type ModeContext, type ModeSetup } from './agent/session/mode-setup'
 import { composeHooks, type SessionHooks } from './agent/session/hooks'
 import { StaleWriteGuard } from './agent/session/stale-write-guard'
 import { NoticeOfAnotherHand } from './agent/session/notice-of-another-hand'
@@ -23,12 +23,17 @@ import { codeOutlineTool } from './agent/code-outline/code-outline-tool'
 import { CodeOutlineGate } from './agent/code-outline/code-outline-gate'
 import { codeSearchTool } from './agent/code-outline/code-search'
 import { RepeatedEdit } from './agent/script/repeated-edit'
+import { InPlaceEditGate } from './agent/script/in-place-edit'
 import { ScriptGate } from './agent/script/script-gate'
 import { indexSkillsDetailed } from './agent/skills/skill-index'
+import { installedClaude } from './agent/sdk-session/installed-claude'
+import { shippedPluginDir } from './extension-paths'
+import { indexSubAgentsDetailed, offeredSubAgents, SHIPPED_SUB_AGENTS } from './agent/sub-agents/sub-agent-index'
 import type { McpServerSet } from './agent/mcp/mcp-servers'
 import { FileEditRecorder } from './agent/edits/file-edit-recorder'
 import type { PermissionPolicy } from './agent/permissions/permission-policy'
 import { SPECS_DIR } from './agent/phases/blind-plan'
+import type { SpecFoldersSetting } from './agent/phases/spec-folders'
 import { specSearchTool } from './agent/phases/spec-search'
 import { UnfiledContract } from './agent/phases/unfiled-decisions'
 import { MemoryContract } from './agent/memory/memories'
@@ -83,13 +88,16 @@ export class SessionEngines {
 
   constructor(private readonly deps: EngineDeps) {
     this.cliPath = vscode.Uri.joinPath(deps.context.extensionUri, 'dist', 'cli.mjs').fsPath
-    this.pluginPath = vscode.Uri.joinPath(deps.context.extensionUri, 'dist', 'plugin').fsPath
+    this.pluginPath = shippedPluginDir(deps.context)
     this.starters = new EngineStarters({
       context: deps.context,
       output: deps.output,
       config: deps.config,
       workspaceRoot: deps.workspaceRoot,
       cliPath: this.cliPath,
+      // Read per start rather than once: a path set, or an install made, after
+      // the host came up counts without reloading the window.
+      installedClaude: () => installedClaude(deps.config.get<string>('claudeCodePath', '')),
       conversation: deps.conversation,
       setSessionTools: (sessionId, tools) => this.sessionTools.set(sessionId, tools),
       traceStart: (record, line) => this.traceStart(record, line),
@@ -152,18 +160,25 @@ export class SessionEngines {
     this.traceStart(record, `${skills.length} skills indexed`)
     for (const skip of shadowed)
       this.traceStart(record, `bundle "${skip.bundle.name}" v${skip.bundle.version}'s skill "${skip.name}" not applied: the person's own skill of that name wins`)
+    // Indexed the same way: a workspace, a profile or a bundle adding a sub agent shows up on the next session too.
+    const { agents: definedSubAgents, shadowed: shadowedSubAgents } = await indexSubAgentsDetailed(workspaceRoot)
+    for (const skip of shadowedSubAgents)
+      this.traceStart(record, `defined sub agent "${skip.name}" (${skip.file}) not offered: the product's own sub agent of that name is kept`)
+    const subAgents = [...offeredSubAgents(mayReadCode(setup), SHIPPED_SUB_AGENTS, definedSubAgents), ...(setup.subAgents ?? [])]
     const start: EngineStart = {
       record,
       setup,
       ownTools,
       mcpServers,
       skills,
+      subAgents,
       whereLine: `\n${workingDirectoryInstruction(workspaceRoot)}`,
       scratchLine: scratch ? `\n${scratchInstruction(scratch)}` : '',
       onProgress,
     }
     switch (record.profile.engine) {
       case 'claude-sdk':
+      case 'claude-installed':
         return this.starters.startClaude(start)
       case 'openai-compatible':
         return this.starters.startOpenAi(start)
@@ -180,7 +195,7 @@ export class SessionEngines {
     // After the mode's scope, so a doc the session may not read is never outlined. The docs map
     // describes every section, so it reads docs whole; plan files are the work and are read whole too.
     const gate: SessionHooks[] = record.mode === 'docs-map' ? [] : [new OutlineGate(workspaceRoot, [`${SPECS_DIR}/**`]), new CodeOutlineGate(workspaceRoot)]
-    if (!setup.toolNames || setup.toolNames.includes('RunScript')) gate.push(new ScriptGate(), new RepeatedEdit())
+    if (!setup.toolNames || setup.toolNames.includes('RunScript')) gate.push(new ScriptGate(), new InPlaceEditGate(workspaceRoot), new RepeatedEdit())
     // Every session that writes is held to the same check, whatever it writes and whichever engine runs it.
     const staleWrites = new StaleWriteGuard(workspaceRoot, new FileHands(workspaceRoot, record.id, record.mode, record.feature))
     // Told on its next tool result, whichever tool that is, when another hand changed a file this session saw.
@@ -206,6 +221,7 @@ export class SessionEngines {
       workspaceRoot: this.deps.workspaceRoot,
       verifyRules: () => this.deps.verifier.rules(),
       planIgnore: this.deps.planIgnore,
+      specFoldersSetting: () => this.deps.config.get<SpecFoldersSetting>('specFolders', 'default'),
       cleanupLimits: () => readCleanupLimits(this.deps.config),
       withMap: (record, systemPrompt) => this.withMap(record, systemPrompt, onProgress),
       withDocs: (record, systemPrompt) => this.withDocs(record, systemPrompt, onProgress),

@@ -52,6 +52,30 @@ export function unifiedDiff(before: string, after: string, context = 3): string[
   return lines
 }
 
+/** A stretch of lines in a file, 1-based and inclusive. */
+export type LineRange = { from: number; to: number }
+
+/**
+ * Where `after` reads differently from `before`, as ranges of `after`'s own
+ * line numbers: what a reader is told to look at again. A stretch that was only
+ * removed has no line of its own left, so it is reported at the line it was
+ * removed from, and two changes with a line or two of unchanged text between
+ * them are reported as one range rather than as a list to pick through.
+ */
+export function changedRanges(before: string, after: string, join = 2): LineRange[] {
+  const lines = splitLines(after)
+  const ranges: LineRange[] = []
+  for (const op of diffOps(splitLines(before), lines)) {
+    if (op.kind === 'equal') continue
+    // A removed line has none of its own left: the one now standing in its place is where to look.
+    const line = Math.max(1, Math.min(lines.length, op.bIndex + 1))
+    const last = ranges[ranges.length - 1]
+    if (last && line - last.to <= join + 1) last.to = Math.max(last.to, line)
+    else ranges.push({ from: line, to: line })
+  }
+  return ranges
+}
+
 export function diffStats(before: string, after: string): DiffStats {
   let added = 0
   let removed = 0

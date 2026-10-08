@@ -1,6 +1,6 @@
 import { compileTemplate } from '@relax.js/core/html'
 import type { CommandLine, FileEditChange, PermissionDecision, SessionEvent } from '../../agent/session/code-session'
-import { projectRuleFor, ruleLabel } from '../../agent/permissions/permission-rules'
+import { projectRuleFor, ruleLabel } from '../../agent/permissions/rule-text'
 import { isShellTool } from '../../agent/permissions/tool-classes'
 import type { RememberedRules } from '../protocol'
 import { editDiffView, fileLink } from './edit-diff'
@@ -10,20 +10,45 @@ import { renderMarkdown } from './markdown'
 
 type PermissionRequest = Extract<SessionEvent, { type: 'permission_request' }>
 
-/** How one line of a shell call was answered; a line that already passes needs no answer. */
-type LineAnswer = 'session' | 'project' | 'once' | 'deny'
+/**
+ * How one line of a shell call was answered; a line that already passes
+ * needs no answer. A denial may be kept the same three ways an allow may.
+ */
+type RuleScope = 'session' | 'project' | 'person'
+type DenyAnswer = 'deny' | 'deny-session' | 'deny-project' | 'deny-person'
+type LineAnswer = RuleScope | 'once' | DenyAnswer
+
+function isDenial(answer: LineAnswer): answer is DenyAnswer {
+  return answer === 'deny' || answer.startsWith('deny-')
+}
 
 type LineRow = {
   index: number
   hasRule: boolean
+  /** The rule names ground inside the project: offered for the workspace rather than the person. */
+  showProject: boolean
+  /** The rule names a folder or file outside the project: offered for the person rather than the workspace. */
+  showPerson: boolean
   label: string
   settled: boolean
   status: string
   statusClass: string
+  /** For a read or a write outside the project: which it is and the whole directory. Empty for any other line. */
+  access: string
+  effects: { text: string; cls: string }[]
+  /** A change of directory: its path in parts, each one a place the answer may be kept for. Empty for any other line. */
+  places: PlacePart[]
   sessionTitle: string
   projectTitle: string
+  personTitle: string
   allowTitle: string
+  denySessionTitle: string
+  denyProjectTitle: string
+  denyPersonTitle: string
 }
+
+/** One part of a directory's path: the text it adds to the part above, and whether the chosen place reaches it. */
+type PlacePart = { place: number; text: string; cls: string; title: string }
 
 /**
  * One tool permission prompt. A shell call is answered command by command,
@@ -43,28 +68,39 @@ export class PermissionCard extends HTMLElement {
       <strong>{{heading}}</strong>
       <p class="description" if="hasDescription">{{description}}</p>
       <p class="reason" if="hasReason">{{reason}}</p>
-      <ul class="commands" if="isShell">
+      <ul class="commands" if="hasLines">
         <li loop="l in lines" class="command">
           <code></code>
+          <p class="access" if="l.access">{{l.access}}</p>
+          <ul class="effects" if="l.effects.length">
+            <li loop="e in l.effects" class="{{e.cls}}">{{e.text}}</li>
+          </ul>
+          <p class="places" if="l.places.length">
+            <button loop="p in l.places" type="button" class="place {{p.cls}}" title="{{p.title}}" r-click="choosePlace(l, p)">{{p.text}}</button>
+          </p>
           <span class="line-status {{l.statusClass}}" if="l.settled">{{l.status}}</span>
           <span class="line-actions" unless="l.settled">
+            <button type="button" class="allow" autofocus title="{{l.allowTitle}}" r-click="answerLine(l, 'once')">Allow</button>
             <button type="button" class="allow-session" if="l.hasRule" title="{{l.sessionTitle}}" r-click="answerLine(l, 'session')">Allow {{l.label}} for session</button>
-            <button type="button" class="allow-project" if="l.hasRule" title="{{l.projectTitle}}" r-click="answerLine(l, 'project')">Allow {{l.label}} for project</button>
-            <button type="button" class="allow" unless="l.hasRule" title="{{l.allowTitle}}" r-click="answerLine(l, 'once')">Allow</button>
+            <button type="button" class="allow-project" if="l.showProject" title="{{l.projectTitle}}" r-click="answerLine(l, 'project')">Allow {{l.label}} for project</button>
+            <button type="button" class="allow-person" if="l.showPerson" title="{{l.personTitle}}" r-click="answerLine(l, 'person')">Allow {{l.label}} for me</button>
             <button type="button" class="deny" r-click="answerLine(l, 'deny')">Deny</button>
+            <button type="button" class="deny-session" if="l.hasRule" title="{{l.denySessionTitle}}" r-click="answerLine(l, 'deny-session')">Deny {{l.label}} for session</button>
+            <button type="button" class="deny-project" if="l.showProject" title="{{l.denyProjectTitle}}" r-click="answerLine(l, 'deny-project')">Deny {{l.label}} for project</button>
+            <button type="button" class="deny-person" if="l.showPerson" title="{{l.denyPersonTitle}}" r-click="answerLine(l, 'deny-person')">Deny {{l.label}} for me</button>
           </span>
         </li>
       </ul>
       <div class="actions" if="askedAnyway">
-        <button type="button" class="allow" r-click="allowWhole('once')">Allow</button>
+        <button type="button" class="allow" autofocus r-click="allowWhole('once')">Allow</button>
         <button type="button" class="deny" r-click="denyWhole()">Deny</button>
       </div>
       <div class="whole" unless="isShell">
         <div class="body"></div>
-        <div class="actions" if="pending">
+        <div class="actions" if="askedAsAWhole">
+          <button type="button" class="allow" autofocus r-click="allowWhole('once')">Allow</button>
           <button type="button" class="allow-session" if="wholeRule" title="{{sessionTitle}}" r-click="allowWhole('session')">Allow {{wholeLabel}} for session</button>
           <button type="button" class="allow-project" if="wholeRule" title="{{projectTitle}}" r-click="allowWhole('project')">Allow {{wholeLabel}} for project</button>
-          <button type="button" class="allow" unless="wholeRule" r-click="allowWhole('once')">Allow</button>
           <button type="button" class="deny" r-click="denyWhole()">Deny</button>
         </div>
       </div>
@@ -75,8 +111,12 @@ export class PermissionCard extends HTMLElement {
   private request: PermissionRequest | undefined
   private lines: CommandLine[] = []
   private answers: (LineAnswer | undefined)[] = []
+  /** For a change of directory, which of its places the answer is kept for; the directory itself until the user picks another. */
+  private chosen: number[] = []
   private decision: PermissionDecision['kind'] | undefined
-  private remembered: RememberedRules = { session: [], project: [] }
+  private remembered: RememberedRules = { session: [], project: [], person: [] }
+  /** The same three scopes, for a line denied and kept rather than allowed. */
+  private deniedRemembered: RememberedRules = { session: [], project: [], person: [] }
   /** Only ever what the host reports back, since the field itself is gone by then. */
   private reason = ''
   private filled = false
@@ -85,6 +125,7 @@ export class PermissionCard extends HTMLElement {
     this.request = request
     this.lines = request.commands ?? []
     this.answers = this.lines.map(() => undefined)
+    this.chosen = this.lines.map(() => 0)
     this.render()
   }
 
@@ -125,6 +166,9 @@ export class PermissionCard extends HTMLElement {
         hasReason: Boolean(r.reason),
         reason: r.reason ?? '',
         isShell,
+        hasLines: this.lines.length > 0,
+        // A call answered place by place has no whole-call buttons beside its lines.
+        askedAsAWhole: this.decision === undefined && this.lines.length === 0,
         askedAnyway,
         lines: this.lines.map((line, index) => this.lineRow(line, index)),
         wholeRule: wholeRule ?? '',
@@ -136,8 +180,12 @@ export class PermissionCard extends HTMLElement {
       },
       {
         answerLine: (l: LineRow, answer: LineAnswer) => this.answer(l.index, answer),
-        allowWhole: (scope: 'session' | 'project') => {
-          if (wholeRule) this.remembered[scope].push(wholeRule)
+        choosePlace: (l: LineRow, p: PlacePart) => {
+          this.chosen[l.index] = p.place
+          this.render()
+        },
+        allowWhole: (scope: 'session' | 'project' | 'once') => {
+          if (wholeRule && scope !== 'once') this.remembered[scope].push(wholeRule)
           this.decide({ kind: 'allow' })
         },
         denyWhole: () => this.decide({ kind: 'deny' }),
@@ -159,10 +207,8 @@ export class PermissionCard extends HTMLElement {
     }
     if (this.filled) return
     this.filled = true
-    if (isShell) {
-      this.querySelectorAll<HTMLElement>('li.command > code').forEach((code, index) => fillCode(code, this.lines[index]?.text ?? '', 'bash'))
-      return
-    }
+    this.querySelectorAll<HTMLElement>('li.command > code').forEach((code, index) => fillCode(code, this.lines[index]?.text ?? '', 'bash'))
+    if (isShell) return
     // A file edit is asked about as the change it would make, and a plan as the plan, decided or not:
     // their arguments are never what the user answers.
     const plan = planText(r)
@@ -182,45 +228,98 @@ export class PermissionCard extends HTMLElement {
   /** What the line still needs from the user, or what settled it. */
   private lineRow(line: CommandLine, index: number): LineRow {
     const answer = this.answers[index]
-    const settled = line.passes ? passesText(line.passes) : answer ? answerText(answer, line.rule) : undefined
+    const rule = this.ruleOf(index)
+    const settled = line.passes ? passesText(line.passes) : answer ? answerText(answer, rule) : undefined
+    const isSettled = settled !== undefined || this.decision !== undefined
     return {
       index,
-      hasRule: Boolean(line.rule),
-      label: line.rule ? ruleLabel(line.rule) : '',
+      hasRule: Boolean(rule),
+      // Ground inside the project is the workspace's to keep; a folder or file outside it is the person's.
+      showProject: Boolean(rule) && line.scope !== 'person',
+      showPerson: Boolean(rule) && line.scope === 'person',
+      // The parts above say which directory; the buttons need only say what kind of place it is.
+      label: line.places ? 'directory' : rule ? ruleLabel(rule) : '',
       // A resolved card takes no more input; a line it never got to says nothing.
-      settled: settled !== undefined || this.decision !== undefined,
+      settled: isSettled,
       status: settled ?? '',
-      statusClass: answer === 'deny' ? 'denied' : 'allowed',
-      sessionTitle: `Later calls covered by ${line.rule} pass without asking, for as long as this session lasts.`,
-      projectTitle: `Writes ${line.rule} to kiwiAgent.permissions.allow in this workspace.`,
-      allowTitle: 'Runs a command the line does not show, so it can only be allowed for this call.',
+      statusClass: answer === 'deny' || answer?.startsWith('deny-') ? 'denied' : 'allowed',
+      // A copy or move names each place it touches; the one still unanswered is why the line is asked.
+      access: isSettled ? '' : accessText(line.access),
+      effects: isSettled ? [] : (line.effects ?? []).map((e) => ({ text: `${e.kind} ${e.path}`, cls: e.asked ? 'asked' : '' })),
+      places: isSettled ? [] : this.placeParts(line, index),
+      sessionTitle: `Later calls covered by ${rule} pass without asking, for as long as this session lasts.`,
+      projectTitle: `Writes ${rule} to kiwiAgent.permissions.allow in this workspace.`,
+      personTitle: `Keeps ${rule} for you, honoured in every workspace that reaches the same ground.`,
+      allowTitle: rule
+        ? 'Allows this call only; the command stays unremembered.'
+        : line.access
+          ? 'The place depends on something this call settles when it runs, so it can only be allowed for this call.'
+          : 'Runs a command the line does not show, so it can only be allowed for this call.',
+      denySessionTitle: `Later calls covered by ${rule} are blocked too, for as long as this session lasts.`,
+      denyProjectTitle: `Writes ${rule} to kiwiAgent.permissions.deny in this workspace.`,
+      denyPersonTitle: `Keeps ${rule} denied for you, in every workspace that reaches the same ground.`,
     }
+  }
+
+  /** The rule an answer to this line keeps: for a change of directory, the one for the place chosen. */
+  private ruleOf(index: number): string | undefined {
+    const line = this.lines[index]
+    return line?.places?.[this.chosen[index] ?? 0]?.rule ?? line?.rule
+  }
+
+  /**
+   * A directory's path from its shallowest place down, each part a button
+   * choosing that place: the parts the chosen place covers stand out, the
+   * deeper ones do not.
+   */
+  private placeParts(line: CommandLine, index: number): PlacePart[] {
+    const places = line.places ?? []
+    const chosen = this.chosen[index] ?? 0
+    return places
+      .map((place, at) => {
+        const above = places[at + 1]?.directory
+        return {
+          place: at,
+          text: above === undefined ? place.directory : place.directory.slice(above.length),
+          cls: at >= chosen ? 'covered' : 'beyond',
+          title: `Keep the answer for ${place.directory} and everything below it.`,
+        }
+      })
+      .reverse()
   }
 
   private answer(index: number, answer: LineAnswer): void {
     if (this.decision !== undefined) return
     this.answers[index] = answer
-    const rule = this.lines[index]?.rule
-    if (rule && (answer === 'session' || answer === 'project')) this.remembered[answer].push(rule)
-    // One rule may cover several lines; answering one answers them all.
-    if (rule && answer !== 'deny') {
-      this.lines.forEach((line, i) => {
-        if (line.rule === rule && this.answers[i] === undefined) this.answers[i] = answer
-      })
+    const rule = this.ruleOf(index)
+    if (isDenial(answer)) {
+      if (rule && answer !== 'deny') this.deniedRemembered[answer.slice(5) as RuleScope].push(rule)
+      return this.decide({ kind: 'deny' })
     }
-    if (answer === 'deny') return this.decide({ kind: 'deny' })
+    if (rule) this.allowRule(rule, answer)
     const open = this.lines.some((line, i) => !line.passes && this.answers[i] === undefined)
     if (!open) return this.decide({ kind: 'allow' })
     this.render()
+  }
+
+  /** One rule may cover several lines; answering one answers them all. */
+  private allowRule(rule: string, answer: Exclude<LineAnswer, DenyAnswer>): void {
+    if (answer !== 'once') this.remembered[answer].push(rule)
+    this.lines.forEach((_, i) => {
+      if (this.ruleOf(i) === rule && this.answers[i] === undefined) this.answers[i] = answer
+    })
   }
 
   private decide(decision: PermissionDecision): void {
     const r = this.request
     if (!r || this.decision !== undefined) return
     const remember = this.remembered
+    const denyRemember = this.deniedRemembered
     const message = this.querySelector<HTMLInputElement>('input.deny-reason')?.value.trim() ?? ''
     const reasoned = decision.kind === 'deny' && message ? { ...decision, message } : decision
-    const decided = remember.session.length || remember.project.length ? { ...reasoned, remember } : reasoned
+    const kept = remember.session.length || remember.project.length || remember.person.length
+    const keptDeny = denyRemember.session.length || denyRemember.project.length || denyRemember.person.length
+    const decided = { ...reasoned, ...(kept ? { remember } : {}), ...(keptDeny ? { denyRemember } : {}) }
     this.dispatchEvent(new PermissionDecidedEvent(r.requestId, decided))
   }
 
@@ -230,6 +329,7 @@ export class PermissionCard extends HTMLElement {
     const kept = [
       ...this.remembered.session.map((rule) => `${ruleLabel(rule)} for session`),
       ...this.remembered.project.map((rule) => `${ruleLabel(rule)} for project`),
+      ...this.remembered.person.map((rule) => `${ruleLabel(rule)} for me`),
     ]
     return kept.length ? `Allowed (${kept.join(', ')})` : 'Allowed'
   }
@@ -269,6 +369,13 @@ function jsonInput(input: unknown): HTMLElement {
   return pre
 }
 
+/** What the call would do outside the project, in the words the person answers: read in a directory, or write to it. */
+function accessText(access: CommandLine['access']): string {
+  if (!access) return ''
+  const doing = access.kind === 'reads' ? 'Reads in' : 'Writes to'
+  return access.directory === undefined ? `${doing} a place this call decides when it runs` : `${doing} ${access.directory}`
+}
+
 function passesText(passes: string): string {
   return passes === 'read-only' ? 'read-only' : `allowed by ${passes}`
 }
@@ -279,10 +386,18 @@ function answerText(answer: LineAnswer, rule: string | undefined): string {
       return `allowed for session${rule ? `: ${ruleLabel(rule)}` : ''}`
     case 'project':
       return `allowed for project${rule ? `: ${ruleLabel(rule)}` : ''}`
+    case 'person':
+      return `allowed for me${rule ? `: ${ruleLabel(rule)}` : ''}`
     case 'once':
       return 'allowed'
     case 'deny':
       return 'denied'
+    case 'deny-session':
+      return `denied for session${rule ? `: ${ruleLabel(rule)}` : ''}`
+    case 'deny-project':
+      return `denied for project${rule ? `: ${ruleLabel(rule)}` : ''}`
+    case 'deny-person':
+      return `denied for me${rule ? `: ${ruleLabel(rule)}` : ''}`
   }
 }
 

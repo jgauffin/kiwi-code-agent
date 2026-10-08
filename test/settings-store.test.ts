@@ -3,7 +3,7 @@ import type { Profile, Provider } from '../src/agent/session/model-profile'
 import type { SettingsTarget } from '../src/settings/protocol'
 import type { MemoryEntry, MemoryScope } from '../src/agent/memory/memories'
 import type { AppliedBundle, Bundle, BundleScope } from '../src/agent/instructions/bundles'
-import { SettingsStore, type BundlePort, type ConfigPort, type MemoryPort, type RemoteControlPort, type SecretPort } from '../src/settings/settings-store'
+import { SettingsStore, type BundlePort, type ConfigPort, type MemoryPort, type PersonRulesPort, type RemoteControlPort, type SecretPort } from '../src/settings/settings-store'
 import type { PairedPhone } from '../src/remote-control/pairing'
 
 type Written = { key: string; value: unknown; target: SettingsTarget }
@@ -39,10 +39,10 @@ function fakeSecrets(stored: string[] = []) {
   return { port, keys }
 }
 
-const claudeProvider: Provider = { name: 'Claude', engine: 'claude-sdk', models: ['claude-opus-5', 'claude-sonnet-5'] }
+const claudeProvider: Provider = { name: 'Claude', engine: 'claude-sdk', models: ['claude-opus-5-5', 'claude-sonnet-5-5'] }
 const bergetProvider: Provider = { name: 'berget', engine: 'openai-compatible', baseUrl: 'https://api.berget.ai/v1', models: ['moonshotai/Kimi-K3'] }
 
-const opus: Profile = { name: 'Opus', default: { provider: 'Claude', model: 'claude-opus-5' } }
+const opus: Profile = { name: 'Opus', default: { provider: 'Claude', model: 'claude-opus-5-5' } }
 const kimi: Profile = { name: 'Kimi', default: { provider: 'berget', model: 'moonshotai/Kimi-K3' } }
 
 /** Remembers what it was asked to forget, rather than touching any real files. */
@@ -80,16 +80,46 @@ function fakeRemoteControl(phones: PairedPhone[] = []) {
   return { port, unpaired }
 }
 
+/** Remembers what it was asked to keep, rather than touching any real file. */
+function fakePersonRules(rules: { allow: string[]; deny: string[] } = { allow: [], deny: [] }) {
+  const sets: { kind: 'allow' | 'deny'; rules: string[] }[] = []
+  const port: PersonRulesPort = {
+    get: () => rules,
+    set: async (kind, values) => {
+      rules = { ...rules, [kind]: values }
+      sets.push({ kind, rules: values })
+    },
+  }
+  return { port, sets }
+}
+
 function store(
   config: Record<string, unknown>,
-  options: { hasWorkspace?: boolean; secrets?: string[]; bundles?: ReturnType<typeof fakeBundles>; remoteControl?: ReturnType<typeof fakeRemoteControl> } = {},
+  options: {
+    hasWorkspace?: boolean
+    secrets?: string[]
+    bundles?: ReturnType<typeof fakeBundles>
+    remoteControl?: ReturnType<typeof fakeRemoteControl>
+    personRules?: ReturnType<typeof fakePersonRules>
+    /** What this machine holds as its own Claude Code; nothing by default, so no test depends on the machine it runs on. */
+    findClaude?: (configured: string) => string | undefined
+  } = {},
 ) {
   const cfg = fakeConfig(config, options.hasWorkspace ?? true)
   const sec = fakeSecrets(options.secrets)
   const mem = fakeMemory()
   const bun = options.bundles ?? fakeBundles()
   const rem = options.remoteControl ?? fakeRemoteControl()
-  return { store: new SettingsStore(cfg.port, sec.port, mem.port, bun.port, rem.port), ...cfg, secrets: sec.keys, memory: mem, bundles: bun, remoteControl: rem }
+  const per = options.personRules ?? fakePersonRules()
+  return {
+    store: new SettingsStore(cfg.port, sec.port, mem.port, bun.port, rem.port, per.port, options.findClaude ?? (() => undefined)),
+    ...cfg,
+    secrets: sec.keys,
+    memory: mem,
+    bundles: bun,
+    remoteControl: rem,
+    personRules: per,
+  }
 }
 
 const withModels = (providers: Provider[], profiles: Profile[], activeProfile: string) => ({ providers, profiles, activeProfile })
@@ -124,27 +154,27 @@ describe('SettingsStore profiles', () => {
 
   it('a_step_override_identical_to_the_default_is_not_kept_as_one', async () => {
     const { store: s, values } = store(withModels([claudeProvider, bergetProvider], [], ''))
-    await s.saveProfile(0, { name: 'Balanced', default: { provider: 'Claude', model: 'claude-opus-5' }, steps: { plan: { provider: 'Claude', model: 'claude-opus-5' } } })
+    await s.saveProfile(0, { name: 'Balanced', default: { provider: 'Claude', model: 'claude-opus-5-5' }, steps: { plan: { provider: 'Claude', model: 'claude-opus-5-5' } } })
     expect((values.get('profiles') as Profile[])[0]!.steps).toBeUndefined()
   })
 
   it('a_step_may_set_only_its_effort_and_keeps_it_when_its_model_matches_the_default', async () => {
     const { store: s, values } = store(withModels([claudeProvider], [], ''))
-    const steps = { implement: { effort: 'low' as const }, plan: { provider: 'Claude', model: 'claude-opus-5', effort: 'max' as const } }
-    await s.saveProfile(0, { name: 'Balanced', default: { provider: 'Claude', model: 'claude-opus-5' }, steps })
+    const steps = { implement: { effort: 'low' as const }, plan: { provider: 'Claude', model: 'claude-opus-5-5', effort: 'max' as const } }
+    await s.saveProfile(0, { name: 'Balanced', default: { provider: 'Claude', model: 'claude-opus-5-5' }, steps })
     expect((values.get('profiles') as Profile[])[0]!.steps).toEqual({ implement: { effort: 'low' }, plan: { effort: 'max' } })
   })
 
   it('a_plan_build_on_another_engine_than_its_planning_is_refused', async () => {
     const { store: s } = store(withModels([claudeProvider, bergetProvider], [], ''))
     const steps = { 'code-build': { provider: 'berget', model: 'moonshotai/Kimi-K3' } }
-    await expect(s.saveProfile(0, { name: 'Split', default: { provider: 'Claude', model: 'claude-opus-5' }, steps })).rejects.toThrow(/Plan · Build.*Plan · Planning/)
-    await expect(s.saveProfile(0, { name: 'Same', default: { provider: 'Claude', model: 'claude-opus-5' }, steps: { 'code-build': { provider: 'Claude', model: 'claude-sonnet-5' } } })).resolves.toBeUndefined()
+    await expect(s.saveProfile(0, { name: 'Split', default: { provider: 'Claude', model: 'claude-opus-5-5' }, steps })).rejects.toThrow(/Plan · Build.*Plan · Planning/)
+    await expect(s.saveProfile(0, { name: 'Same', default: { provider: 'Claude', model: 'claude-opus-5-5' }, steps: { 'code-build': { provider: 'Claude', model: 'claude-sonnet-5-5' } } })).resolves.toBeUndefined()
   })
 
   it('a_step_naming_a_provider_without_a_model_is_refused', async () => {
     const { store: s } = store(withModels([claudeProvider], [], ''))
-    await expect(s.saveProfile(0, { name: 'Half', default: { provider: 'Claude', model: 'claude-opus-5' }, steps: { plan: { provider: 'Claude' } } })).rejects.toThrow(/model/)
+    await expect(s.saveProfile(0, { name: 'Half', default: { provider: 'Claude', model: 'claude-opus-5-5' }, steps: { plan: { provider: 'Claude' } } })).rejects.toThrow(/model/)
   })
 
   it('the_first_profile_saved_becomes_what_new_sessions_run_on', async () => {
@@ -212,14 +242,14 @@ describe('SettingsStore providers', () => {
 
   it('empty_model_rows_are_dropped', async () => {
     const { store: s, values } = store(withModels([], [], ''))
-    await s.saveProvider(0, { ...claudeProvider, models: ['claude-opus-5', ' ', ''] })
-    expect((values.get('providers') as Provider[])[0]!.models).toEqual(['claude-opus-5'])
+    await s.saveProvider(0, { ...claudeProvider, models: ['claude-opus-5-5', ' ', ''] })
+    expect((values.get('providers') as Provider[])[0]!.models).toEqual(['claude-opus-5-5'])
   })
 
   it('a_compaction_limit_is_kept_only_for_a_model_the_provider_still_serves', async () => {
     const { store: s, values } = store(withModels([], [], ''))
-    await s.saveProvider(0, { ...claudeProvider, compactAtTokens: { 'claude-opus-5': 300_000, 'claude-haiku-4-5': 100_000, 'claude-sonnet-5': -1 } })
-    expect((values.get('providers') as Provider[])[0]!.compactAtTokens).toEqual({ 'claude-opus-5': 300_000 })
+    await s.saveProvider(0, { ...claudeProvider, compactAtTokens: { 'claude-opus-5-5': 300_000, 'claude-haiku-4-5': 100_000, 'claude-sonnet-5-5': -1 } })
+    expect((values.get('providers') as Provider[])[0]!.compactAtTokens).toEqual({ 'claude-opus-5-5': 300_000 })
   })
 
   it('a_provider_with_no_compaction_limits_saves_none', async () => {
@@ -267,6 +297,26 @@ describe('SettingsStore workspace settings', () => {
   })
 })
 
+describe('SettingsStore permissions kept for the person', () => {
+  it('the_snapshot_lists_what_the_person_keeps_beside_the_workspaces_own_rules', async () => {
+    const per = fakePersonRules({ allow: ['Bash(cd D:/data)'], deny: ['Read(**/.ssh)'] })
+    const { store: s } = store({ 'permissions.allow': ['Edit'] }, { personRules: per })
+    expect((await s.snapshot()).permissions).toEqual({
+      allow: ['Edit'],
+      deny: [],
+      denyGitWrites: false,
+      person: { allow: ['Bash(cd D:/data)'], deny: ['Read(**/.ssh)'] },
+    })
+  })
+
+  it('saving_a_persons_rule_list_replaces_it_whole_without_a_workspace_setting_and_needs_no_folder_open', async () => {
+    const per = fakePersonRules()
+    const { store: s } = store({}, { hasWorkspace: false, personRules: per })
+    await s.savePersonRules('allow', ['Bash(cd D:/data)', ' ', 'Read(D:/data/**)'])
+    expect(per.sets).toEqual([{ kind: 'allow', rules: ['Bash(cd D:/data)', 'Read(D:/data/**)'] }])
+  })
+})
+
 describe('SettingsStore api keys', () => {
   it('api_key_is_stored_under_the_name_the_provider_gives', async () => {
     const { store: s, secrets } = store(withModels([claudeProvider, bergetProvider], [], ''))
@@ -280,6 +330,7 @@ describe('SettingsStore api keys', () => {
     expect(snapshot.keys).toEqual([
       { name: 'berget', stored: true },
       { name: 'GLM', stored: false },
+      { name: 'Brave Search', stored: false },
     ])
     expect(JSON.stringify(snapshot)).not.toContain('sk-')
   })
@@ -289,7 +340,13 @@ describe('SettingsStore api keys', () => {
     expect((await s.snapshot()).keys).toEqual([
       { name: 'Claude', stored: true },
       { name: 'berget', stored: false },
+      { name: 'Brave Search', stored: false },
     ])
+  })
+
+  it('snapshot_reports_the_research_search_providers_key_even_with_no_model_provider_configured', async () => {
+    const { store: s } = store(withModels([], [], ''), { secrets: ['Brave Search'] })
+    expect((await s.snapshot()).keys).toEqual([{ name: 'Brave Search', stored: true }])
   })
 
   it('an_empty_key_removes_the_stored_one_so_claude_falls_back_to_the_editor_login', async () => {
@@ -320,7 +377,7 @@ describe('SettingsStore memories', () => {
     const project = [{ title: 'Blue means clickable', file: 'blue.md', summary: 'say so' }]
     const user = [{ title: 'Likes short replies', file: 'CLAUDE.md', summary: 'say less' }]
     const mem = fakeMemory(project, user)
-    const s = new SettingsStore(cfg.port, sec.port, mem.port, fakeBundles().port, fakeRemoteControl().port)
+    const s = new SettingsStore(cfg.port, sec.port, mem.port, fakeBundles().port, fakeRemoteControl().port, fakePersonRules().port)
     expect((await s.snapshot()).memories).toEqual({ project, user })
   })
 
@@ -423,12 +480,67 @@ describe('SettingsStore bundles', () => {
   })
 })
 
+describe('SettingsStore offering the newer models', () => {
+  const bundledOnFive: Provider = { name: 'Claude', engine: 'claude-sdk', models: ['claude-opus-5[1m]', 'claude-sonnet-5[1m]'] }
+  const onFive: Profile = { name: 'Claude', default: { provider: 'Claude', model: 'claude-opus-5[1m]' } }
+  const installed = () => 'C:\\Users\\me\\.local\\bin\\claude.exe'
+  const upgradable = () => withModels([bundledOnFive], [onFive], 'Claude')
+
+  it('nothing_is_offered_on_a_machine_with_no_claude_code_to_run_the_newer_models', async () => {
+    const { store: s } = store(upgradable())
+    expect((await s.snapshot()).modelUpgrade).toBeUndefined()
+  })
+
+  it('an_installed_claude_code_puts_the_newer_models_on_offer_naming_what_moves', async () => {
+    const { store: s } = store(upgradable(), { findClaude: installed })
+    expect((await s.snapshot()).modelUpgrade).toEqual({
+      provider: 'Claude (installed)',
+      providerIsNew: true,
+      moves: [{ from: 'claude-opus-5[1m]', to: 'claude-opus-5-5[1m]' }],
+    })
+  })
+
+  it('the_offer_is_gone_once_it_has_been_turned_down', async () => {
+    const { store: s } = store({ ...upgradable(), modelUpgradeDismissed: true }, { findClaude: installed })
+    expect((await s.snapshot()).modelUpgrade).toBeUndefined()
+  })
+
+  it('turning_it_down_is_remembered_for_the_person_not_this_workspace', async () => {
+    const { store: s, writes } = store(upgradable(), { findClaude: installed })
+    await s.dismissModelUpgrade()
+    expect(writes).toContainEqual({ key: 'modelUpgradeDismissed', value: true, target: 'user' })
+  })
+
+  it('taking_it_adds_the_provider_on_the_installed_engine_and_points_the_profile_at_it', async () => {
+    const { store: s, values } = store(upgradable(), { findClaude: installed })
+    await s.upgradeModels()
+    expect(values.get('providers')).toEqual([
+      bundledOnFive,
+      { name: 'Claude (installed)', engine: 'claude-installed', models: ['claude-opus-5-5[1m]', 'claude-sonnet-5-5[1m]'] },
+    ])
+    expect(values.get('profiles')).toEqual([{ name: 'Claude', default: { provider: 'Claude (installed)', model: 'claude-opus-5-5[1m]' } }])
+  })
+
+  it('the_models_that_were_running_stay_configured_so_the_move_can_be_undone', async () => {
+    const { store: s, values } = store(upgradable(), { findClaude: installed })
+    await s.upgradeModels()
+    expect((values.get('providers') as Provider[])[0]).toEqual(bundledOnFive)
+  })
+
+  it('taking_it_a_second_time_writes_no_further_provider', async () => {
+    const { store: s, values } = store(upgradable(), { findClaude: installed })
+    await s.upgradeModels()
+    await s.upgradeModels()
+    expect((values.get('providers') as Provider[]).length).toBe(2)
+  })
+})
+
 describe('SettingsStore migrating settings from before providers existed', () => {
   it('reads_a_flat_profile_list_as_a_provider_and_a_profile_until_the_page_saves_over_it', async () => {
-    const { store: s } = store({ profiles: [{ name: 'Claude', engine: 'claude-sdk', model: 'claude-opus-5' }], activeProfile: 'Claude', planProfile: '' })
+    const { store: s } = store({ profiles: [{ name: 'Claude', engine: 'claude-sdk', model: 'claude-opus-5-5' }], activeProfile: 'Claude', planProfile: '' })
     const snapshot = await s.snapshot()
-    expect(snapshot.providers).toEqual([{ name: 'Claude', engine: 'claude-sdk', models: ['claude-opus-5'] }])
-    expect(snapshot.profiles[0]!.default).toEqual({ provider: 'Claude', model: 'claude-opus-5' })
+    expect(snapshot.providers).toEqual([{ name: 'Claude', engine: 'claude-sdk', models: ['claude-opus-5-5'] }])
+    expect(snapshot.profiles[0]!.default).toEqual({ provider: 'Claude', model: 'claude-opus-5-5' })
     expect(snapshot.activeProfile).toBe('Claude')
   })
 })

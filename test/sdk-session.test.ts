@@ -22,7 +22,7 @@ function createSession(fake: ReturnType<typeof fakeQuery>, resume?: string) {
     id: 'sess-1',
     profile,
     cwd: '/w',
-    cliPath: '/ext/dist/cli.js',
+    enginePath: '/ext/dist/cli.js',
     runtime: { command: 'node', args: [], env: {} },
     ...(resume ? { resumeEngineSessionId: resume } : {}),
     query: fake.query,
@@ -158,7 +158,7 @@ describe('SdkSession', () => {
       id: 'sess-1',
       profile,
       cwd: '/w',
-      cliPath: '/ext/dist/cli.js',
+      enginePath: '/ext/dist/cli.js',
       runtime: { command: 'node', args: [], env: {} },
       query: fake.query,
       trace: (line) => lines.push(line),
@@ -177,7 +177,7 @@ describe('SdkSession', () => {
     await session.dispose()
   })
 
-  it('resume_and_model_and_cli_path_are_passed_to_the_engine', () => {
+  it('resume_and_model_and_engine_path_are_passed_to_the_engine', () => {
     const fake = fakeQuery()
     createSession(fake, 'engine-old')
     expect(fake.options).toMatchObject({
@@ -191,16 +191,23 @@ describe('SdkSession', () => {
     })
   })
 
+  it('an_engine_that_needs_no_node_to_run_it_is_not_given_one', () => {
+    const fake = fakeQuery()
+    new SdkSession({ id: 's', profile, cwd: '/w', enginePath: '/usr/local/bin/claude', query: fake.query })
+    expect(fake.options!.pathToClaudeCodeExecutable).toBe('/usr/local/bin/claude')
+    expect('executable' in fake.options!).toBe(false)
+  })
+
   it('a_session_without_a_prompt_of_its_own_appends_to_the_engines_default_prompt', () => {
     const fake = fakeQuery()
-    const base = { id: 's', profile, cwd: '/w', cliPath: '/c', runtime: { command: 'node', args: [], env: {} }, query: fake.query }
+    const base = { id: 's', profile, cwd: '/w', enginePath: '/c', runtime: { command: 'node', args: [], env: {} }, query: fake.query }
     new SdkSession({ ...base, appendSystemPrompt: 'Find before you read.' })
     expect(fake.options!.systemPrompt).toEqual({ type: 'preset', preset: 'claude_code', append: 'Find before you read.' })
   })
 
   it('a_phase_prompt_replaces_the_default_and_the_append_is_not_used', () => {
     const fake = fakeQuery()
-    const base = { id: 's', profile, cwd: '/w', cliPath: '/c', runtime: { command: 'node', args: [], env: {} }, query: fake.query }
+    const base = { id: 's', profile, cwd: '/w', enginePath: '/c', runtime: { command: 'node', args: [], env: {} }, query: fake.query }
     new SdkSession({ ...base, systemPrompt: 'You are planning.', appendSystemPrompt: 'Find before you read.' })
     expect(fake.options!.systemPrompt).toBe('You are planning.')
   })
@@ -218,7 +225,7 @@ describe('SdkSession', () => {
       id: 'sess-1',
       profile,
       cwd: '/w',
-      cliPath: '/ext/dist/cli.js',
+      enginePath: '/ext/dist/cli.js',
       runtime: { command: 'node', args: [], env: {} },
       query: fake.query,
       ownTools: [jsonQueryTool],
@@ -267,7 +274,7 @@ describe('SdkSession', () => {
         id: 'sess-1',
         profile,
         cwd: '/w',
-        cliPath: '/ext/dist/cli.js',
+        enginePath: '/ext/dist/cli.js',
         runtime: { command: 'node', args: [], env: {} },
         query: fake.query,
         ownTools: [jsonQueryTool],
@@ -359,7 +366,7 @@ describe('SdkSession', () => {
       id: 'sess-1',
       profile,
       cwd: '/w',
-      cliPath: '/ext/dist/cli.js',
+      enginePath: '/ext/dist/cli.js',
       runtime: { command: 'node', args: [], env: {} },
       query: fake.query,
       hooks: {
@@ -419,7 +426,7 @@ describe('SdkSession', () => {
         id: 'sess-1',
         profile,
         cwd,
-        cliPath: '/ext/dist/cli.js',
+        enginePath: '/ext/dist/cli.js',
         runtime: { command: 'node', args: [], env: {} },
         query: fake.query,
         scriptTools: [grep],
@@ -442,7 +449,7 @@ describe('SdkSession', () => {
         execute: async () => ({ text: '1 match', isError: false, items: [{ declaration: 'Cart.total' }] }),
       }
       const fake = fakeQuery()
-      const session = new SdkSession({ id: 'sess-1', profile, cwd: '/w', cliPath: '/ext/dist/cli.js', runtime: { command: 'node', args: [], env: {} }, query: fake.query, ownTools: [codeSearch], scriptTools: [grep] })
+      const session = new SdkSession({ id: 'sess-1', profile, cwd: '/w', enginePath: '/ext/dist/cli.js', runtime: { command: 'node', args: [], env: {} }, query: fake.query, ownTools: [codeSearch], scriptTools: [grep] })
       const result = await runScriptTool().execute({ script: 'return (await codeSearch({ query: "total" }))[0].declaration' }, session.toolContext)
       expect(result.text).toBe('Cart.total')
       await session.dispose()
@@ -479,7 +486,7 @@ describe('SdkSession', () => {
         id: 'sess-1',
         profile,
         cwd: '/w',
-        cliPath: '/ext/dist/cli.js',
+        enginePath: '/ext/dist/cli.js',
         runtime: { command: 'node', args: [], env: {} },
         query: fake.query,
         ownTools: [askUserTool as Tool],
@@ -587,7 +594,7 @@ describe('SdkSession', () => {
         id: 'sess-1',
         profile,
         cwd: '/w',
-        cliPath: '/ext/dist/cli.js',
+        enginePath: '/ext/dist/cli.js',
         runtime: { command: 'node', args: [], env: {} },
         compactAtTokens: 100_000,
         query: fake.query,

@@ -8,7 +8,8 @@ Feature planning is blind to the code because a planner that can read the code i
 
 A session runs on one engine, chosen per session or per phase:
 
-- Claude through the Agent SDK (Claude Code as a library, JavaScript build, inherited Claude Code login).
+- Claude through the Agent SDK (Claude Code as a library, JavaScript build, inherited Claude Code login), bundled with the extension and serving the models its own version knows.
+- Claude through the Agent SDK against the Claude Code installed on the machine, which is how a model newer than the bundled engine knows is reached; offered only where such an install is found.
 - Any OpenAI-compatible provider (Berget AI's GLM and Kimi, say) with our own loop and tools.
 
 The extension only sees `CodeSession`: send a prompt, stream events, answer permission requests, interrupt. Engines differ below that line.

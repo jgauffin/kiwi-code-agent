@@ -21,7 +21,12 @@ Orders can be cancelled.
 `
 
 /** A plan-list entry for `FEATURE` at `status`, its path the real spec file under `dir`. */
-const summary = (dir: string, status: PlanSummary['status']): PlanSummary => ({ feature: FEATURE, path: specPath(dir, FEATURE), status })
+const summary = (dir: string, status: PlanSummary['status'], folder?: string): PlanSummary => ({
+  feature: FEATURE,
+  path: specPath(dir, FEATURE),
+  status,
+  ...(folder ? { folder } : {}),
+})
 
 /** Sessions whose liveness is set per id, rather than always false. */
 class FakeSessions implements UpdateCandidateSessions {
@@ -48,6 +53,13 @@ describe('every spec listed and routed by its state', () => {
     await withWorkspace({ 'specs/order-cancellation.spec.md': settled }, async (dir) => {
       const result = await updatableSpecs(dir, noSessions, [summary(dir, 'approved')])
       expect(result).toEqual([{ feature: FEATURE, status: 'approved', changeable: true }])
+    })
+  })
+
+  it('a_spec_sitting_in_a_domain_folder_carries_its_folder_for_the_picker_to_group_it_by', async () => {
+    await withWorkspace({ 'specs/orders/order-cancellation.spec.md': settled }, async (dir) => {
+      const result = await updatableSpecs(dir, noSessions, [summary(dir, 'approved', 'orders')])
+      expect(result).toEqual([{ feature: FEATURE, status: 'approved', changeable: true, folder: 'orders' }])
     })
   })
 })

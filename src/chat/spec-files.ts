@@ -24,7 +24,8 @@ export function specBadge(status: SpecStatus): SpecBadge {
 }
 
 const SPEC_SUFFIX = '.spec.md'
-const SPEC_FILE = new RegExp(`^${SPECS_DIR}/[^/]+\\.spec\\.md$`)
+// A spec one folder deep is what a session ever proposes; a person may file one deeper still, and it is still a spec.
+const SPEC_FILE = new RegExp(`^${SPECS_DIR}/(.+/)?[^/]+\\.spec\\.md$`)
 
 /** Whether a path is one of this workspace's specs: the only files the explorer badges. */
 export function isSpecPath(workspaceRoot: string, path: string): boolean {

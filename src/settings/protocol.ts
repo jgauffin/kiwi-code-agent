@@ -1,11 +1,15 @@
 import type { AppliedBundle, Bundle, BundleScope } from '../agent/instructions/bundles'
 import type { MemoryEntry, MemoryScope } from '../agent/memory/memories'
 import type { Profile, Provider } from '../agent/session/model-profile'
+import type { ModelMove } from './model-upgrade'
 import type { VerifyRule } from '../agent/phases/verification'
 import type { PairedPhone } from '../remote-control/pairing'
 
 /** Whether a key the providers name is in secret storage; the key itself never leaves the host. */
 export type ApiKeyState = { name: string; stored: boolean }
+
+/** Where the research sub agent's search provider key is stored, and shown, under: the same name wherever it is read, written or displayed. */
+export const SEARCH_PROVIDER_SECRET_NAME = 'Brave Search'
 
 /** Every setting the panel edits, as the host reads it. */
 export type SettingsSnapshot = {
@@ -13,7 +17,7 @@ export type SettingsSnapshot = {
   profiles: Profile[]
   activeProfile: string
   keys: ApiKeyState[]
-  permissions: { allow: string[]; deny: string[]; denyGitWrites: boolean }
+  permissions: { allow: string[]; deny: string[]; denyGitWrites: boolean; person: { allow: string[]; deny: string[] } }
   verify: VerifyRule[]
   verifyFailureBudget: number
   cleanup: {
@@ -43,6 +47,10 @@ export type SettingsSnapshot = {
     offerPending: boolean
   }
   nodePath: string
+  /** The Claude Code found on this machine, by path, or absent when it has none: what decides whether the installed-Claude engine is offered at all. */
+  installedClaude?: string
+  /** The newer models on offer, absent when there are none to offer or the person turned the offer down. */
+  modelUpgrade?: { provider: string; providerIsNew: boolean; moves: ModelMove[] }
   traceEngine: boolean
   /** The conversation size at which a session compacts, when that comes before the window runs short; 0 for none. */
   compactAtTokens: number
@@ -130,7 +138,13 @@ export type FromSettingsWebview =
   | { type: 'remove_bundle'; scope: BundleScope; source: string; name: string }
   /** Ends the one-time suggestion for this workspace without applying anything. */
   | { type: 'dismiss_bundle_offer' }
+  /** Takes the newer models: adds the provider on the installed engine and points the profiles at it. */
+  | { type: 'upgrade_models' }
+  /** Turns the newer-models offer down for good. */
+  | { type: 'dismiss_model_upgrade' }
   /** "Pair a phone": produces a fresh code, answered with a `pairing_code` message. */
   | { type: 'request_pairing_code' }
   /** "Unpair" on a paired phone's row. */
   | { type: 'unpair_phone'; id: string }
+  /** Replaces the person's own allow or deny list, honoured in every workspace. */
+  | { type: 'save_person_rules'; kind: 'allow' | 'deny'; values: string[] }

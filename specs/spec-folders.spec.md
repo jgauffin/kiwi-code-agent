@@ -1,6 +1,6 @@
 ---
 feature: Spec folders
-status: draft
+status: verified
 authored: planned
 ---
 

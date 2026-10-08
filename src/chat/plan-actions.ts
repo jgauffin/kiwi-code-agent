@@ -6,12 +6,13 @@ import type { ModelProfile, Step } from '../agent/session/model-profile'
 import { readSpecState, type SpecState } from '../agent/phases/spec-file'
 import { changePrompt, specPath } from '../agent/phases/blind-plan'
 import { compactAppliedDecisions, decisionsPath, readDecisions } from '../agent/phases/decisions'
+import { mappedFiles, writeMappingSnapshot } from '../agent/phases/mapping-snapshot'
 import { contextPath, readScenarioContext } from '../agent/phases/scenario-context'
 import { pickUpPlan } from '../agent/phases/plan-pickup'
 import { startUpdate as startUpdateSpec } from '../agent/phases/update-spec'
 import { assertImplementable } from '../agent/phases/implement'
 import { checkDue } from '../agent/phases/plan-stage'
-import { parseSpec } from '../agent/phases/spec-model'
+import { parseSpec, specFingerprint } from '../agent/phases/spec-model'
 import { followRenames, type MigrationReport } from '../agent/phases/migrate-plan'
 import { deriveBoard, readBoard, readTasks, tasksPath, writeBoard } from '../agent/phases/tasks-file'
 import type { Review } from '../agent/phases/plan-review'
@@ -93,6 +94,15 @@ export class PlanActions {
     return this.startingChange.has(feature)
   }
 
+  /** Whether approving a spec goes on to start its build, as the toggle beside Approve stands. */
+  startsOnApproval(): boolean {
+    return this.approvals.startsOnApproval()
+  }
+
+  async setStartsOnApproval(on: boolean): Promise<void> {
+    await this.approvals.setStartsOnApproval(on)
+  }
+
   isCritiqueOwed(feature: string): boolean {
     return this.critiqueOwed.has(feature)
   }
@@ -135,11 +145,12 @@ export class PlanActions {
         open: (sessionId) => this.deps.open(sessionId, into),
         start: async (f, prompt, label) => (await this.deps.newSession('plan', f, prompt, into, label))?.id,
         say: (sessionId, text) => sessions.send(sessionId, text),
+        tell: (sessionId, text, label) => sessions.send(sessionId, text, label),
         critiqueOwed: (f) => void this.critiqueOwed.add(f),
       },
       cwd: workspaceRoot,
       feature,
-      ...(owner ? { owner: { sessionId: owner.id } } : {}),
+      ...(owner ? { owner: { sessionId: owner.id, ...(owner.specSeen ? { specSeen: owner.specSeen } : {}) } } : {}),
       ...(note ? { note } : {}),
     })
   }
@@ -179,6 +190,7 @@ export class PlanActions {
         open: (sessionId) => this.deps.open(sessionId, into),
         start: async (f, prompt, label) => (await this.deps.newSession('plan', f, prompt, into, label))?.id,
         say: (sessionId, text) => sessions.send(sessionId, text),
+        tell: (sessionId, text, label) => sessions.send(sessionId, text, label),
         critiqueOwed: (f) => void this.critiqueOwed.add(f),
       },
       cwd: workspaceRoot,
@@ -205,9 +217,12 @@ export class PlanActions {
 
   /**
    * Nothing stands between the approved spec and the code: the board is
-   * derived from the spec, keeping the progress of one it replaces. A first
-   * board goes through the docs listing before the build starts, since the
-   * spec as ruled is final now; a board re-derived mid-build goes straight on.
+   * derived from the spec, keeping the progress of one it replaces, and the
+   * files it was mapped to are kept as they now read, for the build start to
+   * compare against. A first board goes through the docs listing before the
+   * build starts, since the spec as ruled is final now; a board re-derived
+   * mid-build goes straight on. Whether the build starts at all is the
+   * person's, settled on the toggle beside Approve.
    */
   private async buildFromSpec(plan: SessionRecord): Promise<void> {
     const { workspaceRoot, build } = this.deps
@@ -218,9 +233,16 @@ export class PlanActions {
     const existing = await readBoard(path)
     const decisions = await readDecisions(decisionsPath(workspaceRoot, feature))
     await mkdir(dirname(path), { recursive: true })
-    await writeBoard(path, deriveBoard(parseSpec(spec.body), existing, await readScenarioContext(contextPath(workspaceRoot, feature)), spec.built, decisions))
+    const board = deriveBoard(parseSpec(spec.body), existing, await readScenarioContext(contextPath(workspaceRoot, feature)), spec.built, decisions)
+    await writeBoard(path, board)
+    // The check has just read these files: what they say now is what the board was derived from, and what a later build start is told it has moved from.
+    await writeMappingSnapshot(workspaceRoot, feature, mappedFiles(board.tasks))
     await this.deps.sendState()
-    if (existing) return build.implementAfterApproval(plan)
+    // The docs listing belongs to approval and happens either way; only the build waits for the person when they asked it to.
+    if (existing) {
+      if (this.approvals.startsOnApproval()) await build.implementAfterApproval(plan)
+      return
+    }
     await this.approvals.sendDocsReview(plan, feature)
   }
 
@@ -293,7 +315,7 @@ export class PlanActions {
     const critiqued = !isError && this.critiqueOwed.delete(feature)
     if (applied || reviewed || critiqued) void this.deps.sendState()
     // The clean check was the go-ahead for the build; the docs listing was the last thing between it and the implementer.
-    if (reviewed && !isError) void this.deps.build.implementAfterApproval(record)
+    if (reviewed && !isError && this.approvals.startsOnApproval()) void this.deps.build.implementAfterApproval(record)
     if (!isError) void this.followPlan(record)
   }
 
@@ -302,8 +324,9 @@ export class PlanActions {
     const feature = record.feature!
     await followRenames(workspaceRoot, feature)
     await compactAppliedDecisions(decisionsPath(workspaceRoot, feature))
-    if (await this.repairs.continueRepair(feature)) return
     const spec = await readSpecState(specPath(workspaceRoot, feature))
+    if (spec.exists) await this.deps.sessions.noteSpecSeen(record.id, specFingerprint(parseSpec(spec.body)))
+    if (await this.repairs.continueRepair(feature)) return
     const tasks = await readTasks(tasksPath(workspaceRoot, feature))
     const decisions = await readDecisions(decisionsPath(workspaceRoot, feature))
     if (checkDue(spec, tasks, decisions)) await this.checks.startCheck(record)

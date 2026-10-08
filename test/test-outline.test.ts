@@ -387,20 +387,21 @@ describe('finding the files to outline', () => {
 })
 
 describe('rendering a suite', () => {
-  const file = (path: string): { path: string; tests: ReturnType<typeof outlineTests> } => ({
+  const file = (path: string): { path: string; lines: number; tests: ReturnType<typeof outlineTests> } => ({
     path,
+    lines: 4,
     tests: outlineTests(path, "describe('group', () => {\n  it('first rule', () => {})\n  it('second rule', () => {})\n})\n"),
   })
 
   it('files_render_as_full_trees_with_a_count_while_they_fit', () => {
     expect(renderFiles([file('test/a.test.ts')], [])).toBe(
-      ['## test/a.test.ts: 2 tests', 'group (line 1)', '  first rule (line 2)', '  second rule (line 3)'].join('\n'),
+      ['## test/a.test.ts (4 lines): 2 tests', 'group (line 1)', '  first rule (line 2)', '  second rule (line 3)'].join('\n'),
     )
   })
 
   it('suite_view_falls_back_to_top_level_groups_when_over_budget', () => {
     const text = renderFiles([file('test/a.test.ts'), file('test/b.test.ts')], [], 150)
-    expect(text).toContain('## test/a.test.ts: 2 tests\ngroup (line 1)\n## test/b.test.ts')
+    expect(text).toContain('## test/a.test.ts (4 lines): 2 tests\ngroup (line 1)\n## test/b.test.ts')
     expect(text).not.toContain('first rule')
     expect(text).toContain('top level only')
   })
@@ -423,7 +424,7 @@ describe('the CodeOutline tool on tests', () => {
   it('a_test_file_is_outlined_by_its_tests_and_a_file_with_nothing_to_outline_is_left_out', () =>
     withWorkspace({ 'test/a.test.ts': SPEC, 'test/helper.ts': 'export const h = 1\n' }, async (dir) => {
       const out = await codeOutlineTool.execute({ path: 'test' }, ctx(dir))
-      expect(out.text).toBe(['## test/a.test.ts: 1 test', 'a (line 1)', '  b (line 2)'].join('\n'))
+      expect(out.text).toBe(['## test/a.test.ts (3 lines): 1 test', 'a (line 1)', '  b (line 2)'].join('\n'))
     }))
 })
 

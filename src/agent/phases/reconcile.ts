@@ -1,4 +1,4 @@
-import { DOCS_DIR, SPECS_DIR, SPECS_GLOB, featureSlug } from './blind-plan'
+import { DOCS_DIR, SPECS_ANY_GLOB, specRelPath } from './blind-plan'
 import { KEEP_RULING, decisionsFile } from './decisions'
 import { contextFile } from './scenario-context'
 import { MARKDOWN_SEARCH_TOOL } from '../openai-session/tools/markdown-search'
@@ -7,6 +7,7 @@ import { EDIT_WRITING } from '../openai-session/tools/edit'
 import { CODE_OUTLINE_TOOL } from '../code-outline/code-outline-tool'
 import { CODE_READING } from '../code-outline/code-outline-gate'
 import { CODE_SEARCH_TOOL } from '../code-outline/code-search'
+import { DELEGATE_TOOL } from '../openai-session/tools/delegate'
 import type { Scope } from './scope-guard'
 import { READ_TASKS_TOOL, UPDATE_TASK_TOOL } from '../openai-session/tools/task-board'
 import { MAP_ROOT } from '../repo-map/map-files'
@@ -26,7 +27,7 @@ export function reconcileScope(feature: string, memoryDir?: string): Scope {
   }
 }
 
-export const RECONCILE_TOOLS = ['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', MARKDOWN_SEARCH_TOOL, CODE_OUTLINE_TOOL, CODE_SEARCH_TOOL, 'Edit', 'Write', 'Skill']
+export const RECONCILE_TOOLS = ['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', MARKDOWN_SEARCH_TOOL, CODE_OUTLINE_TOOL, CODE_SEARCH_TOOL, 'Edit', 'Write', 'Skill', DELEGATE_TOOL]
 
 /**
  * The first prompt of a check; the system prompt carries the instructions. A
@@ -49,7 +50,7 @@ export function reconcileKickoff(continued: boolean): string {
  * The spec is the intent for this feature; the docs it came from are not re-read.
  */
 export function reconcilePrompt(feature: string, cwd: string): string {
-  const spec = `${SPECS_DIR}/${featureSlug(feature)}.spec.md`
+  const spec = specRelPath(cwd, feature)
   const decisions = decisionsFile(feature)
   const context = contextFile(feature)
   return `You are checking the approved spec for the feature "${feature}" against the source code it will be built in.
@@ -58,7 +59,7 @@ The spec at \`${spec}\` under ${cwd} was written blind, from product intent alon
 
 Read the spec first. Every rule has a name, the bold lead-in of its line; that name is how you refer to it everywhere. Then search the code for what the spec touches: the rules it changes, the behaviour it adds to, the places its terms already live. ${CODE_READING}
 
-The spec is the intent for this feature; it was distilled from \`${DOCS_DIR}/**\` and the other features' specs under \`${SPECS_GLOB}\` by a session that read all of them, so do not browse those. A rule may end with a citation of the section it came from, as \`(${DOCS_DIR}/intent/orders.md#Cancellation)\`; open that section only when the rule's one sentence leaves open whether the code contradicts it. ${DOC_READING} A rule without a citation is the planner's own default, the weaker side in a contradiction. ${EDIT_WRITING}
+The spec is the intent for this feature; it was distilled from \`${DOCS_DIR}/**\` and the other features' specs under \`${SPECS_ANY_GLOB}\` by a session that read all of them, so do not browse those. A rule may end with a citation of the section it came from, as \`(${DOCS_DIR}/intent/orders.md#Cancellation)\`; open that section only when the rule's one sentence leaves open whether the code contradicts it. ${DOC_READING} A rule without a citation is the planner's own default, the weaker side in a contradiction. ${EDIT_WRITING}
 
 What you look for, each of them a decision the user has to make: a business rule in the code that says otherwise (the human decides which side is right; you present both); existing behaviour the feature would change or break that the spec does not mention; something the spec assumes that the code shows to be wrong.
 

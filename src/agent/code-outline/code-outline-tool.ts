@@ -1,7 +1,7 @@
 import { stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { z } from 'zod'
-import { findSources, isGlob, readSource } from '../code-structure/source-files'
+import { findSources, isGlob, lineCount, readSource } from '../code-structure/source-files'
 import { fail, ok, type Tool } from '../openai-session/tools/tool'
 import { findSymbols, outlineCode, outlineFile } from './outline'
 import { renderFiles, renderSymbols, type FileOutline, type SymbolHit } from './render'
@@ -21,7 +21,7 @@ export const CODE_OUTLINE_TOOL = 'CodeOutline'
 export const codeOutlineTool: Tool<typeof schema> = {
   name: CODE_OUTLINE_TOOL,
   description:
-    'Outlines a file, folder or glob without reading it: for a test file its groups and tests with line numbers, parametrized and skipped tests tagged, for any common framework; for other source files their types and functions, nested, with line ranges and doc summaries. With symbol, lists only the declarations whose name matches, across the path: use it to find where something is declared. Then Read only the line ranges you need.',
+    'Outlines a file, folder or glob without reading it: each file with its length in lines, so it also answers how large files are; for a test file its groups and tests with line numbers, parametrized and skipped tests tagged, for any common framework; for other source files their types and functions, nested, with line ranges and doc summaries. With symbol, lists only the declarations whose name matches, across the path: use it to find where something is declared. Then Read only the line ranges you need.',
   schema,
   readOnly: true,
   async execute(input, ctx) {
@@ -51,7 +51,7 @@ export const codeOutlineTool: Tool<typeof schema> = {
     const files: FileOutline[] = []
     for (const { path, text } of texts) {
       const outline = outlineFile(path, text)
-      if (outline) files.push({ path, ...outline })
+      if (outline) files.push({ path, lines: lineCount(text), ...outline })
     }
     if (files.length > 0) return ok(renderFiles(files, nested))
     const skipped = nested.length > 0 ? ` Not searched, repositories of their own: ${nested.join(', ')}.` : ''

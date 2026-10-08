@@ -48,8 +48,11 @@ of the code are one thing.
 ## The file
 
 `specs/<slug>.spec.md`, where `<slug>` is the name lower-cased, accents dropped and every run of
-other characters turned into `-`. Read `contract.md` in the `spec-writing` skill's folder before
-writing: the same contract, enforced on every write. On top of it:
+other characters turned into `-`. Specs may be grouped by domain, as `specs/<domain>/<slug>.spec.md`,
+one level deep and no deeper: where the workspace already has such folders, name the folder each new
+spec lands in as part of the list and reuse an existing folder rather than coining a synonym of it;
+where every spec sits at the root of `specs/`, keep writing there. Read `contract.md` in the
+`spec-writing` skill's folder before writing: the same contract, enforced on every write. On top of it:
 
 - Translate, never transcribe. A rule says what a person can observe from outside: what they do,
   what they get, what they are refused. A sentence that needs a class, a table, an endpoint or a

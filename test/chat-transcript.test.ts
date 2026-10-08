@@ -525,6 +525,148 @@ describe('copying a message out of the transcript', () => {
   })
 })
 
+describe('subagent output in the transcript', () => {
+  /** The call that spawns an agent, named as the model names it. */
+  const spawn = (toolUseId: string, agent: string, description: string): SessionEvent => ({
+    type: 'tool_call',
+    toolUseId,
+    name: 'Agent',
+    input: { description, prompt: 'go', subagent_type: agent },
+  })
+  const named = (element: Element) => [...element.querySelectorAll('.agent-name')].map((tag) => tag.textContent)
+
+  it('a_message_from_a_subagent_is_named_with_the_agent_and_nests_under_the_call_that_spawned_it', () => {
+    const view = transcript()
+
+    view.apply(spawn('t1', 'Explore', 'Find the handler'))
+    view.apply({ type: 'assistant_message', messageId: 'm2', text: 'Found it', parentToolUseId: 't1' })
+
+    const details = view.querySelector('details.tool')!
+    const message = details.querySelector('article.assistant')!
+    expect(message.textContent).toContain('Found it')
+    expect(named(message)).toEqual(['Explore'])
+    expect(details.querySelector('summary')!.textContent).toBe('Agent (Explore) Find the handler')
+  })
+
+  it('a_message_whose_spawning_call_was_never_shown_still_says_it_came_from_a_subagent', () => {
+    const view = transcript()
+
+    view.apply({ type: 'assistant_message', messageId: 'm2', text: 'Orphaned', parentToolUseId: 'gone' })
+
+    const message = view.querySelector('article.assistant')!
+    expect(message.parentElement).toBe(view)
+    expect(named(message)).toEqual(['subagent'])
+  })
+
+  it('two_subagents_streaming_at_once_keep_their_text_in_their_own_step', () => {
+    const view = transcript()
+
+    view.apply(spawn('t1', 'Explore', 'Read the code'))
+    view.apply(spawn('t2', 'Plan', 'Draft the plan'))
+    view.apply({ type: 'assistant_text', messageId: 'm_a', delta: 'from Explore', parentToolUseId: 't1' })
+    view.apply({ type: 'assistant_text', messageId: 'm_b', delta: 'from Plan', parentToolUseId: 't2' })
+    view.apply({ type: 'assistant_text', messageId: 'm_a', delta: ' and more', parentToolUseId: 't1' })
+
+    const steps = [...view.querySelectorAll('details.tool')]
+    expect(steps[0]!.querySelector('article.assistant')!.textContent).toContain('from Explore and more')
+    expect(steps[1]!.querySelector('article.assistant')!.textContent).toContain('from Plan')
+    expect(named(steps[1]!.querySelector('article.assistant')!)).toEqual(['Plan'])
+  })
+
+  it('a_step_run_inside_a_subagent_is_tagged_with_the_agent_running_it', () => {
+    const view = transcript()
+
+    view.apply(spawn('t1', 'Explore', 'Read the code'))
+    view.apply({ type: 'tool_call', toolUseId: 't2', name: 'Read', input: { file_path: 'src/x.ts' }, parentToolUseId: 't1' })
+
+    const inner = view.querySelector('details.tool details.tool')!
+    expect(inner.classList.contains('from-subagent')).toBe(true)
+    expect(named(inner)).toEqual(['Explore'])
+  })
+
+  it('what_a_subagent_is_doing_does_not_rename_the_activity_row_the_main_thread_waits_on', () => {
+    const view = transcript()
+    const activity = () => view.querySelector('.working')?.textContent ?? null
+
+    view.apply({ type: 'user_message', text: 'go' })
+    view.apply(spawn('t1', 'Explore', 'Read the code'))
+    expect(activity()).toBe('Running Agent (Explore) Read the code…')
+    view.apply({ type: 'tool_call', toolUseId: 't2', name: 'Read', input: { file_path: 'src/x.ts' }, parentToolUseId: 't1' })
+    view.apply({ type: 'assistant_text', messageId: 'm_a', delta: 'reading', parentToolUseId: 't1' })
+    expect(activity()).toBe('Running Agent (Explore) Read the code…')
+    view.apply({ type: 'tool_result', toolUseId: 't1', text: 'done', isError: false })
+    expect(activity()).toBe('Waiting on model…')
+  })
+
+  it('a_prompt_raised_inside_a_subagent_is_shown_in_that_agents_step', () => {
+    const view = transcript()
+
+    view.apply(spawn('t1', 'Explore', 'Read the code'))
+    view.apply({ type: 'tool_call', toolUseId: 't2', name: 'Write', input: { file_path: 'src/x.ts' }, parentToolUseId: 't1' })
+    view.apply({ type: 'permission_request', requestId: 'p1', toolUseId: 't2', toolName: 'Write', input: { file_path: 'src/x.ts' } })
+
+    expect(view.querySelector('details.tool .permission')).not.toBeNull()
+    expect(view.querySelector(':scope > .permission')).toBeNull()
+  })
+})
+
+describe('a delegation in the transcript', () => {
+  const delegate = (toolUseId: string, input: unknown): SessionEvent => ({ type: 'tool_call', toolUseId, name: 'Delegate', input })
+
+  it('a_delegation_names_its_task_and_the_sub_agent_it_picked_as_one_row', () => {
+    const view = transcript()
+
+    view.apply(delegate('t1', { agent: 'retrieve', task: 'find the handler' }))
+
+    const details = view.querySelector('details.tool')!
+    expect(details.querySelector('summary')!.textContent).toBe('Delegate (retrieve) find the handler')
+  })
+
+  it('a_delegation_that_defines_its_own_sub_agent_is_named_with_that_definitions_name', () => {
+    const view = transcript()
+
+    view.apply(delegate('t1', { define: { name: 'adhoc', description: 'd', instructions: 'i' }, task: 'check the thing' }))
+
+    expect(view.querySelector('details.tool summary')!.textContent).toBe('Delegate (adhoc) check the thing')
+  })
+
+  it('a_delegations_own_messages_and_tool_calls_expand_in_place_under_its_row', () => {
+    const view = transcript()
+
+    view.apply(delegate('t1', { agent: 'retrieve', task: 'find the handler' }))
+    view.apply({ type: 'assistant_message', messageId: 'm2', text: 'looking', parentToolUseId: 't1' })
+    view.apply({ type: 'tool_call', toolUseId: 't2', name: 'Grep', input: { pattern: 'handler' }, parentToolUseId: 't1' })
+
+    const outer = view.querySelector('details.tool')!
+    expect(outer.querySelector('article.assistant')!.textContent).toContain('looking')
+    expect(outer.querySelector('details.tool')!.classList.contains('from-subagent')).toBe(true)
+  })
+
+  it('a_completed_delegations_result_shows_its_status_and_what_it_spent_beside_the_task', () => {
+    const view = transcript()
+
+    view.apply(delegate('t1', { agent: 'retrieve', task: 'find the handler' }))
+    view.apply({ type: 'tool_result', toolUseId: 't1', text: 'reported back', isError: false, subAgent: { status: 'complete', toolCalls: 2, tokens: 150 } })
+
+    const details = view.querySelector('details.tool')!
+    expect(details.classList.contains('done')).toBe(true)
+    expect(details.classList.contains('failed')).toBe(false)
+    const status = details.querySelector('.sub-agent-status')!
+    expect(status.textContent).toBe('2 calls · 150 tokens')
+  })
+
+  it('a_delegation_that_ran_out_of_budget_is_marked_partial_rather_than_failed', () => {
+    const view = transcript()
+
+    view.apply(delegate('t1', { agent: 'retrieve', task: 'find the handler' }))
+    view.apply({ type: 'tool_result', toolUseId: 't1', text: 'reported back', isError: false, subAgent: { status: 'partial', toolCalls: 1, tokens: 50 } })
+
+    const details = view.querySelector('details.tool')!
+    expect(details.classList.contains('failed')).toBe(false)
+    expect(details.querySelector('.sub-agent-status')!.textContent).toContain('partial')
+  })
+})
+
 describe('a model switch in the transcript', () => {
   const switches = (view: Transcript) => [...view.querySelectorAll('.model-switch')].map((el) => el.textContent)
   const status = (view: Transcript) => view.querySelector<HTMLElement>('.status')?.textContent ?? ''

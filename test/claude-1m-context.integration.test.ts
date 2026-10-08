@@ -11,7 +11,7 @@ import { AsyncQueue } from '../src/agent/session/async-queue'
  * machine's Claude login and costs one small request, so it is opt-in.
  */
 const enabled = process.env.KIWI_CLAUDE_INTEGRATION === '1'
-const model = process.env.KIWI_CLAUDE_1M_MODEL ?? 'claude-opus-5[1m]'
+const model = process.env.KIWI_CLAUDE_1M_MODEL ?? 'claude-opus-5-5[1m]'
 
 describe.runIf(enabled)('Claude Code engine, 1M context', () => {
   it('a_1m_model_id_gives_the_JS_engine_a_1M_window', { timeout: 120_000 }, async () => {

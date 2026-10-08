@@ -4,7 +4,8 @@ import type { ReadTracker } from './read-tracker'
 import type { FileLedger } from '../file-ledger'
 import type { QuestionOutcome, UserQuestionRequest } from '../../session/user-question'
 import type { FileEditChange } from '../../edits/file-edit-diff'
-import type { PermissionDecision } from '../../session/code-session'
+import type { NestedEvent, PermissionDecision, TurnUsage } from '../../session/code-session'
+import type { PermissionAsker } from '../../permissions/gate'
 
 /**
  * How a tool reaches the person running the session. The engine supplies it;
@@ -33,11 +34,27 @@ export type ToolContext = {
   confirm?: (name: string, input: unknown) => Promise<string | undefined>
   /** Puts changes to files to the user as one decision. */
   review?: (title: string, edits: FileEditChange[]) => Promise<PermissionDecision>
+  /**
+   * Tells the session's hooks a call happened, with no result for the model and
+   * nothing in the transcript: how the reads and writes a tool makes inside its
+   * own work reach a hook that follows where the session has been.
+   */
+  observed?: (name: string, input: unknown) => Promise<void>
+  /** Puts a call to the user as this session's own ordinary permission prompt, with no hook of its own in the way: for a delegated run, which already decided through its own hooks and asks only what they left open. */
+  askPermission?: PermissionAsker
+  /** Adds to this turn's token usage: what a delegated run spends counts toward the caller's own totals, not a run of its own. */
+  addUsage?: (usage: TurnUsage) => void
+  /** Forwards an event from inside this call's own work, nested in the transcript under it; absent where nothing nests. */
+  report?: (event: NestedEvent) => void
 }
+
+/** What a delegated run leaves of itself: whether it answered in full or had to stop at its budget, and what it spent. */
+export type SubAgentOutcome = { status: 'complete' | 'partial'; toolCalls: number; tokens: number }
 
 /** `items`: the whole result, uncut, as plain JSON values for a script to work through; the model reads `text`. */
 /** `context` is read by the model after `text` and never shown in the chat: hook context, a skill's body. */
-export type ToolOutput = { text: string; isError: boolean; items?: unknown[]; context?: string }
+/** `subAgent` is set on a delegation's own result, for the chat to show beside the task. */
+export type ToolOutput = { text: string; isError: boolean; items?: unknown[]; context?: string; subAgent?: SubAgentOutcome }
 
 /** A tool result as the model reads it: what the chat shows, then what only the model sees. */
 export function modelText(output: { text: string; context?: string }): string {

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode'
-import { SPECS_GLOB } from '../agent/phases/blind-plan'
+import { SPECS_ANY_GLOB } from '../agent/phases/blind-plan'
 import { readSpecState } from '../agent/phases/spec-file'
 import { isSpecPath, specBadge } from './spec-files'
 
@@ -16,7 +16,7 @@ export function specDecorations(workspaceRoot: string): vscode.Disposable {
       return new vscode.FileDecoration(badge, tooltip)
     },
   })
-  const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(workspaceRoot, SPECS_GLOB))
+  const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(workspaceRoot, SPECS_ANY_GLOB))
   const refresh = (uri: vscode.Uri) => changed.fire([uri])
   return vscode.Disposable.from(provider, watcher, watcher.onDidCreate(refresh), watcher.onDidChange(refresh), watcher.onDidDelete(refresh))
 }

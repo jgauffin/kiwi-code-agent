@@ -3,8 +3,12 @@ import { renderNodes as renderTests } from '../test-outline/render'
 import { countTests, type TestNode } from '../test-outline/scan'
 import { rangeStart, type CodeNode } from './outline'
 
-/** A test file is outlined by its tests, any other source file by its declarations. */
-export type FileOutline = { path: string; nodes: CodeNode[] } | { path: string; tests: TestNode[] }
+/**
+ * A test file is outlined by its tests, any other source file by its
+ * declarations. Each carries its length, so how large the files are is
+ * answered here rather than by counting lines in the shell.
+ */
+export type FileOutline = { path: string; lines: number } & ({ nodes: CodeNode[] } | { tests: TestNode[] })
 
 /** Room left for the notes around the outline. */
 const DEFAULT_BUDGET = MAX_OUTPUT_CHARS - 1000
@@ -30,9 +34,10 @@ export function renderNodes(nodes: CodeNode[], options: { maxDepth?: number; doc
 }
 
 function renderFile(file: FileOutline, maxDepth: number, docs: boolean): string[] {
-  if ('nodes' in file) return [`## ${file.path}`, ...renderNodes(file.nodes, { maxDepth, docs })]
+  const heading = `## ${file.path} (${file.lines} ${file.lines === 1 ? 'line' : 'lines'})`
+  if ('nodes' in file) return [heading, ...renderNodes(file.nodes, { maxDepth, docs })]
   const count = countTests(file.tests)
-  return [`## ${file.path}: ${count} ${count === 1 ? 'test' : 'tests'}`, ...renderTests(file.tests, maxDepth)]
+  return [`${heading}: ${count} ${count === 1 ? 'test' : 'tests'}`, ...renderTests(file.tests, maxDepth)]
 }
 
 /**

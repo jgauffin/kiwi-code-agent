@@ -156,6 +156,25 @@ describe('SessionManager', () => {
     expect(store.saved.at(-1)?.find((r) => r.id === record.id)).not.toHaveProperty('allowWrites')
   })
 
+  it('what_the_person_denied_for_a_session_is_kept_with_it_the_same_way_as_what_they_allowed', async () => {
+    const store = memoryStore()
+    const noEngine = async (): Promise<CodeSession> => {
+      throw new Error('not started')
+    }
+    const manager = new SessionManager(store, noEngine, () => {
+      throw new Error('no log')
+    }, () => {})
+    const record = await manager.create(profile, 'file-decisions')
+
+    await manager.denyForSession(record.id, ['Bash(curl:*)'])
+    await manager.denyForSession(record.id, ['Bash(curl:*)', 'Bash(wget:*)'])
+
+    const reopened = new SessionManager(store, noEngine, () => {
+      throw new Error('no log')
+    }, () => {})
+    expect(reopened.get(record.id)).toMatchObject({ denied: ['Bash(curl:*)', 'Bash(wget:*)'] })
+  })
+
   it('the_persons_own_choice_to_push_for_a_session_is_kept_with_it_and_outlives_its_engine_and_the_host', async () => {
     const store = memoryStore()
     const noEngine = async (): Promise<CodeSession> => {

@@ -82,6 +82,8 @@ export type PlanState = {
   commentable: boolean
   /** A draft with no comment open, so it may be approved. */
   approvable: boolean
+  /** Whether approving goes on to start the build, as the toggle beside Approve stands; off leaves the mapped feature waiting for Implement. */
+  startBuildOnApproval: boolean
   /** What the check found, in file order, with the planner's options and the user's rulings; empty until it found something. */
   decisions: Decision[]
   /** Decisions not yet applied to the rules: the open ones and those ruled but still with the planner. */
@@ -159,7 +161,7 @@ export type ModelOption = { name: string; efforts: Effort[] }
  * here. `authored` and `review` say how a draft came to be and how far its
  * review got; absent once the spec is settled.
  */
-export type ResumablePlan = { feature: string; status: SpecStatus | undefined; lastActiveAt?: string; authored?: Authorship; review?: ReviewProgress }
+export type ResumablePlan = { feature: string; status: SpecStatus | undefined; lastActiveAt?: string; authored?: Authorship; review?: ReviewProgress; folder?: string }
 
 /** A conversation not shown that the new-session screen offers to reopen; its transcript is the context it comes back with. */
 export type ResumableChat = { sessionId: string; title: string; mode: SessionMode; lastActiveAt: string }
@@ -170,7 +172,7 @@ export type ResumableChat = { sessionId: string; title: string; mode: SessionMod
  * `changeable` is absent on one. A settled spec is pickable only once
  * `changeable`; `waiting` says what it is waiting for otherwise.
  */
-export type UpdatableSpec = { feature: string; status: SpecStatus; changeable?: boolean; waiting?: string }
+export type UpdatableSpec = { feature: string; status: SpecStatus; changeable?: boolean; waiting?: string; folder?: string }
 
 /**
  * What is put to the person about one scope's `AGENTS.md`, over the chat:
@@ -225,11 +227,19 @@ export type ToWebview =
   | { type: 'suggested_feature_name'; name?: string; reason?: string }
   | { type: 'event'; sessionId: string; run: RunRef; event: SessionEvent }
 
-/** The user's answer to a permission prompt, with the rules its lines were allowed by that later calls should pass on. */
-export type UserPermissionDecision = PermissionDecision & { remember?: RememberedRules }
+/**
+ * The user's answer to a permission prompt. `remember` carries the rules its
+ * lines were allowed by that later calls should pass on; `denyRemember` the
+ * ones a line was denied by instead, kept the same way.
+ */
+export type UserPermissionDecision = PermissionDecision & { remember?: RememberedRules; denyRemember?: RememberedRules }
 
-/** `session` rules hold for the coding session; `project` rules are written into the workspace's allow list. */
-export type RememberedRules = { session: string[]; project: string[] }
+/**
+ * `session` rules hold for the coding session; `project` rules are written
+ * into the workspace's allow or deny list; `person` rules into the one the
+ * person keeps for themselves, honoured in every workspace.
+ */
+export type RememberedRules = { session: string[]; project: string[]; person: string[] }
 
 /** What the human does on the plan view of a draft: the review, and the rulings on its decisions. */
 export type ReviewAction =
@@ -284,6 +294,8 @@ export type FromWebview =
   | { type: 'update_spec'; feature: string; description: string }
   /** Approves the draft and starts its check against the code; refused while a comment is open. */
   | { type: 'approve_spec' }
+  /** The toggle beside Approve: whether approving goes on to start the build by itself. Remembered for the workspace. */
+  | { type: 'set_start_build'; on: boolean }
   /** Hands the rulings to the plan session to apply; refused while a decision is still open. */
   | { type: 'send_rulings' }
   | ReviewAction

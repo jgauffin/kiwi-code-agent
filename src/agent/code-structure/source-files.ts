@@ -82,6 +82,12 @@ function staticBase(pattern: string): string {
 
 const relativePath = (cwd: string, full: string): string => relative(cwd, full).split('\\').join('/') || '.'
 
+/** How many lines Read numbers in this text: a final newline ends the last line rather than starting another. */
+export function lineCount(text: string): number {
+  if (text === '') return 0
+  return text.split(/\r?\n/).length - (/\r?\n$/.test(text) ? 1 : 0)
+}
+
 /** A file's text, or undefined when it is too large or binary to be source. */
 export async function readSource(full: string): Promise<string | undefined> {
   const info = await stat(full).catch(() => undefined)

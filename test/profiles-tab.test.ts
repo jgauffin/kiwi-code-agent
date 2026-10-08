@@ -13,11 +13,11 @@ const { ProfilesTab } = await import('../src/settings/webview/profiles-tab')
 const events = await import('../src/settings/webview/events')
 const chatEvents = await import('../src/chat/webview/events')
 
-const claude: Provider = { name: 'Claude', engine: 'claude-sdk', models: ['claude-opus-5', 'claude-sonnet-5'] }
+const claude: Provider = { name: 'Claude', engine: 'claude-sdk', models: ['claude-opus-5-5', 'claude-sonnet-5-5'] }
 const berget: Provider = { name: 'berget', engine: 'openai-compatible', baseUrl: 'https://api.berget.ai/v1', models: ['moonshotai/Kimi-K3'] }
 
-const balanced: Profile = { name: 'Balanced', default: { provider: 'Claude', model: 'claude-sonnet-5' } }
-const opusPlan: Profile = { name: 'Opus plan', default: { provider: 'Claude', model: 'claude-sonnet-5' }, steps: { plan: { provider: 'Claude', model: 'claude-opus-5', effort: 'high' } } }
+const balanced: Profile = { name: 'Balanced', default: { provider: 'Claude', model: 'claude-sonnet-5-5' } }
+const opusPlan: Profile = { name: 'Opus plan', default: { provider: 'Claude', model: 'claude-sonnet-5-5' }, steps: { plan: { provider: 'Claude', model: 'claude-opus-5-5', effort: 'high' } } }
 
 function snapshot(over: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
   return {
@@ -25,7 +25,7 @@ function snapshot(over: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     profiles: [balanced, opusPlan],
     activeProfile: 'Balanced',
     keys: [{ name: 'berget', stored: false }],
-    permissions: { allow: [], deny: [], denyGitWrites: false },
+    permissions: { allow: [], deny: [], denyGitWrites: false, person: { allow: [], deny: [] } },
     verify: [],
     verifyFailureBudget: 3,
     cleanup: { functionLines: 60, functionComplexity: 15, typeLines: 200, fileLines: 400, tests: [], testFunctionLines: 120, testFunctionComplexity: 15, testTypeLines: 600, testFileLines: 1200, ignore: [] },
@@ -77,8 +77,8 @@ describe('ProfilesTab defaults', () => {
 describe('ProfilesTab profile cards', () => {
   it('a_card_shows_the_default_and_every_step_that_overrides_it', () => {
     const node = tab()
-    expect(cards(node)[0]!.querySelector('.chips')!.textContent).toContain('default Claude · claude-sonnet-5')
-    expect(cards(node)[1]!.querySelector('.chips')!.textContent).toContain('Feature planning · Spec: Claude · claude-opus-5 (high)')
+    expect(cards(node)[0]!.querySelector('.chips')!.textContent).toContain('default Claude · claude-sonnet-5-5')
+    expect(cards(node)[1]!.querySelector('.chips')!.textContent).toContain('Feature planning · Spec: Claude · claude-opus-5-5 (high)')
     expect(cards(node)[1]!.querySelector('.chips')!.textContent).not.toContain('Implement')
     node.remove()
   })
@@ -95,9 +95,9 @@ describe('ProfilesTab profile cards', () => {
     const form = edit(node, 0)
     let seen: unknown
     node.addEventListener(events.ProfileSavedEvent.type, (e) => (seen = [e.index, e.profile]))
-    set(form, 'default-model', 'claude-opus-5')
+    set(form, 'default-model', 'claude-opus-5-5')
     form.dispatchEvent(new Event('submit', { cancelable: true }))
-    expect(seen).toEqual([0, { name: 'Balanced', default: { provider: 'Claude', model: 'claude-opus-5' } }])
+    expect(seen).toEqual([0, { name: 'Balanced', default: { provider: 'Claude', model: 'claude-opus-5-5' } }])
     node.remove()
   })
 
@@ -199,7 +199,7 @@ describe('ProfilesTab profile cards', () => {
     expect(seen).toBe(2)
     // The form stays until the host answers: a refused save leaves what was typed in place.
     expect(node.querySelector('form.profile')).not.toBeNull()
-    node.update(snapshot({ profiles: [balanced, opusPlan, { name: 'Throughput', default: { provider: 'Claude', model: 'claude-sonnet-5' } }] }))
+    node.update(snapshot({ profiles: [balanced, opusPlan, { name: 'Throughput', default: { provider: 'Claude', model: 'claude-sonnet-5-5' } }] }))
     expect(node.querySelector('form.profile')).toBeNull()
     expect(cards(node)).toHaveLength(3)
     ;[...node.querySelectorAll('button')].find((b) => b.textContent === 'Add profile')!.click()

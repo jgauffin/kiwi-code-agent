@@ -4,12 +4,13 @@ import { DOC_READING } from '../openai-session/tools/markdown/outline-gate'
 import { CODE_OUTLINE_TOOL } from '../code-outline/code-outline-tool'
 import { CODE_READING } from '../code-outline/code-outline-gate'
 import { CODE_SEARCH_TOOL } from '../code-outline/code-search'
+import { DELEGATE_TOOL } from '../openai-session/tools/delegate'
 import { DOCS_DIR, SPEC_READING } from './blind-plan'
 import { SPEC_SEARCH_TOOL } from './spec-search'
 import { FUTURE_FILE, UNFILED_FILE } from './unfiled-decisions'
 
 /** Read-only: the plan is agreed here and built in the chat the session continues into. */
-export const CODE_PLAN_TOOLS = ['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', MARKDOWN_SEARCH_TOOL, SPEC_SEARCH_TOOL, CODE_OUTLINE_TOOL, CODE_SEARCH_TOOL, 'Skill', ASK_USER_TOOL]
+export const CODE_PLAN_TOOLS = ['Read', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', MARKDOWN_SEARCH_TOOL, SPEC_SEARCH_TOOL, CODE_OUTLINE_TOOL, CODE_SEARCH_TOOL, 'Skill', ASK_USER_TOOL, DELEGATE_TOOL]
 
 /**
  * The plan for work that is shaped by what the code already has (a UI on its

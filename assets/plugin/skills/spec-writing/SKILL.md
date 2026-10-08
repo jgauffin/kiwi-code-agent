@@ -12,7 +12,7 @@ result, fix it before you stop.
 
 ## Where intent comes from
 
-A later planner reads `docs/**`, the root README, every `specs/*.spec.md`,
+A later planner reads `docs/**`, the root README, every `specs/**/*.spec.md`,
 `specs/unfiled-decisions.md` and `specs/future-work.md`, never the code. Write the rules from those alone, even though you can
 read the code: approval compares the spec with the code and reports each disagreement for the
 user to rule on, and a rule copied from the code hides the disagreement it would have found.
@@ -32,6 +32,12 @@ existing spec already covers. Wait for the user to confirm or adjust the list.
 
 `specs/<slug>.spec.md`, where `<slug>` is the name lower-cased, accents dropped and every run of
 other characters turned into `-`. The folder is created by the write.
+
+Specs may be grouped by domain, as `specs/<domain>/<slug>.spec.md`, one level deep and no deeper.
+Where the workspace already has such folders, name the folder each new spec lands in as part of the
+list, reusing an existing folder rather than coining a synonym of it; where every spec sits at the
+root of `specs/`, keep writing there. `specs/unfiled-decisions.md` and `specs/future-work.md` stay
+at the root either way, and a citation to a spec in a folder carries the folder.
 
 Read `contract.md` in this skill's folder before writing: it is the contract the feature planner
 writes to, word for word. A question only the user can answer goes under `## Open questions`

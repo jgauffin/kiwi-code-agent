@@ -115,6 +115,9 @@ export class MessageRouter {
       case 'approve_spec':
         await planActions.approveSpec(shown)
         return true
+      case 'set_start_build':
+        await planActions.setStartsOnApproval(message.on)
+        return true
       case 'send_rulings':
         await planActions.sendRulings(shown)
         return true

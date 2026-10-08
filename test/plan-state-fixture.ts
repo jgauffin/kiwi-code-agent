@@ -22,6 +22,7 @@ export function planState(over: Partial<PlanState> = {}): PlanState {
     review: { rounds: [] },
     commentable: true,
     approvable: false,
+    startBuildOnApproval: true,
     decisions: [],
     pendingDecisions: 0,
     applyingRulings: false,

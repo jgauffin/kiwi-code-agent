@@ -97,6 +97,15 @@ describe('SpecSearch', () => {
     })
   })
 
+  it('a_spec_filed_in_a_folder_or_deeper_is_searched_like_any_other', async () => {
+    await withSpecs({ 'specs/orders/order-cancellation.spec.md': ORDERS, 'specs/orders/archive/a-returns.spec.md': RETURNS }, async (ctx) => {
+      const { text, items } = await search(ctx, { query: 'cancelled by' })
+      expect(text).toContain('specs/orders/order-cancellation.spec.md: Order cancellation [approved]')
+      expect(items).toEqual([expect.objectContaining({ file: 'specs/orders/order-cancellation.spec.md' })])
+      expect((await search(ctx, { query: 'return window' })).items).toEqual([expect.objectContaining({ file: 'specs/orders/archive/a-returns.spec.md' })])
+    })
+  })
+
   it('only_specs_the_phase_may_read_are_searched', async () => {
     await withSpecs({ 'specs/a-returns.spec.md': RETURNS, 'specs/order-cancellation.spec.md': ORDERS }, async (ctx) => {
       const { text } = await search(ctx, { query: 'customer' }, (rel) => rel !== 'specs/a-returns.spec.md')
