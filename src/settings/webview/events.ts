@@ -1,3 +1,4 @@
+import type { Grant } from '../../agent/permissions/grants'
 import type { Bundle, BundleScope } from '../../agent/instructions/bundles'
 import type { MemoryScope } from '../../agent/memory/memories'
 import type { Profile, Provider } from '../../agent/session/model-profile'
@@ -108,14 +109,11 @@ export class RuleListChangedEvent extends Event {
   }
 }
 
-/** A person-wide allow or deny list edited: replaces the whole list, empty rows left out. */
-export class PersonRulesChangedEvent extends Event {
-  static readonly type = 'person-rules-changed'
-  constructor(
-    public readonly kind: 'allow' | 'deny',
-    public readonly values: string[],
-  ) {
-    super(PersonRulesChangedEvent.type, { bubbles: true })
+/** The answers the person keeps for themselves, after one was removed: replaces the whole list. */
+export class PersonGrantsChangedEvent extends Event {
+  static readonly type = 'person-grants-changed'
+  constructor(public readonly grants: Grant[]) {
+    super(PersonGrantsChangedEvent.type, { bubbles: true })
   }
 }
 
@@ -224,7 +222,7 @@ declare global {
     [ModelsRefreshRequestedEvent.type]: ModelsRefreshRequestedEvent
     [ApiKeySetEvent.type]: ApiKeySetEvent
     [RuleListChangedEvent.type]: RuleListChangedEvent
-    [PersonRulesChangedEvent.type]: PersonRulesChangedEvent
+    [PersonGrantsChangedEvent.type]: PersonGrantsChangedEvent
     [SettingsFileRequestedEvent.type]: SettingsFileRequestedEvent
     [MemoryOpenedEvent.type]: MemoryOpenedEvent
     [MemoryForgottenEvent.type]: MemoryForgottenEvent

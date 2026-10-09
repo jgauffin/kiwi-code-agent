@@ -1893,88 +1893,100 @@ chat-app {
         }
       }
 
-      /* A shell call: one row per command, its answer beside it and its buttons under it. */
-      & .commands {
+      /* The call as written, above what it would do. */
+      & pre.call {
+        margin: 0.3rem 0;
+        font-family: var(--vscode-editor-font-family);
+        white-space: pre-wrap;
+        word-break: break-all;
+        background: transparent;
+      }
+
+      /* One row per effect: those that already pass quiet, those asked carrying their answer and the sentence it keeps. */
+      & .rows {
         list-style: none;
         margin: 0.3rem 0;
         padding: 0;
 
-        & .command {
-          display: flex;
-          flex-wrap: wrap;
-          align-items: center;
-          gap: 0.4rem 0.8rem;
-          padding: 0.2rem 0;
+        & .row {
+          padding: 0.25rem 0;
 
-          & + .command {
+          & + .row {
             border-top: 1px solid var(--vscode-panel-border);
           }
 
-          & code {
-            flex: 1 1 12rem;
-            font-family: var(--vscode-editor-font-family);            white-space: pre-wrap;
-            word-break: break-all;
-          }
-        }
+          & .does {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0 0.8rem;
 
-        /* Under the command at the left edge: on a wide window buttons trailing the command sit far from the eye and get missed. */
-        & .line-actions {
-          flex: 1 1 100%;
-          display: flex;
-          flex-wrap: wrap;
-          gap: 0.4rem;
-        }
-
-        /* A change of directory: its path in parts, the ones a kept answer would cover standing out from those deeper down. */
-        & .places {
-          flex: 1 1 100%;
-          margin: 0;
-          font-family: var(--vscode-editor-font-family);
-          word-break: break-all;
-
-          & .place {
-            background: none;
-            border: none;
-            padding: 0;
-            font: inherit;
-            color: inherit;
-            cursor: pointer;
-
-            &.covered {
-              text-decoration: underline;
+            & .what {
+              font-family: var(--vscode-editor-font-family);
+              word-break: break-all;
             }
 
-            &.beyond {
-              opacity: 0.5;
+            & .why {
+              opacity: 0.8;
             }
           }
-        }
 
-        & .line-status {
-          opacity: 0.8;
+          &.passes {
+            opacity: 0.7;
+          }
 
-          &.denied {
+          &.refused .why {
             color: var(--vscode-errorForeground);
             opacity: 1;
           }
         }
 
-        /* A copy or move: what it reads from and what it writes to, the latter bold where that is why it asks. */
-        & .effects {
-          flex: 1 1 100%;
-          list-style: none;
-          margin: 0;
-          padding: 0;
-          opacity: 0.8;
-          display: flex;
-          flex-wrap: wrap;
-          gap: 0 0.6rem;
+        & .answer {
+          margin-top: 0.3rem;
 
-          & .asked {
-            opacity: 1;
-            font-weight: 600;
+          & .choices {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.2rem 0.9rem;
+          }
+
+          & .grant-parts {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.3rem 0.5rem;
+            margin-top: 0.3rem;
+
+            & select {
+              background: var(--vscode-dropdown-background);
+              color: var(--vscode-dropdown-foreground);
+              border: 1px solid var(--vscode-dropdown-border, transparent);
+              max-width: 100%;
+            }
+
+            & .flags {
+              display: flex;
+              flex-wrap: wrap;
+              gap: 0.2rem 0.6rem;
+            }
+          }
+
+          & .never {
+            margin: 0.2rem 0 0;
+            opacity: 0.8;
+          }
+
+          /* The answer in words, exactly as it will be kept. */
+          & .sentence {
+            margin: 0.3rem 0 0;
+            padding: 0.3rem 0.5rem;
+            border-left: 2px solid var(--vscode-focusBorder);
+            background: var(--vscode-textBlockQuote-background);
           }
         }
+      }
+
+      & .actions {
+        margin-top: 0.4rem;
       }
 
       & .deny-reason {

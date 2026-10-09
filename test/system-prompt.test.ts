@@ -7,7 +7,7 @@ import { CHAT_DECISIONS } from '../src/agent/phases/unfiled-decisions'
 import { SPEC_READING } from '../src/agent/phases/blind-plan'
 import { memoryWritingInstructions } from '../src/agent/memory/memories'
 import { projectScriptsInstruction } from '../src/agent/permissions/package-scripts'
-import { PIPE_WRITING } from '../src/agent/permissions/read-only-commands'
+import { PIPE_WRITING } from '../src/agent/permissions/shell-guidance'
 import { CLASH_WITH_CORE } from '../src/agent/instructions/instruction-files'
 
 let cwd: string

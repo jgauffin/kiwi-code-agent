@@ -25,7 +25,7 @@ function snapshot(over: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     profiles: [balanced, opusPlan],
     activeProfile: 'Balanced',
     keys: [{ name: 'berget', stored: false }],
-    permissions: { allow: [], deny: [], denyGitWrites: false, person: { allow: [], deny: [] } },
+    permissions: { workspace: [], person: [], denyGitWrites: false },
     verify: [],
     verifyFailureBudget: 3,
     cleanup: { functionLines: 60, functionComplexity: 15, typeLines: 200, fileLines: 400, tests: [], testFunctionLines: 120, testFunctionComplexity: 15, testTypeLines: 600, testFileLines: 1200, ignore: [] },

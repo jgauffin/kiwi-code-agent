@@ -144,14 +144,16 @@ describe('SessionManager', () => {
     }, () => {})
     const record = await manager.create(profile, 'file-decisions')
 
-    await manager.allowForSession(record.id, ['Writes(docs/**)'])
-    await manager.allowForSession(record.id, ['Writes(docs/**)', 'Bash(npm test)'])
+    const docs = { verdict: 'allow' as const, action: 'write' as const, place: 'D:/ws/docs', reach: 'tree' as const }
+    const tests = { verdict: 'allow' as const, command: ['npm', 'test'], place: 'D:/ws', reach: 'tree' as const }
+    await manager.keepForSession(record.id, [docs])
+    await manager.keepForSession(record.id, [docs, tests])
     await manager.setAllowWrites(record.id, true)
 
     const reopened = new SessionManager(store, noEngine, () => {
       throw new Error('no log')
     }, () => {})
-    expect(reopened.get(record.id)).toMatchObject({ allowed: ['Writes(docs/**)', 'Bash(npm test)'], allowWrites: true })
+    expect(reopened.get(record.id)).toMatchObject({ grants: [docs, tests], allowWrites: true })
     await reopened.setAllowWrites(record.id, false)
     expect(store.saved.at(-1)?.find((r) => r.id === record.id)).not.toHaveProperty('allowWrites')
   })
@@ -166,13 +168,15 @@ describe('SessionManager', () => {
     }, () => {})
     const record = await manager.create(profile, 'file-decisions')
 
-    await manager.denyForSession(record.id, ['Bash(curl:*)'])
-    await manager.denyForSession(record.id, ['Bash(curl:*)', 'Bash(wget:*)'])
+    const curl = { verdict: 'deny' as const, command: ['curl'], place: 'D:/ws', reach: 'tree' as const }
+    const wget = { verdict: 'deny' as const, command: ['wget'], place: 'D:/ws', reach: 'tree' as const }
+    await manager.keepForSession(record.id, [curl])
+    await manager.keepForSession(record.id, [curl, wget])
 
     const reopened = new SessionManager(store, noEngine, () => {
       throw new Error('no log')
     }, () => {})
-    expect(reopened.get(record.id)).toMatchObject({ denied: ['Bash(curl:*)', 'Bash(wget:*)'] })
+    expect(reopened.get(record.id)).toMatchObject({ grants: [curl, wget] })
   })
 
   it('the_persons_own_choice_to_push_for_a_session_is_kept_with_it_and_outlives_its_engine_and_the_host', async () => {

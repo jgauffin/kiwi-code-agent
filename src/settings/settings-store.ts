@@ -12,6 +12,8 @@ import { SEARCH_PROVIDER_SECRET_NAME, type EditableSettings, type SettingKey, ty
 import { DEFAULT_SERVICE_URL } from '../remote-control/remote-link'
 import type { PairedPhone } from '../remote-control/pairing'
 import type { PairingCode } from '../remote-control/remote-control-service'
+import type { Grant } from '../agent/permissions/grants'
+import { readGrantList } from '../agent/permissions/grant-stores'
 
 /** The `kiwiAgent` configuration section, keys relative to it. */
 export type ConfigPort = {
@@ -43,10 +45,10 @@ export type MemoryPort = {
   forget(scope: MemoryScope, title: string): Promise<void>
 }
 
-/** The permission rules kept for the person rather than any one workspace, honoured in every workspace that reaches the same ground. */
-export type PersonRulesPort = {
-  get(): { allow: string[]; deny: string[] }
-  set(kind: 'allow' | 'deny', rules: string[]): Promise<void>
+/** The answers kept for the person rather than any one workspace, honoured in every workspace that reaches the same ground. */
+export type PersonGrantsPort = {
+  get(): readonly Grant[]
+  set(grants: readonly Grant[]): Promise<void>
 }
 
 /** The paired phones and the pairing in progress, closed over this workspace's own link to the forwarding service. */
@@ -80,8 +82,7 @@ const TARGETS: Record<SettingKey | 'profiles' | 'providers', SettingsTarget> = {
   nodePath: 'user',
   traceEngine: 'user',
   compactAtTokens: 'user',
-  'permissions.allow': 'workspace',
-  'permissions.deny': 'workspace',
+  'permissions.grants': 'workspace',
   'permissions.denyGitWrites': 'workspace',
   verify: 'workspace',
   verifyFailureBudget: 'workspace',
@@ -141,7 +142,7 @@ export class SettingsStore {
     private readonly memory: MemoryPort,
     private readonly bundles: BundlePort,
     private readonly remoteControl: RemoteControlPort,
-    private readonly personRules: PersonRulesPort,
+    private readonly personGrants: PersonGrantsPort,
     /** Where the machine keeps its own Claude Code; passed in so a test decides what is installed. */
     private readonly findClaude: (configured: string) => string | undefined = installedClaude,
   ) {}
@@ -159,10 +160,9 @@ export class SettingsStore {
         [...names, SEARCH_PROVIDER_SECRET_NAME].map(async (name) => ({ name, stored: await this.secrets.has(name) })),
       ),
       permissions: {
-        allow: this.config.get<string[]>('permissions.allow', []),
-        deny: this.config.get<string[]>('permissions.deny', []),
+        workspace: readGrantList(this.config.get<unknown[]>('permissions.grants', [])),
+        person: [...this.personGrants.get()],
         denyGitWrites: this.config.get('permissions.denyGitWrites', false),
-        person: this.personRules.get(),
       },
       verify: this.config.get<VerifyRule[]>('verify', []),
       verifyFailureBudget: this.config.get('verifyFailureBudget', 3),
@@ -194,12 +194,12 @@ export class SettingsStore {
   async save<K extends SettingKey>(key: K, value: EditableSettings[K]): Promise<void> {
     const target = TARGETS[key]
     if (target === 'workspace' && !this.config.hasWorkspace()) throw new Error(`"${key}" is a workspace setting; open a folder to change it.`)
-    await this.config.update(key, cleaned(value), target)
+    await this.config.update(key, key === 'permissions.grants' ? readGrantList(value) : cleaned(value), target)
   }
 
   /** Kept for the person rather than this workspace, so it is honoured wherever they next reach the same ground. */
-  async savePersonRules(kind: 'allow' | 'deny', rules: string[]): Promise<void> {
-    await this.personRules.set(kind, cleaned(rules))
+  async savePersonGrants(grants: readonly unknown[]): Promise<void> {
+    await this.personGrants.set(readGrantList(grants))
   }
 
   /** Saves the provider at `index`, or adds it at the end; a rename follows into the profiles that chose it and carries its stored key along. */

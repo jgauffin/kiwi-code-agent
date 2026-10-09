@@ -1,5 +1,6 @@
 import type { McpServerState, PermissionDecision, SessionEvent } from '../agent/session/code-session'
 import type { QuestionOutcome } from '../agent/session/user-question'
+import type { KeptGrant } from '../agent/permissions/grants'
 import type { Decision } from '../agent/phases/decisions'
 import type { CommentRef, Review } from '../agent/phases/plan-review'
 import type { PlanStage } from '../agent/phases/plan-stage'
@@ -227,19 +228,8 @@ export type ToWebview =
   | { type: 'suggested_feature_name'; name?: string; reason?: string }
   | { type: 'event'; sessionId: string; run: RunRef; event: SessionEvent }
 
-/**
- * The user's answer to a permission prompt. `remember` carries the rules its
- * lines were allowed by that later calls should pass on; `denyRemember` the
- * ones a line was denied by instead, kept the same way.
- */
-export type UserPermissionDecision = PermissionDecision & { remember?: RememberedRules; denyRemember?: RememberedRules }
-
-/**
- * `session` rules hold for the coding session; `project` rules are written
- * into the workspace's allow or deny list; `person` rules into the one the
- * person keeps for themselves, honoured in every workspace.
- */
-export type RememberedRules = { session: string[]; project: string[]; person: string[] }
+/** The user's answer to a permission prompt, with the answers its rows are kept as for later calls, each in its own scope. */
+export type UserPermissionDecision = PermissionDecision & { keep?: KeptGrant[] }
 
 /** What the human does on the plan view of a draft: the review, and the rulings on its decisions. */
 export type ReviewAction =

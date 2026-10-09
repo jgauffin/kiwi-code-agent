@@ -3,7 +3,8 @@ import type { Profile, Provider } from '../src/agent/session/model-profile'
 import type { SettingsTarget } from '../src/settings/protocol'
 import type { MemoryEntry, MemoryScope } from '../src/agent/memory/memories'
 import type { AppliedBundle, Bundle, BundleScope } from '../src/agent/instructions/bundles'
-import { SettingsStore, type BundlePort, type ConfigPort, type MemoryPort, type PersonRulesPort, type RemoteControlPort, type SecretPort } from '../src/settings/settings-store'
+import { SettingsStore, type BundlePort, type ConfigPort, type MemoryPort, type PersonGrantsPort, type RemoteControlPort, type SecretPort } from '../src/settings/settings-store'
+import type { Grant } from '../src/agent/permissions/grants'
 import type { PairedPhone } from '../src/remote-control/pairing'
 
 type Written = { key: string; value: unknown; target: SettingsTarget }
@@ -81,13 +82,13 @@ function fakeRemoteControl(phones: PairedPhone[] = []) {
 }
 
 /** Remembers what it was asked to keep, rather than touching any real file. */
-function fakePersonRules(rules: { allow: string[]; deny: string[] } = { allow: [], deny: [] }) {
-  const sets: { kind: 'allow' | 'deny'; rules: string[] }[] = []
-  const port: PersonRulesPort = {
-    get: () => rules,
-    set: async (kind, values) => {
-      rules = { ...rules, [kind]: values }
-      sets.push({ kind, rules: values })
+function fakePersonRules(grants: readonly Grant[] = []) {
+  const sets: (readonly Grant[])[] = []
+  const port: PersonGrantsPort = {
+    get: () => grants,
+    set: async (values) => {
+      grants = values
+      sets.push(values)
     },
   }
   return { port, sets }
@@ -186,9 +187,9 @@ describe('SettingsStore profiles', () => {
   it('providers_and_profiles_write_to_user_settings', async () => {
     const { store: s, writes } = store(withModels([claudeProvider], [], ''))
     await s.saveProfile(0, opus)
-    await s.save('permissions.allow', ['Edit'])
+    await s.save('permissions.grants', [])
     expect(writes.filter((w) => w.key === 'profiles' || w.key === 'activeProfile').every((w) => w.target === 'user')).toBe(true)
-    expect(writes.find((w) => w.key === 'permissions.allow')?.target).toBe('workspace')
+    expect(writes.find((w) => w.key === 'permissions.grants')?.target).toBe('workspace')
   })
 })
 
@@ -266,20 +267,22 @@ describe('SettingsStore providers', () => {
   })
 })
 
+const read: Grant = { verdict: 'allow', action: 'read', place: 'D:/data', reach: 'tree' }
+
 describe('SettingsStore workspace settings', () => {
   it('workspace_keys_write_to_the_workspace_target', async () => {
     const { store: s, writes } = store({})
-    await s.save('permissions.allow', ['Edit'])
+    await s.save('permissions.grants', [read])
     await s.save('cleanup.fileLines', 300)
     expect(writes).toEqual([
-      { key: 'permissions.allow', value: ['Edit'], target: 'workspace' },
+      { key: 'permissions.grants', value: [read], target: 'workspace' },
       { key: 'cleanup.fileLines', value: 300, target: 'workspace' },
     ])
   })
 
   it('a_workspace_key_is_refused_without_a_folder_open', async () => {
     const { store: s, writes } = store({}, { hasWorkspace: false })
-    await expect(s.save('permissions.deny', ['Bash'])).rejects.toThrow(/open a folder/i)
+    await expect(s.save('permissions.grants', [read])).rejects.toThrow(/open a folder/i)
     expect(writes).toEqual([])
     expect((await s.snapshot()).hasWorkspace).toBe(false)
   })
@@ -298,22 +301,22 @@ describe('SettingsStore workspace settings', () => {
 })
 
 describe('SettingsStore permissions kept for the person', () => {
-  it('the_snapshot_lists_what_the_person_keeps_beside_the_workspaces_own_rules', async () => {
-    const per = fakePersonRules({ allow: ['Bash(cd D:/data)'], deny: ['Read(**/.ssh)'] })
-    const { store: s } = store({ 'permissions.allow': ['Edit'] }, { personRules: per })
-    expect((await s.snapshot()).permissions).toEqual({
-      allow: ['Edit'],
-      deny: [],
-      denyGitWrites: false,
-      person: { allow: ['Bash(cd D:/data)'], deny: ['Read(**/.ssh)'] },
-    })
+  const denied: Grant = { verdict: 'deny', action: 'read', place: 'D:/home/.ssh', reach: 'tree' }
+  const cargo: Grant = { verdict: 'allow', command: ['cargo', 'build'], place: 'D:/ws', reach: 'tree' }
+
+  it('the_snapshot_lists_what_the_person_keeps_beside_the_workspaces_own_answers', async () => {
+    const per = fakePersonRules([read, denied])
+    const { store: s } = store({ 'permissions.grants': [cargo, { verdict: 'allow', place: 'nowhere' }] }, { personRules: per })
+    // A hand-edited entry that does not read as a grant is left out rather than guessed at.
+    expect((await s.snapshot()).permissions).toEqual({ workspace: [cargo], person: [read, denied], denyGitWrites: false })
   })
 
-  it('saving_a_persons_rule_list_replaces_it_whole_without_a_workspace_setting_and_needs_no_folder_open', async () => {
+  it('saving_the_persons_answers_replaces_them_whole_without_a_workspace_setting_and_needs_no_folder_open', async () => {
     const per = fakePersonRules()
     const { store: s } = store({}, { hasWorkspace: false, personRules: per })
-    await s.savePersonRules('allow', ['Bash(cd D:/data)', ' ', 'Read(D:/data/**)'])
-    expect(per.sets).toEqual([{ kind: 'allow', rules: ['Bash(cd D:/data)', 'Read(D:/data/**)'] }])
+    await s.savePersonGrants([read, { verdict: 'allow', command: ['git'], flags: ['--force'], place: 'D:/ws', reach: 'tree' }])
+    // An allow naming flags is never kept.
+    expect(per.sets).toEqual([[read]])
   })
 })
 

@@ -286,15 +286,17 @@ export class SdkSession implements CodeSession {
       const pre = hooks.preToolUse.bind(hooks)
       const callback: HookCallback = async (input): Promise<HookJSONOutput> => {
         if (input.hook_event_name !== 'PreToolUse') return {}
-        const outcome = await pre({ toolName: bareToolName(input.tool_name), input: input.tool_input, toolUseId: input.tool_use_id })
+        // The hook's `cwd` follows the engine's shell from one call to the next.
+        const outcome = await pre({ toolName: bareToolName(input.tool_name), input: input.tool_input, toolUseId: input.tool_use_id, cwd: input.cwd })
         if (outcome && 'deny' in outcome) {
           return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: outcome.deny } }
         }
-        if (!outcome?.allow && !outcome?.additionalContext) return {}
+        if (!outcome?.allow && !outcome?.ask && !outcome?.additionalContext) return {}
         return {
           hookSpecificOutput: {
             hookEventName: 'PreToolUse',
-            ...(outcome.allow ? { permissionDecision: 'allow' } : {}),
+            // An ask is explicit so the engine's own allow rules, which the policy has already read as grants, cannot let the call past it.
+            ...(outcome.allow ? { permissionDecision: 'allow' } : outcome.ask ? { permissionDecision: 'ask' } : {}),
             ...(outcome.additionalContext ? { additionalContext: outcome.additionalContext } : {}),
           },
         }

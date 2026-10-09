@@ -2,6 +2,12 @@
 
 ## 0.2.8
 
+- Permission prompts list what the call would do, one row per effect, and show the sentence an answer is kept as (who, what, where, how far below) before you confirm; the Permissions settings page lists kept answers the same way.
+- Answers are kept as `kiwiAgent.permissions.grants`; old `permissions.allow`/`deny` entries granting a folder are converted on start, and command-prefix and `cd` answers are dropped and asked again.
+- Deleting or overwriting is asked every time, except in the scratch folder, in ignored output, or (with Allow writes on) where git can bring it back.
+- `cd` no longer asks; commands after it are judged from where it lands, and the Claude engine's real shell directory is used across calls.
+- `sed -i`, `perl -pi`, `tee`, `echo > file` and heredocs into a file are refused with a pointer to Edit, Write or RunScript.
+- The Claude engine's own `permissions` rules in `.claude/settings*.json` and `~/.claude/settings.json` are honoured as kept answers, and can no longer let a call past a prompt on their own.
 - A folder you allowed for writing can now also be read unasked, and a folder you denied for reading or for changing into refuses reads and writes below it, in shell commands and file tools alike.
 - Every permission prompt now offers "Allow" for this call alone beside any remembered-rule button, pre-selected so a plain Allow or Enter settles it without picking a scope. A copy or move command lists what it reads from and what it writes to, and marks whichever one is why it is asking.
 - A rule about a folder or a file outside every one of your repositories (a `cd` into it, or a shell command that writes to it) can now be kept for you rather than for one workspace, so granting it once covers every project that reaches the same ground. The Permissions settings page has a new "For you, in every workspace" section listing what you have kept, in a file of your own (`~/.kiwi/permissions.json`); a write there is always asked, the way a write to a workspace's own settings already is.

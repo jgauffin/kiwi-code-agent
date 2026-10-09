@@ -14,7 +14,7 @@ import {
   ModelUpgradeTakenEvent,
   ModelsRefreshRequestedEvent,
   PairingCodeRequestedEvent,
-  PersonRulesChangedEvent,
+  PersonGrantsChangedEvent,
   PhoneUnpairedEvent,
   ProfileRemovedEvent,
   ProfileSavedEvent,
@@ -89,7 +89,7 @@ export class SettingsApp extends HTMLElement {
     this.addEventListener(BundleOfferDismissedEvent.type, () => post({ type: 'dismiss_bundle_offer' }))
     this.addEventListener(ModelUpgradeTakenEvent.type, () => post({ type: 'upgrade_models' }))
     this.addEventListener(ModelUpgradeDismissedEvent.type, () => post({ type: 'dismiss_model_upgrade' }))
-    this.addEventListener(PersonRulesChangedEvent.type, (e) => post({ type: 'save_person_rules', kind: e.kind, values: e.values }))
+    this.addEventListener(PersonGrantsChangedEvent.type, (e) => post({ type: 'save_person_grants', grants: e.grants }))
     this.addEventListener(PairingCodeRequestedEvent.type, () => post({ type: 'request_pairing_code' }))
     this.addEventListener(PhoneUnpairedEvent.type, (e) => post({ type: 'unpair_phone', id: e.id }))
 

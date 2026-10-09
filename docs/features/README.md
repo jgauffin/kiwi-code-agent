@@ -8,3 +8,4 @@ One file per feature, in rough build order. Each says what the feature does; `do
 4. [coordination.md](coordination.md)
 5. [ado-integration.md](ado-integration.md)
 6. [own-loop-compaction.md](own-loop-compaction.md)
+7. [permission-engine.md](permission-engine.md)

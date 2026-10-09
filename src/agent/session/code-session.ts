@@ -1,10 +1,10 @@
 import type { ModelProfile } from './model-profile'
 import type { FileEditChange } from '../edits/file-edit-diff'
-import type { CommandLine } from '../permissions/permission-rules'
+import type { PermissionRow } from '../permissions/judge-call'
 import type { QuestionOutcome, UserQuestionRequest } from './user-question'
 import type { McpServers } from '../mcp/mcp-config'
 
-export type { CommandLine, FileEditChange }
+export type { PermissionRow, FileEditChange }
 
 /** One MCP server as the engine last reported it. */
 export type McpServerState = {
@@ -92,8 +92,8 @@ export type SessionEvent =
       edit?: FileEditChange
       /** Several files' changes asked about as one: a script's whole run, applied or dropped together. */
       edits?: FileEditChange[]
-      /** A shell call as its commands, each with what already lets it through or the rule that would; shown in place of the raw arguments. */
-      commands?: CommandLine[]
+      /** The call as what it would do, one row per effect, each with what the rules make of it and what an answer may be kept as. */
+      rows?: PermissionRow[]
     }
   | { type: 'permission_resolved'; requestId: string; decision: PermissionDecision['kind']; message?: string }
   /** The model asks the user; the session makes no further progress until the request is resolved. */

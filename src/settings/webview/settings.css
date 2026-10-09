@@ -142,6 +142,35 @@ settings-app {
     }
   }
 
+  /* Each kept answer as the sentence it was kept as, a denial marked apart from an allow. */
+  & .grant-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-width: 48rem;
+
+    & li {
+      display: flex;
+      gap: 0.6rem;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.3rem 0;
+
+      & + li {
+        border-top: 1px solid var(--vscode-panel-border);
+      }
+
+      &.deny .sentence {
+        color: var(--vscode-errorForeground);
+      }
+
+      & .remove {
+        padding: 0.3rem 0.5rem;
+        flex: none;
+      }
+    }
+  }
+
   & rule-list,
   & verify-rules {
     display: flex;

@@ -138,7 +138,7 @@ describe("the task's work is its own", () => {
 describe('the board tools run without a prompt and the file itself is off limits to the implementer', () => {
   it('no_board_tool_is_put_to_a_permission_prompt', async () => {
     const tools = taskBoardTools(FEATURE)
-    const policy = new PermissionPolicy(dir, () => ({ allow: [], deny: [] }), { readOnly: readOnlyTools(() => tools) })
+    const policy = new PermissionPolicy(dir, () => ({ grants: [] }), { readOnly: readOnlyTools(() => tools) })
     for (const name of ['ReadTasks', 'UpdateTask']) {
       expect(tools.map((t) => t.name), name).toContain(name)
       expect(await policy.preToolUse({ toolName: name, input: {}, toolUseId: 't' })).toEqual({ allow: true })

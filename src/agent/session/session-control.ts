@@ -4,6 +4,7 @@ import { sameModelProfile, type ModelProfile } from './model-profile'
 import { continuationOf, type CallPasses, type SessionRecord } from './session-manager'
 import { type PermissionRequest, type SessionEngineHost } from './session-engine-host'
 import { errorMessage } from '../../error-message'
+import { sameGrant, type Grant } from '../permissions/grants'
 
 /**
  * What a session may do, and what gets said to its engine: access grants,
@@ -38,19 +39,11 @@ export class SessionControl {
     await this.host.close(id)
   }
 
-  /** In force from the next call on; the engine is not restarted, since the rules are read on every call. */
-  async allowForSession(id: string, rules: string[]): Promise<void> {
+  /** In force from the next call on; the engine is not restarted, since the answers are read on every call. */
+  async keepForSession(id: string, grants: Grant[]): Promise<void> {
     const record = this.requireRecord(id)
-    const current = record.allowed ?? []
-    record.allowed = [...current, ...rules.filter((r) => !current.includes(r))]
-    await this.saveRecords()
-  }
-
-  /** In force from the next call on, the same way a session's own allow rules are. */
-  async denyForSession(id: string, rules: string[]): Promise<void> {
-    const record = this.requireRecord(id)
-    const current = record.denied ?? []
-    record.denied = [...current, ...rules.filter((r) => !current.includes(r))]
+    const current = record.grants ?? []
+    record.grants = [...current, ...grants.filter((g) => !current.some((c) => sameGrant(c, g)))]
     await this.saveRecords()
   }
 

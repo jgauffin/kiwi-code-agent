@@ -11,7 +11,7 @@ import { EDIT_WRITING } from './tools/edit'
 import { memoryWritingInstructions } from '../memory/memories'
 import { memorySection, readMemorySources } from '../memory/session-context'
 import { projectScriptsInstruction } from '../permissions/package-scripts'
-import { PIPE_WRITING } from '../permissions/read-only-commands'
+import { PIPE_WRITING } from '../permissions/shell-guidance'
 
 /**
  * System prompt for the own-loop engine. Short on purpose: judgment rules

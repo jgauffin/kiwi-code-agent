@@ -45,14 +45,10 @@ export async function handleRunMessage(deps: MessageRouterDeps, message: FromWeb
 async function answerPermission(deps: MessageRouterDeps, message: WebviewMessage<'permission'>): Promise<void> {
   const { sessions, permissions } = deps
   if (!sessions.get(message.sessionId)) return
-  // The rules are in place before the call runs, so a second call they cover in the same turn already passes.
-  const { remember, denyRemember, ...decision } = message.decision
-  if (remember?.project.length) await permissions.allowForProject(remember.project)
-  if (remember?.session.length) await permissions.allowForSession(message.sessionId, remember.session)
-  if (remember?.person.length) await permissions.allowForPerson(remember.person)
-  if (denyRemember?.project.length) await permissions.denyForProject(denyRemember.project)
-  if (denyRemember?.session.length) await permissions.denyForSession(message.sessionId, denyRemember.session)
-  if (denyRemember?.person.length) await permissions.denyForPerson(denyRemember.person)
+  // Kept answers are in place before the call runs, so a second call they cover in the same turn already passes;
+  // they are kept even when the call itself is refused.
+  const { keep, ...decision } = message.decision
+  if (keep?.length) await permissions.keep(message.sessionId, keep)
   await sessions.respondToPermission(message.sessionId, message.requestId, decision)
 }
 

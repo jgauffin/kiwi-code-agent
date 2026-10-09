@@ -4,18 +4,21 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { packageScripts } from '../src/agent/permissions/package-scripts'
 import { PermissionPolicy } from '../src/agent/permissions/permission-policy'
-import { commandLines } from '../src/agent/permissions/permission-rules'
+import type { KeptGrant } from '../src/agent/permissions/grants'
+import { normalizePlace } from '../src/agent/permissions/places'
 import type { ProjectCommands } from '../src/agent/permissions/project-commands'
 
 const cwd = process.platform === 'win32' ? 'D:\\work\\repo' : '/work/repo'
 
 const defined: ProjectCommands = { scripts: new Set(['build', 'test', 'typecheck']), verify: ['dotnet test "{project}" --nologo', 'npm test'] }
 
-const policy = (project: ProjectCommands, rules: { allow?: string[]; deny?: string[] } = {}) =>
-  new PermissionPolicy(cwd, () => ({ allow: rules.allow ?? [], deny: rules.deny ?? [] }), { project: () => project })
+const policy = (project: ProjectCommands, grants: KeptGrant[] = []) =>
+  new PermissionPolicy(cwd, () => ({ grants }), { project: () => project, ignored: () => false, recoverable: () => false })
 
-const asks = (command: string, project: ProjectCommands = defined, rules?: { allow?: string[]; deny?: string[] }) =>
-  policy(project, rules).preToolUse({ toolName: 'Bash', input: { command }, toolUseId: 't' })
+const asks = (command: string, project: ProjectCommands = defined, grants?: KeptGrant[]) =>
+  policy(project, grants).preToolUse({ toolName: 'Bash', input: { command }, toolUseId: 't' })
+
+const ASKED = { ask: true }
 
 describe('commands the project defines for itself', () => {
   it('a_script_the_package_json_defines_runs_without_a_prompt', async () => {
@@ -27,22 +30,22 @@ describe('commands the project defines for itself', () => {
   it('a_command_no_script_defines_still_prompts', async () => {
     // `install` and `publish` are the package manager's own, not the user's; `runner` is not `run`.
     for (const command of ['npm install', 'npm publish', 'npm run release', 'npm runner', 'yarn add lodash', 'npx vitest run']) {
-      expect(await asks(command), command).toBeUndefined()
+      expect(await asks(command), command).toEqual(ASKED)
     }
   })
 
   it('a_script_run_against_another_package_prompts_because_its_scripts_are_not_the_ones_read', async () => {
     for (const command of ['npm --prefix web run build', 'npm run build --workspace=web', 'pnpm -F web build']) {
-      expect(await asks(command), command).toBeUndefined()
+      expect(await asks(command), command).toEqual(ASKED)
     }
   })
 
   it('a_script_xargs_hands_arguments_prompts_because_they_may_send_it_to_another_package', async () => {
-    expect(await asks('echo --prefix=../other | xargs npm run build')).toBeUndefined()
+    expect(await asks('echo --prefix=../other | xargs npm run build')).toEqual(ASKED)
   })
 
   it('a_script_whose_output_is_redirected_into_a_file_prompts_for_the_file_it_writes', async () => {
-    expect(await asks('npm run build > dist/log.txt')).toBeUndefined()
+    expect(await asks('npm run build > dist/log.txt')).toEqual(ASKED)
     // A redirect to nowhere writes nothing.
     expect(await asks('npm run build 2>&1')).toEqual({ allow: true })
   })
@@ -52,29 +55,31 @@ describe('commands the project defines for itself', () => {
       expect(await asks(command, { scripts: new Set(), verify: defined.verify }), command).toEqual({ allow: true })
     }
     // A different subcommand of the same tool is not the command the rule names.
-    expect(await asks('dotnet build src/Api/Api.csproj', { scripts: new Set(), verify: defined.verify })).toBeUndefined()
+    expect(await asks('dotnet build src/Api/Api.csproj', { scripts: new Set(), verify: defined.verify })).toEqual(ASKED)
   })
 
   it('a_deny_rule_beats_a_command_the_project_defines', async () => {
-    expect(await asks('npm run build', defined, { deny: ['Bash(npm run build)'] })).toMatchObject({ deny: expect.stringContaining('npm run build') })
+    const denied: KeptGrant = { verdict: 'deny', command: ['npm', 'run'], place: normalizePlace(cwd), reach: 'tree', scope: 'workspace' }
+    expect(await asks('npm run build', defined, [denied])).toMatchObject({ deny: expect.stringContaining('npm run build') })
   })
 
   it('a_chain_with_one_command_the_project_does_not_define_still_prompts', async () => {
     expect(await asks('npm run build && ls')).toEqual({ allow: true })
-    expect(await asks('npm run build && rm -rf dist')).toBeUndefined()
+    expect(await asks('npm run build && rm -rf dist')).toEqual(ASKED)
   })
 
   it('the_prompt_says_which_commands_the_project_itself_defines', () => {
-    expect(commandLines('Bash', 'npm run build && dotnet test x.csproj && rm x', [], {}, defined)).toEqual([
-      { text: 'npm run build', passes: 'package.json script' },
-      { text: 'dotnet test x.csproj', passes: 'kiwiAgent.verify command' },
-      { text: 'rm x', rule: 'Bash(rm:*)' },
+    const rows = policy(defined).judge('Bash', { command: 'npm run build && dotnet test x.csproj && rm x' }, undefined).rows
+    expect(rows.map((r) => [r.text, r.verdict, r.reason])).toEqual([
+      ['npm run build', 'passes', 'package.json script'],
+      ['dotnet test x.csproj', 'passes', 'kiwiAgent.verify command'],
+      ['rm x', 'asked', 'it deletes or replaces what is there'],
     ])
   })
 
   it('a_project_that_defines_nothing_is_judged_by_its_rules_alone', async () => {
-    expect(await asks('npm run build', { scripts: new Set(), verify: [] })).toBeUndefined()
-    expect(commandLines('Bash', 'npm run build', [])).toEqual([{ text: 'npm run build', rule: 'Bash(npm run:*)' }])
+    expect(await asks('npm run build', { scripts: new Set(), verify: [] })).toEqual(ASKED)
+    expect(policy({ scripts: new Set(), verify: [] }).judge('Bash', { command: 'npm run build' }, undefined).rows[0]!.keep?.subject).toEqual({ command: ['npm', 'run'] })
   })
 })
 

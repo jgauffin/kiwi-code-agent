@@ -3,6 +3,7 @@ import type { ModelProfile, Step } from './model-profile'
 import type { RunLog } from '../runs/run-log'
 import type { QuestionOutcome } from './user-question'
 import type { ToolUse } from './hooks'
+import type { Grant } from '../permissions/grants'
 import { SessionEngineHost } from './session-engine-host'
 import { SessionControl } from './session-control'
 
@@ -103,9 +104,10 @@ export type SessionRecord = {
   cutOff?: true
   /** "Allow writes" is on: writes in the project pass without a prompt, within what the mode lets the session touch. */
   allowWrites?: true
-  /** Permission rules the person allowed for this session, in force beside the project's. Kept across engines and hosts. */
+  /** Answers the person kept for this session, in force beside the workspace's and their own. Kept across engines and hosts. */
+  grants?: Grant[]
+  /** Answers kept for this session in the form used before grants; read as grants where they grant a directory. */
   allowed?: string[]
-  /** Permission rules the person denied for this session, in force beside the project's. Kept across engines and hosts. */
   denied?: string[]
   /** On a plan session: the spec as its last turn ended on it, by fingerprint, so a revision made by another hand is told apart from its own. */
   specSeen?: string
@@ -299,14 +301,9 @@ export class SessionManager {
     await this.control.grantFullAccess(id, continuesOn)
   }
 
-  /** In force from the next call on; the engine is not restarted, since the rules are read on every call. */
-  async allowForSession(id: string, rules: string[]): Promise<void> {
-    await this.control.allowForSession(id, rules)
-  }
-
-  /** In force from the next call on, the same way a session's own allow rules are. */
-  async denyForSession(id: string, rules: string[]): Promise<void> {
-    await this.control.denyForSession(id, rules)
+  /** In force from the next call on; the engine is not restarted, since the answers are read on every call. */
+  async keepForSession(id: string, grants: Grant[]): Promise<void> {
+    await this.control.keepForSession(id, grants)
   }
 
   async setAllowWrites(id: string, enabled: boolean): Promise<void> {

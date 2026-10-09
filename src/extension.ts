@@ -31,9 +31,10 @@ import {
   createAllowWritesControl,
   createEngines,
   createMcp,
+  createGrantSources,
   createPermissionStore,
-  createPersonRulesStore,
   createPolicyFor,
+  migrateWorkspaceRules,
   createProjectCommands,
   createSessionStore,
   createSessions,
@@ -42,7 +43,7 @@ import {
   profileFor,
   registeredModels,
 } from './session-wiring'
-import type { PersonRulesStore } from './agent/permissions/person-rules'
+import type { PersonGrantsStore } from './agent/permissions/grant-stores'
 import { createRemoteControl, pushDefault, remoteAlertPort, remoteControlPort, syncRemoteControlConnection } from './remote-control/remote-control-wiring'
 
 function createMemoryPort(workspaceRoot: string): MemoryPort {
@@ -104,7 +105,7 @@ function createSettings(
   memoryPort: MemoryPort,
   bundlesPort: BundlePort,
   remoteControlPort: RemoteControlPort,
-  personRules: PersonRulesStore,
+  personGrants: PersonGrantsStore,
 ): SettingsStore {
   return new SettingsStore(
     configPort(),
@@ -122,7 +123,7 @@ function createSettings(
     memoryPort,
     bundlesPort,
     remoteControlPort,
-    personRules,
+    personGrants,
   )
 }
 
@@ -293,20 +294,21 @@ export function activate(context: vscode.ExtensionContext): void {
   let sessions: SessionManager
   const allowWritesControl = createAllowWritesControl(() => sessions, output)
   const projectCommands = createProjectCommands(workspaceRoot, verifier)
-  const personRules = createPersonRulesStore()
-  const policyFor = createPolicyFor(workspaceRoot, context, () => sessions, () => engines, projectCommands, allowWritesControl, policies, personRules)
+  const grants = createGrantSources(workspaceRoot, output)
+  migrateWorkspaceRules(workspaceRoot).catch((error: unknown) => output.appendLine(`permissions: could not convert the workspace's old answers: ${errorMessage(error)}`))
+  const policyFor = createPolicyFor(workspaceRoot, context, () => sessions, () => engines, projectCommands, allowWritesControl, policies, grants)
   /** Docs the blind planner must not see, so neither the map nor the evaluation may describe them. */
   const planIgnore = (): string[] => vscode.workspace.getConfiguration('kiwiAgent').get<string[]>('planIgnore', [])
 
   const mcp = createMcp(workspaceRoot, () => sessions, output)
   engines = createEngines({ context, output, workspaceRoot, mcp, verifier, policyFor, planIgnore, getChat: () => chat, getSessions: () => sessions })
   sessions = createSessions(store, engines, workspaceRoot, policyFor, () => chat)
-  const permissionStore = createPermissionStore(() => sessions, personRules)
+  const permissionStore = createPermissionStore(() => sessions, grants)
   const memoryPort = createMemoryPort(workspaceRoot)
   const bundles = createBundles(output, workspaceRoot)
   const agentsMd = createAgentsMdOffers(context, workspaceRoot, output, () => chat)
   const remoteControl = createRemoteControl(context, output)
-  const settings = createSettings(context, memoryPort, bundles.port, remoteControlPort(remoteControl), personRules)
+  const settings = createSettings(context, memoryPort, bundles.port, remoteControlPort(remoteControl), grants.person)
   const settingsPanel = createSettingsPanel(context, settings, workspaceRoot)
   offerNewerModels(context, settings, output)
   // Naming a feature runs on what its planning would, so the one ask follows the profile rather than a model of its own.

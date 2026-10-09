@@ -16,7 +16,7 @@ function snapshot(): SettingsSnapshot {
     profiles: [{ name: 'Claude', default: { provider: 'Claude', model: 'claude-opus-5-5' } }],
     activeProfile: 'Claude',
     keys: [],
-    permissions: { allow: [], deny: [], denyGitWrites: false, person: { allow: [], deny: [] } },
+    permissions: { workspace: [], person: [], denyGitWrites: false },
     verify: [],
     verifyFailureBudget: 3,
     cleanup: { functionLines: 60, functionComplexity: 15, typeLines: 200, fileLines: 400, tests: [], testFunctionLines: 120, testFunctionComplexity: 15, testTypeLines: 600, testFileLines: 1200, ignore: [] },

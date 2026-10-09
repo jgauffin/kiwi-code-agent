@@ -2,6 +2,7 @@ import * as vscode from 'vscode'
 import { isFeatureless, type SessionManager, type SessionMode, type SessionRecord } from '../agent/session/session-manager'
 import type { ModelOffer, ModelProfile, Step } from '../agent/session/model-profile'
 import type { SessionEvent } from '../agent/session/code-session'
+import type { KeptGrant } from '../agent/permissions/grants'
 import type { SessionStatus } from '../agent/session/session-status'
 import type { DocsMapResult } from '../agent/docs-map/build'
 import type { FromWebview } from './protocol'
@@ -25,16 +26,12 @@ import { wireCollaborators } from './chat-collaborators'
 export { CHAT_PANEL_TYPE }
 
 /**
- * Where a prompt's answer goes to be kept: the workspace's permission list,
- * the session's own, or the person's own, honoured in every workspace.
+ * Where a prompt's answer goes to be kept, by each grant's scope: the
+ * session's own, the workspace's settings, or the person's own, honoured in
+ * every workspace.
  */
 export interface PermissionStore {
-  allowForProject(rules: string[]): Promise<void>
-  allowForSession(sessionId: string, rules: string[]): Promise<void>
-  allowForPerson(rules: string[]): Promise<void>
-  denyForProject(rules: string[]): Promise<void>
-  denyForSession(sessionId: string, rules: string[]): Promise<void>
-  denyForPerson(rules: string[]): Promise<void>
+  keep(sessionId: string, grants: readonly KeptGrant[]): Promise<void>
 }
 
 /** What new sessions run on, as the new-session screen shows and sets it. */

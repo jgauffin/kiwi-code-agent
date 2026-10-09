@@ -114,8 +114,8 @@ export class SettingsPanel {
         case 'unpair_phone':
           this.store.unpairPhone(message.id)
           return
-        case 'save_person_rules':
-          await this.store.savePersonRules(message.kind, message.values)
+        case 'save_person_grants':
+          await this.store.savePersonGrants(message.grants)
           return
       }
     } finally {

@@ -4,6 +4,7 @@ import type { Profile, Provider } from '../agent/session/model-profile'
 import type { ModelMove } from './model-upgrade'
 import type { VerifyRule } from '../agent/phases/verification'
 import type { PairedPhone } from '../remote-control/pairing'
+import type { Grant } from '../agent/permissions/grants'
 
 /** Whether a key the providers name is in secret storage; the key itself never leaves the host. */
 export type ApiKeyState = { name: string; stored: boolean }
@@ -17,7 +18,8 @@ export type SettingsSnapshot = {
   profiles: Profile[]
   activeProfile: string
   keys: ApiKeyState[]
-  permissions: { allow: string[]; deny: string[]; denyGitWrites: boolean; person: { allow: string[]; deny: string[] } }
+  /** The answers kept for this workspace and for the person, each read as the sentence it was kept as. */
+  permissions: { workspace: Grant[]; person: Grant[]; denyGitWrites: boolean }
   verify: VerifyRule[]
   verifyFailureBudget: number
   cleanup: {
@@ -72,8 +74,7 @@ export type EditableSettings = {
   nodePath: string
   traceEngine: boolean
   compactAtTokens: number
-  'permissions.allow': string[]
-  'permissions.deny': string[]
+  'permissions.grants': Grant[]
   'permissions.denyGitWrites': boolean
   verify: VerifyRule[]
   verifyFailureBudget: number
@@ -146,5 +147,5 @@ export type FromSettingsWebview =
   | { type: 'request_pairing_code' }
   /** "Unpair" on a paired phone's row. */
   | { type: 'unpair_phone'; id: string }
-  /** Replaces the person's own allow or deny list, honoured in every workspace. */
-  | { type: 'save_person_rules'; kind: 'allow' | 'deny'; values: string[] }
+  /** Replaces the answers the person keeps for themselves, honoured in every workspace. */
+  | { type: 'save_person_grants'; grants: Grant[] }

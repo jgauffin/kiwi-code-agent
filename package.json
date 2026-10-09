@@ -251,6 +251,24 @@
           "default": "described",
           "description": "The docs map feature planning and Clean up docs sessions start with."
         },
+        "kiwiAgent.permissions.grants": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["verdict", "place", "reach"],
+            "properties": {
+              "verdict": { "enum": ["allow", "deny"] },
+              "action": { "enum": ["read", "write"], "description": "An action kept for the place. Set this or command, not both." },
+              "command": { "type": "array", "items": { "type": "string" }, "description": "A command and its subcommand (\"cargo\", \"build\"), or a tool's name; its own effects at the place are covered." },
+              "flags": { "type": "array", "items": { "type": "string" }, "description": "On a deny only: the long flags a call must carry to be refused (\"--force\")." },
+              "place": { "type": "string", "description": "An absolute path." },
+              "reach": { "enum": ["file", "directory", "tree"], "description": "The file alone, the directory alone, or the directory and everything below it." }
+            }
+          },
+          "default": [],
+          "scope": "resource",
+          "description": "Answers kept from permission prompts for this workspace, each an allow or a deny of an action or a command at a place. A deny wins over any allow, in any scope. Reading in the workspace, a script the root package.json defines and a command kiwiAgent.verify names need no answer; deleting or replacing content, running a program decided at run time, and a place the line does not settle are always asked."
+        },
         "kiwiAgent.permissions.allow": {
           "type": "array",
           "items": {
@@ -258,7 +276,7 @@
           },
           "default": [],
           "scope": "resource",
-          "description": "Tool calls that run without a prompt, on every engine. A rule is a tool name (Edit), a tool with a glob on the workspace-relative path (Edit(src/**)), or Bash or PowerShell with a command: Bash(npm test) for that exact command, PowerShell(npm run:*) for any command starting with those words; a rule for one shell says nothing about the other. Every segment of a chained command must be covered or read-only. \"Allow for project\" on a prompt writes here; \"Allow for session\" keeps the rule in memory for that session instead. No rule is needed for read-only tools and commands (Read, Grep, ls, git status, ...), for a script the root package.json defines, or for a command kiwiAgent.verify names: a deny rule still blocks those."
+          "deprecationMessage": "Replaced by kiwiAgent.permissions.grants: answers here that grant a directory are converted when the extension starts, and the rest are asked again."
         },
         "kiwiAgent.permissions.deny": {
           "type": "array",
@@ -267,7 +285,7 @@
           },
           "default": [],
           "scope": "resource",
-          "description": "Tool calls blocked outright, same rule shape as permissions.allow. Wins over allow rules and over read-only calls: Read(**/.env), Bash(curl:*)."
+          "deprecationMessage": "Replaced by kiwiAgent.permissions.grants: answers here that deny a directory are converted when the extension starts, and the rest are asked again."
         },
         "kiwiAgent.permissions.denyGitWrites": {
           "type": "boolean",

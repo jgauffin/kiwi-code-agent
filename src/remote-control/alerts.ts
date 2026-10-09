@@ -77,13 +77,19 @@ export function permissionAlert(sessionId: string, title: string, request: Permi
   return {
     sessionId,
     title,
-    body: request.description ?? request.title ?? request.toolName,
+    body: askedRows(request) ?? request.description ?? request.title ?? request.toolName,
     buttons: [
       { label: 'Allow', value: 'allow' },
       { label: 'Deny', value: 'deny' },
     ],
     opensApp: needsScreen(request),
   }
+}
+
+/** What the call would do that is being asked about, in the words the desk's prompt uses; nothing when the prompt lists no rows. */
+function askedRows(request: PermissionRequestEvent): string | undefined {
+  const asked = (request.rows ?? []).filter((row) => row.verdict === 'asked').map((row) => row.does)
+  return asked.length ? asked.join('; ') : undefined
 }
 
 /** The alert for whichever event stops a session mid-turn on the person; nothing for a turn that merely ended or any other progress. */

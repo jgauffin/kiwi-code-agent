@@ -14,10 +14,13 @@ const HEADER_WORDS = new Set(['for', 'select', 'case', 'esac', 'in'])
 export class SimpleCommandBuilder {
   private words: Word[] = []
   private writes: string[] = []
+  private appends: string[] = []
   /** Files fed in by `< path`. */
   private reads: string[] = []
+  private fedText = false
   /** The next word is the file an output redirect writes. */
   private redirectPending = false
+  private appendPending = false
   /** The next word is the file an input redirect feeds in, not a word of the command. */
   private readPending = false
   private conditional = false
@@ -34,8 +37,14 @@ export class SimpleCommandBuilder {
     return this.cases.at(-1) === 'pattern'
   }
 
-  redirectNextWord(): void {
+  redirectNextWord(append: boolean): void {
     this.redirectPending = true
+    this.appendPending = append
+  }
+
+  /** A heredoc or here-string feeds the command text written in the line. */
+  feedText(): void {
+    this.fedText = true
   }
 
   readNextWord(): void {
@@ -66,7 +75,10 @@ export class SimpleCommandBuilder {
   accept(word: Word): void {
     if (this.redirectPending) {
       this.redirectPending = false
-      if (!isHarmlessRedirectTarget(word.text)) this.writes.push(word.text)
+      if (!isHarmlessRedirectTarget(word.text)) {
+        this.writes.push(word.text)
+        if (this.appendPending) this.appends.push(word.text)
+      }
       return
     }
     if (this.readPending) {
@@ -89,14 +101,19 @@ export class SimpleCommandBuilder {
       tokens: command.words.map((w) => w.text),
       writesFile: this.writes.length > 0,
       writes: this.writes,
+      appends: this.appends,
       reads: this.reads,
+      fedText: this.fedText,
       substituted: command.words.some((w) => w.substituted),
       ...(joined !== undefined && !command.opened ? { joined } : {}),
     }
     this.words = []
     this.writes = []
+    this.appends = []
     this.reads = []
+    this.fedText = false
     this.redirectPending = false
+    this.appendPending = false
     this.readPending = false
     this.conditional = false
     return segment

@@ -22,6 +22,10 @@ export type ShellSegment = {
   writesFile: boolean
   /** The targets of an output redirect, as written: a word that still holds an expansion names no path a rule can judge. */
   writes: string[]
+  /** The targets among `writes` that `>>` adds to rather than replaces. */
+  appends: string[]
+  /** A heredoc or here-string feeds the command text written in the line itself. */
+  fedText: boolean
   /** Files fed in by `< path`: read as surely as a file named as an argument, and named nowhere in `tokens`. */
   reads: string[]
   /** A word of it came out of `$(…)`, backticks or `<(…)`: it holds the substitution as written, not what it will stand for. */
@@ -151,8 +155,9 @@ class Splitter {
   private controlOperator(c: string, next: string | undefined): void {
     if (c === '&' && next === '>') {
       this.endWord()
-      this.i += this.src[this.i + 2] === '>' ? 3 : 2
-      this.command.redirectNextWord()
+      const append = this.src[this.i + 2] === '>'
+      this.i += append ? 3 : 2
+      this.command.redirectNextWord(append)
       return
     }
     this.endSegment(this.i, this.i + (next === c || (c === '|' && next === '&') ? 2 : 1))
@@ -221,9 +226,13 @@ class Splitter {
   private redirect(): void {
     if (!this.word.dropFdPrefix()) this.endWord()
     const found = redirectAt(this.src, this.i)
-    if (found.kind === 'writes') this.command.redirectNextWord()
+    if (found.kind === 'writes') this.command.redirectNextWord(found.append)
     else if (found.kind === 'reads') this.command.readNextWord()
-    else if (found.kind === 'heredoc') this.heredocs.push({ delimiter: found.delimiter, stripTabs: found.stripTabs, owner: this.segments.length })
+    else if (found.kind === 'here-string') this.command.feedText()
+    else if (found.kind === 'heredoc') {
+      this.command.feedText()
+      this.heredocs.push({ delimiter: found.delimiter, stripTabs: found.stripTabs, owner: this.segments.length })
+    }
     this.i = found.end
   }
 

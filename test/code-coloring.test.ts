@@ -70,22 +70,15 @@ describe('a permission card', () => {
     return card
   }
 
-  it('shell_command_lines_are_colored_as_shell', () => {
-    const card = show({
-      type: 'permission_request',
-      requestId: 'r1',
-      toolName: 'Bash',
-      title: 'Bash',
-      input: { command: 'echo "hi"' },
-      commands: [{ text: 'echo "hi"', rule: 'Bash(echo:*)' }],
-    })
-    const code = card.querySelector('li.command code')!
+  it('the_shell_call_is_colored_as_shell', () => {
+    const card = show({ type: 'permission_request', requestId: 'r1', toolName: 'Bash', title: 'Bash', input: { command: 'echo "hi"' }, rows: [] })
+    const code = card.querySelector('pre.call')!
     expect(code.textContent).toBe('echo "hi"')
     expect(tokens(code, 'string')).toEqual(['"hi"'])
   })
 
   it('other_tool_input_is_colored_as_json', () => {
-    const card = show({ type: 'permission_request', requestId: 'r1', toolName: 'WebFetch', title: 'WebFetch', input: { url: 'https://x' }, commands: [] })
+    const card = show({ type: 'permission_request', requestId: 'r1', toolName: 'WebFetch', title: 'WebFetch', input: { url: 'https://x' }, rows: [] })
     const input = card.querySelector('pre.input')!
     expect(input.textContent).toBe(JSON.stringify({ url: 'https://x' }, null, 2))
     expect(tokens(input, 'attr')).toEqual(['"url"'])
