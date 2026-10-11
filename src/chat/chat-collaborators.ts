@@ -212,6 +212,7 @@ function buildRouter(
     newSession: (mode, feature, prompt, into, label) => provider.newSession(mode, feature, prompt, into, label),
     open: (sessionId, into) => provider.open(sessionId, into),
     resumePlan: (feature, into, note) => provider.resumePlan(feature, into, note),
+    resumePlanAside: (feature, stayOn) => provider.resumePlanAside(feature, stayOn),
     sendState: () => provider.sendState(),
     sendTranscript: (sessionId) => provider.sendTranscript(sessionId),
   })

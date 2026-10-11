@@ -12,6 +12,9 @@ import { askUserTool } from '../src/agent/openai-session/tools/ask-user'
 import type { Tool } from '../src/agent/openai-session/tools/tool'
 import type { SessionEvent } from '../src/agent/session/code-session'
 import type { McpServers } from '../src/agent/mcp/mcp-config'
+import { McpToolCache } from '../src/agent/mcp/mcp-tool-cache'
+import { McpToolHost } from '../src/agent/mcp/mcp-tool-host'
+import { fakeConnector, memoryStore } from './fake-mcp'
 import { COMPACT_COMMAND } from '../src/agent/sdk-session/compaction'
 import { assistantMessage, compactionMessages, compactionRefusedMessages, fakeQuery, initMessage, interruptedResult, promptTooLongMessages, resultMessage } from './fake-query'
 
@@ -268,9 +271,14 @@ describe('SdkSession', () => {
   describe('workspace MCP servers', () => {
     const docs = { type: 'stdio' as const, command: 'node', args: ['docs.js'] }
     const github = { type: 'http' as const, url: 'https://x.test/mcp' }
+    const echo = { name: 'echo', inputSchema: { type: 'object' } }
 
-    function mcpSession(fake: ReturnType<typeof fakeQuery>, servers: McpServers = { docs, github }) {
-      return new SdkSession({
+    /** A session whose servers' tools are remembered, so none of them is started until asked. */
+    async function mcpSession(fake: ReturnType<typeof fakeQuery>, servers: McpServers = { docs, github }) {
+      const cache = new McpToolCache(memoryStore())
+      for (const [name, config] of Object.entries(servers)) await cache.write(name, config, [echo])
+      const connector = fakeConnector({ docs: [echo], github: [echo] })
+      const session = new SdkSession({
         id: 'sess-1',
         profile,
         cwd: '/w',
@@ -278,33 +286,37 @@ describe('SdkSession', () => {
         runtime: { command: 'node', args: [], env: {} },
         query: fake.query,
         ownTools: [jsonQueryTool],
-        mcpServers: servers,
+        mcp: { host: new McpToolHost(connector.connect, cache), servers },
       })
+      return { session, connector }
     }
 
-    it('servers_are_passed_beside_the_own_server', () => {
+    /** Reads events until one matches; what came before it is skipped. */
+    async function until(session: SdkSession, match: (e: SessionEvent) => boolean): Promise<SessionEvent> {
+      for await (const e of session.events()) if (match(e)) return e
+      throw new Error('the session ended first')
+    }
+
+    it('servers_reach_the_engine_as_in_process_stand_ins_beside_the_own_server_so_it_never_spawns_them', async () => {
       const fake = fakeQuery()
-      mcpSession(fake)
+      const { session, connector } = await mcpSession(fake)
       expect(Object.keys(fake.options!.mcpServers!)).toEqual([TOOL_SERVER_NAME, 'docs', 'github'])
-      expect(fake.options!.mcpServers!['docs']).toEqual(docs)
+      expect(fake.options!.mcpServers!['docs']).toMatchObject({ type: 'sdk', name: 'docs' })
+      expect(connector.connects).toEqual([])
+      await session.dispose()
     })
 
-    it('server_statuses_are_reported_after_the_session_started_without_the_own_server_and_the_engine_s_own_reading_of_the_file', async () => {
+    it('server_statuses_are_reported_after_the_session_started_without_the_own_server', async () => {
       const fake = fakeQuery()
-      fake.setMcpStatus([
-        { name: TOOL_SERVER_NAME, status: 'connected' },
-        { name: 'docs', status: 'failed', scope: 'project', error: 'read from the file by the engine' },
-        { name: 'docs', status: 'connected', scope: 'dynamic' },
-        { name: 'github', status: 'failed', error: 'ECONNREFUSED' },
-      ])
-      const session = mcpSession(fake)
+      const { session } = await mcpSession(fake)
       fake.emit(initMessage())
-      const events = await take(session, 2)
-      expect(events[1]).toEqual({
+      await until(session, (e) => e.type === 'session_started')
+      const event = await until(session, (e) => e.type === 'mcp_servers')
+      expect(event).toEqual({
         type: 'mcp_servers',
         servers: [
-          { name: 'docs', status: 'connected' },
-          { name: 'github', status: 'failed', error: 'ECONNREFUSED' },
+          { name: 'docs', status: 'stopped' },
+          { name: 'github', status: 'stopped' },
         ],
       })
       await session.dispose()
@@ -312,40 +324,32 @@ describe('SdkSession', () => {
 
     it('a_reload_replaces_the_servers_and_keeps_the_own_server', async () => {
       const fake = fakeQuery()
-      const session = mcpSession(fake)
-      fake.setMcpStatus([{ name: 'docs', status: 'connected' }])
+      const { session } = await mcpSession(fake)
       await session.mcp!.reload({ docs })
       expect(fake.setServers).toHaveLength(1)
       expect(Object.keys(fake.setServers[0]!)).toEqual([TOOL_SERVER_NAME, 'docs'])
-      const [event] = await take(session, 1)
-      expect(event).toEqual({ type: 'mcp_servers', servers: [{ name: 'docs', status: 'connected' }] })
       await session.dispose()
     })
 
-    it('a_failed_reconnect_is_the_server_s_status_not_an_error', async () => {
+    it('starting_and_stopping_a_server_is_reported_as_its_status', async () => {
       const fake = fakeQuery()
-      const session = mcpSession(fake)
-      fake.failReconnect(new Error('still down'))
-      fake.setMcpStatus([{ name: 'github', status: 'failed', error: 'still down' }])
-      await session.mcp!.reconnect('github')
-      expect(fake.reconnected).toEqual(['github'])
-      const [event] = await take(session, 1)
-      expect(event).toEqual({ type: 'mcp_servers', servers: [{ name: 'github', status: 'failed', error: 'still down' }] })
+      const { session, connector } = await mcpSession(fake)
+      await session.mcp!.start('docs')
+      expect(connector.connects).toEqual(['docs'])
+      expect(await until(session, (e) => e.type === 'mcp_servers' && e.servers[0]!.status === 'connected')).toBeDefined()
+      await session.mcp!.stop('docs')
+      expect(connector.closed).toEqual(['docs'])
+      expect(await until(session, (e) => e.type === 'mcp_servers' && e.servers[0]!.status === 'stopped')).toBeDefined()
       await session.dispose()
     })
 
-    it('a_server_still_connecting_is_asked_about_again_until_it_settles', async () => {
+    it('closing_the_session_ends_the_servers_it_started', async () => {
       const fake = fakeQuery()
-      const session = mcpSession(fake, { docs })
-      fake.setMcpStatus([{ name: 'docs', status: 'pending' }])
-      fake.emit(initMessage())
-      const [, first] = await take(session, 2)
-      expect(first).toEqual({ type: 'mcp_servers', servers: [{ name: 'docs', status: 'pending' }] })
-      fake.setMcpStatus([{ name: 'docs', status: 'connected' }])
-      const [second] = await take(session, 1)
-      expect(second).toEqual({ type: 'mcp_servers', servers: [{ name: 'docs', status: 'connected' }] })
+      const { session, connector } = await mcpSession(fake)
+      await session.mcp!.start('github')
       await session.dispose()
-    }, 10_000)
+      expect(connector.closed).toEqual(['github'])
+    })
 
     it('a_session_without_servers_has_no_control_and_never_asks_for_status', async () => {
       const fake = fakeQuery()

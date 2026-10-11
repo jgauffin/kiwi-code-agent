@@ -479,13 +479,13 @@ const textOf = (texts: Record<string, string>, name: string): string | undefined
  * lost and amended rules reopen a tested task, with its proofs for the rules
  * the change left alone kept and the rest dropped, and its `how` naming what
  * is new or amended for the run to build. A task with no snapshot to diff
- * against (derived before this was tracked) is taken as unchanged.
+ * against (derived before this was tracked) still names what it delivered: a
+ * rule outside that is new, and the rest is taken as unchanged.
  */
 function reconciledScenario(t: Task, entry: { scenario: Scenario; delivers: string[]; items: Item[] }): Partial<Task> {
   const base = fromScenario(entry.scenario, entry.delivers)
   const rulesText = textsOf(entry.items)
-  const prior = t.rulesText
-  if (!prior) return { ...base, rulesText }
+  const prior = t.rulesText ?? Object.fromEntries(t.delivers.map((name) => [name, textOf(rulesText, name) ?? '']))
   const added = entry.items.filter((i) => textOf(prior, i.name) === undefined)
   const amended = entry.items.filter((i) => textOf(prior, i.name) !== undefined && textOf(prior, i.name) !== i.text)
   const lost = Object.keys(prior).filter((name) => !entry.items.some((i) => sameName(i.name, name)))

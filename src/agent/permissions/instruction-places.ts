@@ -21,6 +21,7 @@ export function instructionPlaces(cwd: string, shipped: readonly string[] = [], 
     projectMemoryDir(cwd, home),
     join(home, 'AGENTS.md'),
     join(home, 'CLAUDE.md'),
+    join(home, '.claude', 'CLAUDE.md'),
     ...shipped,
   ]
 }

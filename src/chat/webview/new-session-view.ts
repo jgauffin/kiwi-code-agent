@@ -124,15 +124,28 @@ function namingData({ asking, reason }: Naming) {
   return { cannotName: asking, nameLabel: asking ? 'Naming…' : 'Suggest a name', nameHint: reason }
 }
 
+/** How the pick-up list's specs are narrowed: text found in the feature or its folder, and whether the verified ones are left out. */
+type SpecFilter = { text: string; notDone: boolean }
+
+function filterPlans(plans: ResumablePlan[], { text, notDone }: SpecFilter): ResumablePlan[] {
+  const wanted = text.trim().toLowerCase()
+  return plans.filter((p) => (!notDone || p.status !== 'verified') && (!wanted || `${p.feature} ${p.folder ?? ''}`.toLowerCase().includes(wanted)))
+}
+
 /** The template data for a render: what each card and tab shows, from the screen and mode shown and what is there to pick up. */
-function renderData(screen: Screen, mode: Card, profileDefaults: ProfileDefaults, pickUp: PickUp, naming: Naming) {
+function renderData(screen: Screen, mode: Card, profileDefaults: ProfileDefaults, pickUp: PickUp, naming: Naming, specFilter: SpecFilter) {
   const { names, active } = profileDefaults
-  const { plans, chats, unfiled, updates } = pickUp
+  const { chats, unfiled, updates } = pickUp
+  // Headings are given after filtering, so a folder is named on the first of its specs still shown.
+  const plans = filterPlans(pickUp.plans, specFilter)
   return {
     ...namingData(naming),
     profiles: names.map((name) => ({ name, selected: name === active })),
     // Plans and chats are code work; what waits to be filed is counted on the maintenance tab instead.
-    any: screen === 'code' && (plans.length > 0 || chats.length > 0),
+    any: screen === 'code' && (pickUp.plans.length > 0 || chats.length > 0),
+    anySpecs: pickUp.plans.length > 0,
+    noSpecMatches: pickUp.plans.length > 0 && plans.length === 0,
+    notDone: specFilter.notDone,
     unfiled,
     nothingUnfiled: unfiled === 0,
     filingHint: unfiled > 0 ? `${unfiled} decided, not yet in the specs or docs` : 'Nothing waiting to be filed',
@@ -286,10 +299,15 @@ export class NewSessionView extends HTMLElement {
     </form>
     <section class="pick-up" if="any">
       <h3>Pick up where you left off</h3>
+      <div class="spec-filter" if="anySpecs">
+        <input type="search" name="specFilter" placeholder="Filter specs" r-input="filterSpecs(event)">
+        <label><input type="checkbox" checked="{{notDone}}" r-change="showNotDone(event)"> Not done</label>
+      </div>
+      <p class="hint" if="noSpecMatches">No spec matches.</p>
       <ul class="picks">
         <li loop="p in plans">
           <h4 class="folder-heading" if="p.heading">{{p.heading}}</h4>
-          <button type="button" class="pick plan {{p.stage}}" r-click="resume(p)">
+          <button type="button" class="pick plan {{p.stage}}" title="Ctrl+click or middle-click to open in a tab of its own and stay here" r-click="resume(p, event)" r-auxclick="resumeAside(p, event)" r-mousedown="holdMiddle(event)">
             <span class="icon">📐</span>
             <span class="what"><strong>{{p.feature}}</strong><span class="hint">{{p.hint}}</span></span>
           </button>
@@ -312,6 +330,7 @@ export class NewSessionView extends HTMLElement {
   /** An ask for a name in flight, and what the last one left to say. */
   private asking = false
   private nameReason = ''
+  private specFilter: SpecFilter = { text: '', notDone: false }
 
   connectedCallback(): void {
     if (this.childElementCount > 0) return
@@ -337,9 +356,17 @@ export class NewSessionView extends HTMLElement {
 
   private render(): void {
     this.template.render(
-      renderData(this.screen, this.mode, this.profileDefaults, this.pickUp, { asking: this.asking, reason: this.nameReason }),
+      renderData(this.screen, this.mode, this.profileDefaults, this.pickUp, { asking: this.asking, reason: this.nameReason }, this.specFilter),
       {
         suggestName: () => this.suggestName(),
+        filterSpecs: (event: Event) => {
+          this.specFilter = { ...this.specFilter, text: (event.target as HTMLInputElement).value }
+          this.render()
+        },
+        showNotDone: (event: Event) => {
+          this.specFilter = { ...this.specFilter, notDone: (event.target as HTMLInputElement).checked }
+          this.render()
+        },
         pick: (event: Event) => this.dispatchEvent(new DefaultProfileChangedEvent((event.target as HTMLSelectElement).value)),
         open: (screen: Screen) => {
           if (screen === this.screen) return
@@ -347,7 +374,18 @@ export class NewSessionView extends HTMLElement {
           this.choose(FIRST[screen])
         },
         // What was typed before picking a plan goes with it; the card is about to be replaced by that plan's chat.
-        resume: (plan: ResumablePlan) => this.dispatchEvent(new PlanResumeRequestedEvent(plan.feature, this.take())),
+        // Ctrl+click or a middle click opens it in a tab of its own instead, so several specs open from one screen and the card keeps what was typed.
+        resume: (plan: ResumablePlan, event: MouseEvent) =>
+          this.dispatchEvent(event.ctrlKey || event.metaKey ? new PlanResumeRequestedEvent(plan.feature, undefined, true) : new PlanResumeRequestedEvent(plan.feature, this.take())),
+        resumeAside: (plan: ResumablePlan, event: MouseEvent) => {
+          if (event.button !== 1) return
+          event.preventDefault()
+          this.dispatchEvent(new PlanResumeRequestedEvent(plan.feature, undefined, true))
+        },
+        // A middle press would otherwise start the page's autoscroll.
+        holdMiddle: (event: MouseEvent) => {
+          if (event.button === 1) event.preventDefault()
+        },
         reopen: (chat: ResumableChat) => this.dispatchEvent(new SessionSelectedEvent(chat.sessionId)),
         edit: (field: keyof Draft, event: Event) => {
           this.draft[field] = (event.target as TextField).value
@@ -375,6 +413,7 @@ export class NewSessionView extends HTMLElement {
     )
     this.fill('input[name="feature"], select[name="feature"]', this.draft.feature)
     this.fill('textarea[name="prompt"]', this.draft.prompt)
+    this.fill('input[name="specFilter"]', this.specFilter.text)
   }
 
   /** Asks the host to name the feature being described; the button says it is at work until the answer lands. */

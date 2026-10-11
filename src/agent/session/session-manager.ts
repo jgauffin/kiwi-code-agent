@@ -260,9 +260,9 @@ export class SessionManager {
     return this.host.liveSessions()
   }
 
-  /** One MCP server of a live session, tried again; nothing to do for a session that is not running. */
-  async reconnectMcp(id: string, server: string): Promise<void> {
-    await this.host.reconnectMcp(id, server)
+  /** Starts or stops one MCP server of a live session; nothing to do for a session that is not running. */
+  async switchMcp(id: string, server: string, running: boolean): Promise<void> {
+    await this.host.switchMcp(id, server, running)
   }
 
   /** The live session running under another one's tab, if any. */

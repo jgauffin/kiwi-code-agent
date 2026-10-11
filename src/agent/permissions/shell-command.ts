@@ -72,6 +72,18 @@ export class SimpleCommandBuilder {
     return this.words.filter((w) => !isReserved(w, 'function')).length === 1
   }
 
+  /** The words, when they are assignments alone, outside any construct: the shell running the line keeps what they set. */
+  bareAssignments(): Word[] | undefined {
+    if (this.words.length === 0 || this.cases.length > 0 || this.conditional) return undefined
+    return this.words.every(isAssignment) ? this.words : undefined
+  }
+
+  /** The words read so far stand inside a construct, or open one: what runs there may not run at all. */
+  opensConstruct(): boolean {
+    const first = this.words[0]
+    return this.cases.length > 0 || (isReserved(first) && (PREFIX_WORDS.has(first.text) || HEADER_WORDS.has(first.text) || first.text === 'function'))
+  }
+
   accept(word: Word): void {
     if (this.redirectPending) {
       this.redirectPending = false

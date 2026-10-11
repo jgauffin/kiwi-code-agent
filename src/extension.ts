@@ -13,7 +13,6 @@ import type { SessionSwitch, SizeLimits, Verifier } from './chat/feature-runs'
 import { openDraftPlanAction } from './chat/open-draft-plan'
 import { specDecorations } from './chat/spec-decorations'
 import { planDraftAction } from './chat/plan-draft-action'
-import { watchOwnBundle } from './dev-reload'
 import type { SessionEngines } from './session-engines'
 import { forgetMemory, listMemories, memoryPath } from './agent/memory/memories'
 import { bundleFilePath, type BundleScope } from './agent/instructions/bundles'
@@ -272,7 +271,6 @@ function registerSubscriptions(
     vscode.commands.registerCommand('kiwiAgent.buildDocsMap', () => chat.buildDocsMapCommand(planIgnore())),
     watchMcpConfig(workspaceRoot, () => mcp.refresh()),
     openDraftPlanAction(chat, workspaceRoot, output),
-    watchOwnBundle(context),
   )
 }
 
@@ -303,7 +301,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const mcp = createMcp(workspaceRoot, () => sessions, output)
   engines = createEngines({ context, output, workspaceRoot, mcp, verifier, policyFor, planIgnore, getChat: () => chat, getSessions: () => sessions })
   sessions = createSessions(store, engines, workspaceRoot, policyFor, () => chat)
-  const permissionStore = createPermissionStore(() => sessions, grants)
+  const permissionStore = createPermissionStore(() => sessions, grants, workspaceRoot)
   const memoryPort = createMemoryPort(workspaceRoot)
   const bundles = createBundles(output, workspaceRoot)
   const agentsMd = createAgentsMdOffers(context, workspaceRoot, output, () => chat)

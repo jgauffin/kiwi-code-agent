@@ -25,6 +25,15 @@ describe('existing spec folders', () => {
     }
   })
 
+  it('a_folder_inside_a_folder_is_reported_by_its_path_beside_its_parent_once_each_holds_a_spec', async () => {
+    const dir = await workspace({ 'orders/refunds.spec.md': '# Refunds\n', 'orders/returns/labels.spec.md': '# Labels\n', 'billing/invoices/dunning.spec.md': '# Dunning\n' })
+    try {
+      expect(await existingSpecFolders(dir)).toEqual(['billing/invoices', 'orders', 'orders/returns'])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('an_empty_folder_left_behind_does_not_count', async () => {
     const dir = await workspace({ 'orders.spec.md': '# Orders\n' })
     await mkdir(join(dir, 'specs', 'empty'))

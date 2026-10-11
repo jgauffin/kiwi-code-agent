@@ -6,7 +6,7 @@ import { CODE_SEARCH_TOOL } from '../code-outline/code-search'
 import { BLIND_PLAN_TOOLS, blindPlanPrompt, blindPlanScope } from '../phases/blind-plan'
 import { CLEANUP_TOOLS, cleanupPrompt, cleanupScope } from '../phases/cleanup'
 import { CODE_PLAN_TOOLS, codePlanPrompt } from '../phases/code-plan'
-import { DOC_MIGRATION_TOOLS, docMigrationPrompt, docMigrationScope, specsWithWorkInFlight } from '../phases/doc-migration'
+import { DOC_MIGRATION_TOOLS, docMigrationPrompt, docMigrationScope, draftFolders, specsWithWorkInFlight } from '../phases/doc-migration'
 import { DOCS_MAP_TOOLS, docsMapPrompt, docsMapScope } from '../phases/docs-map'
 import { FILE_DECISIONS_TOOLS, fileDecisionsPrompt, fileDecisionsScope } from '../phases/file-decisions'
 import { IMPLEMENT_TOOLS, implementPrompt } from '../phases/implement'
@@ -136,9 +136,10 @@ async function fileDecisionsModeSetup(record: SessionRecord, ctx: ModeContext): 
 async function docMigrationModeSetup(record: SessionRecord, ctx: ModeContext): Promise<ModeSetup> {
   const { workspaceRoot } = ctx
   // Never promoted to full access: the job never reads code, for its whole life.
-  const folderMode = await resolveSpecFoldersMode(workspaceRoot, ctx.specFoldersSetting())
+  const setting = ctx.specFoldersSetting()
+  const folderMode = draftFolders(setting, await resolveSpecFoldersMode(workspaceRoot, setting))
   const folders = folderMode === 'by-domain' ? await existingSpecFolders(workspaceRoot) : []
-  const blockedMoves = folderMode === 'by-domain' ? await specsWithWorkInFlight(workspaceRoot) : []
+  const blockedMoves = folderMode === 'flat' ? [] : await specsWithWorkInFlight(workspaceRoot)
   const scope = docMigrationScope(ctx.planIgnore(), folderMode)
   return {
     // The migrated drafts it writes are held to the contract like the planner's.

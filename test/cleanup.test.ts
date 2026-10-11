@@ -105,6 +105,14 @@ describe('cleanup prompt', () => {
     expect(prompt).toContain('a nested condition becomes an early return')
   })
 
+  it('a_class_spread_over_partial_files_is_not_a_split', () => {
+    const off = { functionLines: 0, functionComplexity: 0, typeLines: 0, fileLines: 0 }
+    const prompt = cleanupPrompt('Order cancellation', cwd, { source: { ...off, typeLines: 200 }, tests: off, testGlobs: [] })
+    expect(prompt).toContain('into a well-formed module or class of its own')
+    expect(prompt).toContain('(a partial class, a type reopened elsewhere through declaration merging')
+    expect(prompt).toContain('is not a split')
+  })
+
   it('the_split_is_planned_from_the_outline_not_from_reading_files_whole', () => {
     const off = { functionLines: 0, functionComplexity: 0, typeLines: 0, fileLines: 0 }
     const prompt = cleanupPrompt('Order cancellation', cwd, { source: { ...off, functionLines: 25, fileLines: 400 }, tests: off, testGlobs: [] })

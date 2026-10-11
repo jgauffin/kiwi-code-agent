@@ -31,8 +31,8 @@ export async function handleRunMessage(deps: MessageRouterDeps, message: FromWeb
     case 'approve_plan':
       await approvePlan(deps, shown)
       return true
-    case 'reconnect_mcp':
-      await reconnectMcp(deps, message, shown)
+    case 'switch_mcp':
+      await switchMcp(deps, message, shown)
       return true
     case 'set_default_profile':
       await setDefaultProfile(deps, message)
@@ -44,7 +44,8 @@ export async function handleRunMessage(deps: MessageRouterDeps, message: FromWeb
 
 async function answerPermission(deps: MessageRouterDeps, message: WebviewMessage<'permission'>): Promise<void> {
   const { sessions, permissions } = deps
-  if (!sessions.get(message.sessionId)) return
+  // An answer for a session the host does not know is lost unless it is said: the card would wait on nothing.
+  if (!sessions.get(message.sessionId)) throw new Error(`Your answer could not be delivered: session ${message.sessionId} is not open in this window.`)
   // Kept answers are in place before the call runs, so a second call they cover in the same turn already passes;
   // they are kept even when the call itself is refused.
   const { keep, ...decision } = message.decision
@@ -53,7 +54,8 @@ async function answerPermission(deps: MessageRouterDeps, message: WebviewMessage
 }
 
 async function answerQuestion(deps: MessageRouterDeps, message: WebviewMessage<'question'>): Promise<void> {
-  if (deps.sessions.get(message.sessionId)) await deps.sessions.respondToQuestion(message.sessionId, message.requestId, message.outcome)
+  if (!deps.sessions.get(message.sessionId)) throw new Error(`Your answer could not be delivered: session ${message.sessionId} is not open in this window.`)
+  await deps.sessions.respondToQuestion(message.sessionId, message.requestId, message.outcome)
 }
 
 async function interruptRun(deps: MessageRouterDeps, message: WebviewMessage<'interrupt'>, shown: SessionRecord | undefined): Promise<void> {
@@ -89,8 +91,8 @@ async function approvePlan(deps: MessageRouterDeps, shown: SessionRecord | undef
   }
 }
 
-async function reconnectMcp(deps: MessageRouterDeps, message: WebviewMessage<'reconnect_mcp'>, shown: SessionRecord | undefined): Promise<void> {
-  if (shown) await deps.sessions.reconnectMcp(deps.tabView.targetOf(shown, message.sessionId, false).id, message.server)
+async function switchMcp(deps: MessageRouterDeps, message: WebviewMessage<'switch_mcp'>, shown: SessionRecord | undefined): Promise<void> {
+  if (shown) await deps.sessions.switchMcp(deps.tabView.targetOf(shown, message.sessionId, false).id, message.server, message.running)
 }
 
 async function setDefaultProfile(deps: MessageRouterDeps, message: WebviewMessage<'set_default_profile'>): Promise<void> {

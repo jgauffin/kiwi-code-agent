@@ -1318,6 +1318,30 @@ chat-app {
         opacity: 0.8;
       }
 
+      & .spec-filter {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        margin-bottom: 0.4rem;
+
+        & input[type='search'] {
+          flex: 1;
+          background: var(--vscode-input-background);
+          color: var(--vscode-input-foreground);
+          border: 1px solid var(--vscode-input-border, transparent);
+          border-radius: 3px;
+          padding: 0.3rem;
+          font: inherit;
+        }
+
+        & label {
+          display: flex;
+          align-items: center;
+          gap: 0.3rem;
+          white-space: nowrap;
+        }
+      }
+
       & .picks {
         list-style: none;
         margin: 0;
@@ -1859,6 +1883,32 @@ chat-app {
         margin: 0.3rem 0;
       }
 
+      /* Left open when its engine stopped: still answerable, but nothing waits on it. */
+      & > .late-note {
+        margin: 0 0 0.3rem;
+        opacity: 0.8;
+        font-style: italic;
+      }
+
+      /* A tool's flat arguments, one labelled line each: the value is what is read, so it is set as code. */
+      & .fields {
+        display: grid;
+        grid-template-columns: max-content minmax(0, 1fr);
+        gap: 0.15rem 0.8rem;
+        margin: 0.3rem 0;
+
+        & dt {
+          opacity: 0.75;
+        }
+
+        & dd {
+          margin: 0;
+          font-family: var(--vscode-editor-font-family);
+          white-space: pre-wrap;
+          word-break: break-all;
+        }
+      }
+
       & .actions {
         display: flex;
         gap: 0.4rem;
@@ -1928,6 +1978,20 @@ chat-app {
             & .why {
               opacity: 0.8;
             }
+
+            /* Keeping an answer waits behind a link, right beside the reason so it is seen however wide the card. */
+            & .keep {
+              background: none;
+              border: none;
+              padding: 0;
+              font: inherit;
+              color: var(--vscode-textLink-foreground);
+              cursor: pointer;
+
+              &:hover {
+                text-decoration: underline;
+              }
+            }
           }
 
           &.passes {
@@ -1938,6 +2002,12 @@ chat-app {
             color: var(--vscode-errorForeground);
             opacity: 1;
           }
+        }
+
+        /* Why an answer cannot be kept, under the row or its kept answer. */
+        & .never {
+          margin: 0.2rem 0 0;
+          opacity: 0.8;
         }
 
         & .answer {
@@ -1968,11 +2038,6 @@ chat-app {
               flex-wrap: wrap;
               gap: 0.2rem 0.6rem;
             }
-          }
-
-          & .never {
-            margin: 0.2rem 0 0;
-            opacity: 0.8;
           }
 
           /* The answer in words, exactly as it will be kept. */
@@ -2150,6 +2215,11 @@ chat-app {
         opacity: 1;
         font-weight: 600;
         color: var(--vscode-editorWarning-foreground, var(--vscode-charts-orange));
+        cursor: pointer;
+
+        &:hover {
+          text-decoration: underline;
+        }
       }
     }
 
@@ -2288,22 +2358,39 @@ chat-app {
       flex-wrap: wrap;
       gap: 0.8rem;      opacity: 0.85;
 
+      /* The light is the status: green running, amber starting, red not running. */
       & .server {
         display: inline-flex;
         align-items: center;
-        gap: 0.3rem;
+        gap: 0.35rem;
+        background: none;
         color: var(--vscode-descriptionForeground);
+        padding: 0 0.2rem;
+        line-height: 1;
+        --light: var(--vscode-errorForeground);
 
-        &.failed,
-        &.needs-auth {
+        &::before {
+          content: '';
+          width: 0.55rem;
+          height: 0.55rem;
+          border-radius: 50%;
+          background: var(--light);
+        }
+
+        &.connected {
+          --light: var(--vscode-testing-iconPassed, #73c991);
+        }
+
+        &.pending {
+          --light: var(--vscode-editorWarning-foreground, #cca700);
+        }
+
+        &.failed {
           color: var(--vscode-errorForeground);
         }
 
-        & .reconnect {
-          background: none;
-          color: inherit;
-          padding: 0 0.2rem;
-          line-height: 1;
+        &:hover {
+          color: var(--vscode-foreground);
         }
       }
     }

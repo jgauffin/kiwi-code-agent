@@ -218,12 +218,13 @@ describe('blind plan spec folders', () => {
     expect(prompt).toContain('write one file, `specs/order-cancellation.spec.md`')
   })
 
-  it('by_domain_mode_opens_a_write_to_one_folder_deep_but_not_two', async () => {
+  it('by_domain_mode_opens_a_write_to_the_features_own_spec_in_a_folder_at_any_depth', async () => {
     const domainGuard = new ScopeGuard(cwd, blindPlanScope('Order cancellation', [], 'by-domain'))
     const domainUse = (toolName: string, input: unknown) => domainGuard.preToolUse({ toolName, input, toolUseId: 't' })
     expect(await domainUse('Write', { file_path: 'specs/order-cancellation.spec.md' })).toEqual({ allow: true })
     expect(await domainUse('Write', { file_path: 'specs/orders/order-cancellation.spec.md' })).toEqual({ allow: true })
-    expect(await domainUse('Write', { file_path: 'specs/orders/sub/order-cancellation.spec.md' })).toMatchObject({ deny: expect.any(String) })
+    expect(await domainUse('Write', { file_path: 'specs/orders/returns/order-cancellation.spec.md' })).toEqual({ allow: true })
+    expect(await domainUse('Write', { file_path: 'specs/orders/returns/other-feature.spec.md' })).toMatchObject({ deny: expect.any(String) })
     // The working files stay keyed by the slug alone, flat, whatever folder the spec itself lands in.
     expect(await domainUse('Edit', { file_path: '.kiwi/specs/order-cancellation.review.md' })).toEqual({ allow: true })
   })

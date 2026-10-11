@@ -28,6 +28,45 @@ describe('splitShellCommand', () => {
     })
   })
 
+  describe('variables the line sets', () => {
+    it('a_variable_set_to_a_literal_before_it_is_used_stands_for_that_literal', () => {
+      expect(tokens('S=.kiwi/scratch/s1; npm test > $S/out.log; tail -5 "${S}/out.log"')).toEqual([['npm', 'test'], ['tail', '-5', '.kiwi/scratch/s1/out.log']])
+      expect(splitShellCommand('S=.kiwi/scratch/s1; npm test > $S/out.log').segments[0]!.writes).toEqual(['.kiwi/scratch/s1/out.log'])
+      expect(tokens('C=src/a.css && grep -n x $C')).toEqual([['grep', '-n', 'x', 'src/a.css']])
+    })
+
+    it('a_variable_written_in_single_quotes_or_escaped_stays_as_written', () => {
+      expect(tokens(`S=out; echo '$S' \\$S`)).toEqual([['echo', '$S', '$S']])
+    })
+
+    it('a_variable_the_line_may_not_have_set_stays_unsettled', () => {
+      expect(tokens('false && S=out; rm -rf $S/')).toEqual([['false'], ['rm', '-rf', '$S/']])
+      expect(tokens('test -d x || S=out; rm -rf $S/')).toEqual([['test', '-d', 'x'], ['rm', '-rf', '$S/']])
+      expect(tokens('(S=out); rm -rf $S/')).toEqual([['rm', '-rf', '$S/']])
+      expect(tokens('S=out | true; rm -rf $S/')).toEqual([['true'], ['rm', '-rf', '$S/']])
+      expect(tokens('if true; then S=out; fi; rm -rf $S/')).toEqual([['true'], ['rm', '-rf', '$S/']])
+      expect(tokens('S=out cat $S')).toEqual([['cat', '$S']])
+    })
+
+    it('a_variable_the_line_binds_again_anywhere_stays_unsettled', () => {
+      expect(tokens('S=out; for f in x; do rm $S; S=/; done')).toEqual([['rm', '$S']])
+      expect(tokens('S=out; read S; rm $S')).toEqual([['read', 'S'], ['rm', '$S']])
+      expect(tokens('S=out; S=/; rm $S')).toEqual([['rm', '$S']])
+    })
+
+    it('a_value_that_expands_further_stays_unsettled', () => {
+      expect(tokens('S=$HOME; rm $S')).toEqual([['rm', '$S']])
+      expect(tokens('S=$(pwd); rm $S')).toEqual([['pwd'], ['rm', '$S']])
+      expect(tokens('S=*.ts; rm $S')).toEqual([['rm', '$S']])
+      expect(tokens('S="a b"; rm $S')).toEqual([['rm', '$S']])
+      expect(tokens("S='$x'; rm $S")).toEqual([['rm', '$S']])
+    })
+
+    it('only_a_plain_reference_is_resolved', () => {
+      expect(tokens('S=out; ls ${S%/*} ${#S} $SS')).toEqual([['ls', '${S%/*}', '${#S}', '$SS']])
+    })
+  })
+
   describe('quoting', () => {
     it('honours_single_quotes_double_quotes_and_backslash_escapes', () => {
       const { segments } = splitShellCommand(`git commit -m 'it''s done' "x\\"y" a\\ b`)

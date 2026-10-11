@@ -17,7 +17,7 @@ import {
   ImplementRequestedEvent,
   InterruptRequestedEvent,
   LinkOpenFileRequestedEvent,
-  McpReconnectRequestedEvent,
+  McpSwitchRequestedEvent,
   NewSessionRequestedEvent,
   PermissionDecidedEvent,
   PlanApprovedEvent,
@@ -83,13 +83,13 @@ export function wireChatEvents(el: HTMLElement, actions: ChatAppActions): void {
   el.addEventListener(LinkOpenFileRequestedEvent.type, (e) => linkOpenFile(actions, e))
   el.addEventListener(InterruptRequestedEvent.type, () => actions.toTarget((sessionId) => post({ type: 'interrupt', sessionId })))
   el.addEventListener(CompactRequestedEvent.type, () => actions.toTarget((sessionId) => post({ type: 'compact', sessionId })))
-  el.addEventListener(PermissionDecidedEvent.type, (e) => answerPermission(e))
-  el.addEventListener(QuestionAnsweredEvent.type, (e) => answerQuestion(e))
+  el.addEventListener(PermissionDecidedEvent.type, (e) => answerPermission(actions, e))
+  el.addEventListener(QuestionAnsweredEvent.type, (e) => answerQuestion(actions, e))
   el.addEventListener(AllowWritesToggledEvent.type, (e) => actions.toTarget((sessionId) => post({ type: 'set_allow_writes', sessionId, enabled: e.enabled })))
   el.addEventListener(SessionModelChangedEvent.type, (e) => post({ type: 'set_session_model', name: e.name }))
   el.addEventListener(SessionEffortChangedEvent.type, (e) => post(sessionEffortMessage(e)))
   el.addEventListener(PlanApprovedEvent.type, () => post({ type: 'approve_plan' }))
-  el.addEventListener(McpReconnectRequestedEvent.type, (e) => actions.toTarget((sessionId) => post({ type: 'reconnect_mcp', sessionId, server: e.server })))
+  el.addEventListener(McpSwitchRequestedEvent.type, (e) => actions.toTarget((sessionId) => post({ type: 'switch_mcp', sessionId, server: e.server, running: e.running })))
   el.addEventListener(SessionSelectedEvent.type, (e) => post({ type: 'switch_session', sessionId: e.sessionId }))
   el.addEventListener(PlanResumeRequestedEvent.type, (e) => post(planResumeMessage(e)))
   el.addEventListener(UpdateSpecRequestedEvent.type, (e) => post({ type: 'update_spec', feature: e.feature, description: e.description }))
@@ -110,13 +110,20 @@ function linkOpenFile(actions: ChatAppActions, e: LinkOpenFileRequestedEvent): v
   post({ type: 'link_open_file' })
 }
 
-function answerPermission(e: PermissionDecidedEvent): void {
-  const sessionId = runOf(e.target)
+/** A card answers for the run it sits in, else for the session shown; an answer with neither is said, never dropped quietly. */
+function answeringSession(actions: ChatAppActions, target: EventTarget | null, what: string): string | undefined {
+  const sessionId = runOf(target) ?? actions.target()?.sessionId
+  if (!sessionId) console.error(`Kiwipow Agent: no session to send this ${what} to`)
+  return sessionId
+}
+
+function answerPermission(actions: ChatAppActions, e: PermissionDecidedEvent): void {
+  const sessionId = answeringSession(actions, e.target, 'permission answer')
   if (sessionId) post({ type: 'permission', sessionId, requestId: e.requestId, decision: e.decision })
 }
 
-function answerQuestion(e: QuestionAnsweredEvent): void {
-  const sessionId = runOf(e.target)
+function answerQuestion(actions: ChatAppActions, e: QuestionAnsweredEvent): void {
+  const sessionId = answeringSession(actions, e.target, 'answer')
   if (sessionId) post({ type: 'question', sessionId, requestId: e.requestId, outcome: e.outcome })
 }
 
@@ -129,7 +136,7 @@ function sessionEffortMessage(e: SessionEffortChangedEvent) {
 }
 
 function planResumeMessage(e: PlanResumeRequestedEvent) {
-  return { type: 'resume_plan' as const, feature: e.feature, ...(e.note ? { note: e.note } : {}) }
+  return { type: 'resume_plan' as const, feature: e.feature, ...(e.note ? { note: e.note } : {}), ...(e.ownTab ? { ownTab: true } : {}) }
 }
 
 function newSessionMessage(e: NewSessionRequestedEvent) {

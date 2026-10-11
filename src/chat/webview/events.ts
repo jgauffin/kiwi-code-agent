@@ -72,12 +72,13 @@ export class NewSessionRequestedEvent extends Event {
   }
 }
 
-/** The new-session screen's pick of a plan already on disk, carrying whatever was typed on the card before picking it. */
+/** The new-session screen's pick of a plan already on disk, carrying whatever was typed on the card before picking it. `ownTab` opens it beside this screen rather than in place of it. */
 export class PlanResumeRequestedEvent extends Event {
   static readonly type = 'plan-resume-requested'
   constructor(
     public readonly feature: string,
     public readonly note?: string,
+    public readonly ownTab = false,
   ) {
     super(PlanResumeRequestedEvent.type, { bubbles: true })
   }
@@ -295,11 +296,14 @@ export class PlanApprovedEvent extends Event {
   }
 }
 
-/** The composer's reconnect on one of the active session's MCP servers. */
-export class McpReconnectRequestedEvent extends Event {
-  static readonly type = 'mcp-reconnect-requested'
-  constructor(public readonly server: string) {
-    super(McpReconnectRequestedEvent.type, { bubbles: true })
+/** The composer's start or stop on one of the active session's MCP servers. */
+export class McpSwitchRequestedEvent extends Event {
+  static readonly type = 'mcp-switch-requested'
+  constructor(
+    public readonly server: string,
+    public readonly running: boolean,
+  ) {
+    super(McpSwitchRequestedEvent.type, { bubbles: true })
   }
 }
 
@@ -374,7 +378,7 @@ declare global {
     [SessionModelChangedEvent.type]: SessionModelChangedEvent
     [SessionEffortChangedEvent.type]: SessionEffortChangedEvent
     [PlanApprovedEvent.type]: PlanApprovedEvent
-    [McpReconnectRequestedEvent.type]: McpReconnectRequestedEvent
+    [McpSwitchRequestedEvent.type]: McpSwitchRequestedEvent
     [DefaultProfileChangedEvent.type]: DefaultProfileChangedEvent
     [AgentsMdAnsweredEvent.type]: AgentsMdAnsweredEvent
   }

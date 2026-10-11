@@ -6,7 +6,7 @@ import type { Grant, GrantScope } from './grants'
  * the person agreed to reads the same wherever they meet it again.
  */
 export function grantSentence(grant: Grant, scope: GrantScope): string {
-  const who = WHO[scope]
+  const who = grant.workspace !== undefined ? `Every session in the workspace ${grant.workspace}` : WHO[scope]
   const what = grant.action !== undefined ? ACTION[grant.action] : `run ${commandText(grant)}`
   const where = placeText(grant)
   return grant.verdict === 'allow' ? `${who} may ${what} ${where} without asking.` : `${who} is refused when it would ${what} ${where}.`
@@ -34,9 +34,4 @@ function placeText(grant: Grant): string {
     case 'tree':
       return `in ${grant.place} and every folder below it`
   }
-}
-
-/** What the person chooses on a prompt that keeps nothing: the answer for this call alone. */
-export function callSentence(verdict: 'allow' | 'deny'): string {
-  return verdict === 'allow' ? 'This call runs; the next one like it is asked again.' : 'This call is refused; the next one like it is asked again.'
 }

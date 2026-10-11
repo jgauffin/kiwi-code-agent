@@ -116,12 +116,15 @@ export class SessionControl {
    * the session: the decision becomes the next user turn, and an allow is
    * honoured once more should the resumed engine ask for the same call again.
    */
+  /**
+   * The answer goes to the engine while it still holds the request. One that
+   * let go of it — it withdrew the call, the turn ended, the window was
+   * reloaded — still gets the answer the person gave: the card settles, an
+   * allow covers the same call when it comes again, and the decision becomes
+   * the session's next prompt.
+   */
   async respondToPermission(id: string, requestId: string, decision: PermissionDecision): Promise<void> {
-    const live = this.host.liveSession(id)
-    if (live) {
-      live.respondToPermission(requestId, decision)
-      return
-    }
+    if (this.host.liveSession(id)?.respondToPermission(requestId, decision)) return
     const record = this.requireRecord(id)
     const request = await this.host.openRequest(record, requestId)
     if (!request) throw new Error(`Permission request ${requestId} is no longer open`)

@@ -6,10 +6,10 @@ import type { McpServers } from '../mcp/mcp-config'
 
 export type { PermissionRow, FileEditChange }
 
-/** One MCP server as the engine last reported it. */
+/** One MCP server as last seen; `stopped` is not running, its tools still offered and starting it on first use. */
 export type McpServerState = {
   name: string
-  status: 'connected' | 'failed' | 'needs-auth' | 'pending' | 'disabled'
+  status: 'connected' | 'failed' | 'pending' | 'stopped'
   error?: string
 }
 
@@ -17,8 +17,10 @@ export type McpServerState = {
 export interface McpControl {
   /** The workspace's servers changed: this set replaces the one the session runs with. */
   reload(servers: McpServers): Promise<void>
-  /** Try one server again; a failure shows up as its status, never as a throw. */
-  reconnect(name: string): Promise<void>
+  /** Start one server now; a failure shows up as its status, never as a throw. */
+  start(name: string): Promise<void>
+  /** Stop one server's process; the next call to one of its tools starts it again. */
+  stop(name: string): Promise<void>
 }
 
 /** Token accounting for one assistant turn, as far as the engine reports it. */
@@ -140,7 +142,12 @@ export interface CodeSession {
   send(text: string): void
   /** Single consumer. Ends after the `ended` event. */
   events(): AsyncIterable<SessionEvent>
-  respondToPermission(requestId: string, decision: PermissionDecision): void
+  /**
+   * Answer a permission request. False when this engine no longer holds it —
+   * it was answered already, or the engine withdrew it — so the host can
+   * deliver the answer another way rather than drop a click.
+   */
+  respondToPermission(requestId: string, decision: PermissionDecision): boolean
   /**
    * Answer a question the model asked, or tell it the question went
    * unanswered; resolved at most once. False when this engine no longer holds

@@ -33,9 +33,9 @@ export class PermissionsTab extends HTMLElement {
     // Not a workspace setting, so it is never disabled for want of a folder open: it has nowhere else to live.
     const person = el('div', 'person')
     person.append(
-      heading('Permissions', 'For you, in every workspace'),
+      heading('Permissions', 'For you, on this machine'),
       this.grantList(snapshot.permissions.person, 'person', false, (grants) => new PersonGrantsChangedEvent(grants)),
-      note('Places outside every repository, granted once here rather than asked for again in each workspace that reaches them.'),
+      note('Places outside the workspace: kept for every workspace, or for the one workspace named, in a file of your own that never travels with the source.'),
     )
     this.append(workspace, person)
   }

@@ -8,13 +8,13 @@ const other = { type: 'stdio' as const, command: 'y' }
 
 function fakeSession(withMcp: boolean) {
   const reloads: McpServers[] = []
-  const reconnects: string[] = []
   const mcp: McpControl = {
     reload: async (servers) => void reloads.push(servers),
-    reconnect: async (name) => void reconnects.push(name),
+    start: async () => {},
+    stop: async () => {},
   }
   const session = { id: 's', mcp: withMcp ? mcp : undefined } as unknown as CodeSession
-  return { session, reloads, reconnects }
+  return { session, reloads }
 }
 
 function setUp(reads: (McpServers | Error)[], live: CodeSession[]) {

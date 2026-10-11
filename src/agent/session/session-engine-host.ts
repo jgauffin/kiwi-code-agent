@@ -41,9 +41,10 @@ export class SessionEngineHost {
     return this.live.get(id)
   }
 
-  /** One MCP server of a live session, tried again; nothing to do for a session that is not running. */
-  async reconnectMcp(id: string, server: string): Promise<void> {
-    await this.live.get(id)?.mcp?.reconnect(server)
+  /** Starts or stops one MCP server of a live session; nothing to do for a session that is not running. */
+  async switchMcp(id: string, server: string, running: boolean): Promise<void> {
+    const mcp = this.live.get(id)?.mcp
+    await (running ? mcp?.start(server) : mcp?.stop(server))
   }
 
   /** The live session running under another one's tab, if any. */

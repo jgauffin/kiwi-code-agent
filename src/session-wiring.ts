@@ -10,7 +10,9 @@ import { packageScripts } from './agent/permissions/package-scripts'
 import { PermissionPolicy, type PermissionRules } from './agent/permissions/permission-policy'
 import type { ProjectCommands } from './agent/permissions/project-commands'
 import { readOnlyTools } from './agent/permissions/tool-classes'
+import { isWithin, normalizePlace } from './agent/permissions/places'
 import { instructionPlaces } from './agent/permissions/instruction-places'
+import { projectMemoryDir, userMemoryFile } from './agent/memory/memories'
 import { ClaudeRulesFile, existsAt, oldRulesAsGrants, PersonGrantsStore, personGrantsFile, readGrantList, withGrants } from './agent/permissions/grant-stores'
 import { parseGrant, type Grant, type GrantScope, type KeptGrant } from './agent/permissions/grants'
 import { homedir } from 'node:os'
@@ -92,6 +94,7 @@ export function createPolicyFor(
       writesAllowed: () => allowWritesControl.isEnabled(sessionId),
       scratch: scratchDir(sessionId),
       readable: instructionPlaces(workspaceRoot, [shippedPluginDir(context), skillsMirrorDir(context, sessionId)]),
+      writable: [projectMemoryDir(workspaceRoot), userMemoryFile()],
       rulesFiles: [personGrantsFile(), claudeUserSettingsFile()],
     })
     policies.set(sessionId, policy)
@@ -180,7 +183,8 @@ async function addWorkspaceGrants(grants: readonly Grant[]): Promise<void> {
  * read again as a grant here, so one the prompt could not have offered (an
  * allow naming flags) is never kept.
  */
-export function createPermissionStore(getSessions: () => SessionManager, grants: GrantSources): PermissionStore {
+export function createPermissionStore(getSessions: () => SessionManager, grants: GrantSources, workspaceRoot: string): PermissionStore {
+  const root = normalizePlace(workspaceRoot)
   return {
     keep: async (sessionId, kept) => {
       const valid = kept.flatMap((k) => {
@@ -188,9 +192,12 @@ export function createPermissionStore(getSessions: () => SessionManager, grants:
         return grant ? [{ grant, scope: k.scope }] : []
       })
       const of = (scope: GrantScope) => valid.filter((k) => k.scope === scope).map((k) => k.grant)
+      // A workspace's answer about a place outside it is a path on this machine: kept with the person's own, tied to this workspace.
+      const inside = of('workspace').filter((g) => isWithin(root, g.place))
+      const outside = of('workspace').filter((g) => !isWithin(root, g.place)).map((g): Grant => ({ ...g, workspace: root }))
       if (of('session').length) await getSessions().keepForSession(sessionId, of('session'))
-      if (of('workspace').length) await addWorkspaceGrants(of('workspace'))
-      if (of('person').length) await grants.person.add(of('person'))
+      if (inside.length) await addWorkspaceGrants(inside)
+      if (of('person').length || outside.length) await grants.person.add([...of('person'), ...outside])
     },
   }
 }
@@ -240,7 +247,8 @@ export function permissionRules(sources: GrantSources, session: SessionRecord | 
   return {
     grants: [
       ...scoped('workspace')([...workspaceGrants(), ...sources.claudeWorkspace.flatMap((file) => file.read())]),
-      ...scoped('person')([...sources.person.get(), ...sources.claudePerson.read()]),
+      ...scoped('workspace')(sources.person.get().filter((g) => g.workspace !== undefined && samePlace(g.workspace, normalizePlace(workspaceRoot)))),
+      ...scoped('person')([...sources.person.get().filter((g) => g.workspace === undefined), ...sources.claudePerson.read()]),
       ...scoped('session')([...(session?.grants ?? []), ...oldSession]),
     ],
     denyGitWrites: config.get('permissions.denyGitWrites', false),
@@ -261,3 +269,5 @@ export async function migrateWorkspaceRules(workspaceRoot: string): Promise<void
   await config.update('permissions.allow', undefined, vscode.ConfigurationTarget.Workspace)
   await config.update('permissions.deny', undefined, vscode.ConfigurationTarget.Workspace)
 }
+
+const samePlace = (a: string, b: string): boolean => isWithin(a, b) && isWithin(b, a)

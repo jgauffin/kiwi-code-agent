@@ -16,7 +16,7 @@ The moment a feature's spec is first written.
   - **Person's word wins**: a folder the person names in reply is the one the spec is written to, whether or not that folder already holds a spec
 - **Domain read from the description**: the folder is inferred from the feature's description text and the domain language of the docs, not from the feature's name alone
 - **Existing folders reused**: the session is told which spec folders the workspace already has and puts the feature in the one it belongs to rather than coining a synonym of it
-- **One level deep**: a proposed folder is a single folder under `specs/`, so a new spec is written as `specs/<domain>/<feature>.spec.md` and never into a folder inside a folder
+- **One level deep**: a proposed folder may sit at any depth under `specs/`, nested where a domain is part of a wider one (`specs/orders/returns/<feature>.spec.md`), and every folder already holding a spec, nested ones by their path, is among those offered for reuse
 - **Setting decides whether folders are used**: `kiwiAgent.specFolders` governs it — the default follows the workspace, so a workspace whose specs all sit at the root keeps getting specs at the root and one that already has a spec folder gets a folder for every new spec, while `by-domain` and `flat` always do that one thing (docs/settings.md#Settings)
   - **Flat skips the proposal**: where the setting resolves to flat, the direction says nothing about a folder and the spec is written at the root of `specs/` (docs/plan-sessions.md#Feature planning)
 - **Drafts written from the docs land the same way**: a draft spec written by the docs cleanup job rather than by a planning session gets its folder the same way, proposed with the feature list it offers (specs/doc-migration.spec.md#Migrating the remaining feature docs into specs)
@@ -27,10 +27,11 @@ The moment a feature's spec is first written.
 What every session and every listing makes of a spec that is no longer at the root.
 
 - **Every folder in scope**: a session that may read the specs may read, search and be answered from a spec in any folder under `specs/`, and one in a folder is never invisible to it (docs/intent/agent.md#Phase 1: Feature planning)
-  - **Deeper folder still read**: a spec a person filed deeper than one level is read, searched and cited like any other, even though nothing proposes such a folder
+  - **Deeper folder still read**: a spec in a folder inside a folder is read, searched and cited like any other
   - **Decision files stay at the root**: `specs/unfiled-decisions.md` and `specs/future-work.md` are not specs and keep their place at the root of `specs/` (docs/plan-sessions.md#Unfiled decisions)
 - **Citation carries the folder**: a rule derived from another feature's spec cites that spec's full path, folder included, so the citation resolves to the file as it now sits (docs/intent/agent.md#Phase 1: Feature planning)
 - **Listed by feature and grouped by folder**: wherever specs are offered to be picked — drafts waiting to be carried on, a spec to update — they are named by their feature and grouped by the folder they sit in (specs/changing-an-implemented-spec.spec.md#Picking a spec to update)
+  - **Narrowing the specs to pick up**: the specs offered to be picked up on the new session screen can be narrowed by text found in their feature name or folder, and to the ones not yet verified, while the conversations listed beside them stay as they are
 
 ## Organising the specs that already exist
 A workspace whose specs were all written before folders existed.

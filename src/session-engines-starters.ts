@@ -36,6 +36,7 @@ import { skillsMirrorDir } from './extension-paths'
 import { connectMcp } from './agent/mcp/mcp-connect'
 import type { McpServerSet } from './agent/mcp/mcp-servers'
 import { McpToolHost } from './agent/mcp/mcp-tool-host'
+import { McpToolCache } from './agent/mcp/mcp-tool-cache'
 import { projectScriptsInstruction } from './agent/permissions/package-scripts'
 import { PIPE_WRITING } from './agent/permissions/shell-guidance'
 import { SPEC_AMENDING, SPEC_CHECKING_AFTER_BUILD, SPEC_READING } from './agent/phases/blind-plan'
@@ -198,7 +199,7 @@ export class EngineStarters {
     const session = new SdkSession({
       ownTools: offered,
       scriptTools,
-      ...(mcpServers ? { mcpServers } : {}),
+      ...(mcpServers ? { mcp: { host: this.mcpHost(), servers: mcpServers } } : {}),
       id: record.id,
       profile,
       cwd: workspaceRoot,
@@ -228,9 +229,16 @@ export class EngineStarters {
         ? { trace: (line: string) => output.appendLine(`[${record.id.slice(0, 8)}] ${line}`) }
         : {}),
     })
-    // The engine starts every workspace server before it reports in, so a slow one is most of the wait.
-    if (mcpServers && Object.keys(mcpServers).length > 0) onProgress('Connecting the MCP servers')
     return session
+  }
+
+  /** A session's own hold on the workspace's servers; the tools they last listed are kept per workspace. */
+  private mcpHost(): McpToolHost {
+    const { context, output, workspaceRoot } = this.deps
+    return new McpToolHost(
+      connectMcp(workspaceRoot, (server, chunk) => output.append(`[mcp ${server}] ${chunk}`)),
+      new McpToolCache(context.workspaceState),
+    )
   }
 
   async startOpenAi({ record, setup, ownTools, mcpServers, skills, subAgents, whereLine, scratchLine, onProgress }: EngineStart): Promise<CodeSession> {
@@ -291,9 +299,7 @@ export class EngineStarters {
       compactionFocus: focusOf(record),
       ...(reasoningEffort ? { reasoningEffort } : {}),
       ...(setup.hooks ? { hooks: setup.hooks } : {}),
-      ...(mcpServers
-        ? { mcp: { host: new McpToolHost(connectMcp(workspaceRoot, (server, chunk) => output.append(`[mcp ${server}] ${chunk}`))), servers: mcpServers } }
-        : {}),
+      ...(mcpServers ? { mcp: { host: this.mcpHost(), servers: mcpServers } } : {}),
     })
   }
 }

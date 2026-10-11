@@ -58,12 +58,78 @@ const searched = (_call: CommandCall, site: CommandSite, word: string): Reach =>
   return 'path' in place && site.exists(place.path) === 'file' ? 'file' : 'tree'
 }
 
+/*
+ * Each reader has its own flags, since a letter that takes a value in one
+ * (`head -c 10`) takes none in another (`wc -c file`). A flag read as taking a
+ * value swallows the word after it, so a path there would go unasked; a value
+ * read as an operand only asks about one place too many.
+ */
+
+/** No short flag of these takes a value: `cat -s` squeezes blank lines, `cat -n` numbers them. */
 export const plainReaders = reader({
-  names: ['cat', 'tac', 'nl', 'head', 'tail', 'wc', 'cut', 'column', 'md5sum', 'sha1sum', 'sha256sum', 'cmp', 'comm', 'stat', 'more'],
+  names: ['cat', 'more', 'md5sum', 'sha1sum', 'sha256sum', 'comm'],
+  flags: { valued: ['--output-delimiter'] },
+  extent: file,
+  noOperand: fromInput,
+})
+
+export const reverseConcatenate = reader({
+  names: ['tac'],
+  flags: { short: { s: '--separator' }, valued: ['--separator'] },
+  extent: file,
+  noOperand: fromInput,
+})
+
+export const headAndTail = reader({
+  names: ['head', 'tail'],
+  flags: { short: { n: '--lines', c: '--bytes', f: '--follow', F: '--follow', s: '--sleep-interval' }, valued: ['--lines', '--bytes', '--sleep-interval', '--pid', '--max-unchanged-stats'] },
+  extent: file,
+  noOperand: fromInput,
+})
+
+export const wordCount = reader({
+  names: ['wc'],
+  flags: { short: { c: '--bytes', l: '--lines', w: '--words', m: '--chars', L: '--max-line-length' }, valued: ['--files0-from'] },
+  readsValueOf: ['--files0-from'],
+  extent: file,
+  noOperand: fromInput,
+})
+
+export const cut = reader({
+  names: ['cut'],
+  flags: { short: { b: '--bytes', c: '--characters', d: '--delimiter', f: '--fields', s: '--only-delimited' }, valued: ['--bytes', '--characters', '--delimiter', '--fields', '--output-delimiter'] },
+  extent: file,
+  noOperand: fromInput,
+})
+
+export const numberLines = reader({
+  names: ['nl'],
   flags: {
-    short: { n: '--lines', c: '--bytes', d: '--delimiter', f: '--fields', b: '--bytes', s: '--separator', t: '--table', w: '--width' },
-    valued: ['--lines', '--bytes', '--delimiter', '--fields', '--separator', '--width', '--output-delimiter', '--format'],
+    short: { b: '--body-numbering', d: '--section-delimiter', f: '--footer-numbering', h: '--header-numbering', i: '--line-increment', l: '--join-blank-lines', n: '--number-format', s: '--number-separator', v: '--starting-line-number', w: '--number-width' },
+    valued: ['--body-numbering', '--section-delimiter', '--footer-numbering', '--header-numbering', '--line-increment', '--join-blank-lines', '--number-format', '--number-separator', '--starting-line-number', '--number-width'],
   },
+  extent: file,
+  noOperand: fromInput,
+})
+
+export const column = reader({
+  names: ['column'],
+  flags: { short: { c: '--output-width', s: '--separator', o: '--output-separator', t: '--table', N: '--table-columns' }, valued: ['--output-width', '--separator', '--output-separator', '--table-columns'] },
+  extent: file,
+  noOperand: fromInput,
+})
+
+export const compareBytes = reader({
+  names: ['cmp'],
+  flags: { short: { n: '--bytes', i: '--ignore-initial' }, valued: ['--bytes', '--ignore-initial'] },
+  extent: file,
+  noOperand: fromInput,
+})
+
+/** `stat -f` reports the file system and takes no value; `-c` takes a format. */
+export const fileStatus = reader({
+  names: ['stat'],
+  flags: { short: { c: '--format', f: '--file-system', L: '--dereference' }, valued: ['--format', '--printf'] },
   extent: file,
   noOperand: fromInput,
 })

@@ -12,6 +12,8 @@ export type Ground = {
   workspace: string
   /** Where the session's own instructions live: read unasked wherever that is. */
   readable: readonly string[]
+  /** Where the session is told to keep its memory notes: written unasked wherever that is. */
+  writable?: readonly string[]
   /** The session's scratch folder, normalized: written unasked, and nothing there is worth asking about losing. */
   scratch?: string
   /** Is the session's Allow writes switch on? */
@@ -43,6 +45,12 @@ export type KeepOffer = {
   places: { place: string; reaches: Reach[] }[]
   /** The flags of the call, offered on a deny only. */
   flags: string[]
+  /**
+   * A command run in the workspace: answered once, for the session or for the
+   * workspace, with nothing else to pick. Its kept answer covers the command
+   * anywhere in the workspace.
+   */
+  plain?: true
 }
 
 export type EffectVerdict =
@@ -77,7 +85,7 @@ export function judgeEffect(judged: Judged, grants: readonly KeptGrant[], ground
       if (isWithin(ground.workspace, path)) return { kind: 'passes', by: 'reading in the workspace' }
       if (ground.readable.some((place) => isWithin(place, path))) return { kind: 'passes', by: "the session's own instructions" }
       if (keptBy) return keptBy
-      return asked('no kept answer reads here', placeOffer({ action: 'read' }, path, effect.extent, ground, flags))
+      return asked('outside the workspace', placeOffer({ action: 'read' }, path, effect.extent, ground, flags))
     }
     case 'write':
     case 'destroy': {
@@ -91,19 +99,22 @@ export function judgeEffect(judged: Judged, grants: readonly KeptGrant[], ground
       if (effect.action === 'destroy' && !throwaway)
         return asked('it deletes or replaces what is there', { ...placeOffer({ action: 'write' }, path, effect.extent, ground, flags), allowNever: 'Deletes or replaces content: always asked.' })
       if (ground.scratch !== undefined && isWithin(ground.scratch, path)) return { kind: 'passes', by: 'the scratch folder' }
+      // The session is told to write its memory notes there; a delete is still asked like any other.
+      if (effect.action === 'write' && (ground.writable ?? []).some((place) => isWithin(place, path))) return { kind: 'passes', by: "the session's memory notes" }
       if (isWithin(ground.workspace, path)) {
         if (ground.writesAllowed) return { kind: 'passes', by: 'the Allow writes switch' }
         return asked('Allow writes is off', { allowNever: 'Writes in the workspace follow the Allow writes switch.', scopes: [], subject: { action: 'write' }, places: [], flags })
       }
       if (keptBy) return keptBy
-      return asked('no kept answer writes here', placeOffer({ action: 'write' }, path, effect.extent, ground, flags))
+      return asked('outside the workspace', placeOffer({ action: 'write' }, path, effect.extent, ground, flags))
     }
     case 'reaches': {
       if (judged.projectCommand !== undefined) return { kind: 'passes', by: judged.projectCommand }
       if (keptBy) return keptBy
       const why = REACHES_WHY[effect.what]
       if (!isKnown(effect.place)) return asked(why, unknownOffer(invocation, ground, flags))
-      return asked(why, placeOffer(commandOf(invocation), effect.place.path, 'directory', ground, flags))
+      const offer = placeOffer(commandOf(invocation), effect.place.path, 'directory', ground, flags)
+      return asked(why, effect.what === 'command' && isWithin(ground.workspace, effect.place.path) ? { ...offer, plain: true } : offer)
     }
   }
 }
@@ -138,7 +149,8 @@ function denyOnlyOffer(invocation: Invocation | undefined, ground: Ground, flags
  */
 function placeOffer(subject: KeepOffer['subject'], path: string, extent: Reach, ground: Ground, flags: string[]): KeepOffer {
   const inside = isWithin(ground.workspace, path)
-  const scopes: GrantScope[] = inside ? ['session', 'workspace'] : ['session', 'person']
+  // Outside, a workspace's answer is kept on this machine for that workspace alone, so it is offered there too.
+  const scopes: GrantScope[] = inside ? ['session', 'workspace'] : ['session', 'workspace', 'person']
   const places: KeepOffer['places'] = []
   if (extent === 'file') places.push({ place: path, reaches: ['file'] })
   let directory = extent === 'file' ? parentPlace(path) : path
@@ -151,9 +163,10 @@ function placeOffer(subject: KeepOffer['subject'], path: string, extent: Reach, 
     if (up === directory) break
     directory = up
   }
-  // The root of a drive is never offered: a grant there is a grant of the whole drive. Nor is a place
-  // straddling the workspace's edge, which would be kept in a scope that place does not warrant.
-  const offered = places.filter((p) => !/^([A-Z]:)?\/$/.test(p.place) && (inside ? isWithin(ground.workspace, p.place) : !isWithin(p.place, ground.workspace)))
+  // The root of a drive is never offered: a grant there is a grant of the whole drive. Inside the workspace
+  // nothing above it is offered, since its answers are kept in the workspace's settings, which travel with
+  // the source. Outside, a folder holding the workspace is offered like any other.
+  const offered = places.filter((p) => !/^([A-Z]:)?\/$/.test(p.place) && (!inside || isWithin(ground.workspace, p.place)))
   return { scopes, subject, places: offered, flags }
 }
 

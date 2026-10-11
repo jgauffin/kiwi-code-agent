@@ -77,6 +77,20 @@ async function builtThenRevised(now = revised): Promise<string> {
   return dir
 }
 
+/** A workspace whose board was derived from `built`, finished and its test run passed, holding `now` as the spec with whatever status it carries; `addTask` adds an untested task to the board afterwards. */
+async function verifiedThen(now: string, addTask = false): Promise<string> {
+  const dir = await workspace({ 'order-cancellation.spec.md': built })
+  const state = await readSpecState(specPath(dir, 'Order cancellation'))
+  if (!state.exists) throw new Error('spec not written')
+  const board = deriveBoard(parseSpec(state.body))
+  const tasks = board.tasks.map((t) => ({ ...t, state: 'tested' as const }))
+  const added = addTask ? [{ ...tasks[0]!, name: 'Cancel from the order page', delivers: [], state: 'open' as const }] : []
+  await mkdir(join(dir, '.kiwi', 'specs'), { recursive: true })
+  await writeBoard(tasksPath(dir, 'Order cancellation'), { ...board, tasks: [...tasks, ...added], verification: [{ at: '2026-01-01T00:00:00Z', ok: true, text: 'passed' }] })
+  await writeFile(specPath(dir, 'Order cancellation'), now)
+  return dir
+}
+
 async function workspace(files: Record<string, string> = {}): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'pickup-'))
   await mkdir(join(dir, 'specs'), { recursive: true })
@@ -161,6 +175,61 @@ describe('picking up a plan', () => {
       const started = (post.delivered[0] as { prompt: string }).prompt
       expect(started).toContain('"Refund on cancel"')
       expect(started).not.toContain('"Cancel reason"')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('a_verified_feature_whose_spec_gained_rules_is_picked_up_with_them_named_rather_than_refused', async () => {
+    const dir = await verifiedThen(revised.replace('status: draft', 'status: verified'))
+    try {
+      const post = courier()
+      await pickUpPlan({ courier: post, cwd: dir, feature: 'Order cancellation' })
+      expect(post.delivered[0]).toMatchObject({ kind: 'start', label: 'Picking the plan up' })
+      const started = (post.delivered[0] as { prompt: string }).prompt
+      expect(started).toContain('"Refund on cancel"')
+      expect(started).not.toContain('"Cancel reason"')
+      expect(started).toContain('never report the feature done')
+      // A settled spec has nothing left to steer, whatever was added to it.
+      expect(post.owed).toEqual([])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('a_verified_feature_whose_board_gained_a_task_is_picked_up_rather_than_refused', async () => {
+    const dir = await verifiedThen(built, true)
+    try {
+      const post = courier()
+      await pickUpPlan({ courier: post, cwd: dir, feature: 'Order cancellation' })
+      expect(post.delivered[0]).toMatchObject({ kind: 'start', label: 'Picking the plan up' })
+      expect((post.delivered[0] as { prompt: string }).prompt).toContain('never report the feature done')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('a_verified_feature_with_nothing_added_since_is_refused_as_done', async () => {
+    const dir = await verifiedThen(built)
+    try {
+      await expect(pickUpPlan({ courier: courier(), cwd: dir, feature: 'Order cancellation' })).rejects.toThrow(/verified/)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('an_approved_revision_brought_up_in_its_open_session_names_the_rules_nothing_has_built_yet', async () => {
+    const dir = await verifiedThen(revised.replace('status: draft', 'status: approved'))
+    try {
+      const post = courier()
+      await pickUpPlan({ courier: post, cwd: dir, feature: 'Order cancellation', owner: { sessionId: 'owner-1', specSeen: 'older-version' } })
+      expect(post.delivered[0]).toEqual({ kind: 'open', sessionId: 'owner-1' })
+      expect(post.delivered[1]).toMatchObject({ kind: 'tell', sessionId: 'owner-1', label: 'Planning the revised spec' })
+      const told = (post.delivered[1] as { prompt: string }).prompt
+      expect(told).toContain('"Refund on cancel"')
+      expect(told).not.toContain('"Cancel reason"')
+      expect(told).not.toContain('draft again')
+      expect(post.owed).toEqual([])
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

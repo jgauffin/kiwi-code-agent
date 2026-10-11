@@ -2,7 +2,33 @@
 
 ## 0.2.8
 
+- Specs can be filed in folders at any depth (`specs/orders/returns/`); planning and Clean up docs propose and write nested folders too.
+- Clean up docs can file drafts in folders and offers to sort existing specs even when every spec sits at the root; only `kiwiAgent.specFolders: flat` keeps it flat.
+- New session: filter the specs to pick up by name or folder, and tick "Not done" to hide verified ones.
+- New session: Ctrl+click or middle-click a spec to open it in a tab of its own while you stay on the current one, so you can open several from one screen.
+- Picking a verified feature whose spec gained rules, or whose board gained a task, now opens it with the unbuilt rules named instead of refusing it as done.
+- Approving a revised spec of a feature built on an older task board now builds the rules it added instead of skipping the implementation.
+- Cleanup no longer splits a class into partial classes or files that reopen it; it extracts each responsibility into a module or class of its own.
+- MCP servers start on the first call to one of their tools instead of with every session; under the composer each server shows a light (green running, red not running) and a click starts or stops it.
+
 - Permission prompts list what the call would do, one row per effect, and show the sentence an answer is kept as (who, what, where, how far below) before you confirm; the Permissions settings page lists kept answers the same way.
+- Permission prompts show one line per asked effect with one Allow and one Deny; "Allow reads in this folder…" on a line keeps the answer for the folder.
+- A read another line already covers is no longer asked twice.
+- Sessions use their scratch folder for output and data files, and do computation in RunScript instead of writing a script and asking to run it.
+- A session's scratch folder is named by the first 8 characters of its id (`.kiwi/scratch/a09d1305`); folders of earlier sessions keep their full names.
+- A path the command line first sets in a variable (`S=.kiwi/scratch/x; npm test > $S/out.log`) is judged as that path instead of always being asked.
+- `wc -c`, `cat -n`, `tail -f` and `stat -f` on a file outside the project are now asked about.
+- A folder outside the workspace can be kept for "this workspace"; it is saved in `~/.kiwi/permissions.json`, tied to the workspace.
+- Grep with a `glob` like `{a,b}/docs/**` asks only for those folders.
+- A brace in a Glob pattern or shell path no longer slips past a prompt.
+- `Exists` is allowed wherever reading that folder is.
+- Permission prompts show a tool's arguments as labelled fields instead of JSON.
+- An open permission prompt stays at the bottom of the chat; clicking "Waiting for you to allow or deny" scrolls to it.
+- Answering a prompt the engine had already withdrawn no longer does nothing; the answer goes to the model.
+- `ToolSearch`, `ListAgents`, `SendMessage`, `ScheduleWakeup`, the task tools and starting a subagent no longer ask for permission; the subagent's own calls still do.
+- A command run in the workspace is answered with Allow once, Allow for this session, Allow for this workspace or Deny.
+- Writing memory notes (`~/.claude/projects/<workspace>/memory/`, your personal memory file) no longer asks.
+- A subagent's permission prompt unfolds its step so you see it; a prompt left open when the session stopped no longer shows as "Waiting for you".
 - Answers are kept as `kiwiAgent.permissions.grants`; old `permissions.allow`/`deny` entries granting a folder are converted on start, and command-prefix and `cd` answers are dropped and asked again.
 - Deleting or overwriting is asked every time, except in the scratch folder, in ignored output, or (with Allow writes on) where git can bring it back.
 - `cd` no longer asks; commands after it are judged from where it lands, and the Claude engine's real shell directory is used across calls.

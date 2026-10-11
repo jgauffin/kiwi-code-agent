@@ -50,14 +50,26 @@ export const FILE_TOOLS: ReadonlySet<string> = new Set([
 export const WITHIN_PROJECT_TOOLS: ReadonlySet<string> = new Set(['ReadDir', 'Exists'])
 
 /**
- * The engine's own tools that only look. The tools this extension implements
- * are not listed: they carry the answer themselves, and `readOnlyTools` below
- * prefers it, so there is one place to state it per tool.
+ * The engine's own tools that only look, or only coordinate the session's own
+ * work. The tools this extension implements are not listed: they carry the
+ * answer themselves, and `readOnlyTools` below prefers it, so there is one
+ * place to state it per tool.
  *
  * Only looking is not on its own leave to run: a call is judged by where it
  * looks as well, so reading stays inside the project exactly as writing does.
+ *
+ * Not here, since each does something beyond the session: Monitor and the
+ * Cron tools run or schedule work, the worktree tools change the repository,
+ * RemoteTrigger and PushNotification reach outside the machine, and the MCP
+ * resource tools reach a server.
  */
-const BUILT_IN_READ_ONLY: ReadonlySet<string> = new Set(['Read', 'Glob', 'Grep', 'LS', 'NotebookRead', 'TodoRead', 'TodoWrite', 'Skill'])
+const BUILT_IN_READ_ONLY: ReadonlySet<string> = new Set([
+  'Read', 'Glob', 'Grep', 'LS', 'NotebookRead',
+  // The session's own bookkeeping: its todo list and tasks, its skills, the definitions of its deferred tools, its background shells' output.
+  'TodoRead', 'TodoWrite', 'Skill', 'ToolSearch', 'BashOutput', 'TaskOutput', 'TaskStop', 'KillShell', 'TaskCreate', 'TaskGet', 'TaskList', 'TaskUpdate', 'EnterPlanMode',
+  // Talking to other agents and waking itself: each agent's own calls are judged on their own, as a subagent's are.
+  'ListAgents', 'SendMessage', 'ScheduleWakeup', 'CronList',
+])
 
 /** Does this tool only look? Asked by name, because a hook is given the name and not the tool. */
 export type ReadOnlyTools = (toolName: string) => boolean

@@ -43,7 +43,9 @@ Claude Code's layout, at the user level and in the workspace. On the own-loop en
 
 ## MCP servers
 
-`.mcp.json` (Claude Code's format) gives chat sessions its servers' tools on both engines, as `mcp__<server>__<tool>`. They ask before running unless an allow rule names the tool or `mcp__<server>__*`. A save of the file reaches running sessions, and the composer shows each server's status with a reconnect button.
+`.mcp.json` (Claude Code's format) gives chat sessions its servers' tools on both engines, as `mcp__<server>__<tool>`. They ask before running unless an allow rule names the tool or `mcp__<server>__*`. A save of the file reaches running sessions.
+
+Servers start lazily: a session offers the tools a server listed when it last ran and starts the server only when one of them is called. A server never run in this workspace, or whose entry in the file changed, is started once to learn its tools. The composer shows each server by name with a light, green while it runs and red while it does not, and a click on it starts or stops it; a stopped server starts again on its next tool call.
 
 `~/.mcp.json` holds the servers every workspace gets and the workspace's own `.mcp.json` goes over it, so a workspace can replace a user server by name. Only the workspace file is watched; a change to the user's takes effect on the next window.
 

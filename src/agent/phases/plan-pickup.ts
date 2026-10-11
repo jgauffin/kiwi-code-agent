@@ -1,13 +1,13 @@
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { SPECS_DIR, draftPickupPrompt, resumePlanPrompt, revisedDraftPrompt, specPath } from './blind-plan'
+import { SPECS_DIR, draftPickupPrompt, resumePlanPrompt, revisedSpecPrompt, specPath } from './blind-plan'
 import { decisionsPath } from './decisions'
 import { finished } from './plan-list'
 import { reviewPath } from './plan-review'
 import { authorshipOf, readSpecState } from './spec-file'
 import { parseSpec, specFingerprint } from './spec-model'
 import { isVerified } from './spec-status'
-import { readTasks, rulesNotBuilt, tasksPath } from './tasks-file'
+import { readTasks, rulesNotBuilt, tasksDone, tasksPath } from './tasks-file'
 
 /** How a picked-up plan reaches its session, decided by the caller: whether the feature already has a tab. */
 export interface PlanPickupCourier {
@@ -50,10 +50,10 @@ export async function pickUpPlan(options: {
   const { courier, cwd, feature, owner, note } = options
   if (owner) {
     await courier.open(owner.sessionId)
-    const unbuilt = await revisionUnseen(cwd, feature, owner.specSeen)
-    if (unbuilt.length > 0) {
-      courier.critiqueOwed(feature)
-      await courier.tell(owner.sessionId, revisedDraftPrompt(feature, cwd, unbuilt), 'Planning the revised spec')
+    const revision = await revisionUnseen(cwd, feature, owner.specSeen)
+    if (revision.unbuilt.length > 0) {
+      if (revision.draft) courier.critiqueOwed(feature)
+      await courier.tell(owner.sessionId, revisedSpecPrompt(feature, cwd, revision.unbuilt, revision.draft), 'Planning the revised spec')
     }
     if (note) await courier.say(owner.sessionId, note)
     return
@@ -62,31 +62,37 @@ export async function pickUpPlan(options: {
   const state = await readSpecState(path)
   if (!state.exists) throw new Error(`No spec for "${feature}" under ${SPECS_DIR}/.`)
   const tasks = await readTasks(tasksPath(cwd, feature))
-  if (isVerified(state.status) || finished(state.status, tasks)) {
+  const unbuilt = tasks.exists ? rulesNotBuilt(parseSpec(state.body), tasks.tasks) : []
+  const tasksOpen = tasks.exists && !tasksDone(tasks.tasks)
+  // The board is the live word while it exists: a rule added to the spec or a task added to the board reopens a verified feature.
+  const verified = tasks.exists ? finished(state.status, tasks) : isVerified(state.status)
+  if (verified && unbuilt.length === 0) {
     throw new Error(`"${feature}" is verified: plan the next change as its own feature.`)
   }
   const present = { review: existsSync(reviewPath(cwd, feature)), decisions: existsSync(decisionsPath(cwd, feature)) }
   // A draft buys a critique before any write; a settled spec only a status report, since there is nothing left to steer.
   const draft = state.status === 'draft'
-  const unbuilt = draft && tasks.exists ? rulesNotBuilt(parseSpec(state.body), tasks.tasks) : []
-  const prompt = draft ? draftPickupPrompt(feature, cwd, authorshipOf(await readFile(path, 'utf8')), present, unbuilt) : resumePlanPrompt(feature, cwd, present)
+  const prompt = draft
+    ? draftPickupPrompt(feature, cwd, authorshipOf(await readFile(path, 'utf8')), present, unbuilt)
+    : resumePlanPrompt(feature, cwd, present, { unbuilt, tasksOpen })
   if (draft) courier.critiqueOwed(feature)
   const started = await courier.start(feature, prompt, 'Picking the plan up')
   if (note && started) await courier.say(started, note)
 }
 
 /**
- * The rules a draft holds that its board never built, when the draft changed
+ * The rules a spec holds that its board never built, when the spec changed
  * since its session last ended a turn on it: what that session remembers is
  * the spec before the change, so it would report the feature done. Empty for
- * a draft with no board (nothing built yet, the session is still planning it)
+ * a spec with no board (nothing built yet, the session is still planning it)
  * and for a revision the session has already seen.
  */
-async function revisionUnseen(cwd: string, feature: string, specSeen: string | undefined): Promise<string[]> {
+async function revisionUnseen(cwd: string, feature: string, specSeen: string | undefined): Promise<{ unbuilt: string[]; draft: boolean }> {
   const state = await readSpecState(specPath(cwd, feature))
-  if (!state.exists || state.status !== 'draft') return []
+  if (!state.exists) return { unbuilt: [], draft: false }
+  const draft = state.status === 'draft'
   const spec = parseSpec(state.body)
-  if (specFingerprint(spec) === specSeen) return []
+  if (specFingerprint(spec) === specSeen) return { unbuilt: [], draft }
   const tasks = await readTasks(tasksPath(cwd, feature))
-  return tasks.exists ? rulesNotBuilt(spec, tasks.tasks) : []
+  return { unbuilt: tasks.exists ? rulesNotBuilt(spec, tasks.tasks) : [], draft }
 }

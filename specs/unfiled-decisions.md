@@ -1,5 +1,9 @@
 # Unfiled decisions
 
+### Ctrl+click on a spec to pick up opens it in a tab of its own
+- decided: On the new-session screen, Ctrl+click (Cmd+click on a Mac) or a middle click on a spec in the pick-up list opens that feature's planning session in a new tab while the screen stays the tab in view, with whatever was typed on it, so several specs can be opened in a row; a plain click still opens it in place of the screen.
+- affects: spec folders, spec drafts
+
 ### A built feature's spec edited back to draft is planned in its own tab
 - decided: Picking a draft that was revised after its feature was built brings the feature's existing planning tab back, and the planner names the rules the task board has nothing built for (new, or reworded since), says whether each makes sense and how it would be built, and writes nothing until the user says go; a revision that session already saw is not raised again.
 - affects: Spec drafts, Changing an implemented spec
@@ -171,4 +175,16 @@
 ### References run from specs to docs, never back
 - decided: A spec cites the docs, but the code, its comments and the docs never cite a spec, a rule's name or a spec's path, and every session that writes code or docs is told so; a behaviour's reason is stated there in the domain's own words instead.
 - affects: feature planning, doc migration, implementing a feature, chat, code planning
+
+### The docs cleanup job is where a root-only workspace adopts folders
+- decided: When spec folders follow the workspace and every spec sits at the root, the docs cleanup job still offers to sort the specs into folders and writes a draft into a folder once the person takes that offer or asks for folders, while drafts otherwise land at the root and only a setting of flat keeps the job from folders altogether.
+- affects: spec folders, doc migration
+
+### Running a script from the scratch folder stays asked
+- decided: Writing and deleting in a session's scratch folder run unasked, but running a program the session wrote there is still asked like any other command, and sessions are told to compute in the sandboxed script tool instead and to write a script only for what that tool cannot do (spawning a process, loading a package, reaching the network).
+- affects: permission rules, chat
+
+### MCP servers start on the first call to one of their tools
+- decided: A session offers each MCP server's tools as the server last listed them in this workspace and starts the server only when one of those tools is called (a server never run here, or whose configuration changed, is started once to learn its tools), and the person can start or stop each server from the composer, a stopped one starting again on its next call.
+- affects: chat, docs/settings.md, docs/intent/agent.md
 

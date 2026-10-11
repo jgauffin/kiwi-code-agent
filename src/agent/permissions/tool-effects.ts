@@ -1,7 +1,9 @@
 import { fileEffect, writeOrDestroy, type CommandSite } from './classifiers/classifier'
 import { effects, type Effect, type Invocation, type Ruling } from './effects'
+import { expandBraces } from './places'
 import { DELEGATE_TOOL } from '../openai-session/tools/delegate'
 import { isResearchDelegation } from '../sub-agents/sub-agent-index'
+import { isSubagentTool } from './tool-classes'
 
 /** What the tool classifiers are told besides the call itself. */
 export type ToolFacts = {
@@ -14,7 +16,7 @@ const READS_FILE = new Set(['Read', 'NotebookRead'])
 /** Tools that edit or write the one file they name, the change shown as a diff. */
 const WRITES_FILE: Record<string, string> = { Write: 'file_path', Edit: 'file_path', MultiEdit: 'file_path', NotebookEdit: 'notebook_path' }
 /** Tools that search or list below the path they are given, or where the session stands without one. */
-const SEARCHES = new Set(['Grep', 'CodeSearch', 'MarkdownSearch', 'CodeOutline', 'JsonSchema', 'JsonQuery', 'Exists', 'SpecSearch'])
+const SEARCHES = new Set(['Grep', 'CodeSearch', 'MarkdownSearch', 'CodeOutline', 'JsonSchema', 'JsonQuery', 'SpecSearch'])
 const LISTS = new Set(['LS', 'ReadDir'])
 /** Tools that reach the open internet. */
 const NETWORK = new Set(['WebFetch', 'WebSearch'])
@@ -33,7 +35,10 @@ export function toolEffects(toolName: string, input: unknown, site: CommandSite,
     const writes = WRITES_FILE[toolName]
     if (writes !== undefined) return pathEffect('write', site, text(writes), 'file')
     if (toolName === 'Glob') return glob(site, text('path'), text('pattern'))
+    if (toolName === 'Grep') return narrowed(site, text('path'), text('glob')) ?? searched(site, text('path'))
     if (SEARCHES.has(toolName)) return searched(site, text('path') ?? text('file_path'))
+    // Whether a path is there is one entry of its folder: read wherever that path may be read, file or folder alike.
+    if (toolName === 'Exists') return pathEffect('read', site, text('path') ?? text('file_path'), 'file')
     if (LISTS.has(toolName)) return pathEffect('read', site, text('path') ?? '.', 'directory')
     if (toolName === 'Move' || toolName === 'Copy') return transfer(toolName, site, text('source'), text('destination'))
     if (toolName === 'RunScript') {
@@ -41,6 +46,8 @@ export function toolEffects(toolName: string, input: unknown, site: CommandSite,
       return effects(...files.map((f) => fileEffect('write', site, f, 'file')))
     }
     if (toolName === DELEGATE_TOOL) return isResearchDelegation(input) ? effects({ action: 'reaches', what: 'network', place: site.cwd }) : effects()
+    // Starting a subagent does nothing itself: every call it makes is judged on its own, as the session's are.
+    if (isSubagentTool(toolName)) return effects()
     if (NETWORK.has(toolName)) return effects({ action: 'reaches', what: 'network', place: site.cwd })
     if (facts.readOnly(toolName)) return effects()
     return effects({ action: 'reaches', what: 'command', place: site.cwd })
@@ -62,12 +69,31 @@ function searched(site: CommandSite, path: string | undefined): Ruling {
   return effects(effect)
 }
 
-/** A glob walks below its path by its pattern: what lies above the pattern's first wildcard is where it reaches. */
+/**
+ * A glob walks below its path by its pattern: what lies above the pattern's
+ * first wildcard is where it reaches, for each of its brace alternatives.
+ */
 function glob(site: CommandSite, path: string | undefined, pattern: string | undefined): Ruling {
   const base = path ?? '.'
   if (pattern === undefined) return effects(fileEffect('read', site, base, 'tree'))
-  const joined = /^([\\/]|[A-Za-z]:)/.test(pattern) ? pattern : `${base.replace(/[\\/]+$/, '')}/${pattern}`
-  return effects(fileEffect('read', site, joined, 'tree'))
+  const joined = (p: string) => (/^([\\/]|[A-Za-z]:)/.test(p) ? p : `${base.replace(/[\\/]+$/, '')}/${p}`)
+  const alternatives = expandBraces(pattern) ?? [pattern]
+  return effects(...alternatives.map((p) => fileEffect('read', site, joined(p), 'tree')))
+}
+
+/**
+ * A search whose glob names folders below its path reads only there: with a
+ * slash in it, a ripgrep glob is anchored at the path searched, so
+ * `{a,b}/docs/**` reads `a/docs` and `b/docs`. A glob without a slash, a
+ * negated one, or one too wide to expand narrows nothing.
+ */
+function narrowed(site: CommandSite, path: string | undefined, pattern: string | undefined): Ruling | undefined {
+  if (pattern === undefined || pattern.startsWith('!')) return undefined
+  const alternatives = expandBraces(pattern.replace(/^[\\/]+/, ''))
+  // Every alternative must name a folder below the path; one that does not, or climbs out of it, leaves the search as wide as its path.
+  if (alternatives === undefined || alternatives.some((p) => !/[\\/]/.test(p) || /^([A-Za-z]:|\.\.)/.test(p))) return undefined
+  const base = (path ?? '.').replace(/[\\/]+$/, '')
+  return effects(...alternatives.map((p) => fileEffect('read', site, `${base}/${p}`, 'tree')))
 }
 
 /** A move takes the source away and lands at the destination; a copy reads the source. */

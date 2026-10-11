@@ -5,13 +5,13 @@ import { DOC_READING } from '../openai-session/tools/markdown/outline-gate'
 import { EDIT_WRITING } from '../openai-session/tools/edit'
 import SPEC_CONTRACT from '../../../assets/plugin/skills/spec-writing/contract.md'
 import { readOptional } from '../workspace-files'
-import { DOCS_DIR, SPECS_DIR, SPECS_ANY_GLOB, SPECS_FOLDER_GLOB, README_GLOB, REFERENCE_DIRECTION, SPECS_GLOB } from './blind-plan'
+import { DOCS_DIR, SPECS_DIR, SPECS_ANY_GLOB, README_GLOB, REFERENCE_DIRECTION, SPECS_GLOB } from './blind-plan'
 import { decisionsPath, readDecisions } from './decisions'
 import { featureOf, specFiles } from './plan-list'
 import { readReview, reviewPath } from './plan-review'
 import { planStage, type PlanStage } from './plan-stage'
 import type { Scope } from './scope-guard'
-import type { SpecFoldersMode } from './spec-folders'
+import type { SpecFoldersMode, SpecFoldersSetting } from './spec-folders'
 import { bodyOf, builtOf, statusOf, type SpecState } from './spec-file'
 import { readTasks, tasksPath } from './tasks-file'
 import { DECISION_FILES, UNFILED_DECISIONS, UNFILED_FILE } from './unfiled-decisions'
@@ -30,16 +30,26 @@ import { SPEC_SEARCH_TOOL } from './spec-search'
  */
 
 /**
- * `ignored` comes from the `kiwiAgent.planIgnore` setting: docs the planner
- * must not see are not this job's either. `mode` is `kiwiAgent.specFolders`,
- * resolved: `by-domain` lets a migrated draft land one domain folder deep as
- * well as at the root, since each draft proposes its own folder as it is
- * written; `flat` keeps every draft at the root.
+ * Where the job's drafts land. `by-domain` and `flat` are `kiwiAgent.specFolders`
+ * resolved; `root-first` is a workspace following its default whose specs all
+ * sit at the root: drafts stay there until the person takes the offer to sort
+ * the specs into folders or names one, since this job is where a workspace
+ * written before folders adopts them. Only a setting of `flat` rules folders out.
  */
-export function docMigrationScope(ignored: string[] = [], mode: SpecFoldersMode = 'flat'): Scope {
-  // Where a migrated draft may land stays mode-bound (root, or root and one folder deep); what it
-  // may read is every spec there already is, whatever folder a person has since filed one in.
-  const specGlobs = mode === 'by-domain' ? [SPECS_GLOB, SPECS_FOLDER_GLOB] : [SPECS_GLOB]
+export type DraftFolders = SpecFoldersMode | 'root-first'
+
+export function draftFolders(setting: SpecFoldersSetting, mode: SpecFoldersMode): DraftFolders {
+  return setting === 'default' && mode === 'flat' ? 'root-first' : mode
+}
+
+/**
+ * `ignored` comes from the `kiwiAgent.planIgnore` setting: docs the planner
+ * must not see are not this job's either. Unless folders are ruled out, a
+ * migrated draft or a picked move may land in a domain folder at any depth as
+ * well as at the root.
+ */
+export function docMigrationScope(ignored: string[] = [], folders: DraftFolders = 'flat'): Scope {
+  const specGlobs = folders === 'flat' ? [SPECS_GLOB] : [SPECS_GLOB, SPECS_ANY_GLOB]
   return {
     readable: [`${DOCS_DIR}/**`, README_GLOB, SPECS_ANY_GLOB, ...DECISION_FILES],
     // A doc cut is offered, never made, until the user agrees. A ruling that a
@@ -102,15 +112,19 @@ export function docMigrationKickoff(): string {
  * says, turn behaviour no spec holds into draft specs, tidy how what stays is
  * arranged. Judgment is always made per section, never per doc.
  */
-export function docMigrationPrompt(cwd: string, mode: SpecFoldersMode = 'flat', existingFolders: string[] = [], blockedMoves: BlockedMove[] = []): string {
-  const byDomain = mode === 'by-domain'
-  const folderNote = byDomain
-    ? ` Alongside each feature, propose the domain folder its spec would land in: a single folder under \`${SPECS_DIR}/\`, read from the sections it comes from and the domain language of the docs. Reuse one of the folders the workspace already has${existingFolders.length > 0 ? ` (${existingFolders.map((f) => `\`${f}\``).join(', ')})` : ''} where the feature belongs there, rather than coining a synonym of it.`
-    : ''
-  const draftPath = byDomain
-    ? `\`${SPECS_DIR}/<folder>/<slug>.spec.md\` with Write, \`<folder>\` the one proposed for that feature, kept or changed by the user, a single folder, never one inside another,`
-    : `\`${SPECS_DIR}/<slug>.spec.md\` with Write,`
-  const sortOffer = byDomain ? sortOfferSection(existingFolders, blockedMoves) : ''
+export function docMigrationPrompt(cwd: string, folders: DraftFolders = 'flat', existingFolders: string[] = [], blockedMoves: BlockedMove[] = []): string {
+  const proposal = `propose the domain folder its spec would land in: a folder under \`${SPECS_DIR}/\`, nested (\`orders/returns\`) where the domain is a part of a wider one, read from the sections it comes from and the domain language of the docs. Reuse one of the folders the workspace already has${existingFolders.length > 0 ? ` (${existingFolders.map((f) => `\`${f}\``).join(', ')})` : ''} where the feature belongs there, rather than coining a synonym of it.`
+  const folderNote = {
+    'by-domain': ` Alongside each feature, ${proposal}`,
+    'root-first': ` Drafts land at the root of \`${SPECS_DIR}/\` unless the user took the offer to sort the specs into folders or asks for folders; then, alongside each feature, ${proposal}`,
+    flat: '',
+  }[folders]
+  const draftPath = {
+    'by-domain': `\`${SPECS_DIR}/<folder>/<slug>.spec.md\` with Write, \`<folder>\` the one proposed for that feature, kept or changed by the user,`,
+    'root-first': `\`${SPECS_DIR}/<slug>.spec.md\` with Write, or \`${SPECS_DIR}/<folder>/<slug>.spec.md\` where a folder was settled for that feature,`,
+    flat: `\`${SPECS_DIR}/<slug>.spec.md\` with Write,`,
+  }[folders]
+  const sortOffer = folders === 'flat' ? '' : sortOfferSection(existingFolders, blockedMoves)
   return `You are cleaning up a software product's documentation, under ${cwd}. This is a maintenance job the user picks on its own, not a step of planning a feature.
 
 The goal: every piece of product behaviour lives in a spec, and the docs hold everything else (the domain and its language, constraints every feature respects, architecture and rationale, features not yet planned), arranged so a planner finds and cites it. A feature here is planned blind: the planner reads \`${DOCS_DIR}/**\`, the README and the specs, never the code, and writes rules that cite a doc section as \`path#Heading\`. Behaviour written twice, once in a doc and once in the spec that now defines it, lets the doc go stale without anyone noticing; a doc the planner cannot find its way through costs it reading, or a citation that leads nowhere.

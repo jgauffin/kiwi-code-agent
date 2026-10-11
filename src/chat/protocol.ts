@@ -270,16 +270,16 @@ export type FromWebview =
   | { type: 'set_session_effort'; effort?: Effort }
   /** Approves the shown code plan: the session goes on to build it with the full tool set. */
   | { type: 'approve_plan' }
-  /** Tries one of the run's MCP servers again. */
-  | { type: 'reconnect_mcp'; sessionId: string; server: string }
+  /** Starts or stops one of the run's MCP servers. */
+  | { type: 'switch_mcp'; sessionId: string; server: string; running: boolean }
   /** Switches the view to the session. */
   | { type: 'switch_session'; sessionId: string }
   /** `prompt`, when given, is sent as the first message; `files` are linked files it should read. */
   | { type: 'new_session'; mode: SessionMode; feature?: string; prompt?: string; files?: string[] }
   /** Sets the profile new sessions run on. */
   | { type: 'set_default_profile'; name: string }
-  /** Opens the plan session behind a spec on disk, or starts one on it when none remains; what it offers follows the spec's status. `note` is what was typed on the screen the pickup came from, said in the plan's chat. */
-  | { type: 'resume_plan'; feature: string; note?: string }
+  /** Opens the plan session behind a spec on disk, or starts one on it when none remains; what it offers follows the spec's status. `note` is what was typed on the screen the pickup came from, said in the plan's chat. `ownTab` opens it in a tab of its own, leaving the screen it was picked from as it is. */
+  | { type: 'resume_plan'; feature: string; note?: string; ownTab?: boolean }
   /** The new-session screen's Update spec: picks a feature's spec, whatever its state, and says `description` in its planning session as the developer's own first message. */
   | { type: 'update_spec'; feature: string; description: string }
   /** Approves the draft and starts its check against the code; refused while a comment is open. */

@@ -171,6 +171,15 @@ export class ChatViewProvider {
     return this.planActions.resumePlan(feature, into, note)
   }
 
+  /**
+   * The plan in a tab of its own while the tab it was picked from stays in view.
+   * VS Code shows a new tab as it opens it, so the picking tab is brought back after.
+   */
+  async resumePlanAside(feature: string, stayOn: ChatPanel): Promise<void> {
+    await this.planActions.resumePlan(feature)
+    this.panels.bringBack(stayOn)
+  }
+
   async open(sessionId: string, into?: ChatPanel): Promise<void> {
     const record = this.sessions.get(sessionId)
     if (record) await this.reveal(record, into)

@@ -9,8 +9,10 @@ import type {
   SDKMessage,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
-import { permissionResolved, type CodeSession, type McpControl, type McpServerState, type PermissionDecision, type SessionEvent } from '../session/code-session'
+import { permissionResolved, type CodeSession, type McpControl, type PermissionDecision, type SessionEvent } from '../session/code-session'
 import type { McpServers } from '../mcp/mcp-config'
+import type { McpToolHost } from '../mcp/mcp-tool-host'
+import { mcpProxy, type McpProxy } from '../mcp/mcp-proxy-server'
 import type { SessionHooks } from '../session/hooks'
 import type { ModelProfile } from '../session/model-profile'
 import { AsyncQueue } from '../session/async-queue'
@@ -56,17 +58,13 @@ export type SdkSessionOptions = {
   ownTools?: Tool[]
   /** The built-ins a script may call, as our own implementations run in this process; a script reaches the own tools too. */
   scriptTools?: Tool[]
-  /** The workspace's MCP servers; absent on a session that takes none. */
-  mcpServers?: McpServers
+  /** The workspace's MCP servers and what runs them; absent on a session that takes none. */
+  mcp?: { host: McpToolHost; servers: McpServers }
   query: QueryFn
   onStderr?: (chunk: string) => void
   /** Receives one line per engine message, for diagnosing what the engine does and does not send. */
   trace?: (line: string) => void
 }
-
-/** A pending server is asked about again this often, this many times: about the engine's own connection deadline. */
-const MCP_PENDING_INTERVAL_MS = 2000
-const MCP_PENDING_CHECKS = 15
 
 type PendingPermission = {
   resolve: (result: PermissionResult) => void
@@ -97,7 +95,8 @@ export class SdkSession implements CodeSession {
   readonly toolContext: ToolContext
   /** The in-process server for the own tools; part of every server set handed to the engine. */
   private readonly ownServer: McpSdkServerConfigWithInstance | undefined
-  private mcpServers: McpServers | undefined
+  /** The workspace's servers as the engine is handed them, by name. */
+  private proxies: Map<string, McpProxy> = new Map()
   readonly mcp: McpControl | undefined
 
   constructor(private readonly options: SdkSessionOptions) {
@@ -112,8 +111,7 @@ export class SdkSession implements CodeSession {
       ...this.scriptAccess(),
     }
     this.ownServer = options.ownTools?.length ? toolServer(options.ownTools, this.toolContext) : undefined
-    this.mcpServers = options.mcpServers
-    this.mcp = options.mcpServers ? this.mcpControl() : undefined
+    this.mcp = options.mcp ? this.mcpControl(options.mcp.host, options.mcp.servers) : undefined
     this.query = options.query({ prompt: this.input, options: this.buildOptions() })
     this.compaction = new SdkCompaction({
       query: this.query,
@@ -151,13 +149,14 @@ export class SdkSession implements CodeSession {
     return this.output
   }
 
-  respondToPermission(requestId: string, decision: PermissionDecision): void {
+  respondToPermission(requestId: string, decision: PermissionDecision): boolean {
     const pending = this.pending.get(requestId)
-    if (!pending) return
+    if (!pending) return false
     this.pending.delete(requestId)
     this.output.push(permissionResolved(requestId, decision))
     if (pending.decided) pending.decided(decision)
     else pending.resolve(toPermissionResult(decision, pending.input))
+    return true
   }
 
   respondToQuestion(requestId: string, outcome: QuestionOutcome): boolean {
@@ -186,6 +185,8 @@ export class SdkSession implements CodeSession {
     // The engine stream normally completes once the process is gone; the
     // timeout covers a process that will not die.
     await Promise.race([this.pumping, new Promise((r) => setTimeout(r, 2000))])
+    // The servers run in this process, not the engine's, so they outlive it unless closed here.
+    await this.options.mcp?.host.close()
     this.finish()
   }
 
@@ -225,7 +226,7 @@ export class SdkSession implements CodeSession {
     if (this.options.tools) options.tools = this.options.tools
     // The workspace's servers go in as dynamic ones, which the host can
     // replace; the engine's own reading of the file yields to a dynamic
-    // server of the same name.
+    // server of the same name, so it never spawns them itself.
     const servers = this.allServers()
     if (Object.keys(servers).length) options.mcpServers = servers
     return options
@@ -235,48 +236,47 @@ export class SdkSession implements CodeSession {
   private allServers(): Record<string, McpServerConfig> {
     return {
       ...(this.ownServer ? { [this.ownServer.name]: this.ownServer } : {}),
-      ...(this.mcpServers ?? {}),
+      ...Object.fromEntries([...this.proxies].map(([name, proxy]) => [name, proxy.config])),
     }
   }
 
-  private mcpControl(): McpControl {
+  /** Takes the servers into the host before the engine starts, so its first look at their tools waits on them. */
+  private mcpControl(host: McpToolHost, servers: McpServers): McpControl {
+    host.watch(() => {
+      for (const proxy of this.proxies.values()) proxy.refresh()
+      this.reportMcp(host)
+    })
+    const load = (next: McpServers): Promise<void> => {
+      const loading = host.load(next)
+      this.proxies = new Map(Object.keys(next).map((name) => [name, mcpProxy(name, host)]))
+      return loading
+    }
+    load(servers).catch((error: unknown) => this.mcpFailed(error))
     return {
-      reload: async (servers) => {
-        this.mcpServers = servers
+      reload: async (next) => {
+        const loading = load(next)
         await this.query.setMcpServers(this.allServers())
-        await this.reportMcp()
+        await loading
+        this.reportMcp(host)
       },
-      reconnect: async (name) => {
-        // A throw here says what the status says next; the status is what is shown.
-        await this.query.reconnectMcpServer(name).catch(() => undefined)
-        await this.reportMcp()
+      start: async (name) => {
+        await host.start(name)
+        this.reportMcp(host)
+      },
+      stop: async (name) => {
+        await host.stop(name)
+        this.reportMcp(host)
       },
     }
   }
 
-  /**
-   * The workspace's servers as the engine sees them now; the own server is
-   * not the user's business, and an entry the engine read from the file
-   * itself yields to the one handed over. A server still connecting is
-   * looked at again until it settles or the engine's own deadline passes.
-   */
-  private async reportMcp(checksLeft = MCP_PENDING_CHECKS): Promise<void> {
-    if (this.output.isEnded) return
-    try {
-      const all = await this.query.mcpServerStatus()
-      const byName = new Map<string, (typeof all)[number]>()
-      for (const s of all) {
-        if (!(s.name in (this.mcpServers ?? {}))) continue
-        if (!byName.has(s.name) || s.scope === 'dynamic') byName.set(s.name, s)
-      }
-      const servers: McpServerState[] = [...byName.values()].map((s) => ({ name: s.name, status: s.status, ...(s.error ? { error: s.error } : {}) }))
-      this.output.push({ type: 'mcp_servers', servers })
-      if (checksLeft > 0 && servers.some((s) => s.status === 'pending')) {
-        setTimeout(() => void this.reportMcp(checksLeft - 1), MCP_PENDING_INTERVAL_MS)
-      }
-    } catch (error) {
-      this.output.push({ type: 'error', message: `MCP status: ${errorMessage(error)}`, fatal: false })
-    }
+  /** The workspace's servers as the host holds them; the own server is not the user's business. */
+  private reportMcp(host: McpToolHost): void {
+    if (!this.output.isEnded) this.output.push({ type: 'mcp_servers', servers: host.statuses() })
+  }
+
+  private mcpFailed(error: unknown): void {
+    if (!this.output.isEnded) this.output.push({ type: 'error', message: `MCP servers: ${errorMessage(error)}`, fatal: false })
   }
 
   /** Maps the engine-agnostic hooks onto the SDK's hook protocol. */
@@ -428,7 +428,7 @@ export class SdkSession implements CodeSession {
         for (const event of this.compaction.filter(message, this.mapper.map(message))) {
           if (event.type === 'session_started') this.engineSessionId = event.engineSessionId
           this.output.push(event)
-          if (event.type === 'session_started' && this.mcpServers) void this.reportMcp()
+          if (event.type === 'session_started' && this.options.mcp) this.reportMcp(this.options.mcp.host)
         }
       }
     } catch (error) {

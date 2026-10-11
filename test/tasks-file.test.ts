@@ -387,6 +387,17 @@ describe('the board derived from the spec', () => {
     // From here on the scenario's rule text is tracked, so a later change can be told apart from one already built.
     expect(again.tasks.find((t) => t.name === 'Refunding')?.rulesText).toEqual({ 'Refund on cancel': 'a cancelled order is refunded' })
   })
+
+  it('a_rule_added_under_a_task_derived_before_rule_changes_were_tracked_still_reopens_it', () => {
+    const legacy = board(task('Refunding', { group: 'Refunding', delivers: ['Refund on cancel'], state: 'tested', files: ['src/refund.ts'] }))
+    const revised = spec('## Refunding\n- **Refund on cancel**: a cancelled order is refunded\n- **Partial refund**: partly refunded')
+    const reopened = deriveBoard(revised, legacy).tasks.find((t) => t.name === 'Refunding')!
+    // Its wording was never kept, but what it delivered was: a rule it never delivered is new, and is what gets built.
+    expect(reopened.state).toBe('open')
+    expect(reopened.files).toEqual(['src/refund.ts'])
+    expect(reopened.how).toContain('Partial refund')
+    expect(reopened.how).not.toContain('Refund on cancel')
+  })
 })
 
 describe('the board on disk under parallel sessions', () => {

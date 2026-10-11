@@ -1,7 +1,7 @@
 import { compileTemplate } from '@relax.js/core/html'
 import type { FileEditChange, PermissionDecision, PermissionRow, SessionEvent } from '../../agent/session/code-session'
 import type { KeepOffer } from '../../agent/permissions/evaluator'
-import { callSentence, grantSentence } from '../../agent/permissions/grant-sentence'
+import { grantSentence } from '../../agent/permissions/grant-sentence'
 import type { Grant, GrantScope, KeptGrant } from '../../agent/permissions/grants'
 import type { Reach } from '../../agent/permissions/places'
 import { isShellTool } from '../../agent/permissions/tool-classes'
@@ -12,8 +12,8 @@ import { renderMarkdown } from './markdown'
 
 type PermissionRequest = Extract<SessionEvent, { type: 'permission_request' }>
 
-/** How one asked row is answered: for this call alone, or kept as a grant. */
-type RowChoice = 'allow-call' | 'allow-keep' | 'deny-call' | 'deny-keep'
+/** How one asked row is answered: by the card's Allow or Deny for this call alone, or kept as a grant. */
+type RowChoice = 'call' | 'allow-keep' | 'deny-keep'
 
 /** One asked row's answer as the person builds it. */
 type RowAnswer = { choice: RowChoice; place: number; reach: Reach; scope: GrantScope; flags: Set<string> }
@@ -23,10 +23,12 @@ const REACH_LABEL: Record<Reach, string> = { file: 'this file', directory: 'this
 
 /**
  * One tool permission prompt. The call is listed as what it would do, one row
- * per effect; rows that already pass are shown collapsed. Each asked row is
- * answered for this call alone or kept as a grant, built from parts the place
- * allows, with the sentence it will be kept as shown before it is given. One
- * confirm answers the whole card: the call runs only when every row is allowed.
+ * per effect, each on one line; rows that already pass are shown quiet. The
+ * card's Allow and Deny answer every asked row for this call alone, so the
+ * quick answer stays one click. A row opened with Keep… is kept as a grant
+ * instead, built from parts the place allows, with the sentence it will be
+ * kept as shown before it is given. The call runs only when every row is
+ * allowed; kept answers go out either way.
  */
 export class PermissionCard extends HTMLElement {
   /** The deny reason carries no `value` binding, so re-rendering leaves what the user typed alone. */
@@ -42,7 +44,9 @@ export class PermissionCard extends HTMLElement {
       <input type="text" class="deny-reason" placeholder="Reason if denied (optional)" if="pending">
       <div class="actions" if="pending">
         <button type="button" class="confirm" autofocus r-click="confirm()">{{confirmLabel}}</button>
-        <button type="button" class="deny" if="canDenyAll" r-click="denyAll()">Deny</button>
+        <button type="button" class="keep-session" if="plain" title="{{sessionSentence}}" r-click="keepForSession()">Allow for this session</button>
+        <button type="button" class="keep-workspace" if="plain" title="{{workspaceSentence}}" r-click="keepForWorkspace()">Allow for this workspace</button>
+        <button type="button" class="deny" if="canDeny" r-click="denyAll()">Deny</button>
       </div>
     </div>
     <p class="decision" unless="settled" hidden="{{pending}}">{{outcome}}</p>
@@ -91,18 +95,26 @@ export class PermissionCard extends HTMLElement {
       {
         settled,
         heading: heading(r),
-        hasDescription: Boolean(r.description) && !isShell,
+        hasDescription: Boolean(r.description) && !isShell && !repeatsInput(r.description ?? '', r.input),
         description: r.description ?? '',
         hasReason: Boolean(r.reason),
         reason: r.reason ?? '',
         isShell,
         pending: this.decision === undefined,
         confirmLabel: this.confirmLabel(),
-        // With rows each answered on its own, Deny is one of their choices; a call with none still needs the button.
-        canDenyAll: this.answers.size === 0,
+        // Once a row is kept as a denial the confirm already refuses, and a second deny button would only repeat it.
+        canDeny: !this.keepsDenial(),
+        plain: this.isPlain(),
+        sessionSentence: this.plainGrants('session').map((g) => grantSentence(g, g.scope)).join(' '),
+        workspaceSentence: this.plainGrants('workspace').map((g) => grantSentence(g, g.scope)).join(' '),
         outcome: this.outcomeText(),
       },
-      { confirm: () => this.confirm(), denyAll: () => this.decide({ kind: 'deny' }, []) },
+      {
+        confirm: () => this.confirm(),
+        keepForSession: () => this.decide({ kind: 'allow' }, this.plainGrants('session')),
+        keepForWorkspace: () => this.decide({ kind: 'allow' }, this.plainGrants('workspace')),
+        denyAll: () => this.decide({ kind: 'deny' }, this.keptGrants()),
+      },
     )
     this.fill(r, settled, isShell)
     this.renderRows()
@@ -125,7 +137,7 @@ export class PermissionCard extends HTMLElement {
     }
     // A file edit is asked about as the change it would make, and a plan as the plan: their arguments are never what the user answers.
     const plan = planText(r)
-    this.querySelector('div.body')?.appendChild(r.edits ? changeList(r.edits) : r.edit ? editDiffView(r.edit) : plan !== undefined ? planView(plan) : jsonInput(r.input))
+    this.querySelector('div.body')?.appendChild(r.edits ? changeList(r.edits) : r.edit ? editDiffView(r.edit) : plan !== undefined ? planView(plan) : inputView(r.input))
   }
 
   /** Every row: those that pass collapsed, those refused said, those asked with their answer and the sentence it keeps. */
@@ -140,24 +152,34 @@ export class PermissionCard extends HTMLElement {
     item.className = `row ${row.verdict}`
     const head = document.createElement('div')
     head.className = 'does'
-    head.append(text('span', 'what', row.does), text('span', 'why', row.verdict === 'passes' ? `✓ ${row.reason}` : row.verdict === 'refused' ? `refused: ${row.reason}` : `asked: ${row.reason}`))
+    head.append(text('span', 'what', row.does), text('span', 'why', row.verdict === 'passes' ? `✓ ${row.reason}` : row.verdict === 'refused' ? `refused: ${row.reason}` : row.reason))
     item.append(head)
     const answer = this.answers.get(index)
-    if (row.verdict !== 'asked' || !row.keep || !answer || this.decision !== undefined) return item
+    if (row.verdict !== 'asked' || !row.keep || !answer || this.decision !== undefined || this.isPlain()) return item
+    if (!canKeep(row.keep)) {
+      if (row.keep.allowNever) item.append(text('p', 'never', row.keep.allowNever))
+      return item
+    }
+    if (answer.choice === 'call') {
+      const open = text('button', 'keep', keepLabel(row.keep))
+      open.type = 'button'
+      open.title = 'Keep an answer for this, so it is not asked again'
+      open.addEventListener('click', () => this.change(index, { choice: row.keep!.allowNever === undefined ? 'allow-keep' : 'deny-keep' }))
+      head.append(open)
+      return item
+    }
     item.append(this.answerParts(row.keep, answer, index))
     return item
   }
 
-  /** The choice for one asked row and, when it is kept, the parts of the grant and the sentence they make. */
+  /** A kept answer for one row: allow or deny, the parts of the grant, and the sentence they make. */
   private answerParts(keep: KeepOffer, answer: RowAnswer, index: number): HTMLElement {
     const parts = document.createElement('div')
     parts.className = 'answer'
-    const canKeep = keep.places.length > 0 && keep.scopes.length > 0
     const choices: [RowChoice, string, boolean][] = [
-      ['allow-call', 'Allow this call only', true],
-      ['allow-keep', 'Allow and keep', canKeep && keep.allowNever === undefined],
-      ['deny-call', 'Deny this call only', true],
-      ['deny-keep', 'Deny and keep', canKeep],
+      ['allow-keep', 'Allow and keep', keep.allowNever === undefined],
+      ['deny-keep', 'Deny and keep', true],
+      ['call', "Don't keep", true],
     ]
     const group = document.createElement('div')
     group.className = 'choices'
@@ -174,7 +196,7 @@ export class PermissionCard extends HTMLElement {
     }
     parts.append(group)
     if (keep.allowNever) parts.append(text('p', 'never', keep.allowNever))
-    if (answer.choice === 'allow-keep' || answer.choice === 'deny-keep') parts.append(this.grantParts(keep, answer, index))
+    parts.append(this.grantParts(keep, answer, index))
     parts.append(text('p', 'sentence', this.sentenceOf(keep, answer)))
     return parts
   }
@@ -220,31 +242,53 @@ export class PermissionCard extends HTMLElement {
     this.render()
   }
 
-  /** The sentence an answer will be kept as, or what answering this call alone means. */
+  /** The sentence a kept answer will be kept as. */
   private sentenceOf(keep: KeepOffer, answer: RowAnswer): string {
-    if (answer.choice === 'allow-call') return callSentence('allow')
-    if (answer.choice === 'deny-call') return callSentence('deny')
     const grant = grantOf(keep, answer)
     return grant ? `From now on: ${grantSentence(grant, answer.scope)}` : ''
   }
 
-  private confirmLabel(): string {
-    const answers = [...this.answers.values()]
-    if (answers.some((a) => a.choice === 'deny-call' || a.choice === 'deny-keep')) return this.rows.length > 1 ? 'Refuse the line' : 'Deny'
-    return answers.some((a) => a.choice === 'allow-keep') ? 'Allow and keep' : 'Allow'
+  /** Every asked row a command run in the workspace: the card answers with plain buttons, nothing to pick. */
+  private isPlain(): boolean {
+    const asked = this.rows.filter((row) => row.verdict === 'asked')
+    return asked.length > 0 && asked.every((row) => row.keep?.plain === true && canKeep(row.keep))
   }
 
-  private confirm(): void {
+  /** Each asked command kept anywhere in the workspace: the widest place offered, and everything below it. */
+  private plainGrants(scope: GrantScope): KeptGrant[] {
+    if (!this.isPlain()) return []
+    return this.rows.flatMap((row) => {
+      const keep = row.keep
+      const place = keep?.places.at(-1)
+      if (row.verdict !== 'asked' || !keep || !place || !('command' in keep.subject)) return []
+      return [{ verdict: 'allow' as const, command: keep.subject.command, place: place.place, reach: 'tree' as const, scope }]
+    })
+  }
+
+  private keepsDenial(): boolean {
+    return [...this.answers.values()].some((a) => a.choice === 'deny-keep')
+  }
+
+  private confirmLabel(): string {
+    if (this.isPlain()) return 'Allow once'
+    if (this.keepsDenial()) return this.rows.length > 1 ? 'Refuse the line' : 'Deny and keep'
+    return [...this.answers.values()].some((a) => a.choice === 'allow-keep') ? 'Allow and keep' : 'Allow'
+  }
+
+  /** Every grant the rows opened with Keep… make. */
+  private keptGrants(): KeptGrant[] {
     const kept: KeptGrant[] = []
-    let denied = false
     for (const [index, answer] of this.answers) {
       const keep = this.rows[index]?.keep
-      if (answer.choice.startsWith('deny')) denied = true
-      if (!keep || !answer.choice.endsWith('keep')) continue
+      if (!keep || answer.choice === 'call') continue
       const grant = grantOf(keep, answer)
       if (grant) kept.push({ ...grant, scope: answer.scope })
     }
-    this.decide({ kind: denied ? 'deny' : 'allow' }, kept)
+    return kept
+  }
+
+  private confirm(): void {
+    this.decide({ kind: this.keepsDenial() ? 'deny' : 'allow' }, this.keptGrants())
   }
 
   private decide(decision: PermissionDecision, kept: KeptGrant[]): void {
@@ -264,10 +308,33 @@ export class PermissionCard extends HTMLElement {
   }
 }
 
-/** A row's answer before the person changes it: this call alone, with the narrowest place and the first scope ready should they keep it. */
+/**
+ * A row's answer before the person changes it: this call alone, with a place
+ * and the first scope ready should they keep it. A file's answer starts at the
+ * folder holding it, since a folder is what a kept read or write is wanted for;
+ * the file alone is one pick away.
+ */
 function firstAnswer(keep: KeepOffer): RowAnswer {
-  return { choice: 'allow-call', place: 0, reach: keep.places[0]?.reaches[0] ?? 'tree', scope: keep.scopes[0] ?? 'session', flags: new Set() }
+  const place = keep.places[0]?.reaches.join() === 'file' && keep.places.length > 1 ? 1 : 0
+  return { choice: 'call', place, reach: keep.places[place]?.reaches[0] ?? 'tree', scope: firstScope(keep), flags: new Set() }
 }
+
+/** A command is kept for the workspace it is the project's to run in; a folder for the session, the narrower step. */
+function firstScope(keep: KeepOffer): GrantScope {
+  const command = 'command' in keep.subject && keep.allowNever === undefined
+  return command && keep.scopes.includes('workspace') ? 'workspace' : (keep.scopes[0] ?? 'session')
+}
+
+/** The link that opens a row's kept answer, named for what it would keep where an allow can be kept. */
+function keepLabel(keep: KeepOffer): string {
+  if (keep.allowNever !== undefined) return 'Keep…'
+  if ('action' in keep.subject) return keep.subject.action === 'read' ? 'Allow reads in this folder…' : 'Allow writes in this folder…'
+  const command = `\`${keep.subject.command.join(' ')}\``
+  return keep.scopes.includes('workspace') ? `Allow ${command} in this workspace…` : `Allow ${command}…`
+}
+
+/** Has the row a place and a scope an answer could be kept for? */
+const canKeep = (keep: KeepOffer): boolean => keep.places.length > 0 && keep.scopes.length > 0
 
 /** The grant a kept answer makes: the row's action or command at the chosen place, flags on a deny only. */
 function grantOf(keep: KeepOffer, answer: RowAnswer): Grant | undefined {
@@ -334,11 +401,33 @@ function planView(plan: string): HTMLElement {
   return article
 }
 
+type Scalar = string | number | boolean
+
+/**
+ * What a tool was asked to do. Flat arguments read as labelled fields, one per
+ * line, the way a person reads them; anything nested is shown as the JSON it is.
+ */
+function inputView(input: unknown): HTMLElement {
+  const fields = typeof input === 'object' && input !== null && !Array.isArray(input) ? Object.entries(input) : []
+  if (fields.length === 0 || !fields.every((entry): entry is [string, Scalar] => ['string', 'number', 'boolean'].includes(typeof entry[1]))) return jsonInput(input)
+  const list = document.createElement('dl')
+  list.className = 'fields'
+  for (const [key, value] of fields) list.append(text('dt', '', key.replace(/_/g, ' ')), text('dd', '', String(value)))
+  return list
+}
+
 function jsonInput(input: unknown): HTMLElement {
   const pre = document.createElement('pre')
   pre.className = 'input'
   fillCode(pre, JSON.stringify(input, null, 2), 'json')
   return pre
+}
+
+/** A description the engine cut from one of the arguments says nothing the fields do not. */
+function repeatsInput(description: string, input: unknown): boolean {
+  const stem = description.replace(/(\.\.\.|…)$/, '').trim()
+  if (!stem || typeof input !== 'object' || input === null) return false
+  return Object.values(input).some((value) => typeof value === 'string' && value.startsWith(stem))
 }
 
 customElements.define('permission-card', PermissionCard)

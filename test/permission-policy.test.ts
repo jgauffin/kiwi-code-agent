@@ -269,6 +269,13 @@ describe('the scratch folder', () => {
     expect(await use(p, 'Write', { file_path: `${scratch}/probe.ts` })).toMatchObject({ deny: expect.any(String) })
   })
 
+  it('naming_the_scratch_folder_through_a_variable_the_line_sets_passes_like_naming_it_outright', async () => {
+    const p = policy([], { scratch })
+    expect(await use(p, 'Bash', { command: `S=${scratch}; ls > $S/out.log; tail -5 "$S/out.log"` })).toEqual({ allow: true })
+    expect(await use(p, 'Bash', { command: `S=${scratch}; rm -rf $S/old` })).toEqual({ allow: true })
+    expect(await use(p, 'Bash', { command: `false && S=${scratch}; rm -rf $S/` })).toEqual(ASKED)
+  })
+
   it('running_a_script_from_the_scratch_folder_is_still_asked', async () => {
     expect(await use(policy([], { scratch }), 'Bash', { command: `node ${scratch}/probe.mjs` })).toEqual(ASKED)
   })

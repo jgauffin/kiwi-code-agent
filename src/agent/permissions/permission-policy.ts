@@ -26,6 +26,8 @@ export type PolicyContext = {
   scratch?: string
   /** Files and folders outside the project the session may read unasked: where its own instructions live. */
   readable?: readonly string[]
+  /** Files and folders outside the project the session writes unasked: where it is told to keep its memory notes. */
+  writable?: readonly string[]
   /** Files where permission rules are kept outside the workspace: a write to one is always asked. */
   rulesFiles?: readonly string[]
   /** The person's home folder: what `~` stands for, and the ground no kept answer may reach. */
@@ -96,6 +98,7 @@ export class PermissionPolicy implements SessionHooks {
     const ground: Ground = {
       workspace: this.root,
       readable: (this.context.readable ?? []).map((p) => normalizePlace(isAbsolute(p) ? p : `${this.root}/${p}`)),
+      writable: (this.context.writable ?? []).map((p) => normalizePlace(isAbsolute(p) ? p : `${this.root}/${p}`)),
       ...(scratch !== undefined ? { scratch: normalizePlace(isAbsolute(scratch) ? scratch : `${this.root}/${scratch}`) } : {}),
       writesAllowed: this.writesAllowed(),
       ignored: this.ignored,

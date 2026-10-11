@@ -18,18 +18,21 @@ export type McpConnector = (name: string, config: McpServerConfig) => Promise<Mc
 /** The name both engines, the permission rules and the transcript use for a server's tool. */
 export const mcpToolName = (server: string, tool: string): string => `mcp__${server}__${tool}`
 
+/** Runs one of a server's tools, starting the server first when it is not running. */
+export type McpToolCall = (tool: string, args: Record<string, unknown>, signal: AbortSignal) => Promise<ToolOutput>
+
 /**
  * A server's tool as the own loop runs it. The server validates its own
  * input, so anything object-shaped passes through; it never runs without
  * asking, since what a foreign tool does is the server's word only.
  */
-export function mcpTool(server: string, info: McpToolInfo, connection: McpConnection): Tool {
+export function mcpTool(server: string, info: McpToolInfo, call: McpToolCall): Tool {
   return {
     name: mcpToolName(server, info.name),
     description: info.description ?? '',
     schema: z.looseObject({}),
     parameters: info.inputSchema,
     readOnly: false,
-    execute: (input, ctx) => connection.callTool(info.name, input, ctx.signal),
+    execute: (input, ctx) => call(info.name, input, ctx.signal),
   }
 }

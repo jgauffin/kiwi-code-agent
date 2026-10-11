@@ -38,6 +38,8 @@ export type MessageRouterDeps = {
   /** One prompt on the model new plan sessions run on, answered as text: for the small asks that are not a session. */
   ask: (prompt: string) => Promise<string>
   resumePlan: (feature: string, into?: ChatPanel, note?: string) => Promise<void>
+  /** Opens the plan in a tab of its own while `stayOn` stays the tab in view. */
+  resumePlanAside: (feature: string, stayOn: ChatPanel) => Promise<void>
   sendState: () => Promise<void>
   sendTranscript: (sessionId: string) => Promise<void>
 }
@@ -89,7 +91,8 @@ export class MessageRouter {
         await startFromCard(this.deps, message, entry)
         return true
       case 'resume_plan':
-        await this.deps.resumePlan(message.feature, entry, message.note)
+        if (message.ownTab) await this.deps.resumePlanAside(message.feature, entry)
+        else await this.deps.resumePlan(message.feature, entry, message.note)
         return true
       case 'update_spec':
         await this.deps.planActions.startUpdate(message.feature, message.description, entry)

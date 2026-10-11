@@ -19,6 +19,13 @@ export type Grant = {
   /** Absolute, forward slashes. */
   place: string
   reach: Reach
+  /**
+   * The root of the one workspace it holds in. Set on an answer kept for a
+   * workspace about a place outside it, which is stored with the person's own
+   * answers on this machine rather than in the workspace's settings, so a path
+   * on one machine never travels with the source.
+   */
+  workspace?: string
 }
 
 export type GrantScope = 'session' | 'workspace' | 'person'
@@ -37,6 +44,7 @@ export function parseGrant(value: unknown): Grant | undefined {
   const command = Array.isArray(v['command']) && v['command'].length > 0 && v['command'].every((w) => typeof w === 'string') ? (v['command'] as string[]) : undefined
   if ((action === undefined) === (command === undefined)) return undefined
   const flags = Array.isArray(v['flags']) && v['flags'].every((f) => typeof f === 'string') ? (v['flags'] as string[]) : undefined
+  const workspace = typeof v['workspace'] === 'string' && v['workspace'] !== '' ? normalizePlace(v['workspace']) : undefined
   // An allow naming flags would stop covering the next call written differently; it is never kept.
   if (flags !== undefined && flags.length > 0 && v['verdict'] === 'allow') return undefined
   return {
@@ -46,6 +54,7 @@ export function parseGrant(value: unknown): Grant | undefined {
     ...(flags !== undefined && flags.length > 0 ? { flags } : {}),
     place: normalizePlace(v['place']),
     reach: v['reach'] as Reach,
+    ...(workspace !== undefined ? { workspace } : {}),
   }
 }
 
@@ -57,7 +66,8 @@ export function sameGrant(a: Grant, b: Grant): boolean {
     (a.command ?? []).join(' ') === (b.command ?? []).join(' ') &&
     [...(a.flags ?? [])].sort().join(' ') === [...(b.flags ?? [])].sort().join(' ') &&
     a.place === b.place &&
-    a.reach === b.reach
+    a.reach === b.reach &&
+    a.workspace === b.workspace
   )
 }
 

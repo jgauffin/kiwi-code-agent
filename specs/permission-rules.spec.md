@@ -11,8 +11,10 @@ A developer works with a session that reaches for the shell and the file tools c
 ## What a call would do
 Every tool call, and every simple command of a shell line, is judged on its own.
 - **Effects of a call**: a call is judged as a list of effects, each a read, a write, a destroy, a program it runs, or a reach beyond files (the network, a git remote, the machine's configuration), at a place, and a call with no effects runs unasked (docs/features/permission-engine.md#Effects)
-  - **Unknown place**: a path held in a variable, taken from another command's output or fed in by `xargs` is an unknown place
+  - **Unknown place**: a path held in a variable, taken from another command's output or fed in by `xargs` is an unknown place, except a variable the line itself surely set to a plain path earlier and binds nowhere else, which names that path
   - **No path named**: a command that names no path has the directory the shell stands in as its place
+  - **A search narrowed by its glob**: a search or a file pattern whose brace alternatives name folders below its path reads only those folders, while a brace in a shell word leaves its place unknown
+  - **Whether a path exists**: looking whether a path exists is covered by whatever lets that path be read
 - **Destroy is not write**: deleting a file or directory, `>` onto a file that exists, a copy or move onto a file that exists, discarding uncommitted work and rewriting pushed history are destroys, while creating a file, appending and editing through the file tools are writes (docs/features/permission-engine.md#Effects)
 - **Flags read as the command means them**: two calls that differ only in how their flags are written (combined, split, short or long, reordered) are judged and matched alike (docs/features/permission-engine.md#Classifiers)
 - **Unknown commands are asked**: a command the agent does not know is asked about, and no answer kept for a place lets it through (docs/features/permission-engine.md#Classifiers)
@@ -44,21 +46,24 @@ Every tool call, and every simple command of a shell line, is judged on its own.
 - **Answers kept before this change**: an answer kept in the old form that grants reading or writing a directory is read as that kept answer, while one kept for a command prefix or for changing directory is dropped
 - **The Claude engines' own rules**: an allow or deny rule in the Claude engine's own settings is read as a kept answer for the scope it lives in where it names a command, a command and subcommand, or a path to read or edit, and is otherwise ignored
   - **A rule naming flags**: an allow rule whose command words include a flag is ignored, since reading it without the flag would allow more than it says
-- **Scopes by place**: a place inside one of the workspace's repositories may be kept for the session or the workspace, and a place outside them, another checkout among them, for the session or the person (docs/features/permission-engine.md#Which scopes a place may be kept for)
+- **Scopes by place**: a place inside one of the workspace's repositories may be kept for the session or the workspace, and a place outside them, another checkout or a folder holding the workspace among them, for the session, the workspace or the person (docs/features/permission-engine.md#Which scopes a place may be kept for)
+  - **Outside kept on this machine**: a workspace's answer about a place outside it is kept with the person's own answers, tied to that workspace and honoured there alone, never in the workspace's settings
 - **Some targets are always asked**: a write to the root `package.json`, `.vscode/settings.json`, `.mcp.json`, a root `.code-workspace`, or where the workspace's or the person's permission rules are kept is asked whatever any kept answer or the Allow writes setting says (docs/settings.md#Settings)
 - **A session's own instructions are its own ground**: reading a skill and the files it ships, a sub agent definition, the memory notes and the person's own rules file runs unasked wherever they live, while a write there is a write like any other (docs/settings.md#Settings)
+  - **Memory notes are written unasked**: writing a memory note where the session is told to keep them, the project's memory folder or the person's memory file, runs unasked, while deleting one is still asked
 - **Project commands run unasked**: a command the project defines in its root `package.json` scripts runs unasked (docs/features/permission-engine.md#Fixed ground)
 - **Git writes can be refused outright**: while git writes are denied for the workspace, every git command that is not read-only is refused whatever any kept answer says (docs/settings.md#Settings)
 
 ## Answering a prompt
 - **The sentence it will be kept as**: a prompt shows, before it is answered, the sentence the answer will be kept as, and updates it as the person changes what is kept (docs/features/permission-engine.md#The prompt)
 - **One sentence everywhere**: a kept answer reads as the same sentence on the prompt, in the Permissions settings list, on a paired phone and in an exported transcript (docs/features/permission-engine.md#The prompt)
-- **This call alone is pre-selected**: every prompt offers an answer for this call alone, pre-selected, beside the ways it may be kept (docs/features/permission-engine.md#The prompt)
+- **A command in the workspace is four buttons**: a command run in the workspace is answered once, for the session, for the workspace, or denied, with nothing else to pick, and a kept answer covers the command and its subcommand anywhere in the workspace (docs/features/permission-engine.md#The prompt)
+- **This call alone is one click**: every prompt is answered for this call alone by one Allow or one Deny, and the ways an answer may be kept are opened per row only when asked for (docs/features/permission-engine.md#The prompt)
 - **Only what the place allows is offered**: a prompt offers only the scopes the place may be kept for, flags only on a denial, and no keeping at all for an effect that is never kept, saying in one line why (docs/features/permission-engine.md#The prompt)
 - **What already stands is said**: a prompt names any kept answer that already decides part of the call (docs/features/permission-engine.md#The prompt)
 - **A write prompt shows its change**: a write is put to the person as the change it would make rather than as the arguments it was called with (specs/file-edit-diff.spec.md#Behaviour)
-- **One row per effect**: a line with several effects is one prompt with one row per effect, effects already covered shown collapsed, and the same action at the same place shown once (docs/features/permission-engine.md#A line with several effects)
-- **Denying a row refuses the line**: a line runs only when every row is allowed, and its confirm says when it will refuse the line (docs/features/permission-engine.md#A line with several effects)
+- **One row per effect**: a line with several effects is one prompt with one row per effect, effects already covered shown quiet, the same action at the same place shown once, and a place another asked row's answer would always cover not asked beside it (docs/features/permission-engine.md#A line with several effects)
+- **Denying refuses the line**: a line runs only when every row is allowed; denying it, or keeping a denial for any row, refuses the whole line, and its confirm says when it will (docs/features/permission-engine.md#A line with several effects)
   - **Kept on a refused line**: answers kept on a prompt are saved when it is confirmed, even when the line is refused
 - **Refused without a prompt**: a line with a command that writes around the file tools, or that a kept denial covers, is refused without a prompt and the model is told what refused it (docs/features/permission-engine.md#Refused without a card)
 - **Answered away from the desk**: a prompt can be answered from a paired phone with the same effect as at the desk (specs/remote-control.spec.md#Acting from the phone)

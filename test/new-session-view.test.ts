@@ -317,6 +317,47 @@ describe('NewSessionView pick-up list', () => {
     node.remove()
   })
 
+  it('ctrl_clicking_a_plan_opens_it_in_its_own_tab_and_leaves_what_was_typed_on_the_card', () => {
+    const node = view(undefined, waiting)
+    type(node, 'textarea[name=prompt]', 'Drop the refund rule')
+    let seen: { feature: string; note: string | undefined; ownTab: boolean } | undefined
+    node.addEventListener(events.PlanResumeRequestedEvent.type, (e) => (seen = { feature: e.feature, note: e.note, ownTab: e.ownTab }))
+    picks(node)[0]!.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }))
+    expect(seen).toEqual({ feature: 'Orders', note: undefined, ownTab: true })
+    // This screen stays up, so the note waits for whatever is started from it.
+    expect(node.querySelector<HTMLTextAreaElement>('textarea[name=prompt]')!.value).toBe('Drop the refund rule')
+    node.remove()
+  })
+
+  it('middle_clicking_a_plan_opens_it_in_its_own_tab_like_ctrl_click', () => {
+    const node = view(undefined, waiting)
+    type(node, 'textarea[name=prompt]', 'Drop the refund rule')
+    let seen: { feature: string; note: string | undefined; ownTab: boolean } | undefined
+    node.addEventListener(events.PlanResumeRequestedEvent.type, (e) => (seen = { feature: e.feature, note: e.note, ownTab: e.ownTab }))
+    picks(node)[0]!.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, button: 1 }))
+    expect(seen).toEqual({ feature: 'Orders', note: undefined, ownTab: true })
+    expect(node.querySelector<HTMLTextAreaElement>('textarea[name=prompt]')!.value).toBe('Drop the refund rule')
+    node.remove()
+  })
+
+  it('a_right_click_on_a_plan_opens_nothing', () => {
+    const node = view(undefined, waiting)
+    let seen = false
+    node.addEventListener(events.PlanResumeRequestedEvent.type, () => (seen = true))
+    picks(node)[0]!.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, button: 2 }))
+    expect(seen).toBe(false)
+    node.remove()
+  })
+
+  it('a_plain_click_opens_the_plan_in_place_of_this_screen', () => {
+    const node = view(undefined, waiting)
+    let seen: unknown
+    node.addEventListener(events.PlanResumeRequestedEvent.type, (e) => (seen = e.ownTab))
+    picks(node)[0]!.click()
+    expect(seen).toBe(false)
+    node.remove()
+  })
+
   it('picking_a_plan_with_nothing_typed_carries_no_note', () => {
     const node = view(undefined, waiting)
     let seen: unknown
@@ -333,6 +374,75 @@ describe('NewSessionView pick-up list', () => {
     picks(node)[1]!.click()
     expect(seen).toBe('s9')
     node.remove()
+  })
+
+  describe('narrowing the specs', () => {
+    const many: PickUp = {
+      ...waiting,
+      plans: [
+        { feature: 'Orders', status: 'verified' },
+        { feature: 'Refunds', status: 'approved', folder: 'orders/returns' },
+        { feature: 'Invoices', status: 'draft', folder: 'billing' },
+      ],
+    }
+    const featuresShown = (node: HTMLElement) => [...node.querySelectorAll('.pick.plan strong')].map((s) => s.textContent)
+    const notDone = (node: HTMLElement) => {
+      const box = node.querySelector<HTMLInputElement>('.spec-filter input[type=checkbox]')!
+      box.checked = !box.checked
+      box.dispatchEvent(new Event('change', { bubbles: true }))
+    }
+
+    it('the_filter_keeps_the_specs_whose_feature_or_folder_holds_the_text_whatever_its_case', () => {
+      const node = view(undefined, many)
+      type(node, '.spec-filter input[type=search]', 'RETURNS')
+      expect(featuresShown(node)).toEqual(['Refunds'])
+      type(node, '.spec-filter input[type=search]', 'inv')
+      expect(featuresShown(node)).toEqual(['Invoices'])
+      node.remove()
+    })
+
+    it('the_filter_narrows_the_specs_and_leaves_the_conversations_listed', () => {
+      const node = view(undefined, many)
+      type(node, '.spec-filter input[type=search]', 'refunds')
+      expect(picks(node).map((p) => p.querySelector('strong')!.textContent)).toEqual(['Refunds', 'Why does the cart double-count?'])
+      node.remove()
+    })
+
+    it('not_done_hides_the_verified_specs_and_unticking_brings_them_back', () => {
+      const node = view(undefined, many)
+      notDone(node)
+      expect(featuresShown(node)).toEqual(['Invoices', 'Refunds'])
+      notDone(node)
+      expect(featuresShown(node)).toEqual(['Orders', 'Invoices', 'Refunds'])
+      node.remove()
+    })
+
+    it('a_folder_heading_follows_the_filter_onto_the_first_spec_still_shown_from_it', () => {
+      const node = view(undefined, {
+        ...many,
+        plans: [
+          { feature: 'Credit notes', status: 'verified', folder: 'billing' },
+          { feature: 'Invoices', status: 'draft', folder: 'billing' },
+        ],
+      })
+      notDone(node)
+      expect(node.querySelector('.folder-heading')!.textContent).toBe('billing')
+      node.remove()
+    })
+
+    it('a_filter_that_matches_no_spec_says_so_rather_than_leaving_an_empty_list', () => {
+      const node = view(undefined, many)
+      type(node, '.spec-filter input[type=search]', 'nothing like it')
+      expect(featuresShown(node)).toEqual([])
+      expect(node.querySelector('.spec-filter + .hint')?.textContent).toBe('No spec matches.')
+      node.remove()
+    })
+
+    it('no_spec_to_pick_up_offers_no_filter', () => {
+      const node = view(undefined, { ...waiting, plans: [] })
+      expect(node.querySelector('.spec-filter')).toBeNull()
+      node.remove()
+    })
   })
 
   it('work_to_pick_up_is_the_code_tab_s_own_and_does_not_follow_to_maintenance', () => {

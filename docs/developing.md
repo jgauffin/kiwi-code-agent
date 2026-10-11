@@ -16,7 +16,7 @@ Load the extension from this repo in your normal VS Code instead of a packaged c
 npm run link-dev   # installs the .vsix so VS Code registers it, then points the installed folder at this repo
 ```
 
-Reload the window once. From then on, after `npm run build` (or the `npm: watch` task) the extension notices its own bundle changed and offers "Reload Window". Sessions and the open session survive the reload; engines resume on the next prompt. `npm run unlink-dev` removes the link.
+Reload the window once. From then on, after `npm run build` (or the `npm: watch` task) run "Developer: Reload Window" to load the new bundle. Sessions and the open session survive the reload; engines resume on the next prompt. `npm run unlink-dev` removes the link.
 
 ## Package
 

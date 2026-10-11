@@ -12,7 +12,7 @@ Each call becomes a list of effects. An effect is an action and a place.
 - **runs**: the call is handed a program decided at the time it runs (`find -exec`, sed's `e`, `rg --pre`, a command word from `$(...)`).
 - **reaches**: the call touches something no folder stands for: the network, a git remote, the machine's own configuration.
 
-A place is a path, or unknown when the line does not settle it: a variable (`$T`), another command's output, `xargs` input, or a relative path after a `cd` that could not be followed.
+A place is a path, or unknown when the line does not settle it: a variable (`$T`), another command's output, `xargs` input, a word with a brace in it (`{a,/etc}`), or a relative path after a `cd` that could not be followed. A variable the line itself set to a plain path is that path (`S=out; ls > $S/a.log` writes `out/a.log`), but only when the assignment surely ran before the use (nothing but `;`, newlines or a following `&&` around it, outside any loop, condition or subshell), the name is bound nowhere else in the line, and the value has no spaces, wildcards or expansions.
 
 A command that names no path has the directory the shell stands in as its place. A call with no effects runs unasked.
 
@@ -29,7 +29,8 @@ A command without a classifier is one effect, unknown command, and is asked.
 | Tool | Effects |
 |---|---|
 | Read | read the file |
-| Glob, Grep | read the directory, and everything below it when the search goes down |
+| Glob, Grep | read the directory, and everything below it when the search goes down; a Glob pattern's or a Grep glob's brace alternatives that name folders below the path are read there alone |
+| Exists | read the path it looks for, covered by whatever lets its folder be read |
 | Edit, Write | write the file |
 | RunScript | one effect per staged change: write, destroy or read |
 | An MCP tool | unknown command, unless the tool declares it only reads |
@@ -69,7 +70,7 @@ A kept answer is:
 - **what**: an action (read or write), or a command with optional flags.
 - **place**: a path.
 - **reach**: the file alone, the directory alone, or the directory and everything below it.
-- **scope**: this session, the workspace or the person. The scope is where the answer is stored, not a field in it: the workspace's settings, the person's own settings, or the session's memory. A grant one person gave never travels with the source.
+- **scope**: this session, the workspace or the person. The scope is where the answer is stored, not a field in it: the workspace's settings, the person's own settings, or the session's memory. A grant one person gave never travels with the source, so a workspace's answer about a place outside it is kept in the person's own file, tied to that workspace's root, and honoured there alone.
 
 ```jsonc
 "kiwiAgent.permissions.grants": [
@@ -112,14 +113,14 @@ Whatever any kept answer or the Allow writes setting says:
 
 ### Fixed ground
 
-- The session's own instructions (skills and the files they ship, sub agent definitions, memory notes, the person's `AGENTS.md`) are read unasked wherever they live. Writing there is a write like any other.
+- The session's own instructions (skills and the files they ship, sub agent definitions, memory notes, the person's `AGENTS.md` or `~/.claude/CLAUDE.md`) are read unasked wherever they live. Writing there is a write like any other, except where the session is told to keep its memory notes: the project's memory folder and the person's memory file are written unasked. Deleting there is still asked.
 - Commands the project defines in its root `package.json` scripts run unasked.
 - While git writes are denied for the workspace, every git command that is not read-only is refused.
 
 ### Which scopes a place may be kept for
 
 - A place inside one of the workspace's repositories: this session or the workspace. Kept for the person it would say nothing in any other workspace.
-- A place outside them, another checkout on the machine among them: this session or the person.
+- A place outside them, another checkout on the machine and a folder holding the workspace among them: this session, the workspace, or the person.
 
 ## The prompt
 
@@ -127,26 +128,30 @@ What an answer means is spelled out before it is given. The card shows the sente
 
 ```
 cargo build --release   in D:/src/other
-Writes D:/src/other/target   ·   asked because: outside the workspace
+Writes D:/src/other/target   outside the workspace   Allow writes in this folder…
 
-  (•) Allow this call only
-  ( ) Allow and keep:
-        [cargo build ▾]  [any flags ▾]
-        writing in  [D:/src/other ▾]  [and everything below ▾]
-        for  [every workspace (you) ▾]
-  ( ) Deny this call only
-  ( ) Deny and keep: ...the same parts...
-
-  From now on, every session in every workspace may run cargo build,
-  with any flags, writing in D:/src/other and every folder below it,
-  without asking.
-  [ Allow and keep ]
+  [ Allow ]  [ Deny ]
 ```
 
-- This call only is pre-selected, so the quick answer stays one click.
+The link opens that row's answer. It is named for what it keeps where an allow can be kept, and "Keep…" where only a denial can; a file's answer starts at the folder holding it.
+
+```
+Writes D:/src/other/target   outside the workspace
+  (•) Allow and keep   ( ) Deny and keep   ( ) Don't keep
+        writing in  [D:/src/other ▾]  [and everything below ▾]
+        for  [every workspace (you) ▾]
+
+  From now on, every session in every workspace may write files
+  in D:/src/other and every folder below it without asking.
+
+  [ Allow and keep ]  [ Deny ]
+```
+
+- A command run in the workspace, whatever it is, is answered with four buttons: Allow once, Allow for this session, Allow for this workspace, and Deny. A kept answer covers the command and its subcommand anywhere in the workspace, with any flags; each button names the sentence it keeps as its tooltip.
+- Allow and Deny answer for this call alone, so the quick answer stays one click and a row asks for no more than its line until Keep… is chosen.
 - The confirm button repeats the verb of the sentence.
-- The parts offer only what the place allows: no "every workspace" inside a repository, no "workspace" outside it, flags on a deny only.
-- Where an effect cannot be kept, the keep options are absent and one line says why: "Deletes files: always asked.", "`$T` could be any folder, so this can only be answered for this call."
+- The parts offer only what the place allows: no "every workspace" inside a repository, flags on a deny only.
+- Where an allow cannot be kept, Keep… offers the deny alone and one line says why: "Deletes files: always asked.", "`$T` could be any folder, so this can only be answered for this call."
 - A kept answer already in force is said: "A deny you kept on D:/src/other already refuses writes here; allowing this call won't change it."
 - A write shows its diff above the answer. A file tool's card has no command part; its sentence starts at the action.
 
@@ -156,15 +161,17 @@ Writes D:/src/other/target   ·   asked because: outside the workspace
 cd ~/data && sort raw.csv | uniq > ../out/clean.csv && rm raw.csv
 
 Reads   ~/data/raw.csv     ✓ already allowed (read ~/data, you)
-Writes  ~/out/clean.csv    ( ) this call  ( ) keep…      no grant here
-Deletes ~/data/raw.csv     ( ) this call only            always asked
+Writes  ~/out/clean.csv    outside the workspace   Allow writes in this folder…
+Deletes ~/data/raw.csv     it deletes or replaces what is there   Keep…
+
+  [ Allow ]  [ Deny ]
 ```
 
-- One card per line, one row per effect. Rows that already pass are shown collapsed, so the whole line is in view.
-- The same action on the same place is one row, however many commands do it.
-- Each asked row has its own answer and sentence; the card has one confirm.
-- The line runs only when every row is allowed. Denying any row refuses the whole line, and the confirm button says so.
-- Kept answers are saved when the card is confirmed, even when the line is refused, and the row's sentence says so.
+- One card per line, one row per effect, each on one line. Rows that already pass are shown quiet, so the whole line is in view.
+- The same action on the same place is one row, however many commands do it, and a row whose every keepable answer another asked row's would cover is folded into that row: `ls -R docs` and `wc -c docs/*` ask once.
+- The card's Allow and Deny answer every asked row for this call alone. A row opened with Keep… carries its own kept answer and sentence; the card has one confirm.
+- The line runs only when every row is allowed. Deny, or a row kept as a denial, refuses the whole line, and the confirm button says so.
+- Kept answers are saved when the card is confirmed or denied, even when the line is refused.
 
 ### Refused without a card
 

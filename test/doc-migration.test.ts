@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { ASK_USER_TOOL } from '../src/agent/openai-session/tools/ask-user'
-import { DOC_MIGRATION_TOOLS, docMigrationPrompt, docMigrationScope, specsWithWorkInFlight } from '../src/agent/phases/doc-migration'
+import { DOC_MIGRATION_TOOLS, docMigrationPrompt, docMigrationScope, draftFolders, specsWithWorkInFlight } from '../src/agent/phases/doc-migration'
 import { ScopeGuard } from '../src/agent/phases/scope-guard'
 import { board, task } from './task-board-fixture'
 import { renderBoard } from '../src/agent/phases/tasks-file'
@@ -65,13 +65,13 @@ describe('what a doc migration may touch', () => {
     expect(DOC_MIGRATION_TOOLS).toEqual(['Read', 'Glob', 'MarkdownSearch', 'SpecSearch', 'Write', 'Edit', 'MultiEdit', 'Move', ASK_USER_TOOL])
   })
 
-  it('a_picked_move_is_allowed_outright_one_folder_deep_but_a_deeper_or_outside_move_is_not', async () => {
+  it('a_picked_move_is_allowed_outright_into_a_folder_at_any_depth_but_a_move_from_outside_the_specs_is_not', async () => {
     const domainGuard = new ScopeGuard(cwd, docMigrationScope([], 'by-domain'))
     const domainUse = (toolName: string, input: unknown) => domainGuard.preToolUse({ toolName, input, toolUseId: 't' })
     expect(await domainUse('Move', { source: 'specs/order-cancellation.spec.md', destination: 'specs/orders/order-cancellation.spec.md' })).toMatchObject({ allow: true })
     expect(await domainUse('Move', { source: 'docs/intent/agent.md', destination: 'specs/orders/agent.spec.md' })).toMatchObject({ deny: expect.any(String) })
-    expect(await domainUse('Move', { source: 'specs/orders/order-cancellation.spec.md', destination: 'specs/orders/sub/order-cancellation.spec.md' })).toMatchObject({
-      deny: expect.any(String),
+    expect(await domainUse('Move', { source: 'specs/orders/order-cancellation.spec.md', destination: 'specs/orders/returns/order-cancellation.spec.md' })).toMatchObject({
+      allow: true,
     })
   })
 })
@@ -257,16 +257,43 @@ describe('a migrated draft lands its folder the same way as a planning session',
     expect(prompt).toContain('write `specs/<folder>/<slug>.spec.md` with Write')
   })
 
-  it('by_domain_mode_writes_are_allowed_one_folder_deep_but_not_two', async () => {
+  it('by_domain_mode_writes_a_draft_into_a_folder_at_any_depth', async () => {
     const domainGuard = new ScopeGuard(cwd, docMigrationScope(['docs/api/**'], 'by-domain'))
     const domainUse = (toolName: string, input: unknown) => domainGuard.preToolUse({ toolName, input, toolUseId: 't' })
+    expect(await domainUse('Write', { file_path: 'specs/order-cancellation.spec.md' })).toMatchObject({ allow: true })
     expect(await domainUse('Write', { file_path: 'specs/orders/order-cancellation.spec.md' })).toMatchObject({ allow: true })
-    expect(await domainUse('Write', { file_path: 'specs/orders/sub/order-cancellation.spec.md' })).toMatchObject({ deny: expect.any(String) })
+    expect(await domainUse('Write', { file_path: 'specs/orders/returns/order-cancellation.spec.md' })).toMatchObject({ allow: true })
+  })
+
+  it('a_workspace_on_the_default_with_every_spec_at_the_root_may_still_take_folders_from_the_job', () => {
+    expect(draftFolders('default', 'flat')).toBe('root-first')
+    expect(draftFolders('default', 'by-domain')).toBe('by-domain')
+    expect(draftFolders('flat', 'flat')).toBe('flat')
+    expect(draftFolders('by-domain', 'by-domain')).toBe('by-domain')
+  })
+
+  it('root_first_writes_a_draft_at_the_root_or_into_a_folder_at_any_depth', async () => {
+    const rootGuard = new ScopeGuard(cwd, docMigrationScope([], 'root-first'))
+    const rootUse = (toolName: string, input: unknown) => rootGuard.preToolUse({ toolName, input, toolUseId: 't' })
+    expect(await rootUse('Write', { file_path: 'specs/order-cancellation.spec.md' })).toMatchObject({ allow: true })
+    expect(await rootUse('Write', { file_path: 'specs/orders/returns/order-cancellation.spec.md' })).toMatchObject({ allow: true })
+    expect(await rootUse('Move', { source: 'specs/order-cancellation.spec.md', destination: 'specs/orders/order-cancellation.spec.md' })).toMatchObject({ allow: true })
+  })
+
+  it('a_workspace_set_to_flat_refuses_a_draft_in_a_folder', async () => {
+    expect(await use('Write', { file_path: 'specs/orders/order-cancellation.spec.md' })).toMatchObject({ deny: expect.any(String) })
+  })
+
+  it('root_first_drafts_at_the_root_until_the_user_asks_for_folders_and_offers_the_sort', () => {
+    const prompt = docMigrationPrompt(cwd, 'root-first')
+    expect(prompt).toContain('Drafts land at the root of `specs/` unless the user took the offer to sort the specs into folders or asks for folders')
+    expect(prompt).toContain('or `specs/<folder>/<slug>.spec.md` where a folder was settled for that feature')
+    expect(prompt).toContain('ask once at the start whether to sort the specs that already exist into domain folders')
   })
 })
 
 describe('organising the specs that already exist', () => {
-  it('nothing_moves_on_its_own_a_flat_workspace_is_never_offered_the_sort', () => {
+  it('nothing_moves_on_its_own_a_workspace_set_to_flat_is_never_offered_the_sort', () => {
     const prompt = docMigrationPrompt(cwd, 'flat')
     expect(prompt).not.toContain('sort the specs that already exist into domain folders')
   })

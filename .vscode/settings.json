@@ -1,16 +1,60 @@
 {
-    "kiwiAgent.permissions.allow": [
-        "Bash(npx vitest:*)",
-        "Bash(npx tsc:*)",
-        "Bash(npx esbuild:*)",
-        "Bash(npm test:*)",
-        "mcp__typescript__get_references",
-        "mcp__html-analytics__element_styles",
-        "mcp__html-analytics__html_outline",
-        "Bash(npm audit:*)",
-        "WebSearch",
-        "Read",
-        "mcp__typescript__calculate_metrics",
-        "JsonQuery"
+    "kiwiAgent.permissions.grants": [
+        {
+            "verdict": "allow",
+            "command": [
+                "mcp__typescript__get_references"
+            ],
+            "place": "D:/src/coderr/KiwiCode-Suite/KiwiPow-Agent",
+            "reach": "tree"
+        },
+        {
+            "verdict": "allow",
+            "command": [
+                "mcp__html-analytics__element_styles"
+            ],
+            "place": "D:/src/coderr/KiwiCode-Suite/KiwiPow-Agent",
+            "reach": "tree"
+        },
+        {
+            "verdict": "allow",
+            "command": [
+                "mcp__html-analytics__html_outline"
+            ],
+            "place": "D:/src/coderr/KiwiCode-Suite/KiwiPow-Agent",
+            "reach": "tree"
+        },
+        {
+            "verdict": "allow",
+            "command": [
+                "WebSearch"
+            ],
+            "place": "D:/src/coderr/KiwiCode-Suite/KiwiPow-Agent",
+            "reach": "tree"
+        },
+        {
+            "verdict": "allow",
+            "command": [
+                "Read"
+            ],
+            "place": "D:/src/coderr/KiwiCode-Suite/KiwiPow-Agent",
+            "reach": "tree"
+        },
+        {
+            "verdict": "allow",
+            "command": [
+                "mcp__typescript__calculate_metrics"
+            ],
+            "place": "D:/src/coderr/KiwiCode-Suite/KiwiPow-Agent",
+            "reach": "tree"
+        },
+        {
+            "verdict": "allow",
+            "command": [
+                "JsonQuery"
+            ],
+            "place": "D:/src/coderr/KiwiCode-Suite/KiwiPow-Agent",
+            "reach": "tree"
+        }
     ]
 }

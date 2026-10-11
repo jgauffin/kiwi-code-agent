@@ -106,6 +106,11 @@ export class PanelRegistry {
     } else this.createPanel(tabId)
   }
 
+  /** Shows a tab again, with the focus, where it already sits; one closed meanwhile is nothing to show. */
+  bringBack(entry: ChatPanel): void {
+    if (this.panels.has(entry)) entry.panel.reveal(entry.panel.viewColumn, false)
+  }
+
   closeTab(tabId: string): void {
     this.panelOf(tabId)?.panel.dispose()
   }

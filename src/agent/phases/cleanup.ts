@@ -96,6 +96,7 @@ When you cannot tell what a piece of code is meant to do, so that splitting it m
 
 Rules:
 - Edit only the files listed, the new files you create and \`${MOVES_FILE}\`; every other file already there is read-only.
+- A split moves a responsibility out into a well-formed module or class of its own, named for what it does and holding the state it uses. Spreading one class over several files (a partial class, a type reopened elsewhere through declaration merging, an extension or mixin that only carries its methods away) is not a split: the class does as much as before and only the measure is dodged.
 - Know every caller and test of what you move before moving it, so the split does not break a name they use.
 - Keep behaviour: no rewrite, no rename for taste, no "while I am here" change to logic, no reformatting of lines the split does not touch.
 - A unit that cannot be split without changing behaviour is left alone; say which and why in one line.

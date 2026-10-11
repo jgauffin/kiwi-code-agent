@@ -5,7 +5,7 @@ import { reachesFromCwd, type CommandClassifier, type CommandSite } from './clas
 import { attributes, copy, create, link, move, remove, tee } from './file-commands'
 import { find, sed } from './find-and-sed'
 import { git } from './git'
-import { date, diff, diskUsage, fileType, grep, hostname, jq, less, listing, plainReaders, ripgrep, silverSearcher, sort, touchesNothing, tree, uniq, yq } from './inspecting'
+import { column, compareBytes, cut, date, diff, diskUsage, fileStatus, fileType, grep, headAndTail, hostname, jq, less, listing, numberLines, plainReaders, reverseConcatenate, ripgrep, silverSearcher, sort, touchesNothing, tree, uniq, wordCount, yq } from './inspecting'
 import { awk, evaluators, node, perlAndRuby, python, shells } from './interpreters'
 import { cargo, curl, dotnet, go, packageManagers, packageRunners, wget } from './toolchains'
 
@@ -15,7 +15,7 @@ import { cargo, curl, dotnet, go, packageManagers, packageRunners, wget } from '
  * the command itself names, which a kept answer for that command covers.
  */
 const CLASSIFIERS: readonly CommandClassifier[] = [
-  touchesNothing, plainReaders, grep, ripgrep, silverSearcher, listing, diskUsage, diff, tree, less, sort, uniq, jq, yq, fileType, date, hostname,
+  touchesNothing, plainReaders, reverseConcatenate, headAndTail, wordCount, cut, numberLines, column, compareBytes, fileStatus, grep, ripgrep, silverSearcher, listing, diskUsage, diff, tree, less, sort, uniq, jq, yq, fileType, date, hostname,
   find, sed,
   remove, create, attributes, copy, move, link, tee,
   perlAndRuby, awk, python, node, shells, evaluators,

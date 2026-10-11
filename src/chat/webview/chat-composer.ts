@@ -7,12 +7,28 @@ import type { ContextMeter, ContextUsage } from './context-meter'
 import {
   AllowWritesToggledEvent,
   InterruptRequestedEvent,
-  McpReconnectRequestedEvent,
+  McpSwitchRequestedEvent,
   PlanApprovedEvent,
   PromptSubmittedEvent,
   SessionEffortChangedEvent,
   SessionModelChangedEvent,
 } from './events'
+
+/** One server under the composer: its light shows whether it runs, and a click turns it the other way. */
+type ServerView = McpServerState & { title: string; switchTo: 'start' | 'stop' }
+
+const STATUS_TEXT: Record<McpServerState['status'], string> = {
+  connected: 'connected',
+  pending: 'starting',
+  stopped: 'not running; starts when one of its tools is first used',
+  failed: 'failed',
+}
+
+function serverView(s: McpServerState): ServerView {
+  const running = s.status === 'connected' || s.status === 'pending'
+  const status = s.error ? `${STATUS_TEXT[s.status]}: ${s.error}` : STATUS_TEXT[s.status]
+  return { ...s, title: `${s.name} ${status}. Click to ${running ? 'stop' : 'start'} it.`, switchTo: running ? 'stop' : 'start' }
+}
 
 /**
  * The profile a session's next turn runs on. A chat session offers every
@@ -80,10 +96,7 @@ export class ChatComposer extends HTMLElement {
         <button type="submit" class="send" disabled="{{blocked}}">Send</button>
       </div>
       <div class="mcp-servers" if="mcpAvailable">
-        <span loop="s in servers" class="server {{s.status}}" title="{{s.title}}">
-          {{s.name}} {{s.status}}
-          <button type="button" class="reconnect" title="Reconnect {{s.name}}" r-click="reconnect(s)">↻</button>
-        </span>
+        <button type="button" loop="s in servers" class="server {{s.status}}" title="{{s.title}}" r-click="switchServer(s)">{{s.name}}</button>
       </div>
     </form>
   `)
@@ -148,7 +161,7 @@ export class ChatComposer extends HTMLElement {
         allowWritesAvailable: allowWrites !== undefined,
         allowWrites: allowWrites ?? false,
         mcpAvailable: mcp !== undefined && mcp.length > 0,
-        servers: (mcp ?? []).map((s) => ({ ...s, title: s.error ?? s.status })),
+        servers: (mcp ?? []).map(serverView),
         modelSwitchable: model !== undefined && model.options !== undefined,
         modelReadOnly: model !== undefined && model.options === undefined,
         modelCurrent: model?.current ?? '',
@@ -162,7 +175,7 @@ export class ChatComposer extends HTMLElement {
         approvePlan: approvePlan ?? false,
       },
       {
-        reconnect: (s: McpServerState) => this.dispatchEvent(new McpReconnectRequestedEvent(s.name)),
+        switchServer: (s: ServerView) => this.dispatchEvent(new McpSwitchRequestedEvent(s.name, s.switchTo === 'start')),
         submit: (event: SubmitEvent) => {
           event.preventDefault()
           this.send()

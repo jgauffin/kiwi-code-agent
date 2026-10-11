@@ -77,10 +77,10 @@ describe('a permission card', () => {
     expect(tokens(code, 'string')).toEqual(['"hi"'])
   })
 
-  it('other_tool_input_is_colored_as_json', () => {
-    const card = show({ type: 'permission_request', requestId: 'r1', toolName: 'WebFetch', title: 'WebFetch', input: { url: 'https://x' }, rows: [] })
+  it('other_tool_input_that_nests_is_colored_as_json', () => {
+    const card = show({ type: 'permission_request', requestId: 'r1', toolName: 'WebFetch', title: 'WebFetch', input: { urls: ['https://x'] }, rows: [] })
     const input = card.querySelector('pre.input')!
-    expect(input.textContent).toBe(JSON.stringify({ url: 'https://x' }, null, 2))
-    expect(tokens(input, 'attr')).toEqual(['"url"'])
+    expect(input.textContent).toBe(JSON.stringify({ urls: ['https://x'] }, null, 2))
+    expect(tokens(input, 'attr')).toEqual(['"urls"'])
   })
 })

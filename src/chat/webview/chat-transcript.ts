@@ -44,6 +44,8 @@ export class ChatTranscript extends HTMLElement {
   private readonly questionCalls = new Set<string>()
   /** Tool calls the user allowed at a prompt: they have read what the call would do. */
   private readonly approvedByHand = new Set<string>()
+  /** Cards left open when their engine stopped: still answerable, a turn late, but nothing waits on them. */
+  private readonly late = new Set<HTMLElement>()
   /** The newest edit the user has not seen, the one edit step left open. */
   private openEdit: HTMLDetailsElement | undefined
   private statusLine!: HTMLElement
@@ -86,6 +88,7 @@ export class ChatTranscript extends HTMLElement {
     this.questions.clear()
     this.questionCalls.clear()
     this.approvedByHand.clear()
+    this.late.clear()
     this.pendingTools.clear()
     this.openEdit = undefined
     this.resume = undefined
@@ -116,7 +119,7 @@ export class ChatTranscript extends HTMLElement {
 
   /** The first card still waiting on the user, a permission prompt or a question. */
   openCard(): HTMLElement | undefined {
-    return [...this.permissions.values(), ...this.questions.values()].find((card) => !card.isResolved)
+    return this.waitingCards()[0]
   }
 
   apply(event: SessionEvent, live = true): void {
@@ -244,6 +247,7 @@ export class ChatTranscript extends HTMLElement {
       }
       case 'ended':
         this.activity = undefined
+        this.leaveOpenCardsLate()
         this.insert(block('ended', 'Engine stopped. The next prompt resumes the conversation.'))
         break
     }
@@ -282,8 +286,9 @@ export class ChatTranscript extends HTMLElement {
    * the newest tool call still running, else the model.
    */
   private currentActivity(): Activity {
-    if ([...this.permissions.values()].some((card) => !card.isResolved)) return awaitingUser(NEEDS_APPROVAL)
-    if (this.hasOpenQuestion) return awaitingUser(NEEDS_ANSWER)
+    const waiting = this.waitingCards()
+    if (waiting.some((card) => card instanceof PermissionCard)) return awaitingUser(NEEDS_APPROVAL)
+    if (waiting.some((card) => card instanceof QuestionCard)) return awaitingUser(NEEDS_ANSWER)
     return atWork([...this.pendingTools.values()].at(-1) ?? WAITING_ON_MODEL)
   }
 
@@ -298,6 +303,9 @@ export class ChatTranscript extends HTMLElement {
     if (!this.working) {
       const row = document.createElement('p')
       row.className = 'working'
+      row.addEventListener('click', () => {
+        if (this.activity?.needsUser) this.revealOpenCard()
+      })
       const working = { element: row, label: '', startedAt: 0, stop: () => window.clearInterval(timer) }
       const timer = window.setInterval(() => {
         row.textContent = `${working.label}… ${Math.round((Date.now() - working.startedAt) / 1000)}s`
@@ -311,6 +319,7 @@ export class ChatTranscript extends HTMLElement {
     }
     // A row that only fades reads as progress; the wait for the user has to stand out as a wait.
     this.working.element.classList.toggle('needs-user', this.activity.needsUser)
+    this.working.element.title = this.activity.needsUser ? 'Show what it is waiting on' : ''
     this.appendChild(this.working.element)
   }
 
@@ -398,10 +407,51 @@ export class ChatTranscript extends HTMLElement {
     details.appendChild(result)
   }
 
-  /** Subagent output nests under the tool call that spawned it. */
+  /**
+   * Adds to the conversation, or to the step of the subagent it came from.
+   * While a card waits on the person, what follows goes above it: calls made
+   * alongside the one asked about would otherwise push the prompt out of sight
+   * while the row below says the turn waits on it. A new card joins the
+   * waiting ones in order, and unfolds the step it lands in: a prompt folded
+   * away is a turn that waits on nothing anyone can see.
+   */
   private insert(element: HTMLElement, parentToolUseId?: string): void {
-    const parent = parentToolUseId ? this.tools.get(parentToolUseId) : undefined
-    ;(parent ?? this).appendChild(element)
+    const container: HTMLElement = (parentToolUseId ? this.tools.get(parentToolUseId) : undefined) ?? this
+    const isCard = element instanceof PermissionCard || element instanceof QuestionCard
+    const waiting = isCard ? undefined : this.waitingCards().find((card) => card.parentElement === container)
+    if (waiting) container.insertBefore(element, waiting)
+    else container.appendChild(element)
+    if (isCard) for (let step = element.parentElement?.closest('details'); step; step = step.parentElement?.closest('details') ?? null) step.open = true
+  }
+
+  /** Cards the turn waits on: open, and raised by the engine still running. */
+  private waitingCards(): (PermissionCard | QuestionCard)[] {
+    return [...this.permissions.values(), ...this.questions.values()].filter((card) => !card.isResolved && !this.late.has(card))
+  }
+
+  /**
+   * The engine stopped with cards still open. They can still be answered, the
+   * answer reaching the model as the next message, but nothing waits on them,
+   * so the row below stops saying so.
+   */
+  private leaveOpenCardsLate(): void {
+    for (const card of [...this.permissions.values(), ...this.questions.values()]) {
+      if (card.isResolved || this.late.has(card)) continue
+      this.late.add(card)
+      card.classList.add('late')
+      const note = document.createElement('p')
+      note.className = 'late-note'
+      note.textContent = 'The session stopped before this was answered. An answer now reaches the model as your next message.'
+      card.prepend(note)
+    }
+  }
+
+  /** The waiting row points at what it waits on: the open card, its step unfolded, brought into view. */
+  private revealOpenCard(): void {
+    const card = this.openCard()
+    if (!card) return
+    for (let step = card.closest('details'); step; step = step.parentElement?.closest('details') ?? null) step.open = true
+    card.scrollIntoView({ block: 'center' })
   }
 
   private setStatus(text: string): void {

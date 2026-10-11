@@ -18,7 +18,7 @@ A session's engine can change while it is in play: it carries on with the conver
 
 How hard a chat session thinks is the person's to set alongside its model, turn by turn, but only where the levels the model takes are known: a guessed level is a parameter the endpoint rejects, so an unknown model is left at its own default.
 
-Both take the user's `~/.mcp.json` and the workspace's `.mcp.json` over it: Claude through its own MCP client, the own loop through a client per server. The tools carry the same names and fall under the same permission rules on either engine, so a project's servers work the same whichever model runs.
+Both take the user's `~/.mcp.json` and the workspace's `.mcp.json` over it, through the extension's own client per server: Claude is handed each server as an in-process stand-in, so a server is started only when a tool of it is called, on either engine. The tools carry the same names and fall under the same permission rules on either engine, so a project's servers work the same whichever model runs.
 
 ## Shape
 

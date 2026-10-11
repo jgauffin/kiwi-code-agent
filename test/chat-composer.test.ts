@@ -10,7 +10,7 @@ vi.resetModules()
 
 const { ChatComposer } = await import('../src/chat/webview/chat-composer')
 const { LinkedFilesRow } = await import('../src/chat/webview/linked-files-row')
-const { LinkOpenFileRequestedEvent, McpReconnectRequestedEvent, PromptSubmittedEvent } = await import('../src/chat/webview/events')
+const { LinkOpenFileRequestedEvent, McpSwitchRequestedEvent, PromptSubmittedEvent } = await import('../src/chat/webview/events')
 
 function composer(): InstanceType<typeof ChatComposer> {
   const node = new ChatComposer()
@@ -99,19 +99,26 @@ describe('ChatComposer MCP line', () => {
       ],
     })
     const servers = [...node.querySelectorAll('.mcp-servers .server')]
-    expect(servers.map((s) => s.textContent!.replace(/\s+/g, ' ').trim())).toEqual(['docs connected ↻', 'github failed ↻'])
+    expect(servers.map((s) => s.textContent!.trim())).toEqual(['docs', 'github'])
     expect(servers[1]!.classList.contains('failed')).toBe(true)
-    expect(servers[1]!.getAttribute('title')).toBe('ECONNREFUSED')
-    expect(servers[0]!.getAttribute('title')).toBe('connected')
+    expect(servers[1]!.getAttribute('title')).toBe('github failed: ECONNREFUSED. Click to start it.')
+    expect(servers[0]!.getAttribute('title')).toBe('docs connected. Click to stop it.')
   })
 
-  it('the_reconnect_button_names_its_server', () => {
+  it('clicking_a_running_server_stops_it_and_clicking_one_not_running_starts_it', () => {
     const node = composer()
-    node.setSwitches({ allowWrites: undefined, model: undefined, mcp: [{ name: 'github', status: 'failed', error: 'down' }] })
+    node.setSwitches({
+      allowWrites: undefined,
+      model: undefined,
+      mcp: [
+        { name: 'docs', status: 'connected' },
+        { name: 'github', status: 'stopped' },
+      ],
+    })
     const seen: string[] = []
-    node.addEventListener(McpReconnectRequestedEvent.type, (e) => seen.push(e.server))
-    node.querySelector<HTMLButtonElement>('.mcp-servers .reconnect')!.click()
-    expect(seen).toEqual(['github'])
+    node.addEventListener(McpSwitchRequestedEvent.type, (e) => seen.push(`${e.server} ${e.running}`))
+    node.querySelectorAll<HTMLButtonElement>('.mcp-servers .server').forEach((b) => b.click())
+    expect(seen).toEqual(['docs false', 'github true'])
   })
 
   it('no_line_is_shown_without_servers', () => {

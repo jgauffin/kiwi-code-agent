@@ -11,26 +11,27 @@ export type SpecFoldersMode = 'by-domain' | 'flat'
 const SPEC_SUFFIX = '.spec.md'
 
 /**
- * The domain folders `specs/` already has, one level deep: read before a
- * direction is given so the session reuses one of them rather than coining a
- * synonym for a domain already named. A folder counts only once it holds a
- * spec; an empty folder left behind by a move does not pull the workspace
- * into by-domain mode on its own.
+ * The domain folders `specs/` already has, at any depth, each by its path
+ * under `specs/` (`orders/returns`): read before a direction is given so the
+ * session reuses one of them rather than coining a synonym for a domain
+ * already named. A folder counts only once it holds a spec; an empty folder
+ * left behind by a move does not pull the workspace into by-domain mode on its
+ * own.
  */
 export async function existingSpecFolders(cwd: string): Promise<string[]> {
-  let entries
-  try {
-    entries = await readdir(join(cwd, SPECS_DIR), { withFileTypes: true })
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
-    throw error
-  }
   const folders: string[] = []
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue
-    const inside = await readdir(join(cwd, SPECS_DIR, entry.name)).catch(() => [] as string[])
-    if (inside.some((name) => name.endsWith(SPEC_SUFFIX))) folders.push(entry.name)
+  async function walk(rel: string): Promise<void> {
+    let entries
+    try {
+      entries = await readdir(join(cwd, SPECS_DIR, rel), { withFileTypes: true })
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+      throw error
+    }
+    if (rel && entries.some((e) => e.isFile() && e.name.endsWith(SPEC_SUFFIX))) folders.push(rel)
+    for (const entry of entries) if (entry.isDirectory()) await walk(rel ? `${rel}/${entry.name}` : entry.name)
   }
+  await walk('')
   return folders.sort()
 }
 

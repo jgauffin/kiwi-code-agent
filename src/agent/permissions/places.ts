@@ -80,10 +80,45 @@ export function isUnsettled(word: string): boolean {
  */
 export function wildcardBase(path: string): { base: string; extent?: Reach } | undefined {
   const parts = path.split(/[\\/]/)
-  const at = parts.findIndex((part) => /[*?[]/.test(part))
+  // A brace is a wildcard too: `{a,/etc}` names `/etc`, so no part from the first brace on is a folder the path stands in.
+  const at = parts.findIndex((part) => /[*?[{]/.test(part))
   if (at === -1) return { base: path }
   if (at === 0) return undefined
   const base = parts.slice(0, at).join('/') || '/'
   const extent: Reach = at === parts.length - 1 && !parts[at]!.includes('**') ? 'directory' : 'tree'
   return { base, extent }
+}
+
+/**
+ * A glob's brace alternatives, each a pattern of its own: `{a,b}/x` is `a/x`
+ * and `b/x`, nested braces included. Undefined when there are more than
+ * `limit`, or a brace is left open, so the caller falls back to what lies above
+ * the first brace rather than judge part of what the glob reaches.
+ */
+export function expandBraces(pattern: string, limit = 32): string[] | undefined {
+  const open = pattern.indexOf('{')
+  if (open === -1) return [pattern]
+  let depth = 0
+  const commas: number[] = []
+  let close = -1
+  for (let i = open; i < pattern.length && close === -1; i++) {
+    const c = pattern[i]
+    if (c === '{') depth++
+    else if (c === '}' && --depth === 0) close = i
+    else if (c === ',' && depth === 1) commas.push(i)
+  }
+  if (close === -1) return undefined
+  const head = pattern.slice(0, open)
+  const tail = pattern.slice(close + 1)
+  // A brace with no comma offers no choice; left as written, it reaches from above the brace, which is wider and so safe.
+  if (commas.length === 0) return [pattern]
+  const bounds = [open, ...commas, close]
+  const out: string[] = []
+  for (let i = 0; i < bounds.length - 1; i++) {
+    const expanded = expandBraces(head + pattern.slice(bounds[i]! + 1, bounds[i + 1]) + tail, limit)
+    if (expanded === undefined) return undefined
+    out.push(...expanded)
+    if (out.length > limit) return undefined
+  }
+  return out
 }

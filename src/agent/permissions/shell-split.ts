@@ -1,7 +1,8 @@
 import { SimpleCommandBuilder } from './shell-command'
 import { redirectAt } from './shell-redirect'
 import { ansiQuoted, blanksEnd, closingBrace, doubleParenAt, heredocBodies, lineEnd, substitutionAt, type Heredoc } from './shell-scan'
-import { WordBuffer } from './shell-word'
+import { boundOnce, isLiteralValue, plainReferenceAt } from './shell-variables'
+import { WordBuffer, type Word } from './shell-word'
 
 /**
  * Splits a shell command line the way a POSIX shell would (Shell Command
@@ -62,6 +63,10 @@ class Splitter {
   private heredocText = ''
   /** How the next command is joined to the one before it; see `ShellSegment.joined`. */
   private joinedBy: ShellSegment['joined'] = 'start'
+  /** Literal values set by assignments the line surely ran, by name. */
+  private readonly variables = new Map<string, string>()
+  /** Every command so far ran whatever the one before it did: only `;` and newlines, outside any construct. */
+  private unconditional = true
   private i = 0
 
   constructor(private readonly src: string) {}
@@ -106,6 +111,13 @@ class Splitter {
 
   /** `$((…))`, `$(…)`, `${…}`, backticks, and `<(…)` or `>(…)` where `processes` allows. True when one was read. */
   private expansion(c: string, next: string | undefined, processes: boolean): boolean {
+    const reference = c === '$' ? plainReferenceAt(this.src, this.i) : undefined
+    const value = reference && this.variables.get(reference.name)
+    if (reference && value !== undefined) {
+      this.add(value, true)
+      this.i = reference.end
+      return true
+    }
     if (c === '$' && next === '{') {
       this.parameterExpansion()
       return true
@@ -290,15 +302,28 @@ class Splitter {
   /** Closes the segment whose text ends at `textEnd`; the next one starts at `nextStart`. */
   private endSegment(textEnd: number, nextStart: number): void {
     this.endWord()
+    const assigned = this.command.bareAssignments()
+    const opened = this.command.opensConstruct()
     const segment = this.command.close(this.src, textEnd, this.heredocText, this.joinedBy)
     if (segment) this.segments.push(segment)
     const operator = this.src.slice(textEnd, nextStart).trim()
+    // Past `;` or a newline the next command runs either way; past `&&` only once this one has, so an assignment there still holds for it.
+    if (assigned && this.unconditional && (operator === '' || operator === ';' || operator === '&&')) this.bind(assigned)
+    this.unconditional &&= !opened && (operator === '' || operator === ';')
     this.joinedBy = segment?.joined !== undefined && (operator === '&&' || operator === '|') ? operator : undefined
     // What a substitution hides runs too, whether or not the command holding it turned out to be one. It runs wherever its holder stands, which is no link in the chain.
     this.segments.push(...this.nested.map(({ joined: _joined, ...nested }) => nested))
     this.nested = []
     this.heredocText = ''
     this.i = nextStart
+  }
+
+  private bind(assignments: Word[]): void {
+    for (const word of assignments) {
+      const name = word.text.slice(0, word.equalsAt)
+      const value = word.text.slice(word.equalsAt + 1)
+      if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) && !word.substituted && isLiteralValue(value) && boundOnce(this.src, name)) this.variables.set(name, value)
+    }
   }
 }
 

@@ -8,6 +8,8 @@ import type { SessionEvent } from '../src/agent/session/code-session'
 import type { McpConnector, McpToolInfo } from '../src/agent/mcp/mcp-connection'
 import type { McpServers } from '../src/agent/mcp/mcp-config'
 import { McpToolHost } from '../src/agent/mcp/mcp-tool-host'
+import { McpToolCache } from '../src/agent/mcp/mcp-tool-cache'
+import { memoryStore } from './fake-mcp'
 
 /** A scripted model: each call to stream() plays the next scripted reply, or throws it. */
 class ScriptedModel implements ChatCompletionClient {
@@ -655,7 +657,7 @@ describe('OpenAiSession', () => {
         client: model,
         tools: [echoTool as Tool],
         systemPrompt: 'sys',
-        mcp: { host: new McpToolHost(connector), servers },
+        mcp: { host: new McpToolHost(connector, new McpToolCache(memoryStore())), servers },
       })
     }
 
@@ -694,16 +696,15 @@ describe('OpenAiSession', () => {
       await s.dispose()
       expect(model.requests[0]!.tools.map((t) => t.name)).toEqual(['Echo', 'mcp__docs__echo'])
       expect(model.requests[1]!.tools.map((t) => t.name)).toEqual(['Echo', 'mcp__other__echo'])
-      expect(events.filter((e) => e.type === 'mcp_servers')).toEqual([
-        { type: 'mcp_servers', servers: [{ name: 'docs', status: 'connected' }] },
-        {
-          type: 'mcp_servers',
-          servers: [
-            { name: 'other', status: 'connected' },
-            { name: 'broken', status: 'failed', error: 'spawn nope ENOENT' },
-          ],
-        },
-      ])
+      const statuses = events.filter((e) => e.type === 'mcp_servers')
+      expect(statuses).toContainEqual({ type: 'mcp_servers', servers: [{ name: 'docs', status: 'connected' }] })
+      expect(statuses.at(-1)).toEqual({
+        type: 'mcp_servers',
+        servers: [
+          { name: 'other', status: 'connected' },
+          { name: 'broken', status: 'failed', error: 'spawn nope ENOENT' },
+        ],
+      })
     })
 
     it('a_session_without_servers_has_no_control', async () => {

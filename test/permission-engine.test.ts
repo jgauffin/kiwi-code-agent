@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { judgeCall, type CallContext } from '../src/agent/permissions/judge-call'
 import type { Ground } from '../src/agent/permissions/evaluator'
-import type { KeptGrant } from '../src/agent/permissions/grants'
+import { parseGrant, type KeptGrant } from '../src/agent/permissions/grants'
 import { grantSentence } from '../src/agent/permissions/grant-sentence'
 import { grantFromClaudeRule, grantFromOldRule } from '../src/agent/permissions/grant-formats'
 import { classifyCommand } from '../src/agent/permissions/classifiers'
 import { siteAt } from '../src/agent/permissions/shell-effects'
+import { readOnlyTools } from '../src/agent/permissions/tool-classes'
 import { known } from '../src/agent/permissions/effects'
 
 const R = process.platform === 'win32' ? 'E:' : ''
@@ -67,6 +68,75 @@ describe('what a call would do', () => {
     const rm1 = classifyCommand('rm', ['-rf', 'x'], site).invocation
     const rm2 = classifyCommand('rm', ['--force', '-r', 'x'], site).invocation
     expect([...rm1.flags].sort()).toEqual([...rm2.flags].sort())
+  })
+
+  it('a_flag_taking_no_value_in_one_reader_never_swallows_the_path_after_it', () => {
+    const OUT = `${R}/other`
+    for (const line of [`wc -c ${OUT}/a.md`, `cat -n ${OUT}/a.md`, `tail -f ${OUT}/a.log`, `wc -w ${OUT}/a.md`, `stat -f ${OUT}/a.md`, `cut -s -f1 ${OUT}/a.csv`]) {
+      expect(bash(line).rows.map((r) => r.does), line).toContain(`Reads ${OUT}/${line.split('/').pop()}`)
+    }
+    // Where the letter does take a value, the value is not taken for a path.
+    expect(bash(`head -c 10 ${OUT}/a.md`).rows.map((r) => r.does)).toEqual([`Reads ${OUT}/a.md`])
+  })
+
+  it('a_place_another_asked_row_already_reaches_is_not_asked_beside_it', () => {
+    const OUT = `${R}/other/docs`
+    const judged = bash(`ls -R ${OUT}; wc -c ${OUT}/* ${OUT}/../readme.md`, { dirs: [OUT] })
+    expect(judged.rows.map((r) => r.does)).toEqual([`Reads ${OUT} and below`, `Reads ${R}/other/readme.md`])
+    // A delete is always asked, so a wider read never stands in for it.
+    expect(bash(`ls -R ${OUT}; rm ${OUT}/a.md`).rows.map((r) => r.does)).toEqual([`Reads ${OUT} and below`, `Deletes or replaces ${OUT}/a.md`])
+  })
+
+  it('a_search_whose_glob_names_folders_reads_only_those', () => {
+    const SUITE = `${R}/suite`
+    const judged = tool('Grep', { pattern: 'x', path: SUITE, glob: '{a,ws}/{docs,specs}/**/*.md' }, { ground: { workspace: `${SUITE}/ws` } })
+    expect(judged.rows.filter((r) => r.verdict === 'asked').map((r) => r.does)).toEqual([`Reads ${SUITE}/a/docs and below`, `Reads ${SUITE}/a/specs and below`])
+    // A glob naming no folder, or one climbing out, narrows nothing.
+    expect(tool('Grep', { pattern: 'x', path: SUITE, glob: '*.md' }).rows.map((r) => r.does)).toEqual([`Reads ${SUITE} and below`])
+    expect(tool('Grep', { pattern: 'x', path: SUITE, glob: '{../x,a}/*.md' }).rows.map((r) => r.does)).toEqual([`Reads ${SUITE} and below`])
+  })
+
+  it('a_memory_note_is_written_unasked_where_the_session_is_told_to_keep_them_and_deleting_one_is_still_asked', () => {
+    const MEMORY = `${HOME}/.claude/projects/ws/memory`
+    const setup = { ground: { writable: [MEMORY, `${HOME}/.claude/CLAUDE.md`] } }
+    expect(tool('Write', { file_path: `${MEMORY}/todo-notes.md`, content: '# x' }, setup).decision).toBe('passes')
+    expect(tool('Edit', { file_path: `${HOME}/.claude/CLAUDE.md` }, setup).decision).toBe('passes')
+    expect(bash(`rm ${MEMORY}/todo-notes.md`, { ...setup, files: [`${MEMORY}/todo-notes.md`] }).decision).toBe('asked')
+    expect(tool('Write', { file_path: `${HOME}/.claude/settings.json`, content: '{}' }, setup).decision).toBe('asked')
+  })
+
+  it('a_brace_never_hides_where_a_path_reaches', () => {
+    expect(tool('Glob', { pattern: '{/etc,src}/*' }).decision).toBe('asked')
+    expect(tool('Glob', { pattern: '{a,b}/*.ts' }).decision).toBe('passes')
+    expect(bash('cat {a,/etc/passwd}').decision).toBe('asked')
+  })
+
+  it('whether_a_path_exists_is_covered_by_whatever_lets_its_folder_be_read', () => {
+    const grants: KeptGrant[] = [{ verdict: 'allow', action: 'read', place: `${R}/data`, reach: 'directory', scope: 'workspace' }]
+    expect(tool('Exists', { path: `${R}/data/sub` }, { grants, dirs: [`${R}/data/sub`] }).decision).toBe('passes')
+    expect(tool('Exists', { path: `${R}/data/missing.txt` }, { grants }).decision).toBe('passes')
+    expect(tool('Exists', { path: `${R}/other/a.txt` }, { grants }).decision).toBe('asked')
+  })
+
+  it('starting_a_subagent_runs_unasked_and_its_own_calls_are_judged_each_on_its_own', () => {
+    expect(tool('Agent', { description: 'Evaluate', subagent_type: 'general-purpose', prompt: 'x' }).decision).toBe('passes')
+    expect(tool('Task', { description: 'Evaluate', prompt: 'x' }).decision).toBe('passes')
+  })
+
+  it('the_engines_own_bookkeeping_and_coordination_tools_run_unasked', () => {
+    const ctx = { ...context(), tools: { readOnly: readOnlyTools(() => []) } }
+    for (const [name, input] of [
+      ['ToolSearch', { query: 'select:SendMessage', max_results: 1 }],
+      ['ListAgents', {}],
+      ['SendMessage', { to: 'reviewer', message: 'done' }],
+      ['ScheduleWakeup', { delaySeconds: 600, prompt: 'check' }],
+      ['TaskOutput', { task_id: 't1' }],
+    ] as const) {
+      expect(judgeCall(name, input, WS, ctx).decision, name).toBe('passes')
+    }
+    // Work beyond the session is still asked.
+    expect(judgeCall('CronCreate', { cron: '* * * * *', prompt: 'x' }, WS, ctx).decision).toBe('asked')
+    expect(judgeCall('EnterWorktree', { name: 'x' }, WS, ctx).decision).toBe('asked')
   })
 
   it('an_unknown_command_is_asked_and_a_kept_command_answer_covers_it', () => {
@@ -203,11 +273,17 @@ describe('keeping an answer', () => {
     expect(judged.rows[0]!.keep?.allowNever).toBeDefined()
   })
 
-  it('a_place_inside_the_workspace_is_kept_for_the_session_or_the_workspace_and_outside_for_the_session_or_the_person', () => {
+  it('a_place_inside_the_workspace_is_kept_for_the_session_or_the_workspace_and_outside_for_any_scope', () => {
     expect(bash('frobnicate').rows[0]!.keep?.scopes).toEqual(['session', 'workspace'])
     const outside = tool('Read', { file_path: `${R}/data/a.txt` }).rows[0]!.keep!
-    expect(outside.scopes).toEqual(['session', 'person'])
+    expect(outside.scopes).toEqual(['session', 'workspace', 'person'])
     expect(outside.places.map((p) => p.place)).toEqual([`${R}/data/a.txt`, `${R}/data`].map((p) => p.replace(/^e:/, 'E:')))
+  })
+
+  it('outside_the_workspace_a_folder_holding_it_is_offered_like_any_other', () => {
+    const SUITE = `${R}/suite`
+    const keep = tool('Grep', { pattern: 'x', path: SUITE }, { ground: { workspace: `${SUITE}/ws` } }).rows[0]!.keep!
+    expect(keep.places.map((p) => p.place)).toEqual([SUITE])
   })
 
   it('no_answer_is_offered_for_the_home_folder_or_above_it', () => {
@@ -256,5 +332,11 @@ describe('the sentence an answer is kept as', () => {
     expect(grantSentence({ verdict: 'deny', action: 'write', place: 'D:/data', reach: 'directory' }, 'session')).toBe(
       'This session is refused when it would write files in D:/data (not the folders below it).',
     )
+  })
+
+  it('an_answer_tied_to_one_workspace_names_it_and_keeps_the_tie_when_read_back', () => {
+    const stored = parseGrant({ verdict: 'allow', action: 'read', place: 'D:/src/other', reach: 'tree', workspace: 'd:\\src\\ws' })!
+    expect(stored.workspace).toBe('D:/src/ws')
+    expect(grantSentence(stored, 'person')).toBe('Every session in the workspace D:/src/ws may read files in D:/src/other and every folder below it without asking.')
   })
 })

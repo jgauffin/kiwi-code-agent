@@ -29,8 +29,12 @@ class FakeSession implements CodeSession {
   events() {
     return this.out
   }
-  respondToPermission(requestId: string, decision: PermissionDecision) {
+  /** Requests the engine let go of: answered, they are not its to resolve any more. */
+  readonly withdrawn = new Set<string>()
+  respondToPermission(requestId: string, decision: PermissionDecision): boolean {
+    if (this.withdrawn.has(requestId)) return false
     this.answered.push({ requestId, decision })
+    return true
   }
   /** Stands in for an engine holding a question: it holds the ones it was told about, and resolves each once. */
   respondToQuestion(requestId: string, outcome: QuestionOutcome): boolean {
@@ -71,15 +75,21 @@ function memoryStore(): SessionStore & { saved: SessionRecord[][] } {
 const tick = () => new Promise((r) => setTimeout(r, 5))
 
 describe('SessionManager', () => {
-  it('live_sessions_are_reachable_and_a_reconnect_reaches_the_live_session_s_mcp_control', async () => {
+  it('live_sessions_are_reachable_and_a_start_or_stop_reaches_the_live_session_s_mcp_control', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'sm-'))
     try {
-      const reconnected: string[] = []
+      const switched: string[] = []
       const manager = new SessionManager(
         memoryStore(),
         async (r) => {
           const s = new FakeSession(r.id, r.profile, r.engineSessionId)
-          return Object.assign(s, { mcp: { reload: async () => {}, reconnect: async (name: string) => void reconnected.push(name) } })
+          return Object.assign(s, {
+            mcp: {
+              reload: async () => {},
+              start: async (name: string) => void switched.push(`start ${name}`),
+              stop: async (name: string) => void switched.push(`stop ${name}`),
+            },
+          })
         },
         (id) => RunLog.forSession(dir, id),
         () => {},
@@ -87,11 +97,12 @@ describe('SessionManager', () => {
       const record = await manager.create(profile)
       const idle = await manager.create(profile)
       expect(manager.liveSessions()).toEqual([])
-      await manager.reconnectMcp(idle.id, 'docs')
+      await manager.switchMcp(idle.id, 'docs', true)
       await manager.send(record.id, 'hello')
       expect(manager.liveSessions().map((s) => s.id)).toEqual([record.id])
-      await manager.reconnectMcp(record.id, 'docs')
-      expect(reconnected).toEqual(['docs'])
+      await manager.switchMcp(record.id, 'docs', true)
+      await manager.switchMcp(record.id, 'docs', false)
+      expect(switched).toEqual(['start docs', 'stop docs'])
       await manager.disposeAll()
     } finally {
       await rm(dir, { recursive: true, force: true })
@@ -513,6 +524,36 @@ describe('SessionManager', () => {
       await manager.close(record.id)
       await expect(manager.respondToPermission(record.id, 'req-1', { kind: 'deny' })).rejects.toThrow(/req-1/)
       expect(engines).toHaveLength(2)
+      await manager.disposeAll()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('a_decision_on_a_request_a_running_engine_withdrew_still_settles_the_card_and_reaches_the_model', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+    try {
+      const engines: FakeSession[] = []
+      const seen: SessionEvent[] = []
+      const manager = new SessionManager(
+        memoryStore(),
+        async (r) => {
+          const s = new FakeSession(r.id, r.profile, r.engineSessionId)
+          engines.push(s)
+          return s
+        },
+        (id) => RunLog.forSession(dir, id),
+        (_, e) => seen.push(e),
+      )
+      const record = await manager.create(profile)
+      await manager.send(record.id, 'find the tool')
+      engines[0]!.out.push({ type: 'permission_request', requestId: 'req-1', toolName: 'ToolSearch', input: { query: 'select:SendMessage' } })
+      engines[0]!.withdrawn.add('req-1')
+      await tick()
+
+      await manager.respondToPermission(record.id, 'req-1', { kind: 'allow' })
+      expect(seen.find((e) => e.type === 'permission_resolved')).toEqual({ type: 'permission_resolved', requestId: 'req-1', decision: 'allow' })
+      expect(engines.at(-1)!.sent.at(-1)).toContain('ToolSearch')
       await manager.disposeAll()
     } finally {
       await rm(dir, { recursive: true, force: true })

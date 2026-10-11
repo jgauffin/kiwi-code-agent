@@ -75,10 +75,7 @@ export const README_GLOB = '{README,ReadMe,Readme,readme}.md'
 /** Every feature's spec: an approved one is that feature's definition, so a later planner reads it as it reads the docs. */
 export const SPECS_GLOB = `${SPECS_DIR}/*.spec.md`
 
-/** A spec one domain folder deep, the only nesting a proposed folder ever takes. */
-export const SPECS_FOLDER_GLOB = `${SPECS_DIR}/*/*.spec.md`
-
-/** Every spec, at the root or any folder beneath it: for reading and citing, never for where a new one lands. */
+/** Every spec, at the root or any folder beneath it. */
 export const SPECS_ANY_GLOB = `${SPECS_DIR}/**/*.spec.md`
 
 /**
@@ -114,14 +111,14 @@ export const SPEC_CHECKING_AFTER_BUILD = `When you have finished coding somethin
 /**
  * `ignored` comes from the `kiwiAgent.planIgnore` setting: docs the planner
  * must not see. `mode` is `kiwiAgent.specFolders`, resolved: `by-domain`
- * leaves the spec's own path open to one domain folder as well as the root,
+ * leaves the spec's own path open to a domain folder at any depth as well as the root,
  * since the folder is settled in chat, during the session, not known up
  * front; `flat` keeps it pinned to the root, so the direction never gets a
  * folder to write outside of.
  */
 export function blindPlanScope(feature: string, ignored: string[] = [], mode: SpecFoldersMode = 'flat'): Scope {
   const slug = featureSlug(feature)
-  const specGlobs = mode === 'by-domain' ? [`${SPECS_DIR}/${slug}.spec.md`, `${SPECS_DIR}/*/${slug}.spec.md`] : [`${SPECS_DIR}/${slug}.spec.md`]
+  const specGlobs = mode === 'by-domain' ? [`${SPECS_DIR}/${slug}.spec.md`, `${SPECS_DIR}/**/${slug}.spec.md`] : [`${SPECS_DIR}/${slug}.spec.md`]
   // The review file holds the human's comments and the planner's resolutions to them.
   // The decisions file holds what the mapping found; the planner proposes on it and reads the rulings from it.
   // Both stay keyed by the slug alone, at their own fixed place, whatever folder the spec itself lands in.
@@ -155,10 +152,10 @@ export function blindPlanPrompt(feature: string, cwd: string, mode: SpecFoldersM
   const slug = featureSlug(feature)
   const byDomain = mode === 'by-domain'
   const folderDirection = byDomain
-    ? ` Also say which domain folder the spec will land in: a single folder under \`${SPECS_DIR}/\`, read from the feature's description and the domain language of the docs, never from the feature's name alone. Reuse one of the folders the workspace already has${existingFolders.length > 0 ? ` (${existingFolders.map((f) => `\`${f}\``).join(', ')})` : ''} where the feature belongs there, rather than coining a synonym of it. Whatever folder the user names in reply, kept or changed, is the one the spec is written to, whether or not that folder already holds a spec: the folder only groups specs, it never becomes part of the feature's name.`
+    ? ` Also say which domain folder the spec will land in: a folder under \`${SPECS_DIR}/\`, nested (\`orders/returns\`) where the domain is a part of a wider one, read from the feature's description and the domain language of the docs, never from the feature's name alone. Reuse one of the folders the workspace already has${existingFolders.length > 0 ? ` (${existingFolders.map((f) => `\`${f}\``).join(', ')})` : ''} where the feature belongs there, rather than coining a synonym of it. Whatever folder the user names in reply, kept or changed, is the one the spec is written to, whether or not that folder already holds a spec: the folder only groups specs, it never becomes part of the feature's name.`
     : ''
   const specFile = byDomain
-    ? `\`${SPECS_DIR}/<folder>/${slug}.spec.md\` under ${cwd} (\`<folder>\` the single folder settled in the direction, never a folder inside another)`
+    ? `\`${SPECS_DIR}/<folder>/${slug}.spec.md\` under ${cwd} (\`<folder>\` the folder settled in the direction)`
     : `\`${SPECS_DIR}/${slug}.spec.md\` under ${cwd}`
   return `You are planning the feature "${feature}" for a software product, blind to its source code.
 
@@ -201,7 +198,12 @@ Then, the spec. When the user accepts or adjusts the direction, write one file, 
  * wrote: the files are the state, so the planner reads them and reports where
  * the plan stands instead of starting the feature over.
  */
-export function resumePlanPrompt(feature: string, cwd: string, present: { review: boolean; decisions: boolean }): string {
+export function resumePlanPrompt(
+  feature: string,
+  cwd: string,
+  present: { review: boolean; decisions: boolean },
+  left: { unbuilt: string[]; tasksOpen: boolean } = { unbuilt: [], tasksOpen: false },
+): string {
   const slug = featureSlug(feature)
   const spec = specRelPath(cwd, feature)
   // Only the files that exist are named, so no Read is spent on one that is not there.
@@ -211,29 +213,43 @@ export function resumePlanPrompt(feature: string, cwd: string, present: { review
     `The spec for "${feature}" already exists at \`${spec}\`, written in an earlier session that is gone. Do not start over.`,
     '',
     `Read ${read} from disk, in one reply. Then, in chat, where the plan stands in a few sentences: its status, open questions${present.decisions ? ', decisions without a ruling or with one not yet applied' : ''}${present.review ? ', comments not yet answered' : ''}. A spec the user has approved is settled: change nothing in it unless the user asks.`,
+    ...(left.unbuilt.length > 0 ? ['', settledUnbuiltStep(left.unbuilt)] : []),
+    // The status a spec carries is written when a stage is reached; a task added since outranks it.
+    ...(left.tasksOpen ? ['', 'Its task board holds tasks not yet tested, whatever status the spec carries: the build is not finished, so never report the feature done.'] : []),
     '',
     'Then stop; the user says what happens next.',
   ].join('\n')
 }
 
-/** The rules a revision added or reworded after the feature was built, and what planning them takes. */
-function unbuiltRulesStep(unbuilt: string[]): string {
+/** The rules a revision added or reworded after the feature was built, named for the planner. */
+function unbuiltRules(unbuilt: string[]): string {
   const quoted = unbuilt.map((n) => `"${n}"`).join(', ')
-  return `The feature was built before this revision, and its task board has nothing built for ${quoted}: no task delivers ${unbuilt.length === 1 ? 'it' : 'them'} as ${unbuilt.length === 1 ? 'it reads' : 'they read'} now, and no test proves ${unbuilt.length === 1 ? 'it' : 'them'}. Plan ${unbuilt.length === 1 ? 'that rule' : 'those rules'}, never report the feature done: whether each makes sense beside the rest of the spec and the other specs, what you would amend, and what building it would change in the code that exists. Once approved, the check against the code reopens the board for them.`
+  return `its task board has nothing built for ${quoted}: no task delivers ${unbuilt.length === 1 ? 'it' : 'them'} as ${unbuilt.length === 1 ? 'it reads' : 'they read'} now, and no test proves ${unbuilt.length === 1 ? 'it' : 'them'}`
+}
+
+/** What planning the rules a draft's revision added takes. */
+function unbuiltRulesStep(unbuilt: string[]): string {
+  return `The feature was built before this revision, and ${unbuiltRules(unbuilt)}. Plan ${unbuilt.length === 1 ? 'that rule' : 'those rules'}, never report the feature done: whether each makes sense beside the rest of the spec and the other specs, what you would amend, and what building it would change in the code that exists. Once approved, the check against the code reopens the board for them.`
+}
+
+/** The same for a settled spec: its rules are approved already, so what is left is building them, not steering them. */
+function settledUnbuiltStep(unbuilt: string[]): string {
+  return `The feature was built before the spec last changed, and ${unbuiltRules(unbuilt)}. Name ${unbuilt.length === 1 ? 'it' : 'them'} and never report the feature done: say what building ${unbuilt.length === 1 ? 'it' : 'them'} would change in the code that exists.`
 }
 
 /**
- * Said to a feature's planning session brought back up on a draft that was
- * revised after the feature was built: what the session remembers is the spec
- * before the revision, so it reads the file again and plans what was added
- * rather than reporting the feature done.
+ * Said to a feature's planning session brought back up on a spec revised after
+ * the feature was built: what the session remembers is the spec before the
+ * revision, so it reads the file again and plans what was added rather than
+ * reporting the feature done. A draft is planned again; a settled revision is
+ * left to be built.
  */
-export function revisedDraftPrompt(feature: string, cwd: string, unbuilt: string[]): string {
+export function revisedSpecPrompt(feature: string, cwd: string, unbuilt: string[], draft: boolean): string {
   const spec = specRelPath(cwd, feature)
   return [
-    `\`${spec}\` was revised since you last worked on "${feature}" and stands as a draft again. Read it from disk: what you remember is the spec before the revision.`,
+    `\`${spec}\` was revised since you last worked on "${feature}"${draft ? ' and stands as a draft again' : ''}. Read it from disk: what you remember is the spec before the revision.`,
     '',
-    unbuiltRulesStep(unbuilt),
+    draft ? unbuiltRulesStep(unbuilt) : settledUnbuiltStep(unbuilt),
     '',
     'Say it in chat, a short message, then stop and wait. Write nothing until the user says go.',
   ].join('\n')

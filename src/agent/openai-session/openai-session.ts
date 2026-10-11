@@ -95,9 +95,11 @@ export class OpenAiSession implements CodeSession {
     this.emit({ type: 'session_started', engineSessionId: options.resume?.engineSessionId ?? options.id, model: options.profile.model })
     const { mcp } = options
     if (mcp) {
+      mcp.host.watch(() => this.mcpChanged())
       this.mcp = {
         reload: (servers) => this.applyMcp(() => mcp.host.load(servers)),
-        reconnect: (name) => this.applyMcp(() => mcp.host.reconnect(name)),
+        start: (name) => this.applyMcp(() => mcp.host.start(name)),
+        stop: (name) => this.applyMcp(() => mcp.host.stop(name)),
       }
       void this.applyMcp(() => mcp.host.load(mcp.servers))
     }
@@ -123,12 +125,13 @@ export class OpenAiSession implements CodeSession {
     return this.output
   }
 
-  respondToPermission(requestId: string, decision: PermissionDecision): void {
+  respondToPermission(requestId: string, decision: PermissionDecision): boolean {
     const resolve = this.pending.get(requestId)
-    if (!resolve) return
+    if (!resolve) return false
     this.pending.delete(requestId)
     this.emit(permissionResolved(requestId, decision))
     resolve(decision)
+    return true
   }
 
   respondToQuestion(requestId: string, outcome: QuestionOutcome): boolean {
@@ -158,22 +161,25 @@ export class OpenAiSession implements CodeSession {
     this.output.end()
   }
 
-  /**
-   * One MCP change at a time. A round in flight keeps the definitions it was
-   * sent; the next round sees the new set, and a call to a tool that went
-   * away fails like any unknown tool.
-   */
+  /** One MCP change at a time; a turn waits for the one in flight, so its first round sees the servers' tools. */
   private applyMcp(change: () => Promise<void>): Promise<void> {
-    const host = this.options.mcp!.host
     this.mcpChain = this.mcpChain
       .then(change)
       .catch((error: unknown) => this.emitError(`MCP servers: ${errorMessage(error)}`))
-      .then(() => {
-        this.tools = [...this.options.tools, ...host.tools()]
-        this.definitions = this.tools.map(toDefinition)
-        this.emit({ type: 'mcp_servers', servers: host.statuses() })
-      })
+      .then(() => this.mcpChanged())
     return this.mcpChain
+  }
+
+  /**
+   * A server started, stopped or listed other tools. A round in flight keeps
+   * the definitions it was sent; the next round sees the new set, and a call
+   * to a tool that went away fails like any unknown tool.
+   */
+  private mcpChanged(): void {
+    const host = this.options.mcp!.host
+    this.tools = [...this.options.tools, ...host.tools()]
+    this.definitions = this.tools.map(toDefinition)
+    this.emit({ type: 'mcp_servers', servers: host.statuses() })
   }
 
   private async drain(): Promise<void> {
