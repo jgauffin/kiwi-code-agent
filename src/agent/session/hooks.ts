@@ -4,8 +4,11 @@
  * a hook is written once.
  */
 
-/** `cwd` is where the engine's shell stands for this call, where the engine says; the workspace root otherwise. */
-export type ToolUse = { toolName: string; input: unknown; toolUseId: string; cwd?: string }
+/**
+ * `cwd` is where the engine's shell stands for this call, where the engine says; the workspace root otherwise.
+ * `agent` names the sub agent the call is made inside, where the engine says; absent for the session's own call.
+ */
+export type ToolUse = { toolName: string; input: unknown; toolUseId: string; cwd?: string; agent?: string }
 
 /**
  * `allow` skips the permission prompt: the hook has ruled the call safe. `ask`

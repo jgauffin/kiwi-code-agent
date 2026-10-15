@@ -37,9 +37,9 @@ export type CallJudgement = { decision: 'passes' | 'asked' | 'refused'; rows: Pe
 /**
  * A call as rows, one per effect, and what the rules make of the whole. The
  * same action at the same place is one row however many commands do it; a
- * call with no effects runs unasked.
+ * call with no effects runs unasked. `agent` is the sub agent the call is made inside.
  */
-export function judgeCall(toolName: string, input: unknown, cwd: string, context: CallContext): CallJudgement {
+export function judgeCall(toolName: string, input: unknown, cwd: string, context: CallContext, agent?: string): CallJudgement {
   const start = known(normalizePlace(cwd))
   const items: { text: string; effect: Effect; invocation?: Invocation; cwd: Place; projectCommand?: string; refusal?: string }[] = []
   if (isShellTool(toolName)) {
@@ -50,7 +50,7 @@ export function judgeCall(toolName: string, input: unknown, cwd: string, context
     }
   } else {
     const site: CommandSite = siteAt(start, { home: context.home, exists: context.exists })
-    const { invocation, ruling } = toolEffects(toolName, input, site, context.tools)
+    const { invocation, ruling } = toolEffects(toolName, input, site, context.tools, agent)
     // A tool denied by name is refused even where it does nothing else a place could stand for.
     const denial = context.grants.find((g) => g.verdict === 'deny' && g.command !== undefined && commandMatches(g, invocation))
     if (ruling.kind === 'refused') items.push({ text: toolName, effect: { action: 'runs', reason: ruling.reason }, cwd: start, refusal: ruling.reason })

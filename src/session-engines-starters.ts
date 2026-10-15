@@ -21,7 +21,9 @@ import { globTool } from './agent/openai-session/tools/glob'
 import { grepTool } from './agent/openai-session/tools/grep'
 import { bashTool } from './agent/openai-session/tools/bash'
 import { skillTool } from './agent/openai-session/tools/skill'
-import { delegateTool } from './agent/openai-session/tools/delegate'
+import { DELEGATE_TOOL, delegateTool } from './agent/openai-session/tools/delegate'
+import { claudeBaseTools, claudeResearchAgent, ResearchOnlyDelegation } from './agent/sub-agents/claude-research'
+import { composeHooks } from './agent/session/hooks'
 import { webFetchTool } from './agent/openai-session/tools/web-fetch'
 import { webSearchTool } from './agent/openai-session/tools/web-search'
 import { SEARCH_PROVIDER_SECRET_NAME } from './settings/protocol'
@@ -55,7 +57,7 @@ export type EngineStart = {
   mcpServers: Awaited<ReturnType<McpServerSet['current']>> | undefined
   /** The workspace's, the person's and every bundle's skills, already resolved to one entry per name. */
   skills: SkillEntry[]
-  /** The sub agents this session offers its own delegating tool, empty where none is: the Claude engine's own delegation is untouched by this. */
+  /** The sub agents this session offers its own delegating tool: the Claude engine takes research alone from these, as one of its own sub agents. */
   subAgents: SubAgentCatalogEntry[]
   whereLine: string
   scratchLine: string
@@ -196,6 +198,9 @@ export class EngineStarters {
     const offered = allowed(setup, ownTools)
     this.deps.setSessionTools(record.id, [...offered, ...scriptTools])
     const toolNaming = toolNamingLine(offered)
+    // A scoped session that delegates reaches research alone; a chat keeps the engine's own sub agents and its own searching.
+    const delegates = setup.toolNames?.includes(DELEGATE_TOOL) ?? false
+    const hooks = delegates && setup.hooks ? composeHooks(setup.hooks, new ResearchOnlyDelegation()) : setup.hooks
     const session = new SdkSession({
       ownTools: offered,
       scriptTools,
@@ -214,13 +219,15 @@ export class EngineStarters {
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
         ...(anthropicKey ? { ANTHROPIC_API_KEY: anthropicKey } : {}),
       },
-      ...(setup.hooks ? { hooks: setup.hooks } : {}),
+      ...(hooks ? { hooks } : {}),
+      // Offered to every session, as on the other engine; each research is asked about before it runs.
+      agents: { [RESEARCH_SUB_AGENT.name]: claudeResearchAgent() },
       ...(setup.systemPrompt !== undefined
         ? { systemPrompt: setup.systemPrompt + whereLine + scratchLine + toolNaming }
         : {
             appendSystemPrompt: `${DOC_READING}\n${CODE_READING}\n${SCRIPT_WRITING}\n${EDIT_WRITING}\n${projectScriptsInstruction(workspaceRoot)}\n${PIPE_WRITING}\n${SPEC_READING}\n${SPEC_AMENDING}\n${SPEC_CHECKING_AFTER_BUILD}\n${CHAT_DECISIONS}\n${memoryWritingInstructions(workspaceRoot)}${chatMemories ? `\n\n${chatMemories}` : ''}${chatInstructionFiles?.length ? `\n\n${instructionsText(chatInstructionFiles)}` : ''}${whereLine}${scratchLine}${toolNaming}`,
           }),
-      ...(setup.toolNames ? { tools: setup.toolNames } : {}),
+      ...(setup.toolNames ? { tools: claudeBaseTools(setup.toolNames) } : {}),
       compactAtTokens: this.deps.compactAtTokens(profile),
       compactionFocus: focusOf(record),
       query,

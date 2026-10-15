@@ -132,14 +132,4 @@ describe('modeSetup', () => {
     const setup = await modeSetup(record('plan', { feature: 'f' }), ctx)
     expect(setup.toolNames).not.toContain('Skill')
   })
-
-  it('the blind planner is offered the research sub agent on its own, reading no code', async () => {
-    const setup = await modeSetup(record('plan', { feature: 'f' }), ctx)
-    expect(setup.subAgents).toEqual([{ name: 'research', description: expect.any(String), prompt: expect.any(String), kind: 'shipped' }])
-  })
-
-  it.each(['implement', 'code-plan', 'reconcile', 'cleanup'] as const)('the %s session names no sub agent of its own: a code-reading session is offered the shipped catalogue instead', async (mode) => {
-    const setup = await modeSetup(record(mode, { feature: 'f', files: ['a.ts'] }), ctx)
-    expect(setup.subAgents).toBeUndefined()
-  })
 })

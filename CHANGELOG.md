@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.9
+
+- The research sub agent is offered in every session that can delegate, on Claude profiles too, not only in feature planning; each research is asked about once before it runs.
+- A Claude Code process (and the MCP servers it started) is no longer left running after its engine stops on its own, or when a second prompt or a stop arrives while it is still starting.
+
 ## 0.2.8
 
 - Specs can be filed in folders at any depth (`specs/orders/returns/`); planning and Clean up docs propose and write nested folders too.

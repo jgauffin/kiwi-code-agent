@@ -416,6 +416,41 @@ describe('SdkSession', () => {
     await session.dispose()
   })
 
+  it('a_hook_is_told_which_sub_agent_made_a_call_and_nothing_for_the_sessions_own', async () => {
+    const fake = fakeQuery()
+    const agents: (string | undefined)[] = []
+    const session = new SdkSession({
+      id: 'sess-1',
+      profile,
+      cwd: '/w',
+      enginePath: '/ext/dist/cli.js',
+      query: fake.query,
+      hooks: {
+        async preToolUse(tool) {
+          agents.push(tool.agent)
+          return undefined
+        },
+      },
+    })
+    const pre = fake.options!.hooks!.PreToolUse![0]!.hooks[0]!
+    const base = { session_id: 's', transcript_path: '', cwd: '/w', hook_event_name: 'PreToolUse' as const, tool_name: 'WebFetch', tool_input: {} }
+    const ctx = { signal: new AbortController().signal }
+    await pre({ ...base, tool_use_id: 't1', agent_id: 'a1', agent_type: 'research' }, 't1', ctx)
+    await pre({ ...base, tool_use_id: 't2' }, 't2', ctx)
+    // A session started as an agent carries its type with no id: still the session's own call.
+    await pre({ ...base, tool_use_id: 't3', agent_type: 'research' }, 't3', ctx)
+    expect(agents).toEqual(['research', undefined, undefined])
+    await session.dispose()
+  })
+
+  it('sub_agents_it_is_given_are_registered_with_the_engine', async () => {
+    const fake = fakeQuery()
+    const research = { description: 'd', prompt: 'p', tools: ['WebSearch', 'WebFetch'] }
+    const session = new SdkSession({ id: 'sess-1', profile, cwd: '/w', enginePath: '/ext/dist/cli.js', query: fake.query, agents: { research } })
+    expect(fake.options!.agents).toEqual({ research })
+    await session.dispose()
+  })
+
   describe('running a script', () => {
     const grep: Tool = {
       name: 'Grep',

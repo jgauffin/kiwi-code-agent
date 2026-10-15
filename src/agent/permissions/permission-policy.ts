@@ -73,7 +73,7 @@ export class PermissionPolicy implements SessionHooks {
 
   async preToolUse(tool: ToolUse): Promise<PreToolUseOutcome> {
     if (tool.cwd !== undefined) this.standing.set(tool.toolUseId, tool.cwd)
-    const judged = this.judge(tool.toolName, tool.input, tool.cwd)
+    const judged = this.judge(tool.toolName, tool.input, tool.cwd, tool.agent)
     if (judged.decision === 'refused') return { deny: refusalText(judged) }
     if (judged.decision === 'passes') return { allow: true }
     return { ask: true }
@@ -86,10 +86,10 @@ export class PermissionPolicy implements SessionHooks {
     return { ...event, rows: this.judge(event.toolName, event.input, cwd).rows }
   }
 
-  /** The call judged from where the shell stands, or the workspace root. */
-  judge(toolName: string, input: unknown, cwd: string | undefined): CallJudgement {
+  /** The call judged from where the shell stands, or the workspace root, and inside which sub agent, if any. */
+  judge(toolName: string, input: unknown, cwd: string | undefined, agent?: string): CallJudgement {
     const { grants, denyGitWrites } = this.rules()
-    return judgeCall(toolName, input, cwd ?? this.root, this.callContext(grants, denyGitWrites ?? false))
+    return judgeCall(toolName, input, cwd ?? this.root, this.callContext(grants, denyGitWrites ?? false), agent)
   }
 
   private callContext(grants: readonly KeptGrant[], denyGitWrites: boolean): CallContext {

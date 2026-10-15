@@ -115,13 +115,13 @@ describe('offeredSubAgents', () => {
     await definition('finder', '---\nname: finder\ndescription: Finds things.\n---\nbody')
     const defined = await indexSubAgents(dir)
     const offered = offeredSubAgents(true, SHIPPED_SUB_AGENTS, defined)
-    expect(offered.map((a) => a.name)).toEqual(['retrieve', 'finder'])
+    expect(offered.map((a) => a.name)).toEqual(['retrieve', 'research', 'finder'])
   })
 
-  it('nothing_is_offered_to_a_session_that_may_not_read_the_code', async () => {
+  it('a_session_that_may_not_read_the_code_is_offered_research_alone', async () => {
     await definition('finder', '---\nname: finder\ndescription: Finds things.\n---\nbody')
     const defined = await indexSubAgents(dir)
-    expect(offeredSubAgents(false, SHIPPED_SUB_AGENTS, defined)).toEqual([])
+    expect(offeredSubAgents(false, SHIPPED_SUB_AGENTS, defined)).toEqual([shippedEntry(RESEARCH_SUB_AGENT)])
   })
 
   it('a_shipped_entry_is_tagged_with_its_own_kind_and_a_defined_one_with_its', async () => {
@@ -220,12 +220,6 @@ describe('research sub agent', () => {
     expect(RESEARCH_SUB_AGENT.prompt).toMatch(/never answer from what you already know/i)
   })
 
-  it('is_not_among_the_sub_agents_the_product_ships_to_every_code_reading_session', () => {
-    // Offered only where a mode wires it in (the blind planner), never through the shipped catalogue:
-    // a code-reading session already sees the code, so it needs no sub agent that reaches past it.
-    expect(SHIPPED_SUB_AGENTS).not.toContain(RESEARCH_SUB_AGENT)
-  })
-
   it('shippedEntry_shapes_it_the_same_way_the_offered_catalogue_shapes_any_shipped_sub_agent', () => {
     expect(shippedEntry(RESEARCH_SUB_AGENT)).toEqual({
       name: 'research',
@@ -238,10 +232,17 @@ describe('research sub agent', () => {
 
 describe('isResearchDelegation', () => {
   it('is_true_only_for_a_call_naming_the_research_sub_agent', () => {
-    expect(isResearchDelegation({ agent: 'research', task: 't' })).toBe(true)
-    expect(isResearchDelegation({ agent: 'retrieve', task: 't' })).toBe(false)
-    expect(isResearchDelegation({ define: { name: 'x', description: 'd', instructions: 'i' }, task: 't' })).toBe(false)
-    expect(isResearchDelegation(undefined)).toBe(false)
+    expect(isResearchDelegation('Delegate', { agent: 'research', task: 't' })).toBe(true)
+    expect(isResearchDelegation('Delegate', { agent: 'retrieve', task: 't' })).toBe(false)
+    expect(isResearchDelegation('Delegate', { define: { name: 'x', description: 'd', instructions: 'i' }, task: 't' })).toBe(false)
+    expect(isResearchDelegation('Delegate', undefined)).toBe(false)
+  })
+
+  it('reads_the_claude_engines_own_sub_agent_call_by_the_agent_type_it_names', () => {
+    expect(isResearchDelegation('Agent', { subagent_type: 'research', prompt: 'p' })).toBe(true)
+    expect(isResearchDelegation('Task', { subagent_type: 'research', prompt: 'p' })).toBe(true)
+    expect(isResearchDelegation('Agent', { subagent_type: 'Explore', prompt: 'p' })).toBe(false)
+    expect(isResearchDelegation('Read', { agent: 'research' })).toBe(false)
   })
 })
 

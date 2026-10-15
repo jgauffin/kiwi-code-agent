@@ -391,6 +391,125 @@ describe('SessionManager', () => {
     }
   })
 
+  it('an_engine_whose_events_end_on_their_own_is_still_disposed_so_its_process_and_servers_stop', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+    try {
+      const engines: FakeSession[] = []
+      const manager = new SessionManager(
+        memoryStore(),
+        async (r) => {
+          const s = new FakeSession(r.id, r.profile, r.engineSessionId)
+          engines.push(s)
+          return s
+        },
+        (id) => RunLog.forSession(dir, id),
+        () => {},
+      )
+      const record = await manager.create(profile)
+      await manager.send(record.id, 'go')
+      engines[0]!.out.push({ type: 'error', message: 'engine crashed', fatal: true })
+      engines[0]!.out.end()
+      await tick()
+      expect(engines[0]!.disposed).toBe(true)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('prompts_that_arrive_while_the_engine_is_still_starting_share_one_engine_rather_than_orphaning_one', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+    try {
+      const engines: FakeSession[] = []
+      let release = () => {}
+      const started = new Promise<void>((r) => {
+        release = r
+      })
+      const manager = new SessionManager(
+        memoryStore(),
+        async (r) => {
+          await started
+          const s = new FakeSession(r.id, r.profile, r.engineSessionId)
+          engines.push(s)
+          return s
+        },
+        (id) => RunLog.forSession(dir, id),
+        () => {},
+      )
+      const record = await manager.create(profile)
+      const first = manager.send(record.id, 'go')
+      const second = manager.send(record.id, 'and this')
+      await tick()
+      release()
+      await Promise.all([first, second])
+      expect(engines).toHaveLength(1)
+      expect(engines[0]!.sent).toEqual(['go', 'and this'])
+      await manager.disposeAll()
+      expect(engines[0]!.disposed).toBe(true)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('a_shutdown_while_an_engine_is_still_starting_stops_that_engine_once_it_is_up', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+    try {
+      const engines: FakeSession[] = []
+      let release = () => {}
+      const started = new Promise<void>((r) => {
+        release = r
+      })
+      let entered = () => {}
+      const bringingUp = new Promise<void>((r) => {
+        entered = r
+      })
+      const manager = new SessionManager(
+        memoryStore(),
+        async (r) => {
+          entered()
+          await started
+          const s = new FakeSession(r.id, r.profile, r.engineSessionId)
+          engines.push(s)
+          return s
+        },
+        (id) => RunLog.forSession(dir, id),
+        () => {},
+      )
+      const record = await manager.create(profile)
+      const sending = manager.send(record.id, 'go')
+      await bringingUp
+      const stopping = manager.disposeAll()
+      release()
+      await Promise.all([sending, stopping])
+      expect(engines[0]!.disposed).toBe(true)
+      expect(manager.isLive(record.id)).toBe(false)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('a_start_that_failed_does_not_block_the_next_prompt_from_starting_an_engine', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'sm-'))
+    try {
+      let attempts = 0
+      const manager = new SessionManager(
+        memoryStore(),
+        async (r) => {
+          if (++attempts === 1) throw new Error('No API key stored')
+          return new FakeSession(r.id, r.profile, r.engineSessionId)
+        },
+        (id) => RunLog.forSession(dir, id),
+        () => {},
+      )
+      const record = await manager.create(profile)
+      await expect(manager.send(record.id, 'go')).rejects.toThrow('No API key stored')
+      await manager.send(record.id, 'again')
+      expect(manager.isLive(record.id)).toBe(true)
+      await manager.disposeAll()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   describe('a shutdown that cuts a turn off', () => {
     async function withManager(run: (manager: SessionManager, engines: FakeSession[], store: SessionStore) => Promise<void>) {
       const dir = await mkdtemp(join(tmpdir(), 'sm-'))

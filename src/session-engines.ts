@@ -164,7 +164,7 @@ export class SessionEngines {
     const { agents: definedSubAgents, shadowed: shadowedSubAgents } = await indexSubAgentsDetailed(workspaceRoot)
     for (const skip of shadowedSubAgents)
       this.traceStart(record, `defined sub agent "${skip.name}" (${skip.file}) not offered: the product's own sub agent of that name is kept`)
-    const subAgents = [...offeredSubAgents(mayReadCode(setup), SHIPPED_SUB_AGENTS, definedSubAgents), ...(setup.subAgents ?? [])]
+    const subAgents = offeredSubAgents(mayReadCode(setup), SHIPPED_SUB_AGENTS, definedSubAgents)
     const start: EngineStart = {
       record,
       setup,

@@ -32,9 +32,9 @@ What the person sees when they open the app.
 The person is away; something stops the work and the phone has to say so, or deliberately not.
 - **Anything that blocks completion pushes**: whenever a session stops mid-turn on the person — a question asked or a permission prompt pending — the agent pushes a notification to the paired phones that session is allowed to reach, and a turn that merely ended pushes nothing (specs/unfiled-decisions.md#A tab stopped mid-turn on the person pulses its icon)
   - **Progress is not an alert**: work that is still moving pushes nothing and is seen only in the app
-- **Choices as buttons**: the notification carries what is being asked and offers its choices as buttons only where one tap settles the whole of it, and where it does not it carries a way straight into that prompt in the app instead (specs/user-question.spec.md#Being asked a question)
-  - **Wizard for several questions**: a request holding more than one question is answered in the app one question to a screen, each taken with a single tap, so a small screen never shows several questions at once (specs/user-question.spec.md#Being asked a question)
-  - **Decision that needs a screen**: where a choice cannot be judged from the notification alone — a file write, whose diff has to be read — the notification offers its buttons and a way straight into that prompt in the app (specs/file-edit-diff.spec.md#Behaviour)
+- **Choices as buttons**: the notification carries what is being asked and offers its choices as buttons only where one tap settles the whole of it, and where it does not it carries a way straight into that prompt in the app instead (specs/sessions/user-question.spec.md#Being asked a question)
+  - **Wizard for several questions**: a request holding more than one question is answered in the app one question to a screen, each taken with a single tap, so a small screen never shows several questions at once (specs/sessions/user-question.spec.md#Being asked a question)
+  - **Decision that needs a screen**: where a choice cannot be judged from the notification alone — a file write, whose diff has to be read — the notification offers its buttons and a way straight into that prompt in the app (specs/sessions/file-edit-diff.spec.md#Behaviour)
 - **Per-session push permission**: whether a session may push is the person's to set per session, and a session without permission pushes nothing
   - **Default by where it started**: a session started from the phone may push, and one started at the desk follows the workspace's standing default, which allows pushing until the person changes it
 - **Quiet session waits to be visited**: a session that may not push waits with nothing sent, and what waits is counted in the app so the person's next visit shows it
@@ -42,13 +42,13 @@ The person is away; something stops the work and the phone has to say so, or del
 
 ## Acting from the phone
 The person answers or steers from away, and the effect is the same as at the desk.
-- **Answer resolves the card**: an answer sent from the phone resolves the session's question exactly as an answer at the desk does, reaching the model as the result of its own tool call so the session carries on in the same turn (specs/user-question.spec.md#Answering the card)
-  - **Free text from the phone**: a question answered from the phone can be answered in the person's own words as well as by the offered options (specs/user-question.spec.md#Being asked a question)
+- **Answer resolves the card**: an answer sent from the phone resolves the session's question exactly as an answer at the desk does, reaching the model as the result of its own tool call so the session carries on in the same turn (specs/sessions/user-question.spec.md#Answering the card)
+  - **Free text from the phone**: a question answered from the phone can be answered in the person's own words as well as by the offered options (specs/sessions/user-question.spec.md#Being asked a question)
 - **Permission answered from the phone**: a permission prompt can be allowed or denied from the phone with the same effect as at the desk, so a session never stalls for want of someone at the keyboard (docs/settings.md#Settings)
-- **First answer wins**: the first answer to reach the agent resolves what was asked, that resolution reaches every device connected to the workspace — the computer and the paired phones — where the prompt disappears as it arrives, and a later answer to the same request is ignored (specs/user-question.spec.md#Answering the card)
+- **First answer wins**: the first answer to reach the agent resolves what was asked, that resolution reaches every device connected to the workspace — the computer and the paired phones — where the prompt disappears as it arrives, and a later answer to the same request is ignored (specs/sessions/user-question.spec.md#Answering the card)
 - **Steering a running session**: the phone can send a running session a prompt and can interrupt it, an interrupt ending its turn as one made at the desk would (docs/intent/agent.md#Interrupting)
 - **Approving and ruling**: a spec's rules and the check's decisions can be read on the phone and settled there — the spec approved, the decisions ruled on and sent (docs/intent/agent.md#Phase 2: Check against code)
-- **Starting a draft's session**: the only work the phone starts is a spec — picking a feature whose spec is a draft opens that feature's planning session on it (specs/spec-drafts.spec.md#Picking up a draft)
+- **Starting a draft's session**: the only work the phone starts is a spec — picking a feature whose spec is a draft opens that feature's planning session on it (specs/planning/spec-drafts.spec.md#Picking up a draft)
 - **Authoring stays at the desk**: writing a spec, commenting on a review and changing settings are not offered on the phone
 - **Remote act on the record**: an answer or command from the phone is recorded in the session's log like the same act at the desk, noting that it came from that phone (docs/intent/agent.md#Observability)
 

@@ -2,7 +2,7 @@
   "name": "kiwipow-agent",
   "displayName": "Kiwipow Agent",
   "description": "Coding sessions in VS Code with a choice of model engine per session.",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "publisher": "CoderrAB",
   "icon": "docs/logos/kiwipow-agent-logo-128.png",
   "galleryBanner": {
@@ -255,14 +255,51 @@
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["verdict", "place", "reach"],
+            "required": [
+              "verdict",
+              "place",
+              "reach"
+            ],
             "properties": {
-              "verdict": { "enum": ["allow", "deny"] },
-              "action": { "enum": ["read", "write"], "description": "An action kept for the place. Set this or command, not both." },
-              "command": { "type": "array", "items": { "type": "string" }, "description": "A command and its subcommand (\"cargo\", \"build\"), or a tool's name; its own effects at the place are covered." },
-              "flags": { "type": "array", "items": { "type": "string" }, "description": "On a deny only: the long flags a call must carry to be refused (\"--force\")." },
-              "place": { "type": "string", "description": "An absolute path." },
-              "reach": { "enum": ["file", "directory", "tree"], "description": "The file alone, the directory alone, or the directory and everything below it." }
+              "verdict": {
+                "enum": [
+                  "allow",
+                  "deny"
+                ]
+              },
+              "action": {
+                "enum": [
+                  "read",
+                  "write"
+                ],
+                "description": "An action kept for the place. Set this or command, not both."
+              },
+              "command": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "A command and its subcommand (\"cargo\", \"build\"), or a tool's name; its own effects at the place are covered."
+              },
+              "flags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "On a deny only: the long flags a call must carry to be refused (\"--force\")."
+              },
+              "place": {
+                "type": "string",
+                "description": "An absolute path."
+              },
+              "reach": {
+                "enum": [
+                  "file",
+                  "directory",
+                  "tree"
+                ],
+                "description": "The file alone, the directory alone, or the directory and everything below it."
+              }
             }
           },
           "default": [],

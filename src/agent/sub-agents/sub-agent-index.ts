@@ -34,8 +34,8 @@ export const RETRIEVAL_SUB_AGENT: ShippedSubAgent = {
 }
 
 /**
- * The research lookup: it reaches the open internet rather than the code or the docs, so a session that
- * may not read the code can still be offered it, unlike every other shipped or defined sub agent. Searching
+ * The research lookup: it reaches the open internet rather than the code or the docs, so every session is
+ * offered it, including one that may not read the code, unlike every other shipped or defined sub agent. Searching
  * and fetching join its tools once it is wired to a session (`run-sub-agent`'s `subAgentTools`); nothing here
  * grants them on their own.
  */
@@ -53,9 +53,16 @@ export const RESEARCH_SUB_AGENT: ShippedSubAgent = {
 /** Beyond this, which further sub agents the product should ship of its own is open. */
 export const SHIPPED_SUB_AGENTS: readonly ShippedSubAgent[] = [RETRIEVAL_SUB_AGENT]
 
-/** Whether a Delegate call names the research sub agent: the one whose tools reach the open internet, so it alone needs its own permission rather than running unasked like every other delegation. */
-export function isResearchDelegation(input: unknown): boolean {
-  return (input as { agent?: unknown } | undefined)?.agent === RESEARCH_SUB_AGENT.name
+/**
+ * Whether a call hands work to the research sub agent, through our own Delegate or the Claude engine's own
+ * sub agent tool: its tools reach the open internet, so it alone needs its own permission rather than
+ * running unasked like every other delegation.
+ */
+export function isResearchDelegation(toolName: string, input: unknown): boolean {
+  const named = input as { agent?: unknown; subagent_type?: unknown } | undefined
+  if (toolName === 'Delegate') return named?.agent === RESEARCH_SUB_AGENT.name
+  if (toolName === 'Agent' || toolName === 'Task') return named?.subagent_type === RESEARCH_SUB_AGENT.name
+  return false
 }
 
 /**
@@ -153,14 +160,15 @@ export function shippedEntry(agent: ShippedSubAgent): SubAgentCatalogEntry {
 /**
  * The catalogue a session's delegating tool is built from: every shipped and
  * defined sub agent when the session may read the code, none of either
- * otherwise. A feature-planning session reads no code and so is offered
- * neither kind, left with only a sub agent it defines in the call itself
- * and, where its mode wires it in, the research lookup.
+ * otherwise. The research lookup is offered to every session, since it shows
+ * nothing of the code and each research is asked about before it runs.
  */
 export function offeredSubAgents(mayReadCode: boolean, shipped: readonly ShippedSubAgent[], defined: readonly DefinedSubAgent[]): SubAgentCatalogEntry[] {
-  if (!mayReadCode) return []
+  const research = shippedEntry(RESEARCH_SUB_AGENT)
+  if (!mayReadCode) return [research]
   return [
     ...shipped.map(shippedEntry),
+    research,
     ...defined.map((a) => ({
       name: a.name,
       description: a.description,

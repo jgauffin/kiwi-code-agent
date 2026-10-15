@@ -23,10 +23,10 @@ What the new-session screen offers and what the session begins with.
 ## Carrying the draft on
 - **Critique before any write**: the first turn of a pickup says in chat what the draft settles, which of its rules the planner would amend, drop or add and which questions it leaves open, and writes nothing until the user says go (docs/intent/agent.md#Phase 1: Feature planning)
 - **Depth follows how it was authored**: a draft planned with the person is taken as complete and critiqued only on what changed around it since; a draft drafted from the docs is critiqued for the gaps its source sections left and for overlap; a hand-written draft is critiqued whole — missing scenarios, rules no test could prove, and whether the direction holds
-- **Review in flight answers first**: where a submitted review waits on the draft, the pickup answers its comments and strikes and raises nothing of its own until they are resolved (specs/commenting-a-plan.spec.md#Behaviour)
+- **Review in flight answers first**: where a submitted review waits on the draft, the pickup answers its comments and strikes and raises nothing of its own until they are resolved (specs/planning/commenting-a-plan.spec.md#Behaviour)
 - **Recorded decisions on the draft**: an unfiled decision or future-work entry whose `affects` names the feature is named in the critique, worked into the rules only when the user says so, and removed from its file once its words stand as rules (docs/intent/agent.md#Unfiled decisions)
 - **Names are not settled yet**: a rule of a draft may be renamed or dropped outright, since nothing has been approved, tasked or proved from it (docs/intent/agent.md#Shape)
-  - **Renaming a commented rule**: a rule a review has already commented on keeps the `(was Old name)` note when it is renamed, so the comment still finds it (specs/commenting-a-plan.spec.md#Edge cases)
+  - **Renaming a commented rule**: a rule a review has already commented on keeps the `(was Old name)` note when it is renamed, so the comment still finds it (specs/planning/commenting-a-plan.spec.md#Edge cases)
 
 ## Drafts that overlap
 Two drafts, neither settled, describing the same behaviour.
@@ -40,7 +40,7 @@ Two drafts, neither settled, describing the same behaviour.
 - **Another direction proposed**: where the planner judges the draft's whole shape wrong it says so in chat, with the direction it would take instead and why, and the draft stands untouched until the user chooses (docs/intent/agent.md#Phase 1: Feature planning)
   - **Draft's direction kept**: when the user keeps the draft's direction the planner carries it on as it stands and does not raise the same redirect again in that session
 - **Rewritten in place**: a direction the user takes rewrites that same spec file to the contract, never a second spec for the same feature (docs/plan-sessions.md#Feature planning)
-  - **Struck rule stays struck**: a rule the user struck in a review is not brought back by a redirect and stays marked ` [removed]` (specs/commenting-a-plan.spec.md#Behaviour)
+  - **Struck rule stays struck**: a rule the user struck in a review is not brought back by a redirect and stays marked ` [removed]` (specs/planning/commenting-a-plan.spec.md#Behaviour)
 
 ## Open questions
 - **Discarding a draft**: whether a draft the user abandons can be dropped from the pick-up list, and what happens to its file, or whether abandoning stays a matter of deleting the spec by hand

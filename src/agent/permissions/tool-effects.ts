@@ -2,7 +2,7 @@ import { fileEffect, writeOrDestroy, type CommandSite } from './classifiers/clas
 import { effects, type Effect, type Invocation, type Ruling } from './effects'
 import { expandBraces } from './places'
 import { DELEGATE_TOOL } from '../openai-session/tools/delegate'
-import { isResearchDelegation } from '../sub-agents/sub-agent-index'
+import { isResearchDelegation, RESEARCH_SUB_AGENT } from '../sub-agents/sub-agent-index'
 import { isSubagentTool } from './tool-classes'
 
 /** What the tool classifiers are told besides the call itself. */
@@ -24,12 +24,13 @@ const NETWORK = new Set(['WebFetch', 'WebSearch'])
 /**
  * A tool call as the effects it would have. One answer per place for every
  * tool: reading a folder with Read and with `cat` is the same effect, covered
- * by the same kept answer.
+ * by the same kept answer. `agent` is the sub agent the call is made inside.
  */
-export function toolEffects(toolName: string, input: unknown, site: CommandSite, facts: ToolFacts): { invocation: Invocation; ruling: Ruling } {
+export function toolEffects(toolName: string, input: unknown, site: CommandSite, facts: ToolFacts, agent?: string): { invocation: Invocation; ruling: Ruling } {
   const invocation: Invocation = { command: [toolName], flags: new Set(), operands: [] }
   const named = (input ?? {}) as Record<string, unknown>
   const text = (key: string): string | undefined => (typeof named[key] === 'string' ? (named[key] as string) : undefined)
+  const research = isResearchDelegation(toolName, input)
   const ruling = ((): Ruling => {
     if (READS_FILE.has(toolName)) return pathEffect('read', site, text('file_path') ?? text('notebook_path'), 'file')
     const writes = WRITES_FILE[toolName]
@@ -45,15 +46,16 @@ export function toolEffects(toolName: string, input: unknown, site: CommandSite,
       const files = Array.isArray(named['files']) ? named['files'].filter((f): f is string => typeof f === 'string') : []
       return effects(...files.map((f) => fileEffect('write', site, f, 'file')))
     }
-    if (toolName === DELEGATE_TOOL) return isResearchDelegation(input) ? effects({ action: 'reaches', what: 'network', place: site.cwd }) : effects()
+    if (research) return effects({ action: 'reaches', what: 'network', place: site.cwd })
     // Starting a subagent does nothing itself: every call it makes is judged on its own, as the session's are.
     if (isSubagentTool(toolName)) return effects()
-    if (NETWORK.has(toolName)) return effects({ action: 'reaches', what: 'network', place: site.cwd })
+    // Approving a research delegation approved the question, not a list of addresses: its own searching and fetching is not asked again.
+    if (NETWORK.has(toolName)) return agent === RESEARCH_SUB_AGENT.name ? effects() : effects({ action: 'reaches', what: 'network', place: site.cwd })
     if (facts.readOnly(toolName)) return effects()
     return effects({ action: 'reaches', what: 'command', place: site.cwd })
   })()
-  const research = toolName === DELEGATE_TOOL && isResearchDelegation(input)
-  return { invocation: research ? { ...invocation, command: [toolName, 'research'] } : invocation, ruling }
+  // One kept answer for research whichever engine's tool hands the work on.
+  return { invocation: research ? { ...invocation, command: [DELEGATE_TOOL, RESEARCH_SUB_AGENT.name] } : invocation, ruling }
 }
 
 /** A tool that names no path where it needs one is presumed to touch the place it stands in. */

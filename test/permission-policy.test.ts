@@ -123,6 +123,22 @@ describe('PermissionPolicy', () => {
     expect(await use(policy(), 'Delegate', { define: { name: 'x', description: 'd', instructions: 'i' }, task: 'look it up' })).toEqual({ allow: true })
   })
 
+  it('the_claude_engines_own_call_to_the_research_sub_agent_is_asked_and_covered_by_the_same_kept_answer', async () => {
+    expect(await use(policy(), 'Agent', { subagent_type: 'research', prompt: 'look it up' })).toEqual(ASKED)
+    const kept = policy([keep({ verdict: 'allow', command: ['Delegate', 'research'], place: root, reach: 'tree' })])
+    expect(await use(kept, 'Agent', { subagent_type: 'research', prompt: 'look it up' })).toEqual({ allow: true })
+    expect(await use(policy(), 'Agent', { subagent_type: 'Explore', prompt: 'look it up' })).toEqual({ allow: true })
+  })
+
+  it('searching_and_fetching_inside_an_approved_research_run_unasked_while_any_other_caller_is_asked', async () => {
+    const p = policy()
+    const inside = (toolName: string, input: unknown, agent: string) => p.preToolUse({ toolName, input, toolUseId: 't', agent })
+    expect(await inside('WebFetch', { url: 'https://example.com', prompt: 'title' }, 'research')).toEqual({ allow: true })
+    expect(await inside('WebSearch', { query: 'rfc 9110' }, 'research')).toEqual({ allow: true })
+    expect(await inside('WebFetch', { url: 'https://example.com', prompt: 'title' }, 'general-purpose')).toEqual(ASKED)
+    expect(await use(p, 'WebFetch', { url: 'https://example.com', prompt: 'title' })).toEqual(ASKED)
+  })
+
   it('a_substitution_is_judged_by_the_commands_it_holds_and_a_command_word_it_supplies_is_always_asked', async () => {
     expect(await use(policy(), 'Bash', { command: 'echo "count: $(ls | wc -l)"' })).toEqual({ allow: true })
     const everything = keep({ verdict: 'allow', command: ['rm'], place: root, reach: 'tree' })

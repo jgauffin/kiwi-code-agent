@@ -6,3 +6,5 @@ build/
 .env
 .articles
 PROMPTS.md
+specs/planning/feature-lifecycle.spec.md
+docs/feature-lifecycle-internals.md

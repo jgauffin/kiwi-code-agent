@@ -192,7 +192,8 @@ describe('blind plan helpers', () => {
 
   it('prompt_sends_an_unsettled_question_to_the_research_sub_agent_approved_once_and_never_cited', () => {
     const prompt = blindPlanPrompt('Order cancellation', cwd)
-    expect(flowed(prompt)).toContain("hand that one question to `Delegate`'s `research` sub agent rather than guessing")
+    // Named by the sub agent, not by the tool: each engine hands work on with a tool of its own.
+    expect(flowed(prompt)).toContain('hand that one question to the `research` sub agent, through the tool you hand work to a sub agent with, rather than guessing')
     expect(flowed(prompt)).toContain('Approving that delegation approves the research as a whole')
     expect(flowed(prompt)).toContain('without being asked about each one')
     expect(flowed(prompt)).toContain('fold it into your own default and name the research, not a page address, in your direction')

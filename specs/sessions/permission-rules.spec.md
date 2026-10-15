@@ -61,9 +61,9 @@ Every tool call, and every simple command of a shell line, is judged on its own.
 - **This call alone is one click**: every prompt is answered for this call alone by one Allow or one Deny, and the ways an answer may be kept are opened per row only when asked for (docs/features/permission-engine.md#The prompt)
 - **Only what the place allows is offered**: a prompt offers only the scopes the place may be kept for, flags only on a denial, and no keeping at all for an effect that is never kept, saying in one line why (docs/features/permission-engine.md#The prompt)
 - **What already stands is said**: a prompt names any kept answer that already decides part of the call (docs/features/permission-engine.md#The prompt)
-- **A write prompt shows its change**: a write is put to the person as the change it would make rather than as the arguments it was called with (specs/file-edit-diff.spec.md#Behaviour)
+- **A write prompt shows its change**: a write is put to the person as the change it would make rather than as the arguments it was called with (specs/sessions/file-edit-diff.spec.md#Behaviour)
 - **One row per effect**: a line with several effects is one prompt with one row per effect, effects already covered shown quiet, the same action at the same place shown once, and a place another asked row's answer would always cover not asked beside it (docs/features/permission-engine.md#A line with several effects)
 - **Denying refuses the line**: a line runs only when every row is allowed; denying it, or keeping a denial for any row, refuses the whole line, and its confirm says when it will (docs/features/permission-engine.md#A line with several effects)
   - **Kept on a refused line**: answers kept on a prompt are saved when it is confirmed, even when the line is refused
 - **Refused without a prompt**: a line with a command that writes around the file tools, or that a kept denial covers, is refused without a prompt and the model is told what refused it (docs/features/permission-engine.md#Refused without a card)
-- **Answered away from the desk**: a prompt can be answered from a paired phone with the same effect as at the desk (specs/remote-control.spec.md#Acting from the phone)
+- **Answered away from the desk**: a prompt can be answered from a paired phone with the same effect as at the desk (specs/sessions/remote-control.spec.md#Acting from the phone)

@@ -16,7 +16,6 @@ import { ScopeGuard, readableIn } from '../phases/scope-guard'
 import { SpecContract } from '../phases/spec-model'
 import { existingSpecFolders, resolveSpecFoldersMode, type SpecFoldersSetting } from '../phases/spec-folders'
 import { TaskBoardGuard } from '../openai-session/tools/task-board'
-import { RESEARCH_SUB_AGENT, shippedEntry, type SubAgentCatalogEntry } from '../sub-agents/sub-agent-index'
 import type { VerifyRule } from '../phases/verification'
 import { composeHooks, type SessionHooks } from './hooks'
 import type { SessionRecord } from './session-manager'
@@ -27,8 +26,6 @@ export type ModeSetup = {
   systemPrompt?: string
   toolNames?: string[]
   readable?: (relPath: string) => boolean
-  /** A sub agent this mode offers on its own, beside whatever a session that may read the code is offered: the blind planner's research lookup. */
-  subAgents?: SubAgentCatalogEntry[]
 }
 
 /** What the modes read from the workspace and its settings, and the maps a prompt carries, built when behind. */
@@ -108,8 +105,6 @@ async function planModeSetup(record: SessionRecord, ctx: ModeContext): Promise<M
     systemPrompt: await ctx.withDocs(record, blindPlanPrompt(record.feature, workspaceRoot, folderMode, folders)),
     toolNames: BLIND_PLAN_TOOLS,
     readable: readableIn(scope),
-    // Offered on its own: a blind planner reads no code, so it is otherwise offered no sub agent at all.
-    subAgents: [shippedEntry(RESEARCH_SUB_AGENT)],
   }
 }
 

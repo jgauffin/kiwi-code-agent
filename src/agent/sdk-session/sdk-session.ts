@@ -1,4 +1,5 @@
 import type {
+  AgentDefinition,
   HookCallback,
   HookJSONOutput,
   McpSdkServerConfigWithInstance,
@@ -50,6 +51,9 @@ export type SdkSessionOptions = {
   appendSystemPrompt?: string
   /** Restricts the built-in tools to these names. */
   tools?: string[]
+  /** Sub agents registered with the engine, by name, beside its own. */
+  agents?: Record<string, AgentDefinition>
+
   /** Compacts once the conversation is this large, when that comes before the window's share; absent or 0 means the share alone. */
   compactAtTokens?: number
   /** What a compaction must keep for this session's phase, and what the turn carries on with after it. */
@@ -224,6 +228,7 @@ export class SdkSession implements CodeSession {
     else if (this.options.appendSystemPrompt !== undefined)
       options.systemPrompt = { type: 'preset', preset: 'claude_code', append: this.options.appendSystemPrompt }
     if (this.options.tools) options.tools = this.options.tools
+    if (this.options.agents) options.agents = this.options.agents
     // The workspace's servers go in as dynamic ones, which the host can
     // replace; the engine's own reading of the file yields to a dynamic
     // server of the same name, so it never spawns them itself.
@@ -287,7 +292,9 @@ export class SdkSession implements CodeSession {
       const callback: HookCallback = async (input): Promise<HookJSONOutput> => {
         if (input.hook_event_name !== 'PreToolUse') return {}
         // The hook's `cwd` follows the engine's shell from one call to the next.
-        const outcome = await pre({ toolName: bareToolName(input.tool_name), input: input.tool_input, toolUseId: input.tool_use_id, cwd: input.cwd })
+        // Only a sub agent's call carries an agent id; a session started as an agent carries its type without one.
+        const agent = input.agent_id !== undefined ? input.agent_type : undefined
+        const outcome = await pre({ toolName: bareToolName(input.tool_name), input: input.tool_input, toolUseId: input.tool_use_id, cwd: input.cwd, ...(agent ? { agent } : {}) })
         if (outcome && 'deny' in outcome) {
           return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: outcome.deny } }
         }

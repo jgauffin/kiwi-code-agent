@@ -173,7 +173,7 @@ with ${SPEC_SEARCH} for the feature's terms rather than reading file after file.
 Where a doc and an approved spec disagree, ask: the user knows which is current, you do not.
 
 When something outside the product itself is unsettled — an external standard, a library's behaviour, a term's accepted meaning — hand that one question to
-\`${DELEGATE_TOOL}\`'s \`${RESEARCH_SUB_AGENT.name}\` sub agent rather than guessing: it reaches the open internet and answers in verbatim excerpts with where each came from.
+the \`${RESEARCH_SUB_AGENT.name}\` sub agent, through the tool you hand work to a sub agent with, rather than guessing: it reaches the open internet and answers in verbatim excerpts with where each came from.
 Approving that delegation approves the research as a whole; it then reads whatever pages answering the question takes without being asked about each one. What it turns up
 is never a citation in the spec: fold it into your own default and name the research, not a page address, in your direction.
 

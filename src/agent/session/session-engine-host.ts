@@ -17,6 +17,8 @@ export interface SessionRecords {
 /** Runs the live engine behind each session and keeps its event log and status; a session is started lazily on its first prompt. */
 export class SessionEngineHost {
   private readonly live = new Map<string, CodeSession>()
+  /** Engines still being brought up: a second prompt or a close in that window waits on the one start rather than leaving an engine nobody owns. */
+  private readonly starting = new Map<string, Promise<CodeSession>>()
   /** Per session, the call the user allowed after its engine had stopped; answered for them when the resumed engine asks. */
   private readonly preapproved = new Map<string, { toolName: string; input: string }>()
   /** One log per session: the write chain that keeps entries in emission order belongs to the instance. */
@@ -64,6 +66,8 @@ export class SessionEngineHost {
   /** Stop the engine but keep the record; a later prompt resumes it. A run under the session stops with it. */
   async close(id: string): Promise<void> {
     for (const child of this.records.all().filter((r) => r.parentId === id)) await this.close(child.id)
+    // A start that fails has already told the session so; the close has nothing left to stop.
+    await this.starting.get(id)?.catch(() => undefined)
     const session = this.live.get(id)
     if (!session) return
     this.live.delete(id)
@@ -75,7 +79,7 @@ export class SessionEngineHost {
     const cut = this.records.all().filter((r) => this.live.has(r.id) && underWay(this.statuses.get(r.id) ?? 'idle'))
     for (const record of cut) record.cutOff = true
     if (cut.length > 0) await this.records.save()
-    await Promise.all([...this.live.keys()].map((id) => this.close(id)))
+    await Promise.all([...new Set([...this.live.keys(), ...this.starting.keys()])].map((id) => this.close(id)))
   }
 
   forget(id: string): void {
@@ -114,8 +118,18 @@ export class SessionEngineHost {
   }
 
   async ensureLive(record: SessionRecord): Promise<CodeSession> {
-    const existing = this.live.get(record.id)
+    const existing = this.live.get(record.id) ?? this.starting.get(record.id)
     if (existing) return existing
+    const start = this.start(record)
+    this.starting.set(record.id, start)
+    try {
+      return await start
+    } finally {
+      this.starting.delete(record.id)
+    }
+  }
+
+  private async start(record: SessionRecord): Promise<CodeSession> {
     const session = await this.createEngine(record, (line) => this.publish(record, { type: 'status', status: 'starting', detail: line }))
     this.live.set(record.id, session)
     void this.pump(record, session)
@@ -123,6 +137,18 @@ export class SessionEngineHost {
   }
 
   private async pump(record: SessionRecord, session: CodeSession): Promise<void> {
+    try {
+      await this.forward(record, session)
+    } finally {
+      // An engine that stopped on its own may still hold its process and servers; one being closed is the closer's to dispose.
+      if (this.live.get(record.id) === session) {
+        this.live.delete(record.id)
+        await session.dispose().catch((error: unknown) => this.publish(record, { type: 'error', message: `Stopping the engine: ${errorMessage(error)}`, fatal: false }))
+      }
+    }
+  }
+
+  private async forward(record: SessionRecord, session: CodeSession): Promise<void> {
     for await (const raw of session.events()) {
       // A decoration that fails must not cost the event itself.
       const event = await this.decorate(record.id, raw).catch(() => raw)
@@ -133,7 +159,6 @@ export class SessionEngineHost {
       this.publish(record, event)
       this.answerPreapproved(record.id, session, event)
     }
-    if (this.live.get(record.id) === session) this.live.delete(record.id)
   }
 
   /** Shown at once and logged in emission order, without waiting on the write: what follows may not overtake it on screen. */
