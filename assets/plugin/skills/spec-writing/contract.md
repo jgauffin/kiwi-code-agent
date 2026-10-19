@@ -21,6 +21,8 @@ One line on the situation, when the title is not enough.
 - **Partial refunds**: something intent does not settle and only the user can
 ```
 
+The extension adds an `id:` line to the front matter once the spec exists; keep it exactly as it is on every revision.
+
 The spec is a contract, and the extension holds you to it on every write:
 - `## Goal` first, as prose. Then one `##` section per scenario: a situation from the user's side, named as the user would say it. A small feature has one scenario; a feature is rarely more than four.
 - A scenario holds rules, `- **Name**: ...`, that make up the situation. An edge case, `  - **Name**: ...`, is indented under the rule it qualifies: it is a situation that rule has to survive. An edge case that is a rule of its own is a rule. Nothing nests deeper.

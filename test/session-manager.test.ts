@@ -75,6 +75,21 @@ function memoryStore(): SessionStore & { saved: SessionRecord[][] } {
 const tick = () => new Promise((r) => setTimeout(r, 5))
 
 describe('SessionManager', () => {
+  it('every_run_on_a_renamed_spec_follows_it_and_a_title_the_extension_gave_is_given_again', async () => {
+    const store = memoryStore()
+    const manager = new SessionManager(store, async (r) => new FakeSession(r.id, r.profile, r.engineSessionId), (id) => RunLog.forSession(tmpdir(), id), () => {})
+    const plan = await manager.create(profile, 'plan', 'Permission decisions')
+    const run = await manager.create(profile, 'implement', 'Permission decisions', { parentId: plan.id, task: 'Deny wins' })
+    const other = await manager.create(profile, 'plan', 'Orders')
+
+    await manager.followFeatureRename('permission-decisions', 'Permission rules')
+
+    expect(manager.get(plan.id)).toMatchObject({ feature: 'Permission rules', title: 'Feature: Permission rules' })
+    expect(manager.get(run.id)).toMatchObject({ feature: 'Permission rules', title: 'Implement: Deny wins' })
+    expect(manager.get(other.id)).toMatchObject({ feature: 'Orders', title: 'Feature: Orders' })
+    expect(store.saved.at(-1)?.find((r) => r.id === plan.id)?.feature).toBe('Permission rules')
+  })
+
   it('live_sessions_are_reachable_and_a_start_or_stop_reaches_the_live_session_s_mcp_control', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'sm-'))
     try {

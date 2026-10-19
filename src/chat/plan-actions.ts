@@ -14,6 +14,7 @@ import { assertImplementable } from '../agent/phases/implement'
 import { checkDue } from '../agent/phases/plan-stage'
 import { parseSpec, specFingerprint } from '../agent/phases/spec-model'
 import { followRenames, type MigrationReport } from '../agent/phases/migrate-plan'
+import { recordSpecId } from '../agent/phases/spec-identity'
 import { deriveBoard, readBoard, readTasks, tasksPath, writeBoard } from '../agent/phases/tasks-file'
 import type { Review } from '../agent/phases/plan-review'
 import type { FromWebview, PlanState, RunState } from './protocol'
@@ -323,6 +324,7 @@ export class PlanActions {
     const { workspaceRoot } = this.deps
     const feature = record.feature!
     await followRenames(workspaceRoot, feature)
+    await recordSpecId(workspaceRoot, feature)
     await compactAppliedDecisions(decisionsPath(workspaceRoot, feature))
     const spec = await readSpecState(specPath(workspaceRoot, feature))
     if (spec.exists) await this.deps.sessions.noteSpecSeen(record.id, specFingerprint(parseSpec(spec.body)))

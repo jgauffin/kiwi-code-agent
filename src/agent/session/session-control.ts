@@ -149,6 +149,17 @@ export class SessionControl {
     await this.send(id, questionPrompt(request.request, outcome), 'Question answered')
   }
 
+  /**
+   * Another agent's message starts a turn. It is not the person's message: nothing is echoed
+   * as theirs, the title is left alone, and no permission or question is answered by it.
+   */
+  async sendFromAgent(id: string, text: string): Promise<void> {
+    const record = this.requireRecord(id)
+    if (!this.host.liveSession(id)) await this.host.emit(record, { type: 'status', status: 'starting' })
+    const session = await this.host.ensureLive(record)
+    session.send(text)
+  }
+
   /** A paired phone's command, logged beside the act itself so the record says where it came from. */
   async noteRemoteAct(id: string, note: string): Promise<void> {
     await this.host.emit(this.requireRecord(id), { type: 'remote_action', note })

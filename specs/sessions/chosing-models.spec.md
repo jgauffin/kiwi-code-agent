@@ -1,6 +1,7 @@
 ---
 feature: Chosing models
 status: verified
+id: 168e2acc-2e40-427b-8e87-cb273ba549a2
 ---
 
 # Chosing models

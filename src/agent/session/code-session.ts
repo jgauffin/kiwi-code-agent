@@ -124,6 +124,10 @@ export type SessionEvent =
   | { type: 'ended' }
   /** A paired phone's command, carried out through the same call a desk act would make; logged beside it so the record says where it came from. */
   | { type: 'remote_action'; note: string }
+  /** What one agent said to the agent of the linked session in another window; `workspace` is that other window's. Logged as the record of where it came from. */
+  | { type: 'agent_message'; direction: 'sent' | 'received'; workspace: string; text: string }
+  /** The agents exchanged as many messages as allowed without a word from the person; the next was refused. */
+  | { type: 'agent_exchange_capped'; workspace: string; limit: number }
 
 /** An event that can come from inside a delegated run, nested in the transcript under the call that spawned it. */
 export type NestedEvent = Extract<SessionEvent, { parentToolUseId?: string }>

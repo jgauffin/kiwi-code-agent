@@ -226,6 +226,8 @@ describe('NewSessionView asking for a feature name', () => {
 })
 
 const picks = (node: HTMLElement) => [...node.querySelectorAll<HTMLButtonElement>('.pick-up .pick')]
+const planPicks = (node: HTMLElement) => [...node.querySelectorAll<HTMLButtonElement>('.pick-up.specs .pick')]
+const chatPicks = (node: HTMLElement) => [...node.querySelectorAll<HTMLButtonElement>('.pick-up.chats .pick')]
 
 describe('NewSessionView pick-up list', () => {
   const waiting = {
@@ -237,31 +239,31 @@ describe('NewSessionView pick-up list', () => {
 
   it('a_finished_plan_stays_on_the_list_saying_it_is_done', () => {
     const node = view(undefined, { ...waiting, plans: [{ feature: 'Dashboards', status: 'verified', lastActiveAt: '2026-10-03T11:20:00.000Z' }] })
-    expect(picks(node)[0]!.querySelector('.hint')!.textContent).toMatch(/^verified: done · last worked on /)
+    expect(planPicks(node)[0]!.querySelector('.hint')!.textContent).toMatch(/^verified: done · last worked on /)
     node.remove()
   })
 
   it('a_drafts_entry_says_how_it_came_to_be_and_how_far_its_review_got', () => {
     const node = view(undefined, { ...waiting, plans: [{ feature: 'Orders', status: 'draft' as const, authored: 'drafted' as const, review: 'under_review' as const }] })
-    expect(picks(node)[0]!.querySelector('.hint')!.textContent).toBe('draft: review, check or approve · drafted from the docs · review in flight')
+    expect(planPicks(node)[0]!.querySelector('.hint')!.textContent).toBe('draft: review, check or approve · drafted from the docs · review in flight')
     node.remove()
   })
 
   it('a_draft_with_nothing_recorded_about_how_it_was_written_reads_as_hand_written', () => {
     const node = view(undefined, { ...waiting, plans: [{ feature: 'Orders', status: 'draft' as const, authored: 'hand-written' as const, review: 'created' as const }] })
-    expect(picks(node)[0]!.querySelector('.hint')!.textContent).toBe('draft: review, check or approve · hand-written · never reviewed')
+    expect(planPicks(node)[0]!.querySelector('.hint')!.textContent).toBe('draft: review, check or approve · hand-written · never reviewed')
     node.remove()
   })
 
   it('a_drafts_every_comment_answered_shows_so', () => {
     const node = view(undefined, { ...waiting, plans: [{ feature: 'Orders', status: 'draft' as const, authored: 'planned' as const, review: 'final_draft' as const }] })
-    expect(picks(node)[0]!.querySelector('.hint')!.textContent).toBe('draft: review, check or approve · planned with you · every comment answered')
+    expect(planPicks(node)[0]!.querySelector('.hint')!.textContent).toBe('draft: review, check or approve · planned with you · every comment answered')
     node.remove()
   })
 
   it('a_conversation_other_than_a_chat_is_offered_as_the_session_type_it_is', () => {
     const node = view(undefined, { ...waiting, chats: [{ sessionId: 's1', title: 'Widget framework', mode: 'code-plan', lastActiveAt: '2026-10-03T09:00:00.000Z' }] })
-    const pick = picks(node)[1]!
+    const pick = chatPicks(node)[0]!
     expect(pick.querySelector('.icon')!.textContent).toBe('🗺')
     expect(pick.querySelector('.hint')!.textContent).toMatch(/^Plan · last worked on /)
     node.remove()
@@ -279,6 +281,22 @@ describe('NewSessionView pick-up list', () => {
       'Orders',
       'Why does the cart double-count?',
     ])
+    node.remove()
+  })
+
+  it('specs_and_recent_chats_are_two_lists_side_by_side_specs_first', () => {
+    const node = view(undefined, waiting)
+    const columns = [...node.querySelectorAll('.pick-ups > .pick-up')]
+    expect(columns.map((s) => s.querySelector('h3')!.textContent)).toEqual(['Specs', 'Recent chats'])
+    expect(chatPicks(node).map((p) => p.querySelector('strong')!.textContent)).toEqual(['Why does the cart double-count?'])
+    expect(planPicks(node).map((p) => p.querySelector('strong')!.textContent)).toEqual(['Orders'])
+    node.remove()
+  })
+
+  it('chats_alone_show_no_spec_list', () => {
+    const node = view(undefined, { ...waiting, plans: [] })
+    expect(node.querySelector('.pick-up.specs')).toBeNull()
+    expect(chatPicks(node)).toHaveLength(1)
     node.remove()
   })
 
@@ -300,7 +318,7 @@ describe('NewSessionView pick-up list', () => {
     const node = view(undefined, waiting)
     let seen: unknown
     node.addEventListener(events.PlanResumeRequestedEvent.type, (e) => (seen = e.feature))
-    picks(node)[0]!.click()
+    planPicks(node)[0]!.click()
     expect(seen).toBe('Orders')
     node.remove()
   })
@@ -310,7 +328,7 @@ describe('NewSessionView pick-up list', () => {
     type(node, 'textarea[name=prompt]', '  Drop the refund rule  ')
     let seen: { feature: string; note: string | undefined } | undefined
     node.addEventListener(events.PlanResumeRequestedEvent.type, (e) => (seen = { feature: e.feature, note: e.note }))
-    picks(node)[0]!.click()
+    planPicks(node)[0]!.click()
     expect(seen).toEqual({ feature: 'Orders', note: 'Drop the refund rule' })
     // Taken off the card with it, so picking a second plan does not say it again.
     expect(node.querySelector<HTMLTextAreaElement>('textarea[name=prompt]')!.value).toBe('')
@@ -322,7 +340,7 @@ describe('NewSessionView pick-up list', () => {
     type(node, 'textarea[name=prompt]', 'Drop the refund rule')
     let seen: { feature: string; note: string | undefined; ownTab: boolean } | undefined
     node.addEventListener(events.PlanResumeRequestedEvent.type, (e) => (seen = { feature: e.feature, note: e.note, ownTab: e.ownTab }))
-    picks(node)[0]!.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }))
+    planPicks(node)[0]!.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }))
     expect(seen).toEqual({ feature: 'Orders', note: undefined, ownTab: true })
     // This screen stays up, so the note waits for whatever is started from it.
     expect(node.querySelector<HTMLTextAreaElement>('textarea[name=prompt]')!.value).toBe('Drop the refund rule')
@@ -334,7 +352,7 @@ describe('NewSessionView pick-up list', () => {
     type(node, 'textarea[name=prompt]', 'Drop the refund rule')
     let seen: { feature: string; note: string | undefined; ownTab: boolean } | undefined
     node.addEventListener(events.PlanResumeRequestedEvent.type, (e) => (seen = { feature: e.feature, note: e.note, ownTab: e.ownTab }))
-    picks(node)[0]!.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, button: 1 }))
+    planPicks(node)[0]!.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, button: 1 }))
     expect(seen).toEqual({ feature: 'Orders', note: undefined, ownTab: true })
     expect(node.querySelector<HTMLTextAreaElement>('textarea[name=prompt]')!.value).toBe('Drop the refund rule')
     node.remove()
@@ -344,7 +362,7 @@ describe('NewSessionView pick-up list', () => {
     const node = view(undefined, waiting)
     let seen = false
     node.addEventListener(events.PlanResumeRequestedEvent.type, () => (seen = true))
-    picks(node)[0]!.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, button: 2 }))
+    planPicks(node)[0]!.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, button: 2 }))
     expect(seen).toBe(false)
     node.remove()
   })
@@ -353,7 +371,7 @@ describe('NewSessionView pick-up list', () => {
     const node = view(undefined, waiting)
     let seen: unknown
     node.addEventListener(events.PlanResumeRequestedEvent.type, (e) => (seen = e.ownTab))
-    picks(node)[0]!.click()
+    planPicks(node)[0]!.click()
     expect(seen).toBe(false)
     node.remove()
   })
@@ -362,7 +380,7 @@ describe('NewSessionView pick-up list', () => {
     const node = view(undefined, waiting)
     let seen: unknown
     node.addEventListener(events.PlanResumeRequestedEvent.type, (e) => (seen = e.note))
-    picks(node)[0]!.click()
+    planPicks(node)[0]!.click()
     expect(seen).toBeUndefined()
     node.remove()
   })
@@ -371,7 +389,7 @@ describe('NewSessionView pick-up list', () => {
     const node = view(undefined, waiting)
     let seen: unknown
     node.addEventListener(events.SessionSelectedEvent.type, (e) => (seen = e.sessionId))
-    picks(node)[1]!.click()
+    chatPicks(node)[0]!.click()
     expect(seen).toBe('s9')
     node.remove()
   })

@@ -1,5 +1,6 @@
 import type { McpServerState, PermissionDecision, SessionEvent } from '../agent/session/code-session'
 import type { QuestionOutcome } from '../agent/session/user-question'
+import type { LinkAct, WindowLinkState } from '../cross-window/cross-window'
 import type { KeptGrant } from '../agent/permissions/grants'
 import type { Decision } from '../agent/phases/decisions'
 import type { CommentRef, Review } from '../agent/phases/plan-review'
@@ -144,6 +145,8 @@ export type RunControls = RunRef & {
   allowWrites?: boolean
   /** Its MCP servers as its engine last reported them; absent while it is not running or takes none. */
   mcp?: McpServerState[]
+  /** Its link to a chat session of another window; absent on a run that is not a chat. */
+  windowLink?: WindowLinkState
 }
 
 /** A run's conversation to replay, with whether its engine is still there: a turn its log leaves unfinished was cut off with the last window. */
@@ -156,13 +159,12 @@ export type RunSection = RunRef & { live: boolean; events: SessionEvent[] }
 export type ModelOption = { name: string; efforts: Effort[] }
 
 /**
- * A plan the new-session screen offers to pick up, at its stage: absent while
- * its session has not written the spec. A verified one is offered while its
- * plan session is kept. `lastActiveAt` is absent on a spec nobody has opened
- * here. `authored` and `review` say how a draft came to be and how far its
- * review got; absent once the spec is settled.
+ * A spec the new-session screen offers to pick up, at its stage. A verified
+ * one is offered while its plan session is kept. `lastActiveAt` is absent on
+ * a spec nobody has opened here. `authored` and `review` say how a draft came
+ * to be and how far its review got; absent once the spec is settled.
  */
-export type ResumablePlan = { feature: string; status: SpecStatus | undefined; lastActiveAt?: string; authored?: Authorship; review?: ReviewProgress; folder?: string }
+export type ResumablePlan = { feature: string; status: SpecStatus; lastActiveAt?: string; authored?: Authorship; review?: ReviewProgress; folder?: string }
 
 /** A conversation not shown that the new-session screen offers to reopen; its transcript is the context it comes back with. */
 export type ResumableChat = { sessionId: string; title: string; mode: SessionMode; lastActiveAt: string }
@@ -272,6 +274,8 @@ export type FromWebview =
   | { type: 'approve_plan' }
   /** Starts or stops one of the run's MCP servers. */
   | { type: 'switch_mcp'; sessionId: string; server: string; running: boolean }
+  /** Links the chat run to one in another window, or unlinks, pauses or resumes the link it has. */
+  | { type: 'window_link'; sessionId: string; act: LinkAct }
   /** Switches the view to the session. */
   | { type: 'switch_session'; sessionId: string }
   /** `prompt`, when given, is sent as the first message; `files` are linked files it should read. */

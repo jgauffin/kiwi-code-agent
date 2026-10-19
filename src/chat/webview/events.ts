@@ -2,6 +2,7 @@ import type { SessionMode } from '../../agent/session/session-manager'
 import type { QuestionOutcome } from '../../agent/session/user-question'
 import type { BundleScope } from '../../agent/instructions/bundles'
 import type { Effort } from '../../agent/session/model-profile'
+import type { LinkAct } from '../../cross-window/cross-window'
 import type { AgentsMdAnswer, ReviewAction, UserPermissionDecision } from '../protocol'
 import type { Step, ViewTab } from './plan-step'
 
@@ -307,6 +308,14 @@ export class McpSwitchRequestedEvent extends Event {
   }
 }
 
+/** The composer's link control on a chat session: link it to a chat of another window, or unlink, pause or resume that link. */
+export class WindowLinkRequestedEvent extends Event {
+  static readonly type = 'window-link-requested'
+  constructor(public readonly act: LinkAct) {
+    super(WindowLinkRequestedEvent.type, { bubbles: true })
+  }
+}
+
 /** The picker on the new-session screen: the profile new sessions run on from now. */
 export class DefaultProfileChangedEvent extends Event {
   static readonly type = 'default-profile-changed'
@@ -379,6 +388,7 @@ declare global {
     [SessionEffortChangedEvent.type]: SessionEffortChangedEvent
     [PlanApprovedEvent.type]: PlanApprovedEvent
     [McpSwitchRequestedEvent.type]: McpSwitchRequestedEvent
+    [WindowLinkRequestedEvent.type]: WindowLinkRequestedEvent
     [DefaultProfileChangedEvent.type]: DefaultProfileChangedEvent
     [AgentsMdAnsweredEvent.type]: AgentsMdAnsweredEvent
   }

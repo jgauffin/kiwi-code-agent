@@ -59,6 +59,11 @@ export class SessionEngineHost {
     this.live.get(id)?.compact()
   }
 
+  /** The session's engine is at work on a turn, not stopped or waiting on the person. */
+  inTurn(id: string): boolean {
+    return underWay(this.statuses.get(id) ?? 'idle')
+  }
+
   async interrupt(id: string): Promise<void> {
     await this.live.get(id)?.interrupt()
   }

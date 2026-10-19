@@ -40,6 +40,7 @@ import {
   SweepRequestedEvent,
   UpdateSpecRequestedEvent,
   VerifyRequestedEvent,
+  WindowLinkRequestedEvent,
 } from './events'
 
 /** What `wireChatEvents` calls back into `ChatApp` for, rather than reaching into its private state itself. */
@@ -90,6 +91,7 @@ export function wireChatEvents(el: HTMLElement, actions: ChatAppActions): void {
   el.addEventListener(SessionEffortChangedEvent.type, (e) => post(sessionEffortMessage(e)))
   el.addEventListener(PlanApprovedEvent.type, () => post({ type: 'approve_plan' }))
   el.addEventListener(McpSwitchRequestedEvent.type, (e) => actions.toTarget((sessionId) => post({ type: 'switch_mcp', sessionId, server: e.server, running: e.running })))
+  el.addEventListener(WindowLinkRequestedEvent.type, (e) => actions.toTarget((sessionId) => post({ type: 'window_link', sessionId, act: e.act })))
   el.addEventListener(SessionSelectedEvent.type, (e) => post({ type: 'switch_session', sessionId: e.sessionId }))
   el.addEventListener(PlanResumeRequestedEvent.type, (e) => post(planResumeMessage(e)))
   el.addEventListener(UpdateSpecRequestedEvent.type, (e) => post({ type: 'update_spec', feature: e.feature, description: e.description }))

@@ -1,6 +1,7 @@
 ---
 feature: Session transcript export
 status: draft
+id: 9f801eb4-f386-4aa5-852c-96cef2751c37
 ---
 
 # Session transcript export

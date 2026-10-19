@@ -1,20 +1,13 @@
 import type { SessionEvent } from '../../agent/session/code-session'
-import { isShellTool, isSubagentTool } from '../../agent/permissions/tool-classes'
-import { splitShellCommand } from '../../agent/permissions/shell-split'
 import { renderAnsi } from './ansi'
-import { editDiffView, fileLink } from './edit-diff'
-import { compact, formatUsage } from './format-usage'
-import { fillCode } from './highlight'
+import { AssistantBubbles } from './assistant-bubbles'
 import { PromptSubmittedEvent } from './events'
-import { renderMarkdown } from './markdown'
 import { PermissionCard } from './permission-card'
+import { PromptCards } from './prompt-cards'
 import { isQuestionTool, QuestionCard } from './question-card'
-import { post } from './vscode-api'
-
-type AssistantBubble = { element: HTMLElement; text: HTMLElement; thinking: HTMLElement; streamed: string; finalParts: string[] }
-
-/** What is being waited on, and whether the one to act is the user. */
-type Activity = { label: string; needsUser: boolean }
+import { ToolSteps } from './tool-steps'
+import { agentMessage, block, compactionMarker, copyButton, switchMarker, turnLine } from './transcript-blocks'
+import { type Activity, WorkingRow } from './working-row'
 
 const WAITING_ON_MODEL = 'Waiting on model'
 const STARTING = 'Starting the session'
@@ -32,28 +25,16 @@ const awaitingUser = (label: string): Activity => ({ label, needsUser: true })
 export class ChatTranscript extends HTMLElement {
   /** What scrolls as the conversation grows: this element, or the container a tab's several runs share. */
   scrollHost: HTMLElement = this
-  private readonly bubbles = new Map<string, AssistantBubble>()
-  private readonly tools = new Map<string, HTMLDetailsElement>()
-  /** The agent each subagent step runs, by the call that spawned it: what the output nested under it is named after. */
-  private readonly agents = new Map<string, string>()
-  /** The thread each call belongs to, so a prompt about one lands where the call sits and not at the end of the transcript. */
-  private readonly toolThreads = new Map<string, string | undefined>()
-  private readonly permissions = new Map<string, PermissionCard>()
-  private readonly questions = new Map<string, QuestionCard>()
-  /** Tool calls of the question tool: the card says what they ask, so their own rows say nothing. */
-  private readonly questionCalls = new Set<string>()
-  /** Tool calls the user allowed at a prompt: they have read what the call would do. */
-  private readonly approvedByHand = new Set<string>()
-  /** Cards left open when their engine stopped: still answerable, a turn late, but nothing waits on them. */
-  private readonly late = new Set<HTMLElement>()
-  /** The newest edit the user has not seen, the one edit step left open. */
-  private openEdit: HTMLDetailsElement | undefined
+  private readonly bubbles = new AssistantBubbles(
+    (element, parentToolUseId) => this.insert(element, parentToolUseId),
+    (parentToolUseId) => this.steps.agentLabel(parentToolUseId),
+  )
+  private readonly steps = new ToolSteps()
+  private readonly cards = new PromptCards()
+  private readonly workingRow = new WorkingRow()
   private statusLine!: HTMLElement
-  /** Tool calls still without a result, by id, each named as its row is. */
-  private readonly pendingTools = new Map<string, string>()
   /** What the session is doing right now, or what it needs from the user; nothing when idle. */
   private activity: Activity | undefined
-  private working: { element: HTMLElement; label: string; startedAt: number; stop: () => void } | undefined
   /** The offer to carry on a turn that stopped short; it stands only until the conversation moves on. */
   private resume: HTMLButtonElement | undefined
   /** The model the session is running on now, to tell a restart on the same model from a switch to another (B13). */
@@ -81,27 +62,15 @@ export class ChatTranscript extends HTMLElement {
     this.ensureStatusLine()
     this.replaceChildren(this.statusLine)
     this.bubbles.clear()
-    this.tools.clear()
-    this.agents.clear()
-    this.toolThreads.clear()
-    this.permissions.clear()
-    this.questions.clear()
-    this.questionCalls.clear()
-    this.approvedByHand.clear()
-    this.late.clear()
-    this.pendingTools.clear()
-    this.openEdit = undefined
+    this.steps.clear()
+    this.cards.clear()
     this.resume = undefined
     this.currentModel = undefined
-    this.working?.stop()
-    this.working = undefined
+    this.workingRow.clear()
     this.activity = undefined
     this.setStatus('')
     for (const event of events) this.apply(event, false)
-    // Streamed text is rendered once at the end of a replay, not per delta.
-    for (const bubble of this.bubbles.values()) {
-      if (bubble.finalParts.length === 0) renderMarkdown(bubble.streamed, bubble.text, true)
-    }
+    this.bubbles.renderStreamed()
     if (!live) this.dropWork()
     this.showWorking()
     this.scrollToEnd()
@@ -114,122 +83,73 @@ export class ChatTranscript extends HTMLElement {
 
   /** A question card still waiting on the user. */
   get hasOpenQuestion(): boolean {
-    return [...this.questions.values()].some((card) => !card.isResolved)
+    return this.cards.hasOpenQuestion
   }
 
   /** The first card still waiting on the user, a permission prompt or a question. */
   openCard(): HTMLElement | undefined {
-    return this.waitingCards()[0]
+    return this.cards.openCard()
   }
 
   apply(event: SessionEvent, live = true): void {
     this.ensureStatusLine()
+    this.handle(event, live)
+    if (live) {
+      this.showWorking()
+      this.scrollToEnd()
+    }
+  }
+
+  private handle(event: SessionEvent, live: boolean): void {
     switch (event.type) {
       case 'session_started':
-        // A restart on the same model (a reconnect, a resumed turn) says nothing new; a switch
-        // to another model is marked in the scrolling transcript, not only in the status line,
-        // so a reader can tell after the fact which part of the conversation it produced (B13).
-        if (this.currentModel !== undefined && this.currentModel !== event.model) this.insert(switchMarker(event))
-        this.currentModel = event.model
-        this.setStatus(`${event.model} · Claude Code ${event.engineVersion ?? ''}`.trim())
-        // The engine is up, so what the turn waits on takes over from the start-up.
-        if (this.activity) this.activity = this.currentActivity()
+        this.sessionStarted(event)
         break
       case 'user_message':
-        this.resume?.remove()
-        this.resume = undefined
-        // What the extension sent on the person's behalf is named, not quoted; the host never passes its text on.
-        if (event.label) this.insert(block('turn kickoff', event.label))
-        else {
-          const message = block('user', event.text, renderAnsi)
-          message.appendChild(copyButton(() => event.text))
-          this.insert(message)
-        }
-        this.activity = atWork(WAITING_ON_MODEL)
+        this.userMessage(event)
         break
       // What a subagent is doing never renames the row: the main thread is waiting on
       // the step that spawned it, and several threads renaming the one row in turn reads
       // as a stall, the time spent restarting at every change of name.
-      case 'assistant_text': {
-        const bubble = this.bubble(event.messageId, event.parentToolUseId)
-        bubble.streamed += event.delta
-        if (live && bubble.finalParts.length === 0) renderMarkdown(bubble.streamed, bubble.text, false)
+      case 'assistant_text':
+        this.bubbles.appendText(event, live)
         if (!event.parentToolUseId) this.activity = atWork('Writing')
         break
-      }
-      case 'assistant_thinking': {
-        const bubble = this.bubble(event.messageId, event.parentToolUseId)
-        bubble.thinking.hidden = false
-        bubble.thinking.textContent += event.delta
+      case 'assistant_thinking':
+        this.bubbles.appendThinking(event)
         if (!event.parentToolUseId) this.activity = atWork('Thinking')
         break
-      }
-      case 'assistant_message': {
-        const bubble = this.bubble(event.messageId, event.parentToolUseId)
-        bubble.finalParts.push(event.text)
-        renderMarkdown(bubble.finalParts.join(''), bubble.text, true)
+      case 'assistant_message':
+        this.bubbles.finish(event)
         // The tool calls the message carries, if any, follow right after and take over.
         if (!event.parentToolUseId) this.activity = atWork(WAITING_ON_MODEL)
         break
-      }
-      case 'tool_call': {
-        // The question is put as a card, so its call and its result are not shown as a tool step.
-        if (isQuestionTool(event.name)) {
-          this.questionCalls.add(event.toolUseId)
-          break
-        }
-        const details = this.toolCall(event)
-        this.insert(details, event.parentToolUseId)
-        if (!event.parentToolUseId) {
-          this.pendingTools.set(event.toolUseId, `Running ${details.querySelector('summary')?.textContent ?? event.name}`)
-          this.activity = this.currentActivity()
-        }
+      case 'tool_call':
+        this.toolCalled(event)
         break
-      }
       case 'tool_result':
-        if (this.questionCalls.has(event.toolUseId)) break
-        this.pendingTools.delete(event.toolUseId)
-        this.dropAnsweredPrompt(event.toolUseId)
-        this.activity = this.currentActivity()
-        this.toolResult(event)
+        this.toolResulted(event)
         break
-      case 'permission_request': {
-        const card = new PermissionCard()
-        card.className = 'permission'
+      case 'permission_request':
         // A prompt stands where the call it asks about stands, so one raised inside a
         // subagent is read in that agent's step and not at the foot of the transcript.
-        this.insert(card, event.toolUseId ? this.toolThreads.get(event.toolUseId) : undefined)
-        card.show(event)
-        this.permissions.set(event.requestId, card)
+        this.cards.requestPermission(event, (card) => this.insert(card, event.toolUseId ? this.steps.threadOf(event.toolUseId) : undefined))
         this.activity = this.currentActivity()
         break
-      }
-      case 'permission_resolved': {
-        const card = this.permissions.get(event.requestId)
-        card?.resolve(event.decision, event.message)
-        if (event.decision === 'allow' && card?.toolUseId) this.approvedByHand.add(card.toolUseId)
+      case 'permission_resolved':
+        this.cards.resolvePermission(event)
         this.activity = this.currentActivity()
         break
-      }
-      case 'question_request': {
-        const card = new QuestionCard()
-        card.className = 'question-card'
-        this.insert(card)
-        card.show(event)
-        this.questions.set(event.requestId, card)
+      case 'question_request':
+        this.cards.requestQuestion(event, (card) => this.insert(card))
         this.activity = this.currentActivity()
         break
-      }
       case 'question_resolved':
-        this.questions.get(event.requestId)?.resolve(event.outcome)
+        this.cards.resolveQuestion(event)
         this.activity = this.currentActivity()
         break
       case 'status':
-        // 'idle' also arrives mid-turn (after compaction, between requests); only the turn's end clears the activity.
-        // The row adds its own ellipsis to whatever phase it names.
-        if (event.status === 'starting') this.activity = atWork(event.detail?.replace(/…$/, '') ?? STARTING)
-        if (event.status === 'requesting') this.activity = atWork(WAITING_ON_MODEL)
-        if (event.status === 'compacting') this.activity = atWork('Compacting context')
+        this.statusChanged(event)
         break
       case 'compacted':
         this.insert(compactionMarker(event))
@@ -238,23 +158,81 @@ export class ChatTranscript extends HTMLElement {
         this.activity = undefined
         this.insert(turnLine(event))
         break
-      case 'error': {
-        const message = block(event.fatal ? 'error fatal' : 'error', event.message)
-        if (event.resumable) this.offerResume(message)
-        this.insert(message)
-        if (event.fatal) this.activity = undefined
+      case 'error':
+        this.errored(event)
         break
-      }
+      case 'agent_message':
+        this.insert(agentMessage(event))
+        break
+      case 'agent_exchange_capped':
+        this.insert(block('error', `The agents exchanged ${event.limit} messages with ${event.workspace} without a word from you, so the next one was refused. Write in this chat to let them go on.`))
+        break
       case 'ended':
         this.activity = undefined
-        this.leaveOpenCardsLate()
+        this.cards.leaveOpenCardsLate()
         this.insert(block('ended', 'Engine stopped. The next prompt resumes the conversation.'))
         break
     }
-    if (live) {
-      this.showWorking()
-      this.scrollToEnd()
+  }
+
+  private sessionStarted(event: Extract<SessionEvent, { type: 'session_started' }>): void {
+    // A restart on the same model (a reconnect, a resumed turn) says nothing new; a switch
+    // to another model is marked in the scrolling transcript, not only in the status line,
+    // so a reader can tell after the fact which part of the conversation it produced (B13).
+    if (this.currentModel !== undefined && this.currentModel !== event.model) this.insert(switchMarker(event))
+    this.currentModel = event.model
+    this.setStatus(`${event.model} · Claude Code ${event.engineVersion ?? ''}`.trim())
+    // The engine is up, so what the turn waits on takes over from the start-up.
+    if (this.activity) this.activity = this.currentActivity()
+  }
+
+  private userMessage(event: Extract<SessionEvent, { type: 'user_message' }>): void {
+    this.resume?.remove()
+    this.resume = undefined
+    // What the extension sent on the person's behalf is named, not quoted; the host never passes its text on.
+    if (event.label) this.insert(block('turn kickoff', event.label))
+    else {
+      const message = block('user', event.text, renderAnsi)
+      message.appendChild(copyButton(() => event.text))
+      this.insert(message)
     }
+    this.activity = atWork(WAITING_ON_MODEL)
+  }
+
+  private toolCalled(event: Extract<SessionEvent, { type: 'tool_call' }>): void {
+    // The question is put as a card, so its call and its result are not shown as a tool step.
+    if (isQuestionTool(event.name)) {
+      this.steps.markQuestionCall(event.toolUseId)
+      return
+    }
+    const details = this.steps.call(event)
+    this.insert(details, event.parentToolUseId)
+    if (event.parentToolUseId) return
+    this.steps.trackPending(event, details)
+    this.activity = this.currentActivity()
+  }
+
+  private toolResulted(event: Extract<SessionEvent, { type: 'tool_result' }>): void {
+    if (this.steps.isQuestionCall(event.toolUseId)) return
+    this.steps.finishPending(event.toolUseId)
+    this.cards.dropAnsweredPrompt(event.toolUseId)
+    this.activity = this.currentActivity()
+    this.steps.result(event, this.cards.isApprovedByHand(event.toolUseId), (element, parentToolUseId) => this.insert(element, parentToolUseId))
+  }
+
+  private statusChanged(event: Extract<SessionEvent, { type: 'status' }>): void {
+    // 'idle' also arrives mid-turn (after compaction, between requests); only the turn's end clears the activity.
+    // The row adds its own ellipsis to whatever phase it names.
+    if (event.status === 'starting') this.activity = atWork(event.detail?.replace(/…$/, '') ?? STARTING)
+    if (event.status === 'requesting') this.activity = atWork(WAITING_ON_MODEL)
+    if (event.status === 'compacting') this.activity = atWork('Compacting context')
+  }
+
+  private errored(event: Extract<SessionEvent, { type: 'error' }>): void {
+    const message = block(event.fatal ? 'error fatal' : 'error', event.message)
+    if (event.resumable) this.offerResume(message)
+    this.insert(message)
+    if (event.fatal) this.activity = undefined
   }
 
   private offerResume(message: HTMLElement): void {
@@ -268,143 +246,19 @@ export class ChatTranscript extends HTMLElement {
   }
 
   /**
-   * A call is shown once. The prompt stands for the call until the call's own
-   * step reports what it did, and then goes: what the user allowed is the step
-   * they see. A refused call has no step to speak for it, so its prompt stays.
-   */
-  private dropAnsweredPrompt(toolUseId: string): void {
-    if (!this.approvedByHand.has(toolUseId)) return
-    for (const [requestId, card] of this.permissions) {
-      if (card.toolUseId !== toolUseId) continue
-      card.remove()
-      this.permissions.delete(requestId)
-    }
-  }
-
-  /**
    * Who the turn is waiting on: the user while a card of theirs is open, else
    * the newest tool call still running, else the model.
    */
   private currentActivity(): Activity {
-    const waiting = this.waitingCards()
+    const waiting = this.cards.waitingCards()
     if (waiting.some((card) => card instanceof PermissionCard)) return awaitingUser(NEEDS_APPROVAL)
     if (waiting.some((card) => card instanceof QuestionCard)) return awaitingUser(NEEDS_ANSWER)
-    return atWork([...this.pendingTools.values()].at(-1) ?? WAITING_ON_MODEL)
+    return atWork(this.steps.latestPending() ?? WAITING_ON_MODEL)
   }
 
   /** A pulsing row naming the current activity, with the time spent in it, kept last while the session is at work. */
   private showWorking(): void {
-    if (!this.activity) {
-      this.working?.stop()
-      this.working?.element.remove()
-      this.working = undefined
-      return
-    }
-    if (!this.working) {
-      const row = document.createElement('p')
-      row.className = 'working'
-      row.addEventListener('click', () => {
-        if (this.activity?.needsUser) this.revealOpenCard()
-      })
-      const working = { element: row, label: '', startedAt: 0, stop: () => window.clearInterval(timer) }
-      const timer = window.setInterval(() => {
-        row.textContent = `${working.label}… ${Math.round((Date.now() - working.startedAt) / 1000)}s`
-      }, 1000)
-      this.working = working
-    }
-    if (this.working.label !== this.activity.label) {
-      this.working.label = this.activity.label
-      this.working.startedAt = Date.now()
-      this.working.element.textContent = `${this.activity.label}…`
-    }
-    // A row that only fades reads as progress; the wait for the user has to stand out as a wait.
-    this.working.element.classList.toggle('needs-user', this.activity.needsUser)
-    this.working.element.title = this.activity.needsUser ? 'Show what it is waiting on' : ''
-    this.appendChild(this.working.element)
-  }
-
-  private bubble(messageId: string, parentToolUseId: string | undefined): AssistantBubble {
-    const existing = this.bubbles.get(messageId)
-    if (existing) return existing
-    const element = document.createElement('article')
-    element.className = 'assistant'
-    const thinking = document.createElement('pre')
-    thinking.className = 'thinking'
-    thinking.hidden = true
-    const text = document.createElement('div')
-    text.className = 'text'
-    const bubble: AssistantBubble = { element, text, thinking, streamed: '', finalParts: [] }
-    element.append(thinking, text, copyButton(() => bubble.finalParts.join('') || bubble.streamed))
-    if (parentToolUseId) {
-      element.classList.add('from-subagent')
-      element.prepend(agentTag(this.agentLabel(parentToolUseId)))
-    }
-    this.insert(element, parentToolUseId)
-    this.bubbles.set(messageId, bubble)
-    return bubble
-  }
-
-  private toolCall(event: Extract<SessionEvent, { type: 'tool_call' }>): HTMLDetailsElement {
-    const details = document.createElement('details')
-    details.className = 'tool'
-    const summary = document.createElement('summary')
-    const input = document.createElement('pre')
-    input.className = 'input'
-    const shell = isShellTool(event.name) ? shellCall(event.input) : undefined
-    const spawns = isSubagentTool(event.name) ? subagentName(event.input) : undefined
-    if (spawns) this.agents.set(event.toolUseId, spawns)
-    if (shell) {
-      // A shell step is named by what it is for; its body is the commands it runs, one per line.
-      summary.textContent = shell.description ?? summarizeInput(event.input)
-      fillCode(input, shell.lines.join('\n'), 'bash')
-    } else {
-      // A step that spawns an agent is named with the agent, so the thread it opens is read as that agent's.
-      summary.textContent = `${spawns ? `${event.name} (${spawns})` : event.name} ${summarizeInput(event.input)}${lineRange(event.input)}`
-      fillCode(input, JSON.stringify(event.input, null, 2), 'json')
-    }
-    if (event.parentToolUseId) {
-      details.classList.add('from-subagent')
-      summary.prepend(agentTag(this.agentLabel(event.parentToolUseId)))
-    }
-    details.append(summary, input)
-    this.tools.set(event.toolUseId, details)
-    this.toolThreads.set(event.toolUseId, event.parentToolUseId)
-    return details
-  }
-
-  /** The agent whose thread this output came from; one whose spawning step never arrived is named only as a subagent. */
-  private agentLabel(parentToolUseId: string): string {
-    return this.agents.get(parentToolUseId) ?? 'subagent'
-  }
-
-  /** A result goes into its call's step; one whose call is not shown stands on its own. */
-  private toolResult(event: Extract<SessionEvent, { type: 'tool_result' }>): void {
-    const details = this.tools.get(event.toolUseId)
-    const result = document.createElement('pre')
-    result.className = event.isError ? 'result error' : 'result'
-    renderAnsi(event.text, result)
-    if (!details) {
-      this.insert(result, event.parentToolUseId)
-      return
-    }
-    details.classList.add('done')
-    details.classList.toggle('failed', event.isError)
-    // A delegation's row names its status and what it spent beside its task, not only inside the expanded result.
-    if (event.subAgent) details.querySelector('summary')?.appendChild(subAgentStatus(event.subAgent))
-    // A written file speaks through its diff; the tool's confirmation says nothing more.
-    if (event.edit && !event.isError) {
-      // An edit the user allowed at a prompt has already been read; one that ran on its own has not.
-      const unread = !this.approvedByHand.has(event.toolUseId)
-      showEdit(details, event.edit, unread)
-      // Only the newest unread edit stays open, so a run of edits does not bury the conversation.
-      if (unread) {
-        if (this.openEdit) this.openEdit.open = false
-        this.openEdit = details
-      }
-      return
-    }
-    if (event.edit) showEdit(details, event.edit, true)
-    details.appendChild(result)
+    this.workingRow.show(this, this.activity, () => this.revealOpenCard())
   }
 
   /**
@@ -416,34 +270,12 @@ export class ChatTranscript extends HTMLElement {
    * away is a turn that waits on nothing anyone can see.
    */
   private insert(element: HTMLElement, parentToolUseId?: string): void {
-    const container: HTMLElement = (parentToolUseId ? this.tools.get(parentToolUseId) : undefined) ?? this
+    const container: HTMLElement = (parentToolUseId ? this.steps.step(parentToolUseId) : undefined) ?? this
     const isCard = element instanceof PermissionCard || element instanceof QuestionCard
-    const waiting = isCard ? undefined : this.waitingCards().find((card) => card.parentElement === container)
+    const waiting = isCard ? undefined : this.cards.waitingCards().find((card) => card.parentElement === container)
     if (waiting) container.insertBefore(element, waiting)
     else container.appendChild(element)
     if (isCard) for (let step = element.parentElement?.closest('details'); step; step = step.parentElement?.closest('details') ?? null) step.open = true
-  }
-
-  /** Cards the turn waits on: open, and raised by the engine still running. */
-  private waitingCards(): (PermissionCard | QuestionCard)[] {
-    return [...this.permissions.values(), ...this.questions.values()].filter((card) => !card.isResolved && !this.late.has(card))
-  }
-
-  /**
-   * The engine stopped with cards still open. They can still be answered, the
-   * answer reaching the model as the next message, but nothing waits on them,
-   * so the row below stops saying so.
-   */
-  private leaveOpenCardsLate(): void {
-    for (const card of [...this.permissions.values(), ...this.questions.values()]) {
-      if (card.isResolved || this.late.has(card)) continue
-      this.late.add(card)
-      card.classList.add('late')
-      const note = document.createElement('p')
-      note.className = 'late-note'
-      note.textContent = 'The session stopped before this was answered. An answer now reaches the model as your next message.'
-      card.prepend(note)
-    }
   }
 
   /** The waiting row points at what it waits on: the open card, its step unfolded, brought into view. */
@@ -462,160 +294,6 @@ export class ChatTranscript extends HTMLElement {
   private scrollToEnd(): void {
     this.scrollHost.scrollTop = this.scrollHost.scrollHeight
   }
-}
-
-/**
- * An edit step shows what it did, where every other step shows only its name:
- * the edit is the session's output, not its plumbing, and the diff is capped so
- * it cannot swallow the transcript. It opens for an edit the user has not read
- * yet. The arguments it was called with say nothing the diff does not, so they
- * give way to it.
- */
-function showEdit(details: HTMLDetailsElement, change: Parameters<typeof editDiffView>[0], open: boolean): void {
-  details.classList.add('edit-step')
-  details.open = open
-  const summary = details.querySelector('summary')
-  if (summary) {
-    const name = summary.textContent?.split(' ')[0] ?? ''
-    summary.replaceChildren(document.createTextNode(`${name} `), fileLink(change))
-    if (change.added !== undefined || change.removed !== undefined) {
-      const stats = document.createElement('span')
-      stats.className = 'stats'
-      stats.textContent = ` +${change.added ?? 0} −${change.removed ?? 0}`
-      summary.appendChild(stats)
-    }
-  }
-  const input = details.querySelector('pre.input')
-  if (input instanceof HTMLElement) input.hidden = true
-  details.appendChild(editDiffView(change))
-}
-
-/** Where the conversation was folded, with the summary to hand for anyone who wants to see what was kept. */
-function compactionMarker(event: Extract<SessionEvent, { type: 'compacted' }>): HTMLElement {
-  const sizes =
-    event.preTokens === undefined
-      ? ''
-      : ` · ${compact(event.preTokens)}${event.postTokens === undefined ? ' before' : ` → ${compact(event.postTokens)}`}`
-  if (!event.summary) return block('turn compaction', `Context compacted${sizes}`)
-  const details = document.createElement('details')
-  details.className = 'turn compaction'
-  const summary = document.createElement('summary')
-  summary.textContent = `Context compacted${sizes}`
-  details.append(summary, block('compaction-summary', event.summary))
-  return details
-}
-
-/** The line closing a turn: what it used, what it cost, how long it took, and why it failed. */
-function turnLine(event: Extract<SessionEvent, { type: 'turn_done' }>): HTMLElement {
-  const line = document.createElement('p')
-  line.className = event.isError ? 'turn error' : 'turn'
-  const usage = event.usage
-  const parts = []
-  if (usage) parts.push(formatUsage(usage))
-  if (usage?.costUsd) parts.push(`$${usage.costUsd.toFixed(4)}`)
-  if (event.durationMs) parts.push(`${(event.durationMs / 1000).toFixed(1)}s`)
-  if (event.errors.length) parts.push(event.errors.join('; '))
-  line.textContent = parts.join(' · ')
-  return line
-}
-
-/** Where the session switched to another model, so a reader can place which model produced what follows (B13). */
-function switchMarker(event: Extract<SessionEvent, { type: 'session_started' }>): HTMLElement {
-  return block('turn model-switch', `Switched to ${event.model}`)
-}
-
-const COPY_ICONS =
-  '<svg class="idle" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">' +
-  '<rect x="5.5" y="1.5" width="9" height="9" rx="1.5"/><path d="M10.5 13.5A1.5 1.5 0 0 1 9 15H3a1.5 1.5 0 0 1-1.5-1.5V7A1.5 1.5 0 0 1 3 5.5"/></svg>' +
-  '<svg class="done" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' +
-  '<path d="m2.5 8.5 3.5 3.5 7.5-8"/></svg>'
-
-/** Icon-only and without a space between its tags, so a message's own words stay the whole of its text. */
-const COPY_BUTTON = document.createElement('template')
-COPY_BUTTON.innerHTML = `<button type="button" class="copy" title="Copy as Markdown" aria-label="Copy as Markdown">${COPY_ICONS}</button>`
-
-/** The Markdown the message was written in, not the HTML it was rendered to. The clipboard is the host's, so the text goes there to be written. */
-function copyButton(markdown: () => string): HTMLButtonElement {
-  const button = COPY_BUTTON.content.firstElementChild!.cloneNode(true) as HTMLButtonElement
-  let revert: number | undefined
-  button.addEventListener('click', () => {
-    post({ type: 'copy_text', text: markdown() })
-    button.classList.add('copied')
-    window.clearTimeout(revert)
-    revert = window.setTimeout(() => button.classList.remove('copied'), 1500)
-  })
-  return button
-}
-
-function block(className: string, text: string, render: (text: string, into: HTMLElement) => void = plainText): HTMLElement {
-  const element = document.createElement('article')
-  element.className = className
-  render(text, element)
-  return element
-}
-
-function plainText(text: string, into: HTMLElement): void {
-  into.textContent = text
-}
-
-/** A shell call's description and its commands, one per line; nothing when the input holds no command. */
-function shellCall(input: unknown): { description?: string; lines: string[] } | undefined {
-  const record = (input ?? {}) as Record<string, unknown>
-  if (typeof record['command'] !== 'string') return undefined
-  const description = typeof record['description'] === 'string' && record['description'].trim() ? record['description'] : undefined
-  const lines = splitShellCommand(record['command']).segments.map((s) => s.text)
-  return { ...(description ? { description } : {}), lines: lines.length ? lines : [record['command']] }
-}
-
-/**
- * The agent a subagent call spawns: the name it is addressable under, else
- * the type it was asked for. Our own delegating tool names it with `agent`,
- * or inside `define` for a one-off sub agent.
- */
-function subagentName(input: unknown): string | undefined {
-  if (typeof input !== 'object' || input === null) return undefined
-  const record = input as Record<string, unknown>
-  const define = typeof record['define'] === 'object' && record['define'] !== null ? (record['define'] as Record<string, unknown>) : undefined
-  const named = [record['name'], record['subagent_type'], record['agent'], define?.['name']].find((value) => typeof value === 'string' && value.trim())
-  return typeof named === 'string' ? named : undefined
-}
-
-/** Whose thread a step or a message belongs to, as a tag it carries ahead of its own text. */
-function agentTag(label: string): HTMLElement {
-  const tag = document.createElement('span')
-  tag.className = 'agent-name'
-  tag.textContent = label
-  return tag
-}
-
-/** What a delegation's row adds once it reports back: whether it answered in full, and what it spent. */
-function subAgentStatus(outcome: { status: 'complete' | 'partial'; toolCalls: number; tokens: number }): HTMLElement {
-  const tag = document.createElement('span')
-  tag.className = `sub-agent-status ${outcome.status}`
-  const spend = `${outcome.toolCalls} call${outcome.toolCalls === 1 ? '' : 's'} · ${outcome.tokens} tokens`
-  tag.textContent = outcome.status === 'partial' ? `partial · ${spend}` : spend
-  return tag
-}
-
-function summarizeInput(input: unknown): string {
-  if (typeof input !== 'object' || input === null) return ''
-  const record = input as Record<string, unknown>
-  if (typeof record['source'] === 'string' && typeof record['destination'] === 'string') return `${record['source']} → ${record['destination']}`
-  const key = ['command', 'file_path', 'pattern', 'path', 'query', 'description', 'task'].find((k) => typeof record[k] === 'string')
-  if (!key) return ''
-  const value = key === 'pattern' && typeof record['path'] === 'string' ? `${record[key]} in ${record['path']}` : (record[key] as string)
-  return value.length > 80 ? value.slice(0, 77) + '...' : value
-}
-
-/** The lines a partial read covered, as `:first–last` (1-based offset); a whole-file read has none. */
-function lineRange(input: unknown): string {
-  if (typeof input !== 'object' || input === null) return ''
-  const record = input as Record<string, unknown>
-  const offset = typeof record['offset'] === 'number' ? record['offset'] : undefined
-  const limit = typeof record['limit'] === 'number' ? record['limit'] : undefined
-  if (offset === undefined && limit === undefined) return ''
-  const first = offset ?? 1
-  return `:${first}–${limit === undefined ? '' : first + limit - 1}`
 }
 
 customElements.define('chat-transcript', ChatTranscript)

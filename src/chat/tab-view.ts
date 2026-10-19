@@ -17,6 +17,7 @@ import type { FeatureCleanup, CleanupState } from './feature-cleanup'
 import type { PlanActions } from './plan-actions'
 import type { SessionTracker } from './session-tracker'
 import { refusal } from './phase-runs'
+import type { WindowLinkControl } from '../cross-window/cross-window'
 
 /** Every run the tab holds, oldest first: one feature's sessions, or the one session that belongs to no feature. */
 export function runsOf(sessions: SessionManager, record: SessionRecord): SessionRecord[] {
@@ -53,6 +54,7 @@ export type TabViewDeps = {
   cleanup: FeatureCleanup
   planActions: PlanActions
   allowWrites: SessionSwitch
+  windowLinks: WindowLinkControl
 }
 
 /**
@@ -92,8 +94,9 @@ export class TabView {
   }
 
   runControls(run: SessionRecord): RunControls {
-    const { sessions, allowWrites, tracker } = this.deps
+    const { sessions, allowWrites, tracker, windowLinks } = this.deps
     const mcp = tracker.mcpServersOf(run.id)
+    const windowLink = windowLinks.viewOf(run.id)
     return {
       ...runRef(run),
       profileName: run.profile.name,
@@ -103,6 +106,7 @@ export class TabView {
       // A session granted full access writes wherever the rules let it, and the switch is its own again.
       ...(offersAllowWrites(actingMode(run)) ? { allowWrites: allowWrites.isEnabled(run.id) } : {}),
       ...(mcp ? { mcp } : {}),
+      ...(windowLink ? { windowLink } : {}),
     }
   }
 

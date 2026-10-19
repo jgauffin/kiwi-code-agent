@@ -4,6 +4,7 @@ import type { RunLog } from '../runs/run-log'
 import type { QuestionOutcome } from './user-question'
 import type { ToolUse } from './hooks'
 import type { Grant } from '../permissions/grants'
+import { featureSlug } from '../phases/feature-slug'
 import { SessionEngineHost } from './session-engine-host'
 import { SessionControl } from './session-control'
 
@@ -205,6 +206,13 @@ export type CallPasses = (sessionId: string, call: ToolUse) => Promise<boolean>
 
 const nothingPasses: CallPasses = async () => false
 
+/** What the person does in a session that a linked window's agent exchange must hear of. */
+export interface PersonsWord {
+  /** Returns what the other window's agent said while the person had interrupted, to be read with their message. */
+  personSpoke(sessionId: string): string | undefined
+  personInterrupted(sessionId: string): void
+}
+
 /**
  * A stored record in today's shape: one written before modes existed is a chat, one stored as `opened` has full access,
  * and a docs evaluation, a session type that is gone, is the chat it became once it had reported.
@@ -223,6 +231,8 @@ export class SessionManager {
   private records: SessionRecord[]
   private readonly host: SessionEngineHost
   private readonly control: SessionControl
+  private readonly removedListeners: Array<(sessionId: string) => void> = []
+  private exchange: PersonsWord | undefined
 
   constructor(
     private readonly store: SessionStore,
@@ -297,6 +307,21 @@ export class SessionManager {
     return record
   }
 
+  /**
+   * Every run on the feature whose spec went by `fromSlug` follows it to its
+   * new name; a title the extension gave is given again, one the person or a
+   * task named is kept.
+   */
+  async followFeatureRename(fromSlug: string, feature: string): Promise<void> {
+    const moved = this.records.filter((r) => r.feature !== undefined && featureSlug(r.feature) === fromSlug)
+    if (moved.length === 0) return
+    for (const record of moved) {
+      if (record.title === titleFor(record.mode, record.feature)) record.title = titleFor(record.mode, feature)
+      record.feature = feature
+    }
+    await this.store.save(this.records)
+  }
+
   async grantFullAccess(id: string, continuesOn?: ModelProfile): Promise<void> {
     await this.control.grantFullAccess(id, continuesOn)
   }
@@ -321,7 +346,30 @@ export class SessionManager {
 
   /** `label` marks text the extension wrote: the chat and the title show it in the text's place. */
   async send(id: string, text: string, label?: string): Promise<void> {
-    await this.control.send(id, text, label)
+    // What the other window's agent said while the person had interrupted is read on this turn, ahead of their message.
+    const held = this.exchange?.personSpoke(id)
+    if (held === undefined) return this.control.send(id, text, label)
+    await this.control.send(id, `${held}\n\n${text}`, label ?? text)
+  }
+
+  /** Lets the session's turns know the person spoke or interrupted, for the agent exchange with a linked window. */
+  attachExchange(exchange: PersonsWord): void {
+    this.exchange = exchange
+  }
+
+  /** An event of the session's own, outside its engine: logged and shown like the engine's. */
+  async record(id: string, event: SessionEvent): Promise<void> {
+    await this.host.emit(this.require(id), event)
+  }
+
+  /** The session's agent is in a turn now. */
+  isInTurn(id: string): boolean {
+    return this.host.inTurn(id)
+  }
+
+  /** A turn on what another agent said, not shown as the person's message. */
+  async startTurnFromAgent(id: string, text: string): Promise<void> {
+    await this.control.sendFromAgent(id, text)
   }
 
   async respondToPermission(id: string, requestId: string, decision: PermissionDecision): Promise<void> {
@@ -341,6 +389,12 @@ export class SessionManager {
   }
 
   async interrupt(id: string): Promise<void> {
+    this.exchange?.personInterrupted(id)
+    await this.host.interrupt(id)
+  }
+
+  /** Ends the turn in flight for a pause of the linked conversation: unlike the person's Stop, the other agent may still reach this one once it resumes. */
+  async endTurn(id: string): Promise<void> {
     await this.host.interrupt(id)
   }
 
@@ -374,6 +428,12 @@ export class SessionManager {
     this.records = this.records.filter((r) => r.id !== id && r.parentId !== id)
     this.host.forget(id)
     await this.store.save(this.records)
+    for (const listener of this.removedListeners) listener(id)
+  }
+
+  /** Told of each session once it is deleted, for what hangs on it outside the list. */
+  onRemoved(listener: (sessionId: string) => void): void {
+    this.removedListeners.push(listener)
   }
 
   async transcript(id: string): Promise<SessionEvent[]> {

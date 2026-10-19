@@ -15,6 +15,7 @@ import type { PlanActions } from './plan-actions'
 import type { SessionTracker } from './session-tracker'
 import type { TabView } from './tab-view'
 import type { PermissionStore, ProfileDefaultsStore } from './chat-view-provider'
+import type { WindowLinkControl } from '../cross-window/cross-window'
 
 /** One kind of message from the tab. */
 export type WebviewMessage<T extends FromWebview['type']> = Extract<FromWebview, { type: T }>
@@ -26,6 +27,7 @@ export type MessageRouterDeps = {
   registeredModels: () => ModelOffer[]
   profileDefaults: ProfileDefaultsStore
   allowWrites: SessionSwitch
+  windowLinks: WindowLinkControl
   permissions: PermissionStore
   agentsMd: AgentsMdOffers
   tracker: SessionTracker

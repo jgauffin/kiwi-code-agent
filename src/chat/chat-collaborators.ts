@@ -20,6 +20,7 @@ import type { RemoteAlertPort } from '../remote-control/alerts'
 import { RemoteActions } from './remote-actions'
 import { listDraftPlans } from '../agent/phases/plan-list'
 import type { ChatViewProvider, PermissionStore, ProfileDefaultsStore } from './chat-view-provider'
+import type { WindowLinkControl } from '../cross-window/cross-window'
 
 export type ConstructorDeps = {
   extensionUri: vscode.Uri
@@ -37,6 +38,7 @@ export type ConstructorDeps = {
   pushDefault: () => boolean
   /** One prompt on the model new plan sessions run on, answered as text: for the small asks that are not a session. */
   ask: (prompt: string) => Promise<string>
+  windowLinks: WindowLinkControl
 }
 
 export type Collaborators = {
@@ -175,8 +177,8 @@ function buildTracker(
 }
 
 function buildTabView(deps: ConstructorDeps, tracker: SessionTracker, build: FeatureBuild, cleanup: FeatureCleanup, planActions: PlanActions): TabView {
-  const { workspaceRoot, sessions, allowWrites } = deps
-  return new TabView({ workspaceRoot, sessions, tracker, build, cleanup, planActions, allowWrites })
+  const { workspaceRoot, sessions, allowWrites, windowLinks } = deps
+  return new TabView({ workspaceRoot, sessions, tracker, build, cleanup, planActions, allowWrites, windowLinks })
 }
 
 function buildBroadcaster(deps: ConstructorDeps, panels: PanelRegistry, tabView: TabView): StateBroadcaster {
@@ -193,7 +195,7 @@ function buildRouter(
   cleanup: FeatureCleanup,
   build: FeatureBuild,
 ): MessageRouter {
-  const { workspaceRoot, sessions, profileFor, registeredModels, profileDefaults, allowWrites, permissions, agentsMd, ask } = deps
+  const { workspaceRoot, sessions, profileFor, registeredModels, profileDefaults, allowWrites, permissions, agentsMd, ask, windowLinks } = deps
   return new MessageRouter({
     workspaceRoot,
     sessions,
@@ -202,6 +204,7 @@ function buildRouter(
     registeredModels,
     profileDefaults,
     allowWrites,
+    windowLinks,
     permissions,
     agentsMd,
     tracker,

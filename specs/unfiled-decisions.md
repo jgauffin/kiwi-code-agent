@@ -184,7 +184,27 @@
 - decided: Writing and deleting in a session's scratch folder run unasked, but running a program the session wrote there is still asked like any other command, and sessions are told to compute in the sandboxed script tool instead and to write a script only for what that tool cannot do (spawning a process, loading a package, reaching the network).
 - affects: permission rules, chat
 
+### A spec carries an id, and its feature's files and sessions follow it
+- decided: The spec is the master of everything kept about its feature: each spec carries a stable id in its front matter, given by the extension once the spec exists, and when the extension starts, a spec found under a new file name takes its working files and every session on its feature along to that name. A spec renamed in the file and in its feature line at once is still the same feature.
+- affects: spec folders, feature lifecycle, spec drafts, sessions and tabs, picking up a plan
+
+### Nothing is listed as a plan without its spec
+- decided: The Sessions view and the new-session screen list a feature only while its spec exists on disk, so a planning session that has not written its spec yet, or whose spec was deleted, is not offered there; its working files are left to the ordinary expiry of a feature whose spec is gone.
+- affects: sessions and tabs, picking up a plan, starting a new session, feature lifecycle
+
+### Specs and recent chats stand side by side on the new-session screen
+- decided: On the new-session screen's Code tab, the specs to pick up and the conversations to reopen are two lists in two columns, specs on the left and Recent chats on the right, stacked one above the other only where the view is too narrow for both.
+- affects: starting a new session, picking up a plan, spec folders
+
 ### MCP servers start on the first call to one of their tools
 - decided: A session offers each MCP server's tools as the server last listed them in this workspace and starts the server only when one of those tools is called (a server never run here, or whose configuration changed, is started once to learn its tools), and the person can start or stop each server from the composer, a stopped one starting again on its next call.
 - affects: chat, docs/settings.md, docs/intent/agent.md
+
+### A message from a linked window is recorded where it happened, and the export renders it
+- decided: A message one agent receives from a chat session linked in another window is an event of the session's run log, carrying the workspace it came from; an exported transcript shows it the way it shows every other recorded event, so the link owns what is recorded and the export owns only how it reads.
+- affects: Cross-window chat, Session transcript export
+
+### Linked agents keep their messages short and leave each other's side alone
+- decided: An agent writing to the agent of a linked window is told to be succinct and to the point, saying what changed on its own side, what it needs or what it asks, and never telling the other agent how to do the work on that agent's side.
+- affects: Cross-window chat
 

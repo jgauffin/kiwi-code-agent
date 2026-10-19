@@ -37,6 +37,10 @@ export async function handleRunMessage(deps: MessageRouterDeps, message: FromWeb
     case 'set_default_profile':
       await setDefaultProfile(deps, message)
       return true
+    case 'window_link':
+      if (shown) await deps.windowLinks.act(deps.tabView.targetOf(shown, message.sessionId, false).id, message.act)
+      await deps.sendState()
+      return true
     default:
       return false
   }

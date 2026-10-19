@@ -104,7 +104,7 @@ export class SessionsTree implements vscode.TreeDataProvider<SessionNode> {
 
   /** Opened by its feature, so a spec whose session is gone starts a planner on it rather than showing nothing. */
   private planItem(plan: PlanEntry): vscode.TreeItem {
-    const stage = plan.status ?? 'no spec yet'
+    const stage = plan.status
     const item = plan.record ? this.sessionItem(plan.record) : new vscode.TreeItem(plan.feature)
     item.id = `plan:${plan.feature}`
     item.label = plan.feature

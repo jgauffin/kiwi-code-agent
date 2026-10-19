@@ -56,7 +56,7 @@ function withFolderHeadings<T extends { folder?: string }>(items: T[]): (T & { h
   return [...root, ...grouped.flatMap(([folder, group]) => group.map((item, i) => ({ ...item, ...(i === 0 ? { heading: folder } : {}) })))]
 }
 
-const STATUS_HINT: Record<NonNullable<ResumablePlan['status']>, string> = {
+const STATUS_HINT: Record<ResumablePlan['status'], string> = {
   draft: 'draft: review, check or approve',
   approved: 'approved: ready to implement',
   implemented: 'implemented: ready to verify',
@@ -88,7 +88,7 @@ const CONVERSATION: Partial<Record<SessionMode, { icon: string; label: string }>
 const when = (iso: string): string => new Date(iso).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
 
 const planHint = (plan: ResumablePlan): string => {
-  const stage = plan.status ? STATUS_HINT[plan.status] : 'no spec yet'
+  const stage = STATUS_HINT[plan.status]
   // How a draft came to be and how far its review got matter only while it still is one.
   const parts = [stage, ...(plan.authored ? [AUTHORED_HINT[plan.authored]] : []), ...(plan.review ? [REVIEW_HINT[plan.review]] : [])]
   const summary = parts.join(' · ')
@@ -142,14 +142,15 @@ function renderData(screen: Screen, mode: Card, profileDefaults: ProfileDefaults
     ...namingData(naming),
     profiles: names.map((name) => ({ name, selected: name === active })),
     // Plans and chats are code work; what waits to be filed is counted on the maintenance tab instead.
-    any: screen === 'code' && (pickUp.plans.length > 0 || chats.length > 0),
-    anySpecs: pickUp.plans.length > 0,
+    anyPickUp: screen === 'code' && (chats.length > 0 || pickUp.plans.length > 0),
+    anyChats: screen === 'code' && chats.length > 0,
+    anySpecs: screen === 'code' && pickUp.plans.length > 0,
     noSpecMatches: pickUp.plans.length > 0 && plans.length === 0,
     notDone: specFilter.notDone,
     unfiled,
     nothingUnfiled: unfiled === 0,
     filingHint: unfiled > 0 ? `${unfiled} decided, not yet in the specs or docs` : 'Nothing waiting to be filed',
-    plans: withFolderHeadings(plans).map((p) => ({ ...p, stage: p.status ?? 'unwritten', hint: planHint(p) })),
+    plans: withFolderHeadings(plans).map((p) => ({ ...p, stage: p.status, hint: planHint(p) })),
     chats: chats.map(chatPick),
     ...groupUpdates(updates),
     noUpdates: updates.length === 0,
@@ -297,29 +298,36 @@ export class NewSessionView extends HTMLElement {
       <p class="hint">Reads docs/**, the README and the specs, never the code, in three stages: cut what a settled spec already says, turn behaviour no spec holds into draft specs, then fix what makes the rest hard to find or cite. Each stage proposes first, and you can stop after any of them. Each change to a doc is one confirmed write, asked for by you.</p>
       <button type="submit">Clean up the docs</button>
     </form>
-    <section class="pick-up" if="any">
-      <h3>Pick up where you left off</h3>
-      <div class="spec-filter" if="anySpecs">
-        <input type="search" name="specFilter" placeholder="Filter specs" r-input="filterSpecs(event)">
-        <label><input type="checkbox" checked="{{notDone}}" r-change="showNotDone(event)"> Not done</label>
-      </div>
-      <p class="hint" if="noSpecMatches">No spec matches.</p>
-      <ul class="picks">
-        <li loop="p in plans">
-          <h4 class="folder-heading" if="p.heading">{{p.heading}}</h4>
-          <button type="button" class="pick plan {{p.stage}}" title="Ctrl+click or middle-click to open in a tab of its own and stay here" r-click="resume(p, event)" r-auxclick="resumeAside(p, event)" r-mousedown="holdMiddle(event)">
-            <span class="icon">📐</span>
-            <span class="what"><strong>{{p.feature}}</strong><span class="hint">{{p.hint}}</span></span>
-          </button>
-        </li>
-        <li loop="c in chats">
-          <button type="button" class="pick chat" r-click="reopen(c)">
-            <span class="icon">{{c.icon}}</span>
-            <span class="what"><strong>{{c.title}}</strong><span class="hint">{{c.hint}}</span></span>
-          </button>
-        </li>
-      </ul>
-    </section>
+    <div class="pick-ups" if="anyPickUp">
+      <section class="pick-up specs" if="anySpecs">
+        <h3>Specs</h3>
+        <div class="spec-filter">
+          <input type="search" name="specFilter" placeholder="Filter specs" r-input="filterSpecs(event)">
+          <label><input type="checkbox" checked="{{notDone}}" r-change="showNotDone(event)"> Not done</label>
+        </div>
+        <p class="hint" if="noSpecMatches">No spec matches.</p>
+        <ul class="picks">
+          <li loop="p in plans">
+            <h4 class="folder-heading" if="p.heading">{{p.heading}}</h4>
+            <button type="button" class="pick plan {{p.stage}}" title="Ctrl+click or middle-click to open in a tab of its own and stay here" r-click="resume(p, event)" r-auxclick="resumeAside(p, event)" r-mousedown="holdMiddle(event)">
+              <span class="icon">📐</span>
+              <span class="what"><strong>{{p.feature}}</strong><span class="hint">{{p.hint}}</span></span>
+            </button>
+          </li>
+        </ul>
+      </section>
+      <section class="pick-up chats" if="anyChats">
+        <h3>Recent chats</h3>
+        <ul class="picks">
+          <li loop="c in chats">
+            <button type="button" class="pick chat" r-click="reopen(c)">
+              <span class="icon">{{c.icon}}</span>
+              <span class="what"><strong>{{c.title}}</strong><span class="hint">{{c.hint}}</span></span>
+            </button>
+          </li>
+        </ul>
+      </section>
+    </div>
   `)
   private screen: Screen = 'code'
   private mode: Card = 'chat'

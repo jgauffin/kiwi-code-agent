@@ -49,6 +49,8 @@ import type { Verifier } from './chat/feature-runs'
 import { readCleanupLimits, readModelSettings, type ConfigPort } from './settings/settings-store'
 import { errorMessage } from './error-message'
 import { EngineStarters, type EngineStart } from './session-engines-starters'
+import { MessagesFromOtherWindow, type AgentExchange } from './cross-window/agent-exchange'
+import { sendToLinkedAgentTool } from './cross-window/send-to-linked-agent-tool'
 
 /**
  * Tools the extension provides to every engine, beside the engine's own file
@@ -72,6 +74,8 @@ export type EngineDeps = {
   buildDocsMap: (ignored: string[], onProgress: (line: string) => void) => Promise<DocsMapResult>
   /** A session's past events, for an engine that rebuilds its conversation from the run log. */
   conversation: (sessionId: string) => Promise<SessionEvent[]>
+  /** How a chat session's agent reaches the agent of the session linked to it in another window. */
+  exchange: () => AgentExchange
 }
 
 /** Starts a session's engine: its mode's setup, the hooks every session is held to, and the engine its profile names. */
@@ -145,6 +149,8 @@ export class SessionEngines {
       codeSearchTool(setup.readable),
       specSearchTool(setup.readable),
       ...(record.feature ? taskBoardTools(record.feature, new FileHands(workspaceRoot, record.id, record.mode, record.feature)) : []),
+      // Offered whether or not the session is linked yet: a link made mid-session needs no restart, and the tool says when there is none.
+      ...(record.mode === 'chat' ? [sendToLinkedAgentTool(record.id, this.deps.exchange())] : []),
     ]
     // A mode with a tool set of its own names no MCP server; only a chat takes the workspace's.
     if (!setup.toolNames) onProgress('Reading the MCP servers')
@@ -211,6 +217,7 @@ export class SessionEngines {
         notice,
         new UnfiledContract(workspaceRoot),
         new MemoryContract(workspaceRoot),
+        ...(record.mode === 'chat' ? [new MessagesFromOtherWindow(record.id, this.deps.exchange())] : []),
         recorder,
       ),
     }

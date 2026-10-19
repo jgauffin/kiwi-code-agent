@@ -4,6 +4,9 @@ import type { Effort } from '../../agent/session/model-profile'
 import { LinkedFilesRow } from './linked-files-row'
 import './context-meter'
 import type { ContextMeter, ContextUsage } from './context-meter'
+import './window-link-control'
+import type { WindowLinkControl } from './window-link-control'
+import type { WindowLinkState } from '../../cross-window/cross-window'
 import {
   AllowWritesToggledEvent,
   InterruptRequestedEvent,
@@ -53,6 +56,8 @@ type Switches = {
   approvePlan?: boolean
   /** An engine holds the conversation, so it can be compacted. */
   compactable?: boolean
+  /** A chat session's link to a chat of another window; absent on any other run. */
+  windowLink?: WindowLinkState | undefined
 }
 
 /**
@@ -90,6 +95,7 @@ export class ChatComposer extends HTMLElement {
           <span class="effort-current" if="effortReadOnly" title="How hard the model thinks on this phase, as its profile sets it.">{{effortCurrent}} effort</span>
           <button type="button" class="approve-plan" if="approvePlan" title="Approve the plan and build it here, with the full tool set." r-click="approvePlan()">Approve plan</button>
           <linked-files-row class="linked-files"></linked-files-row>
+          <window-link-control hidden="{{noWindowLink}}"></window-link-control>
         </span>
         <context-meter class="context"></context-meter>
         <button type="button" class="stop" r-click="stop()">Stop</button>
@@ -173,6 +179,7 @@ export class ChatComposer extends HTMLElement {
         effortReadOnly: model !== undefined && model.options === undefined && model.effort !== undefined,
         effortCurrent: model?.effort ?? '',
         approvePlan: approvePlan ?? false,
+        noWindowLink: this.switches.windowLink === undefined,
       },
       {
         switchServer: (s: ServerView) => this.dispatchEvent(new McpSwitchRequestedEvent(s.name, s.switchTo === 'start')),
@@ -203,6 +210,7 @@ export class ChatComposer extends HTMLElement {
       },
     )
     ;(this.querySelector('context-meter') as ContextMeter).update(this.context, this.switches.compactable ?? false)
+    if (this.switches.windowLink) (this.querySelector('window-link-control') as WindowLinkControl).setLink(this.switches.windowLink)
   }
 
   private get textarea(): HTMLTextAreaElement {

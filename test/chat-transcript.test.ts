@@ -494,6 +494,27 @@ describe('copying a message out of the transcript', () => {
     expect(copied(view, 'article.assistant')).toEqual([{ type: 'copy_text', text: '# Done\n\nIt is **finished**.' }])
   })
 
+  it('a_message_from_the_other_windows_agent_is_rendered_as_markdown_under_who_sent_it_and_copies_its_source', () => {
+    const view = transcript()
+    const text = '## Contract change\n\n- `orderId` replaces `id`\n- `POST /orders` returns it'
+    view.reset([{ type: 'agent_message', direction: 'received', workspace: 'backend', text }], true)
+
+    const message = view.querySelector('article.agent-message.received')!
+    expect(message.querySelector('.from')!.textContent).toBe('From the agent in backend')
+    expect(message.querySelector('.text h2')!.textContent).toBe('Contract change')
+    expect([...message.querySelectorAll('.text li')].map((li) => li.textContent)).toEqual(['orderId replaces id', 'POST /orders returns it'])
+    expect(copied(view, 'article.agent-message')).toEqual([{ type: 'copy_text', text }])
+  })
+
+  it('a_message_sent_to_the_other_windows_agent_names_where_it_went', () => {
+    const view = transcript()
+    view.reset([{ type: 'agent_message', direction: 'sent', workspace: 'backend', text: 'Rename **id**' }], true)
+
+    const message = view.querySelector('article.agent-message.sent')!
+    expect(message.querySelector('.from')!.textContent).toBe('To the agent in backend')
+    expect(message.querySelector('.text strong')!.textContent).toBe('id')
+  })
+
   it('a_message_still_streaming_copies_the_text_that_has_arrived_so_far', () => {
     const view = transcript()
     view.apply({ type: 'assistant_text', messageId: 'm1', delta: 'Half a ' })

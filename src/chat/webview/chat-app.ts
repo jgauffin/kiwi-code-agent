@@ -254,6 +254,7 @@ function switchesFor(target: RunControls | undefined, tab: SessionTab | undefine
     // Only a code plan waits on an approval, and it is the only session that is granted full access.
     approvePlan: tab?.mode === 'code-plan' && tab.access === 'scoped',
     compactable: target?.live ?? false,
+    windowLink: target?.windowLink,
   }
 }
 

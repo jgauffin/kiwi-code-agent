@@ -1,6 +1,7 @@
 ---
 feature: Remote control
 status: verified
+id: 4c70019f-ab59-404c-99c5-72dfa0aa33f9
 ---
 
 # Remote control

@@ -22,6 +22,7 @@ import type { RemoteAlertPort } from '../remote-control/alerts'
 import type { RemoteCommand } from '../remote-control/remote-commands'
 import type { RemoteActions } from './remote-actions'
 import { wireCollaborators } from './chat-collaborators'
+import type { WindowLinkControl } from '../cross-window/cross-window'
 
 export { CHAT_PANEL_TYPE }
 
@@ -77,6 +78,7 @@ export class ChatViewProvider {
     pushDefault: () => boolean,
     /** One prompt on the model new plan sessions run on, answered as text: for the small asks that are not a session. */
     ask: (prompt: string) => Promise<string>,
+    windowLinks: WindowLinkControl,
   ) {
     const built = wireCollaborators(this, {
       extensionUri,
@@ -93,6 +95,7 @@ export class ChatViewProvider {
       pushDefault,
       agentsMd,
       ask,
+      windowLinks,
     })
     this.panels = built.panels
     this.cleanup = built.cleanup

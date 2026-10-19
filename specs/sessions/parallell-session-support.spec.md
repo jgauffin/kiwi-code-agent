@@ -1,6 +1,7 @@
 ---
 feature: Parallell session support
 status: verified
+id: 15143a17-9eb5-451c-8b29-94e41feaf9b2
 ---
 
 # Parallell session support

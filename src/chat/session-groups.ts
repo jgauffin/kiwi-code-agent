@@ -5,14 +5,14 @@ import type { PlanStatus, PlanSummary, ReviewProgress } from '../agent/phases/pl
 import type { Authorship } from '../agent/phases/spec-status'
 
 /**
- * A planned feature: its spec's stage (absent while the planner has not written
- * it), the newest plan session on it, if one is kept, and when any run on the
- * feature was last worked in. `authored` and `review` say how a draft came to
- * be and how far its review got; absent once the spec is settled.
+ * A planned feature: its spec's stage, the newest plan session on it, if one
+ * is kept, and when any run on the feature was last worked in. `authored` and
+ * `review` say how a draft came to be and how far its review got; absent once
+ * the spec is settled.
  */
 export type PlanEntry = {
   feature: string
-  status: PlanStatus | undefined
+  status: PlanStatus
   record: SessionRecord | undefined
   lastActiveAt: string | undefined
   authored: Authorship | undefined
@@ -45,10 +45,12 @@ function lastTouchedByFeature(records: SessionRecord[]): Map<string, string> {
  * The runs a plan starts (checks, implementers, cleanups) and the docs map
  * build are its machinery, not something the person opens by name. A plan is
  * its spec on disk: the session that wrote it may be gone, and the feature is
- * still unfinished. A verified feature is listed while its plan session is
- * kept, so work just finished is not gone from the list; a verified spec
- * nobody has a session on is history. Everything comes newest worked in
- * first, then the specs nobody has opened here.
+ * still unfinished. A plan session with no spec under its name is not listed:
+ * the spec is the master, and the session follows it once it is written. A
+ * verified feature is listed while its plan session is kept, so work just
+ * finished is not gone from the list; a verified spec nobody has a session on
+ * is history. Everything comes newest worked in first, then the specs nobody
+ * has opened here.
  */
 export function sessionGroups(records: SessionRecord[], specs: PlanSummary[]): SessionGroups {
   const chats = records.filter((r) => CONVERSATIONS.has(r.mode) && !r.parentId).sort((a, b) => newestFirst(lastActive(a), lastActive(b)))
@@ -60,7 +62,8 @@ export function sessionGroups(records: SessionRecord[], specs: PlanSummary[]): S
     const slug = featureSlug(r.feature)
     if (plans.has(slug)) continue
     const spec = bySlug.get(slug)
-    plans.set(slug, { feature: spec?.feature ?? r.feature, status: spec?.status, record: r, lastActiveAt: touched.get(slug), authored: spec?.authored, review: spec?.review, folder: spec?.folder })
+    if (!spec) continue
+    plans.set(slug, { feature: spec.feature, status: spec.status, record: r, lastActiveAt: touched.get(slug), authored: spec.authored, review: spec.review, folder: spec.folder })
   }
   const opened = [...plans.values()].sort((a, b) => newestFirst(a.lastActiveAt, b.lastActiveAt))
   const unopened: PlanEntry[] = []

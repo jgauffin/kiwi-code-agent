@@ -1,5 +1,6 @@
 import * as vscode from 'vscode'
-import { SessionManager, type SessionRecord, type SessionStore } from './agent/session/session-manager'
+import { SessionManager, type SessionListener, type SessionRecord, type SessionStore } from './agent/session/session-manager'
+import type { AgentExchange } from './cross-window/agent-exchange'
 import { offeredModels, resolveStep, type ModelOffer, type ModelProfile, type Step } from './agent/session/model-profile'
 import { RunLog } from './agent/runs/run-log'
 import { MCP_CONFIG_FILE, readMcpConfig } from './agent/mcp/mcp-config'
@@ -132,6 +133,7 @@ export function createEngines(params: {
   planIgnore: () => string[]
   getChat: () => ChatViewProvider
   getSessions: () => SessionManager
+  getExchange: () => AgentExchange
 }): SessionEngines {
   return new SessionEngines({
     context: params.context,
@@ -144,6 +146,7 @@ export function createEngines(params: {
     planIgnore: params.planIgnore,
     buildDocsMap: (ignored, onProgress) => params.getChat().buildDocsMap(ignored, onProgress),
     conversation: (id) => params.getSessions().conversation(id),
+    exchange: params.getExchange,
   })
 }
 
@@ -154,12 +157,17 @@ export function createSessions(
   workspaceRoot: string,
   policyFor: (sessionId: string) => PermissionPolicy,
   getChat: () => ChatViewProvider,
+  /** Told of every event besides the chat, for what follows a session's turns from outside it. */
+  observe: SessionListener,
 ): SessionManager {
   return new SessionManager(
     store,
     (record, onProgress) => engines.create(record, onProgress),
     (id) => RunLog.forSession(workspaceRoot, id),
-    (id, event) => getChat().onSessionEvent(id, event),
+    (id, event) => {
+      getChat().onSessionEvent(id, event)
+      observe(id, event)
+    },
     // The edit diff and the command lines are added once, before the event is logged, so a reload shows the same thing.
     async (id, event) => policyFor(id).decorate((await engines.recorderOf(id)?.decorate(event)) ?? event),
     async (id, call) => {

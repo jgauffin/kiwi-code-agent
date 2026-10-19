@@ -2,7 +2,7 @@
   "name": "kiwipow-agent",
   "displayName": "Kiwipow Agent",
   "description": "Coding sessions in VS Code with a choice of model engine per session.",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "publisher": "CoderrAB",
   "icon": "docs/logos/kiwipow-agent-logo-128.png",
   "galleryBanner": {
@@ -369,6 +369,12 @@
           "default": false,
           "scope": "resource",
           "description": "Lets this workspace pair with a phone over the forwarding service, from the Remote tab of Settings. Off by default while the service is still being built."
+        },
+        "kiwiAgent.linkedAgentMessageLimit": {
+          "type": "integer",
+          "default": 20,
+          "minimum": 1,
+          "description": "How many messages the agents of two linked chat sessions in different windows may exchange without a word from you; the next one is refused and you are told."
         },
         "kiwiAgent.remoteControl.serviceUrl": {
           "type": "string",

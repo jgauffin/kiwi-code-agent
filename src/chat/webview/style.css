@@ -1306,11 +1306,20 @@ chat-app {
       }
     }
 
-    /* What can be picked up again: plans on disk, chats with no tab open, decisions waiting to be filed. */
-    & .pick-up {
+    /* Specs on the left, chats on the right; stacked once the view is too narrow for both, and one list alone takes the full width. */
+    & .pick-ups {
       margin-top: 1.2rem;
       border-top: 1px solid var(--vscode-panel-border);
       padding-top: 0.8rem;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+      gap: 1rem 1.5rem;
+      align-items: start;
+    }
+
+    /* What can be picked up again: specs on disk, chats with no tab open. */
+    & .pick-up {
+      min-width: 0;
 
       & h3 {
         margin: 0 0 0.4rem;
@@ -1599,7 +1608,8 @@ chat-app {
      * transcript would read as louder than the conversation it belongs to.
      */
     & .user,
-    & .assistant {
+    & .assistant,
+    & .agent-message {
       position: relative;
 
       & > .copy {
@@ -1638,7 +1648,20 @@ chat-app {
       }
     }
 
-    & .assistant {
+    /* A message between the two windows' agents reads like a reply, set apart by a rule and the header naming the other window. */
+    & .agent-message {
+      border-left: 3px solid var(--vscode-charts-purple, var(--vscode-focusBorder));
+      padding-left: 0.6rem;
+
+      & .from {
+        font-size: 0.85em;
+        color: var(--vscode-descriptionForeground);
+        margin-bottom: 0.3rem;
+      }
+    }
+
+    & .assistant,
+    & .agent-message {
       & .thinking {
         opacity: 0.5;        white-space: pre-wrap;
         max-height: 8rem;
@@ -2397,6 +2420,33 @@ chat-app {
   }
 }
 
+/* A chat's link to a chat of another window: who it is with, and what can be done with it. */
+window-link-control {
+  & .window-link {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+
+  & button {
+    flex: none;
+    padding: 0.2rem 0.5rem;
+  }
+
+  & .with {
+    white-space: nowrap;
+  }
+
+  & .disconnected .with,
+  & .ended .with {
+    opacity: 0.7;
+  }
+
+  & .paused .with {
+    color: var(--vscode-editorWarning-foreground, inherit);
+  }
+}
+
 /* The linked files beside the button that links them: the composer's and the new-session card's. */
 linked-files-row {
   display: flex;
@@ -2568,6 +2618,7 @@ button {
   &.approve-plan,
   &.compact,
   &.decline,
+  window-link-control &,
   .tidy + &.move {
     background: var(--vscode-button-secondaryBackground, var(--vscode-input-background));
     color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));

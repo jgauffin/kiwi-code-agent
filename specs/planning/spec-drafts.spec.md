@@ -1,6 +1,7 @@
 ---
 feature: Spec drafts
 status: verified
+id: 40e08169-dcb7-45d9-a100-5ec0c0e93623
 ---
 
 # Spec drafts

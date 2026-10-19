@@ -44,6 +44,8 @@ import {
 } from './session-wiring'
 import type { PersonGrantsStore } from './agent/permissions/grant-stores'
 import { createRemoteControl, pushDefault, remoteAlertPort, remoteControlPort, syncRemoteControlConnection } from './remote-control/remote-control-wiring'
+import type { CrossWindow } from './cross-window/cross-window'
+import { createCrossWindow } from './cross-window/cross-window-wiring'
 
 function createMemoryPort(workspaceRoot: string): MemoryPort {
   return {
@@ -180,6 +182,7 @@ function createChat(
   remoteControl: RemoteControlService,
   output: vscode.OutputChannel,
   ask: (prompt: string) => Promise<string>,
+  crossWindow: CrossWindow,
 ): ChatViewProvider {
   const provider = new ChatViewProvider(
     context.extensionUri,
@@ -199,6 +202,7 @@ function createChat(
     remoteAlertPort(remoteControl),
     pushDefault,
     ask,
+    crossWindow,
   )
   // The only way in from the phone: a command reaches the chat the same way a desk act would.
   remoteControl.onCommand((command) => {
@@ -279,8 +283,6 @@ export function activate(context: vscode.ExtensionContext): void {
   // Without a folder open the engine still needs a working directory that exists.
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? context.globalStorageUri.fsPath
   mkdirSync(workspaceRoot, { recursive: true })
-  runStartupMigrations(workspaceRoot, output)
-
   const store = createSessionStore(context)
   const verifier = createVerifier()
   const sizeLimits = createSizeLimits()
@@ -290,6 +292,8 @@ export function activate(context: vscode.ExtensionContext): void {
   let chat: ChatViewProvider
   let engines: SessionEngines
   let sessions: SessionManager
+  let crossWindow: CrossWindow
+  runStartupMigrations(workspaceRoot, output, () => sessions)
   const allowWritesControl = createAllowWritesControl(() => sessions, output)
   const projectCommands = createProjectCommands(workspaceRoot, verifier)
   const grants = createGrantSources(workspaceRoot, output)
@@ -299,8 +303,11 @@ export function activate(context: vscode.ExtensionContext): void {
   const planIgnore = (): string[] => vscode.workspace.getConfiguration('kiwiAgent').get<string[]>('planIgnore', [])
 
   const mcp = createMcp(workspaceRoot, () => sessions, output)
-  engines = createEngines({ context, output, workspaceRoot, mcp, verifier, policyFor, planIgnore, getChat: () => chat, getSessions: () => sessions })
-  sessions = createSessions(store, engines, workspaceRoot, policyFor, () => chat)
+  engines = createEngines({ context, output, workspaceRoot, mcp, verifier, policyFor, planIgnore, getChat: () => chat, getSessions: () => sessions, getExchange: () => crossWindow.exchange })
+  sessions = createSessions(store, engines, workspaceRoot, policyFor, () => chat, (id, event) =>
+    crossWindow.sessionEvent(id, event).catch((error: unknown) => output.appendLine(`cross-window chat: ${errorMessage(error)}`)),
+  )
+  crossWindow = createCrossWindow(context, workspaceRoot, sessions, () => chat.refresh(), output)
   const permissionStore = createPermissionStore(() => sessions, grants, workspaceRoot)
   const memoryPort = createMemoryPort(workspaceRoot)
   const bundles = createBundles(output, workspaceRoot)
@@ -311,7 +318,7 @@ export function activate(context: vscode.ExtensionContext): void {
   offerNewerModels(context, settings, output)
   // Naming a feature runs on what its planning would, so the one ask follows the profile rather than a model of its own.
   const ask = (prompt: string) => engines.ask(profileFor('plan'), prompt)
-  chat = createChat(context, sessions, settings, verifier, sizeLimits, allowWritesControl, permissionStore, workspaceRoot, agentsMd, remoteControl, output, ask)
+  chat = createChat(context, sessions, settings, verifier, sizeLimits, allowWritesControl, permissionStore, workspaceRoot, agentsMd, remoteControl, output, ask, crossWindow)
   const tree = createSessionsTree(sessions, workspaceRoot, chat)
 
   registerSubscriptions(context, output, chat, tree, sessions, settingsPanel, mcp, workspaceRoot, planIgnore)

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.10
+
+- Specs get an `id:` line in their front matter; rename a spec file and, at the next start, its task board, review and sessions follow it.
+- Plans whose spec is missing are no longer listed ("no spec yet" is gone).
+- New session: specs and recent chats are two columns, specs on the left, stacked when the view is narrow.
+- Link window, under a chat's composer, pairs it with a chat in another VS Code window on this machine by a code you copy across, so the two agents can message each other; pause, resume or unlink from either side. `kiwiAgent.linkedAgentMessageLimit` caps their exchange without you.
+
 ## 0.2.9
 
 - The research sub agent is offered in every session that can delegate, on Claude profiles too, not only in feature planning; each research is asked about once before it runs.

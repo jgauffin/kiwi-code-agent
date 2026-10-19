@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, type Dirent } from 'node:fs'
 import { join, relative } from 'node:path'
 import { KIWI_DIR } from '../kiwi-dir'
+import { featureSlug } from './feature-slug'
 import { ASK_USER_TOOL } from '../openai-session/tools/ask-user'
 import { MARKDOWN_SEARCH_TOOL } from '../openai-session/tools/markdown-search'
 import { DOC_READING } from '../openai-session/tools/markdown/outline-gate'
@@ -20,17 +21,7 @@ export const SPECS_DIR = 'specs'
 /** A feature's working files (review, decisions, tasks): the extension's own, beside its run logs, never committed. */
 export const WORK_DIR = `${KIWI_DIR}/${SPECS_DIR}`
 
-export function featureSlug(feature: string): string {
-  return (
-    feature
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/\p{M}/gu, '')
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 60) || 'feature'
-  )
-}
+export { featureSlug }
 
 /**
  * Where a feature's spec sits: at the root when it is there, or, failing

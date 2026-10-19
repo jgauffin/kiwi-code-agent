@@ -80,10 +80,10 @@ describe('sessionGroups', () => {
     expect(groups.plans).toEqual([])
   })
 
-  it('lists_a_plan_session_whose_spec_is_not_written_yet', () => {
-    const groups = sessionGroups([record('plan', 'plan', { feature: 'login' })], [])
+  it('lists_nothing_for_a_plan_session_whose_spec_is_missing_since_the_spec_is_the_master', () => {
+    const groups = sessionGroups([record('plan', 'plan', { feature: 'login' })], [spec('search')])
 
-    expect(groups.plans).toEqual([{ feature: 'login', status: undefined, record: expect.objectContaining({ id: 'plan' }), lastActiveAt: '2026-09-29T00:00:00.000Z' }])
+    expect(groups.plans.map((p) => p.feature)).toEqual(['search'])
   })
 
   it('orders_the_conversations_by_when_they_were_last_worked_in_not_by_when_they_started', () => {

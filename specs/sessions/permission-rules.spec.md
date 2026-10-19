@@ -1,6 +1,7 @@
 ---
 feature: Permission rules
 status: draft
+id: b2dd28c2-b97d-4510-93aa-28fddd475e45
 ---
 
 # Permission rules
