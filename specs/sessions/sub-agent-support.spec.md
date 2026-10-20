@@ -1,6 +1,6 @@
 ---
 feature: Sub agent support
-status: implemented
+status: verified
 authored: planned
 id: 18fdd954-6f3d-493a-9297-ca7249b60eac
 ---
