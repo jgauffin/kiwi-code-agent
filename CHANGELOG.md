@@ -20,6 +20,7 @@
 - Specs get an `id:` line in their front matter; rename a spec file and, at the next start, its task board, review and sessions follow it.
 - Plans whose spec is missing are no longer listed ("no spec yet" is gone).
 - New session: specs and recent chats are two columns, specs on the left, stacked when the view is narrow.
+- An MCP server whose tool schema chooses between shapes at its top level (`anyOf`, `oneOf`, `allOf`) no longer makes Claude refuse every turn with "input_schema does not support oneOf, allOf, or anyOf at the top level"; the tool is offered with all its branches' fields instead.
 - Link window, under a chat's composer, pairs it with a chat in another VS Code window on this machine by a code you copy across, so the two agents can message each other; pause, resume or unlink from either side. `kiwiAgent.linkedAgentMessageLimit` caps their exchange without you.
 
 ## 0.2.9

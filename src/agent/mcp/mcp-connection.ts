@@ -19,6 +19,38 @@ export interface McpConnection {
  */
 export type McpConnector = (name: string, config: McpServerConfig, onClosed: () => void) => Promise<McpConnection>
 
+const BRANCHES = ['anyOf', 'oneOf', 'allOf'] as const
+
+/**
+ * A server's tool as an engine may offer it. Claude refuses a tool whose
+ * schema chooses between shapes at its top level, and refuses the request
+ * carrying it, so one such tool would stop every turn of the session; the
+ * branches are folded into one object holding all their properties. The
+ * server validates its own input, so the looser schema costs nothing.
+ */
+export function offerable(info: McpToolInfo): McpToolInfo {
+  const schema = info.inputSchema
+  if (!BRANCHES.some((key) => key in schema)) return info
+  const properties: Record<string, unknown> = {}
+  collectProperties(schema, properties)
+  const rest = { ...schema }
+  for (const key of BRANCHES) delete rest[key]
+  return { ...info, inputSchema: { ...rest, type: 'object', properties } }
+}
+
+function collectProperties(schema: Record<string, unknown>, into: Record<string, unknown>): void {
+  if (isRecord(schema.properties)) Object.assign(into, schema.properties)
+  for (const key of BRANCHES) {
+    const branches = schema[key]
+    if (!Array.isArray(branches)) continue
+    for (const branch of branches) {
+      if (isRecord(branch)) collectProperties(branch, into)
+    }
+  }
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
+
 /** The name both engines, the permission rules and the transcript use for a server's tool. */
 export const mcpToolName = (server: string, tool: string): string => `mcp__${server}__${tool}`
 

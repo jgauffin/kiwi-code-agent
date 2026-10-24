@@ -27,6 +27,34 @@ describe('McpToolHost', () => {
     expect(host.statuses()).toEqual([{ name: 'docs', status: 'connected' }])
   })
 
+  it('a_schema_choosing_between_shapes_at_its_top_level_is_offered_as_one_object_so_the_api_does_not_refuse_the_turn', async () => {
+    const picky: McpToolInfo = {
+      name: 'picky',
+      inputSchema: {
+        type: 'object',
+        required: ['mode'],
+        properties: { mode: { type: 'string' } },
+        anyOf: [{ properties: { path: { type: 'string' } } }, { oneOf: [{ properties: { query: { type: 'string' } } }] }],
+      },
+    }
+    const host = new McpToolHost(fakeConnector({ docs: [picky] }).connect, new McpToolCache(memoryStore()))
+    await host.load({ docs })
+    expect(host.toolsOf('docs')[0]!.inputSchema).toEqual({
+      type: 'object',
+      required: ['mode'],
+      properties: { mode: { type: 'string' }, path: { type: 'string' }, query: { type: 'string' } },
+    })
+  })
+
+  it('a_remembered_schema_choosing_between_shapes_is_folded_too_so_a_server_left_stopped_cannot_refuse_the_turn', async () => {
+    const store = memoryStore()
+    const picky: McpToolInfo = { name: 'picky', inputSchema: { oneOf: [{ properties: { path: { type: 'string' } } }] } }
+    await new McpToolHost(fakeConnector({ docs: [picky] }).connect, new McpToolCache(store)).load({ docs })
+    const host = new McpToolHost(fakeConnector({ docs: [picky] }).connect, new McpToolCache(store))
+    await host.load({ docs })
+    expect(host.toolsOf('docs')[0]!.inputSchema).toEqual({ type: 'object', properties: { path: { type: 'string' } } })
+  })
+
   it('a_server_whose_tools_are_remembered_is_not_started_until_one_of_them_is_called', async () => {
     const store = memoryStore()
     await new McpToolHost(fakeConnector({ docs: [echo] }).connect, new McpToolCache(store)).load({ docs })

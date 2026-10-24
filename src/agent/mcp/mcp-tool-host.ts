@@ -1,5 +1,5 @@
 import type { McpServerConfig, McpServers } from './mcp-config'
-import { mcpTool, type McpConnection, type McpConnector, type McpToolInfo } from './mcp-connection'
+import { mcpTool, offerable, type McpConnection, type McpConnector, type McpToolInfo } from './mcp-connection'
 import type { McpToolCache } from './mcp-tool-cache'
 import type { McpServerState } from '../session/code-session'
 import { fail, type Tool, type ToolOutput } from '../openai-session/tools/tool'
@@ -47,7 +47,7 @@ export class McpToolHost {
     for (const [name, config] of Object.entries(servers)) {
       const known = this.cache.read(name, config)
       if (!known) learning.push(name)
-      this.servers.set(name, { config, connection: undefined, starting: undefined, tools: known ?? [], state: { name, status: known ? 'stopped' : 'pending' } })
+      this.servers.set(name, { config, connection: undefined, starting: undefined, tools: (known ?? []).map(offerable), state: { name, status: known ? 'stopped' : 'pending' } })
     }
     await Promise.all([...previous.map((s) => this.shut(s)), ...learning.map((name) => this.start(name))])
     this.changed()
@@ -126,7 +126,7 @@ export class McpToolHost {
         return
       }
       server.connection = connection
-      server.tools = listed
+      server.tools = listed.map(offerable)
       server.state = { name, status: 'connected' }
     } catch (error) {
       server.state = { name, status: 'failed', error: errorMessage(error) }
