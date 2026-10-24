@@ -16,7 +16,7 @@ const MEMORIES_HEADING = /^##\s+Memories\s*$/
 const MEMORY_BULLET = /^-\s+\*\*(.+?)\*\*:\s*(.*)$/
 
 /** Claude Code's own name for a checkout: its path with every separator turned into a dash. */
-function sanitizedWorkspace(cwd: string): string {
+export function sanitizedWorkspace(cwd: string): string {
   return cwd
     .split('')
     .map((ch) => (ch === '/' || ch === '\\' || ch === ':' ? '-' : ch))

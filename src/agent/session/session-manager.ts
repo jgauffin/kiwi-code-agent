@@ -1,4 +1,4 @@
-import type { CodeSession, PermissionDecision, SessionEvent } from './code-session'
+import type { CodeSession, PermissionDecision, PromptImage, SessionEvent } from './code-session'
 import type { ModelProfile, Step } from './model-profile'
 import type { RunLog } from '../runs/run-log'
 import type { QuestionOutcome } from './user-question'
@@ -7,6 +7,10 @@ import type { Grant } from '../permissions/grants'
 import { featureSlug } from '../phases/feature-slug'
 import { SessionEngineHost } from './session-engine-host'
 import { SessionControl } from './session-control'
+import type { BackgroundCommand, BackgroundCommands, BackgroundEvent } from '../background/background-commands'
+import { SessionBackground } from '../background/session-background'
+import { sessionBackgroundPorts } from './session-background-ports'
+import type { ReturnEvent, ScheduledReturn, ScheduledReturns } from '../background/scheduled-returns'
 
 /**
  * `plan` writes a feature's spec blind, `reconcile` checks it against the code
@@ -33,36 +37,8 @@ export const isPlanning = (mode: Step): boolean =>
  */
 export const offersAllowWrites = (mode: SessionMode): boolean => !isPlanning(mode) || mode === 'file-decisions' || mode === 'doc-migration'
 
-/**
- * The steps a profile names a model for, in the order the settings page lists
- * them. A step is a mode: what a session is for is what decides how strong a
- * model it earns, so there is no second vocabulary to keep in step.
- */
-export const STEPS: { step: Step; group: StepGroup; label: string; hint: string }[] = [
-  { step: 'chat', group: 'Chat', label: 'Chat', hint: 'Work in the code with the full tool set.' },
-  { step: 'code-plan', group: 'Plan', label: 'Planning', hint: 'Agree on intent, then plan against the code.' },
-  { step: 'code-build', group: 'Plan', label: 'Build', hint: "Build the approved plan in the plan's own conversation, so on the same engine." },
-  { step: 'plan', group: 'Feature planning', label: 'Spec', hint: 'Write the spec from the intent docs, blind to the code.' },
-  { step: 'reconcile', group: 'Feature planning', label: 'Check against code', hint: 'Name each disagreement between the approved spec and the code before it is built.' },
-  { step: 'implement', group: 'Feature planning', label: 'Implement', hint: 'Build the approved spec, task by task, with a test per rule.' },
-  { step: 'fix', group: 'Feature planning', label: 'Fix', hint: 'Mend what a failed test run names; one effort level harder each time it fails again.' },
-  { step: 'cleanup', group: 'Feature planning', label: 'Cleanup', hint: 'Split what the implementation left oversized.' },
-  { step: 'docs-map', group: 'Maintenance', label: 'Docs map', hint: 'Describe the docs so a blind planner can find its way.' },
-  { step: 'file-decisions', group: 'Maintenance', label: 'File decisions', hint: "File the user's unfiled decisions into the specs and docs they belong in." },
-  { step: 'doc-migration', group: 'Maintenance', label: 'Clean up docs', hint: 'Move behaviour into specs, drop what the specs already say, and make the rest easy to find.' },
-]
-
-/** The kind of session a step belongs to: the settings page shows one group at a time. */
-export type StepGroup = 'Chat' | 'Plan' | 'Feature planning' | 'Maintenance'
-
-export const STEP_GROUPS: StepGroup[] = ['Chat', 'Plan', 'Feature planning', 'Maintenance']
-
-/** A step named where its group is not shown around it: "Feature planning · Spec". */
-export function stepTitle(step: Step): string {
-  const entry = STEPS.find((s) => s.step === step)
-  if (!entry) return step
-  return entry.group === entry.label ? entry.label : `${entry.group} · ${entry.label}`
-}
+// The step table lives on its own so the settings webview can read it without bundling the manager.
+export { STEPS, STEP_GROUPS, stepTitle, type StepGroup } from './steps'
 
 /** The modes that stand on their own rather than on a feature's plan files. */
 export const isFeatureless = (mode: Step): boolean =>
@@ -116,6 +92,10 @@ export type SessionRecord = {
   startedFrom?: 'phone' | 'desk'
   /** The person's own choice for this session, overriding the default for where it started: whether a turn stopped mid-way on them may push to the paired phones. */
   pushAllowed?: boolean
+  /** The background commands the session has running: what a window reload cuts, so the next window can tell the session which. */
+  background?: BackgroundCommand[]
+  /** The turn the session asked to start later: kept across a reload, and marked missed when its time passed with the window closed. */
+  scheduledReturn?: ScheduledReturn
   createdAt: string
   /** When the session was last sent a prompt; absent on one stored before this was kept. */
   lastActiveAt?: string
@@ -222,6 +202,35 @@ function fromStore(stored: Omit<SessionRecord, 'mode'> & { mode?: SessionMode | 
   return { ...record, mode: mode === undefined || mode === 'docs' ? 'chat' : mode, ...(opened ? { access: 'full' as const } : {}) }
 }
 
+function newRecord(profile: ModelProfile, mode: SessionMode, feature: string | undefined, options: CreateOptions): SessionRecord {
+  const { parentId, files, task, fixAttempt, continues, startedFrom } = options
+  const continued = continues ? continuationOf(continues, profile) : undefined
+  return {
+    id: crypto.randomUUID(),
+    title: task ? `Implement: ${task}` : titleFor(mode, feature),
+    profile,
+    mode,
+    ...(feature ? { feature } : {}),
+    ...(parentId ? { parentId } : {}),
+    ...(files ? { files } : {}),
+    ...(task ? { task } : {}),
+    ...(fixAttempt ? { fixAttempt } : {}),
+    ...(continued ? { engineSessionId: continued } : {}),
+    ...(startedFrom ? { startedFrom } : {}),
+    createdAt: new Date().toISOString(),
+  }
+}
+
+/** Whether any record moved to the new feature name. */
+function renameFeature(records: SessionRecord[], fromSlug: string, feature: string): boolean {
+  const moved = records.filter((r) => r.feature !== undefined && featureSlug(r.feature) === fromSlug)
+  for (const record of moved) {
+    if (record.title === titleFor(record.mode, record.feature)) record.title = titleFor(record.mode, feature)
+    record.feature = feature
+  }
+  return moved.length > 0
+}
+
 /**
  * Owns the list of sessions and the live engines behind them. A session is
  * started lazily on its first prompt, and continued from its engine session
@@ -241,16 +250,61 @@ export class SessionManager {
     listener: SessionListener,
     decorate: EventDecorator = noDecoration,
     passes: CallPasses = nothingPasses,
+    background?: BackgroundCommands,
+    returns?: ScheduledReturns,
+    ownTurnLimit?: () => number,
   ) {
     this.records = store.list().map(fromStore)
     this.host = new SessionEngineHost(
       { get: (id) => this.get(id), all: () => this.records, save: () => this.store.save(this.records) },
       createEngine,
       runLogFor,
-      listener,
+      (id, event) => {
+        listener(id, event)
+        this.background?.onSessionEvent(id, event)
+      },
       decorate,
     )
     this.control = new SessionControl(this.host, (id) => this.require(id), () => this.store.save(this.records), passes)
+    if (background && returns) {
+      const access = {
+        get: (id: string) => this.get(id),
+        all: () => this.records,
+        save: () => this.store.save(this.records),
+        emit: (record: SessionRecord, event: SessionEvent) => this.host.emit(record, event),
+        inTurn: (id: string) => this.host.inTurn(id),
+        wake: (id: string, text: string) => this.control.sendFromAgent(id, text),
+      }
+      this.background = new SessionBackground(background, sessionBackgroundPorts(access), returns, ownTurnLimit)
+    }
+  }
+
+  /** The commands the sessions run in the background, and how their ends reach each session. */
+  private readonly background: SessionBackground | undefined
+
+  /** A scheduled return was made, cancelled or came due. */
+  async returnEvent(id: string, event: ReturnEvent): Promise<void> {
+    await this.background?.onReturn(id, event)
+  }
+
+  /** The person's cancel of the session's scheduled return; false when it has none. */
+  cancelReturn(id: string): boolean {
+    return this.background?.cancelReturn(id) ?? false
+  }
+
+  /** Called once the window is up: returns the last window recorded are re-armed, or shown missed. */
+  async resumeReturns(): Promise<void> {
+    await this.background?.resumeReturns()
+  }
+
+  /** A background command started, ended or was stopped. */
+  async backgroundEvent(id: string, event: BackgroundEvent): Promise<void> {
+    await this.background?.onCommand(id, event)
+  }
+
+  /** The person's stop on a running background command of the session; false when it is not running. */
+  stopBackground(id: string, commandId: string): boolean {
+    return this.background?.commands.stop(id, commandId) ?? false
   }
 
   list(): SessionRecord[] {
@@ -286,22 +340,7 @@ export class SessionManager {
   }
 
   async create(profile: ModelProfile, mode: SessionMode = 'chat', feature?: string, options: CreateOptions = {}): Promise<SessionRecord> {
-    const { parentId, files, task, fixAttempt, continues, startedFrom } = options
-    const continued = continues ? continuationOf(continues, profile) : undefined
-    const record: SessionRecord = {
-      id: crypto.randomUUID(),
-      title: task ? `Implement: ${task}` : titleFor(mode, feature),
-      profile,
-      mode,
-      ...(feature ? { feature } : {}),
-      ...(parentId ? { parentId } : {}),
-      ...(files ? { files } : {}),
-      ...(task ? { task } : {}),
-      ...(fixAttempt ? { fixAttempt } : {}),
-      ...(continued ? { engineSessionId: continued } : {}),
-      ...(startedFrom ? { startedFrom } : {}),
-      createdAt: new Date().toISOString(),
-    }
+    const record = newRecord(profile, mode, feature, options)
     this.records.unshift(record)
     await this.store.save(this.records)
     return record
@@ -313,13 +352,7 @@ export class SessionManager {
    * task named is kept.
    */
   async followFeatureRename(fromSlug: string, feature: string): Promise<void> {
-    const moved = this.records.filter((r) => r.feature !== undefined && featureSlug(r.feature) === fromSlug)
-    if (moved.length === 0) return
-    for (const record of moved) {
-      if (record.title === titleFor(record.mode, record.feature)) record.title = titleFor(record.mode, feature)
-      record.feature = feature
-    }
-    await this.store.save(this.records)
+    if (renameFeature(this.records, fromSlug, feature)) await this.store.save(this.records)
   }
 
   async grantFullAccess(id: string, continuesOn?: ModelProfile): Promise<void> {
@@ -345,11 +378,14 @@ export class SessionManager {
   }
 
   /** `label` marks text the extension wrote: the chat and the title show it in the text's place. */
-  async send(id: string, text: string, label?: string): Promise<void> {
+  async send(id: string, text: string, label?: string, images: PromptImage[] = []): Promise<void> {
     // What the other window's agent said while the person had interrupted is read on this turn, ahead of their message.
-    const held = this.exchange?.personSpoke(id)
-    if (held === undefined) return this.control.send(id, text, label)
-    await this.control.send(id, `${held}\n\n${text}`, label ?? text)
+    const other = this.exchange?.personSpoke(id)
+    // What a background command's end or a reload left unsaid while the person had interrupted goes ahead of their message too.
+    const commands = await this.background?.beforePerson(id)
+    const held = [commands, other].filter((part) => part !== undefined).join('\n\n')
+    if (held === '') return this.control.send(id, text, label, images)
+    await this.control.send(id, `${held}\n\n${text}`, label ?? text, images)
   }
 
   /** Lets the session's turns know the person spoke or interrupted, for the agent exchange with a linked window. */
@@ -390,6 +426,7 @@ export class SessionManager {
 
   async interrupt(id: string): Promise<void> {
     this.exchange?.personInterrupted(id)
+    this.background?.interrupted(id)
     await this.host.interrupt(id)
   }
 
@@ -415,12 +452,20 @@ export class SessionManager {
 
   /** Stop the engine but keep the record; a later prompt resumes it. A run under the session stops with it. */
   async close(id: string): Promise<void> {
+    this.endBackground(id)
     await this.host.close(id)
   }
 
   /** Closed because its job is done, unlike a run merely stopped, which still waits on the person. */
   async settle(id: string): Promise<void> {
+    this.endBackground(id)
     await this.control.settle(id)
+  }
+
+  /** The session, and the runs under it, are over: their background commands stop and are never told of. */
+  private endBackground(id: string): void {
+    for (const child of this.records.filter((r) => r.parentId === id)) this.endBackground(child.id)
+    this.background?.end(id)
   }
 
   async remove(id: string): Promise<void> {
@@ -446,6 +491,7 @@ export class SessionManager {
 
   /** The host is going away: a turn it cuts off is marked before its engine stops, so the next host can carry it on. */
   async disposeAll(): Promise<void> {
+    this.background?.cutAll()
     await this.host.disposeAll()
   }
 

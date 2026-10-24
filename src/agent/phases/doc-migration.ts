@@ -7,7 +7,7 @@ import SPEC_CONTRACT from '../../../assets/plugin/skills/spec-writing/contract.m
 import { readOptional } from '../workspace-files'
 import { DOCS_DIR, SPECS_DIR, SPECS_ANY_GLOB, README_GLOB, REFERENCE_DIRECTION, SPECS_GLOB } from './blind-plan'
 import { decisionsPath, readDecisions } from './decisions'
-import { featureOf, specFiles } from './plan-list'
+import { featureNameOf, specFiles } from './plan-list'
 import { readReview, reviewPath } from './plan-review'
 import { planStage, type PlanStage } from './plan-stage'
 import type { Scope } from './scope-guard'
@@ -88,7 +88,7 @@ export async function specsWithWorkInFlight(cwd: string): Promise<BlockedMove[]>
     const spec: SpecState = { exists: true, status: statusOf(text), body: bodyOf(text), built: builtOf(text) }
     const [review, tasks, decisions] = await Promise.all([readReview(reviewPath(cwd, slug)), readTasks(tasksPath(cwd, slug)), readDecisions(decisionsPath(cwd, slug))])
     const waiting = BLOCKING_WAIT[planStage(spec, review, tasks, decisions)]
-    if (waiting) blocked.push({ feature: featureOf(text) ?? slug, path: `${SPECS_DIR}/${folder ? `${folder}/` : ''}${slug}.spec.md`, waiting })
+    if (waiting) blocked.push({ feature: featureNameOf(text, slug), path: `${SPECS_DIR}/${folder ? `${folder}/` : ''}${slug}.spec.md`, waiting })
   }
   return blocked
 }

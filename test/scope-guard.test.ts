@@ -238,6 +238,10 @@ describe('blind plan spec folders', () => {
     expect(prompt).toContain('write one file, `specs/<folder>/order-cancellation.spec.md`')
   })
 
+  it('by_domain_mode_homes_the_spec_by_the_concepts_the_feature_changes', () => {
+    expect(blindPlanPrompt('Order cancellation', cwd, 'by-domain')).toContain('the domain that owns the concepts whose information or states the feature changes')
+  })
+
   it('a_person_named_folder_wins_whatever_the_workspace_already_has', () => {
     const prompt = blindPlanPrompt('Order cancellation', cwd, 'by-domain', [])
     expect(prompt).toContain('Whatever folder the user names in reply, kept or changed, is the one the spec is written to, whether or not that folder already holds a spec')

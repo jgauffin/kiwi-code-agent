@@ -212,7 +212,7 @@ function buildRouter(
     planActions,
     cleanup,
     build,
-    newSession: (mode, feature, prompt, into, label) => provider.newSession(mode, feature, prompt, into, label),
+    newSession: (mode, feature, prompt, into, label, images) => provider.newSession(mode, feature, prompt, into, label, images),
     open: (sessionId, into) => provider.open(sessionId, into),
     resumePlan: (feature, into, note) => provider.resumePlan(feature, into, note),
     resumePlanAside: (feature, stayOn) => provider.resumePlanAside(feature, stayOn),

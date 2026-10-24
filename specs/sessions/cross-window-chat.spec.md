@@ -17,6 +17,8 @@ The two windows run on the same machine; the person joins them by copying a code
   - **Code used once**: a code links one session and is spent afterwards, and a code nobody uses expires on its own (specs/sessions/remote-control.spec.md#Pairing a phone with a workspace)
   - **Same machine only**: a code is accepted only by a window on the same machine under the same user, and a window whose extension runs elsewhere, a remote, container or WSL one included, refuses it with the reason.
   - **Same workspace refused**: entering a code in a session of the same workspace that produced it is refused with the reason.
+- **Linked work on the new-session screen**: *Linked work* on the new-session screen's Code tab starts a new chat session linked by a pairing code, either creating the code there or entering the code the other window created (specs/unfiled-decisions.md#Linked work on the new-session screen)
+  - **Unusable code starts nothing**: a code that is unknown, expired, produced in the same workspace or entered on a remote, container or WSL window is refused with the reason before any chat session is started.
 - **Two to a link**: a link joins exactly two sessions, and a session already linked must unlink before it can take another code.
 - **Link survives reloads**: a link outlives a window reload or restart and reconnects once both windows are open again, while the other side shows it as disconnected in the meantime.
   - **Message to a closed window**: a message for the other side while it is disconnected is refused with the reason rather than held for later.

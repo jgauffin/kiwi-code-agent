@@ -82,6 +82,15 @@ describe('plan list', () => {
     }
   })
 
+  it('a_spec_whose_name_does_not_lead_back_to_its_file_is_named_by_its_slug_so_its_sessions_find_it', async () => {
+    const dir = await workspace({ 'analyzers/dotnet-analyzer.spec.md': '---\nfeature: .NET analyzer\nstatus: approved\n---\n# .NET analyzer\n' })
+    try {
+      expect(await listPlans(dir)).toMatchObject([{ feature: 'dotnet-analyzer' }])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('a_spec_one_domain_folder_deep_is_listed_like_any_other', async () => {
     const dir = await workspace({ 'orders/refunds.spec.md': '---\nfeature: Refunds\nstatus: approved\n---\n# Refunds\n' })
     try {

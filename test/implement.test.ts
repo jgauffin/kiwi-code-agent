@@ -63,7 +63,7 @@ describe('implement phase', () => {
     expect(prompt).toContain('docs/')
     expect(IMPLEMENT_TOOLS).toEqual([
       'Read', 'Write', 'Edit', 'MultiEdit', 'Move', 'Copy', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', 'MarkdownSearch', 'SpecSearch', 'CodeOutline', 'CodeSearch', 'Bash', 'RunScript', 'Skill', 'AskUser', 'Delegate',
-      'ReadTasks', 'UpdateTask',
+      'ReadTasks', 'UpdateTask', 'BackgroundBash', 'BackgroundList', 'BackgroundStop', 'BackgroundWait',
     ])
   })
 

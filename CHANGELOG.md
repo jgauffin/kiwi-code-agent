@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.11
+
+- A session on either engine can run a long command in the background and is told when it ends; the transcript shows it with a Stop button. The Claude engine's own background commands are withheld in favour of this.
+- A session can wait for a condition instead of sleeping: a background command exits or prints a matching line, a URL answers, a port accepts connections, or a file appears, changes or goes away (at most ten minutes).
+- A shell command that sleeps for more than five seconds is refused, with a pointer to the background notice, the wait or a scheduled return; short sleeps between retries still run.
+- A chat session can end its turn and ask to be resumed up to ten minutes later, with a reason; the transcript shows when, with a Cancel button, and your own prompt or an interrupt cancels it. A return that fell due while the window was closed is shown as missed. Turns a session starts on its own, on commands ending or returns, are capped at `kiwiAgent.ownTurnLimit` (10) until you write.
+- Paste or drop an image onto a prompt box to attach it to the next prompt, shown as a removable thumbnail; a prompt of images alone can be sent.
+- A spec whose feature name doesn't match its file name (`.NET analyzer` in `dotnet-analyzer.spec.md`) now opens and plans; it is listed by its file name.
+- The proposed spec folder is now the domain whose concepts the feature changes, not the one it only reads or sounds like.
+- Images an MCP tool returns now reach the model on both engines, instead of an `[image]` placeholder.
+- A killed MCP server restarts on its next call; stopping one on Windows also ends its `dotnet run` child.
+- Reading a background command's output (Claude engine) no longer asks for permission.
+- *Linked work* replaces *Update spec* on the new-session screen: start a chat linked to another window by creating a pairing code or entering one.
+- Opening a verified spec from the list starts a change to it; what you typed on the screen first becomes the described change.
+
 ## 0.2.10
 
 - Specs get an `id:` line in their front matter; rename a spec file and, at the next start, its task board, review and sessions follow it.

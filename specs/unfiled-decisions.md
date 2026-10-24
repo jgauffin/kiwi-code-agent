@@ -1,5 +1,9 @@
 # Unfiled decisions
 
+### Refusing a long sleep and judging a wait belong to background work
+- decided: A shell command that sleeps for more than five seconds is refused without a prompt, and a wait on a URL, port or file is judged as reaching the network or reading the file; both are defined by Background work, while Permission rules keeps how a shell line is judged in general and does not repeat them.
+- affects: Background work, Permission rules
+
 ### Ctrl+click on a spec to pick up opens it in a tab of its own
 - decided: On the new-session screen, Ctrl+click (Cmd+click on a Mac) or a middle click on a spec in the pick-up list opens that feature's planning session in a new tab while the screen stays the tab in view, with whatever was typed on it, so several specs can be opened in a row; a plain click still opens it in place of the screen.
 - affects: spec folders, spec drafts
@@ -116,9 +120,13 @@
 - decided: The forwarding service remote control pairs through lives at a known address (remote.kiwipow.com) rather than one each workspace points at on its own, and the pairing and connecting built against it stays off by default until the service itself is in place, turned on per workspace once it is.
 - affects: remote control, docs/settings.md
 
-### Changing a spec begins on the new-session screen with a described change
-- decided: The new-session screen's Code tab carries *Update spec*, where the person picks any spec, whatever state it is in, and describes in their own words what should change; the pick routes by state, a settled spec into a change of that spec and a draft into a draft pickup, nothing starts until the change is described, and a spec opened from that screen always shows the act that changes it.
-- affects: changing an implemented spec, change feature, spec drafts, starting a new session, picking up a plan, docs/plan-sessions.md
+### Opening a verified spec starts a change to it
+- decided: The new-session screen has no card of its own for changing a spec; opening a verified spec from its spec list starts a change to that spec, with what the person typed on the screen first as the described change, or the planner asking what should change when nothing was typed, while a spec still being planned or built is picked up as before.
+- affects: changing an implemented spec, change feature, starting a new session, picking up a plan, docs/plan-sessions.md
+
+### Linked work on the new-session screen
+- decided: The new-session screen's Code tab carries *Linked work*, which starts a chat linked to a chat in another window, either by creating a pairing code here or by entering the code the other window created; a code that cannot link is refused before any chat starts, and Link window on a chat's composer stays.
+- affects: cross-window chat, starting a new session
 
 ### A change is never answered by the phase conversation the tab is showing
 - decided: Asking for a change on a feature opens the describe-the-change step and plans it in a feature-planning session, never handing the request to the cleanup, implement or check conversation its tab happens to show; a feature whose only open step is an unsettled cleanup is changeable, and that cleanup waits for the change's own build.
@@ -207,4 +215,12 @@
 ### Linked agents keep their messages short and leave each other's side alone
 - decided: An agent writing to the agent of a linked window is told to be succinct and to the point, saying what changed on its own side, what it needs or what it asks, and never telling the other agent how to do the work on that agent's side.
 - affects: Cross-window chat
+
+### A spec's folder is the domain that owns what the feature changes
+- decided: A spec's folder is the domain owning the concepts whose information or states the feature changes (not those it only reads), with the acting role's domain as tie-break, a derived view living with most of its inputs, and a feature whose sections each change a different domain proposed as two features.
+- affects: Spec folders, Docs cleanup
+
+### Images an MCP tool returns reach the model and are kept no longer than pasted ones
+- decided: An image a workspace MCP server's tool returns reaches the model as image content on both engines, the result's text keeping an `[image]` placeholder where it was; on the own loop it follows the round's tool results as pasted images follow a prompt, and like them it is dropped by compaction, a failed turn and a resumed thread.
+- affects: MCP servers, Pasting images
 

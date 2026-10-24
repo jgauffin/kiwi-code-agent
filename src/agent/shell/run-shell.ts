@@ -69,7 +69,7 @@ export function runShell(command: string, options: ShellOptions): Promise<ShellR
   })
 }
 
-function killProcessTree(child: ChildProcess): void {
+export function killProcessTree(child: ChildProcess): void {
   if (child.pid === undefined) return
   if (process.platform === 'win32') {
     spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }).on('error', () =>

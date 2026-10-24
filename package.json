@@ -2,7 +2,7 @@
   "name": "kiwipow-agent",
   "displayName": "Kiwipow Agent",
   "description": "Coding sessions in VS Code with a choice of model engine per session.",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "publisher": "CoderrAB",
   "icon": "docs/logos/kiwipow-agent-logo-128.png",
   "galleryBanner": {
@@ -369,6 +369,12 @@
           "default": false,
           "scope": "resource",
           "description": "Lets this workspace pair with a phone over the forwarding service, from the Remote tab of Settings. Off by default while the service is still being built."
+        },
+        "kiwiAgent.ownTurnLimit": {
+          "type": "integer",
+          "default": 10,
+          "minimum": 1,
+          "description": "How many turns a session may start on its own, when a background command ends or a scheduled return comes due, without a word from you; the next one is held and you are told."
         },
         "kiwiAgent.linkedAgentMessageLimit": {
           "type": "integer",

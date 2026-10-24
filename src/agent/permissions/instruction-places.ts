@@ -1,6 +1,6 @@
-import { homedir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { projectMemoryDir } from '../memory/memories'
+import { projectMemoryDir, sanitizedWorkspace } from '../memory/memories'
 import { skillRoots } from '../skills/skill-index'
 import { subAgentRoots } from '../sub-agents/sub-agent-index'
 
@@ -24,4 +24,13 @@ export function instructionPlaces(cwd: string, shipped: readonly string[] = [], 
     join(home, '.claude', 'CLAUDE.md'),
     ...shipped,
   ]
+}
+
+/**
+ * Where the Claude engine writes the output of this workspace's background
+ * commands. The session is told to read it there, so a read is never asked;
+ * other workspaces' output and the rest of the temp folder stay asked.
+ */
+export function engineOutputPlace(cwd: string, temp: string = tmpdir()): string {
+  return join(temp, 'claude', sanitizedWorkspace(cwd))
 }

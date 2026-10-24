@@ -2,8 +2,8 @@ import type { SessionMode } from '../../agent/session/session-manager'
 import type { QuestionOutcome } from '../../agent/session/user-question'
 import type { BundleScope } from '../../agent/instructions/bundles'
 import type { Effort } from '../../agent/session/model-profile'
-import type { LinkAct } from '../../cross-window/cross-window'
-import type { AgentsMdAnswer, ReviewAction, UserPermissionDecision } from '../protocol'
+import type { LinkAct, LinkWay } from '../../cross-window/cross-window'
+import type { AgentsMdAnswer, AttachedImage, ReviewAction, UserPermissionDecision } from '../protocol'
 import type { Step, ViewTab } from './plan-step'
 
 export class PromptSubmittedEvent extends Event {
@@ -12,6 +12,8 @@ export class PromptSubmittedEvent extends Event {
     public readonly text: string,
     /** The files linked on the composer when it was sent; the prompt tells the agent to read them. */
     public readonly files: string[] = [],
+    /** The images attached on the composer when it was sent; they belong to this prompt alone. */
+    public readonly images: AttachedImage[] = [],
   ) {
     super(PromptSubmittedEvent.type, { bubbles: true })
   }
@@ -29,6 +31,22 @@ export class InterruptRequestedEvent extends Event {
   static readonly type = 'interrupt-requested'
   constructor() {
     super(InterruptRequestedEvent.type, { bubbles: true })
+  }
+}
+
+/** The stop on a background command's row in the transcript. */
+export class BackgroundStopRequestedEvent extends Event {
+  static readonly type = 'background-stop-requested'
+  constructor(readonly commandId: string) {
+    super(BackgroundStopRequestedEvent.type, { bubbles: true })
+  }
+}
+
+/** The cancel on a scheduled return's row in the transcript. */
+export class ReturnCancelRequestedEvent extends Event {
+  static readonly type = 'return-cancel-requested'
+  constructor() {
+    super(ReturnCancelRequestedEvent.type, { bubbles: true })
   }
 }
 
@@ -68,6 +86,8 @@ export class NewSessionRequestedEvent extends Event {
     public readonly prompt: string | undefined,
     /** Files linked on the card; the first prompt tells the session to read them. */
     public readonly files: string[] = [],
+    /** Images attached on the card; they go with the first prompt. */
+    public readonly images: AttachedImage[] = [],
   ) {
     super(NewSessionRequestedEvent.type, { bubbles: true })
   }
@@ -93,14 +113,11 @@ export class FeatureNameSuggestionRequestedEvent extends Event {
   }
 }
 
-/** The new-session screen's Update spec: the feature picked and the change described, in the developer's own words. */
-export class UpdateSpecRequestedEvent extends Event {
-  static readonly type = 'update-spec-requested'
-  constructor(
-    public readonly feature: string,
-    public readonly description: string,
-  ) {
-    super(UpdateSpecRequestedEvent.type, { bubbles: true })
+/** The new-session screen's Linked work: a new chat, linked to another window by a code made here or the one made there. */
+export class LinkedWorkRequestedEvent extends Event {
+  static readonly type = 'linked-work-requested'
+  constructor(public readonly link: LinkWay) {
+    super(LinkedWorkRequestedEvent.type, { bubbles: true })
   }
 }
 
@@ -356,11 +373,13 @@ declare global {
     [LinkOpenFileRequestedEvent.type]: LinkOpenFileRequestedEvent
     [InterruptRequestedEvent.type]: InterruptRequestedEvent
     [CompactRequestedEvent.type]: CompactRequestedEvent
+    [BackgroundStopRequestedEvent.type]: BackgroundStopRequestedEvent
+    [ReturnCancelRequestedEvent.type]: ReturnCancelRequestedEvent
     [PermissionDecidedEvent.type]: PermissionDecidedEvent
     [QuestionAnsweredEvent.type]: QuestionAnsweredEvent
     [NewSessionRequestedEvent.type]: NewSessionRequestedEvent
     [PlanResumeRequestedEvent.type]: PlanResumeRequestedEvent
-    [UpdateSpecRequestedEvent.type]: UpdateSpecRequestedEvent
+    [LinkedWorkRequestedEvent.type]: LinkedWorkRequestedEvent
     [FeatureNameSuggestionRequestedEvent.type]: FeatureNameSuggestionRequestedEvent
     [SessionSelectedEvent.type]: SessionSelectedEvent
     [SpecApprovedEvent.type]: SpecApprovedEvent

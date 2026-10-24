@@ -1,7 +1,7 @@
 import * as vscode from 'vscode'
 import { isFeatureless, type SessionManager, type SessionMode, type SessionRecord } from '../agent/session/session-manager'
 import type { ModelOffer, ModelProfile, Step } from '../agent/session/model-profile'
-import type { SessionEvent } from '../agent/session/code-session'
+import type { PromptImage, SessionEvent } from '../agent/session/code-session'
 import type { KeptGrant } from '../agent/permissions/grants'
 import type { SessionStatus } from '../agent/session/session-status'
 import type { DocsMapResult } from '../agent/docs-map/build'
@@ -138,21 +138,22 @@ export class ChatViewProvider {
    * `into` is the tab the session is started from, which then shows it; without one the session gets its own tab.
    * `label` marks a first prompt the extension wrote: the chat shows the label in its place.
    */
-  async newSession(mode: SessionMode, feature?: string, prompt?: string, into?: ChatPanel, label?: string): Promise<SessionRecord | undefined> {
+  async newSession(mode: SessionMode, feature?: string, prompt?: string, into?: ChatPanel, label?: string, images: PromptImage[] = []): Promise<SessionRecord | undefined> {
     if (!isFeatureless(mode) && !feature) throw new Error(`A ${mode} session needs a feature name`)
     const record = await this.sessions.create(this.profileFor(mode), mode, feature)
     // Approving the plan is the consent for the writes it maps out, so the switch starts on where a build session carries it out.
     if (mode === 'implement' || mode === 'cleanup') this.allowWrites.setEnabled(record.id, true)
-    return await this.activate(record, prompt, into, label)
+    return await this.activate(record, prompt, into, label, images)
   }
 
   /**
    * Shows a newly created session, and sends its first prompt when there is
    * one. A run on a feature joins the tab that feature already has.
    */
-  private async activate(record: SessionRecord, prompt?: string, into?: ChatPanel, label?: string): Promise<SessionRecord> {
+  private async activate(record: SessionRecord, prompt?: string, into?: ChatPanel, label?: string, images: PromptImage[] = []): Promise<SessionRecord> {
     await this.reveal(record, into)
-    if (prompt) await this.sessions.send(record.id, prompt, label)
+    // A prompt of images alone has no words, only the label that says how many.
+    if (prompt || label) await this.sessions.send(record.id, prompt ?? '', label, images)
     return record
   }
 

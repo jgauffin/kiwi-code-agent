@@ -1,30 +1,23 @@
-import type {
-  AgentDefinition,
-  HookCallback,
-  HookJSONOutput,
-  McpSdkServerConfigWithInstance,
-  McpServerConfig,
-  Options,
-  PermissionResult,
-  Query,
-  SDKMessage,
-  SDKUserMessage,
-} from '@anthropic-ai/claude-agent-sdk'
-import { permissionResolved, type CodeSession, type McpControl, type PermissionDecision, type SessionEvent } from '../session/code-session'
+import type { AgentDefinition, McpSdkServerConfigWithInstance, Options, Query, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import type { CodeSession, McpControl, PermissionDecision, PromptImage, SessionEvent } from '../session/code-session'
 import type { McpServers } from '../mcp/mcp-config'
 import type { McpToolHost } from '../mcp/mcp-tool-host'
-import { mcpProxy, type McpProxy } from '../mcp/mcp-proxy-server'
 import type { SessionHooks } from '../session/hooks'
 import type { ModelProfile } from '../session/model-profile'
 import { AsyncQueue } from '../session/async-queue'
 import { SdkEventMapper } from './sdk-event-mapper'
 import { SdkCompaction } from './compaction'
+import { SdkMcpServers } from './sdk-mcp-servers'
+import { SdkPermissions } from './sdk-permissions'
+import { sdkHooks } from './sdk-hooks'
+import { userMessage } from './sdk-user-message'
 import { spawnWithRuntime, type NodeRuntime } from './node-runtime'
-import { bareToolName, toolServer } from './tool-server'
+import { toolServer } from './tool-server'
+import { CLAUDE_OWN_BACKGROUND_OFF_ENV, CLAUDE_OWN_BACKGROUND_TOOLS } from '../background/claude-background'
 import { ReadTracker } from '../openai-session/tools/read-tracker'
 import { fail, folded, type Tool, type ToolContext } from '../openai-session/tools/tool'
-import { confirmReason, denyReason, gateCall, noteCall, reviewEdits, type AskPermission, type PermissionShown } from '../permissions/gate'
-import type { QuestionOutcome, UserQuestionRequest } from '../session/user-question'
+import { confirmReason, denyReason, gateCall, noteCall, reviewEdits, type AskPermission } from '../permissions/gate'
+import type { QuestionOutcome } from '../session/user-question'
 import { errorMessage } from '../../error-message'
 import type { CompactionFocus } from '../session/compaction-focus'
 
@@ -70,13 +63,6 @@ export type SdkSessionOptions = {
   trace?: (line: string) => void
 }
 
-type PendingPermission = {
-  resolve: (result: PermissionResult) => void
-  input: Record<string, unknown>
-  /** Set on a question a script's own call put; the user's answer goes here as given, not through the engine's result. */
-  decided?: (decision: PermissionDecision) => void
-}
-
 /**
  * Claude through the Agent SDK. One `query()` in streaming-input mode per
  * session, so one engine process serves every turn of the conversation.
@@ -86,11 +72,9 @@ export class SdkSession implements CodeSession {
   readonly profile: ModelProfile
   private readonly input = new AsyncQueue<SDKUserMessage>()
   private readonly output = new AsyncQueue<SessionEvent>()
-  private readonly pending = new Map<string, PendingPermission>()
-  /** Questions this session's tools put to the user, by request id. */
-  private readonly questions = new Map<string, (outcome: QuestionOutcome) => void>()
   private readonly mapper = new SdkEventMapper()
   private readonly abort = new AbortController()
+  private readonly permissions = new SdkPermissions(this.output, this.abort.signal)
   private readonly query: Query
   private readonly compaction: SdkCompaction
   private readonly pumping: Promise<void>
@@ -99,8 +83,7 @@ export class SdkSession implements CodeSession {
   readonly toolContext: ToolContext
   /** The in-process server for the own tools; part of every server set handed to the engine. */
   private readonly ownServer: McpSdkServerConfigWithInstance | undefined
-  /** The workspace's servers as the engine is handed them, by name. */
-  private proxies: Map<string, McpProxy> = new Map()
+  private readonly mcpServers: SdkMcpServers
   readonly mcp: McpControl | undefined
 
   constructor(private readonly options: SdkSessionOptions) {
@@ -111,11 +94,14 @@ export class SdkSession implements CodeSession {
       cwd: options.cwd,
       signal: this.abort.signal,
       files: new ReadTracker(),
-      ask: (request) => this.askUser(request),
+      ask: (request) => this.permissions.askUser(request),
       ...this.scriptAccess(),
     }
     this.ownServer = options.ownTools?.length ? toolServer(options.ownTools, this.toolContext) : undefined
-    this.mcp = options.mcp ? this.mcpControl(options.mcp.host, options.mcp.servers) : undefined
+    this.mcpServers = new SdkMcpServers(this.ownServer, this.output)
+    this.mcp = options.mcp
+      ? this.mcpServers.control(options.mcp.host, options.mcp.servers, (servers) => this.query.setMcpServers(servers))
+      : undefined
     this.query = options.query({ prompt: this.input, options: this.buildOptions() })
     this.compaction = new SdkCompaction({
       query: this.query,
@@ -132,21 +118,17 @@ export class SdkSession implements CodeSession {
     return this.engineSessionId
   }
 
-  send(text: string): void {
+  send(text: string, images: PromptImage[] = []): void {
     this.compaction.sent(text)
-    this.prompt(text)
+    this.prompt(text, images)
   }
 
   compact(): void {
     this.compaction.request()
   }
 
-  private prompt(text: string): void {
-    this.input.push({
-      type: 'user',
-      message: { role: 'user', content: text },
-      parent_tool_use_id: null,
-    })
+  private prompt(text: string, images: PromptImage[] = []): void {
+    this.input.push(userMessage(text, images))
   }
 
   events(): AsyncIterable<SessionEvent> {
@@ -154,35 +136,24 @@ export class SdkSession implements CodeSession {
   }
 
   respondToPermission(requestId: string, decision: PermissionDecision): boolean {
-    const pending = this.pending.get(requestId)
-    if (!pending) return false
-    this.pending.delete(requestId)
-    this.output.push(permissionResolved(requestId, decision))
-    if (pending.decided) pending.decided(decision)
-    else pending.resolve(toPermissionResult(decision, pending.input))
-    return true
+    return this.permissions.respondToPermission(requestId, decision)
   }
 
   respondToQuestion(requestId: string, outcome: QuestionOutcome): boolean {
-    const resolve = this.questions.get(requestId)
-    if (!resolve) return false
-    this.questions.delete(requestId)
-    this.output.push({ type: 'question_resolved', requestId, outcome })
-    resolve(outcome)
-    return true
+    return this.permissions.respondToQuestion(requestId, outcome)
   }
 
   async interrupt(): Promise<void> {
     // The turn is torn down around the card, so the question goes unanswered:
     // stopping a session never answers it, and the model is told so.
-    this.cancelQuestions('Interrupted')
+    this.permissions.cancelQuestions('Interrupted')
     this.compaction.cancel()
     await this.query.interrupt()
   }
 
   async dispose(): Promise<void> {
-    this.denyAllPending('Session closed')
-    this.cancelQuestions('Session closed')
+    this.permissions.denyAllPending('Session closed')
+    this.permissions.cancelQuestions('Session closed')
     this.input.end()
     this.abort.abort()
     this.query.close()
@@ -209,13 +180,13 @@ export class SdkSession implements CodeSession {
       ...(this.options.runtime ? { executable: 'node' as const } : {}),
       pathToClaudeCodeExecutable: this.options.enginePath,
       spawnClaudeCodeProcess: spawnWithRuntime(this.options.runtime, this.options.onStderr ?? (() => {})),
-      canUseTool: (toolName, input, ctx) => this.requestPermission(toolName, input, ctx),
+      canUseTool: (toolName, input, ctx) => this.permissions.request(toolName, input, ctx),
       // Questions go through the own AskUser tool on every engine. The engine's built-in one
       // can only be answered through canUseTool, so left in it lands in the permission prompt.
-      disallowedTools: ['AskUserQuestion'],
+      disallowedTools: ['AskUserQuestion', ...CLAUDE_OWN_BACKGROUND_TOOLS],
       // Compaction is this session's to run (SdkCompaction): the engine's own
       // can fail without a word and leave the turn to overflow its window.
-      env: { ...(this.options.env ?? {}), DISABLE_AUTO_COMPACT: '1' },
+      env: { ...(this.options.env ?? {}), DISABLE_AUTO_COMPACT: '1', ...CLAUDE_OWN_BACKGROUND_OFF_ENV },
       // Memory is this session's to write, through the ordinary tools and the hook that
       // validates and caps it; the engine's own hidden auto-memory tool would otherwise
       // write the same project folder on its own, unseen by that hook.
@@ -223,7 +194,7 @@ export class SdkSession implements CodeSession {
     }
     if (profile.effort) options.effort = profile.effort
     if (this.options.resumeEngineSessionId) options.resume = this.options.resumeEngineSessionId
-    if (this.options.hooks) options.hooks = this.sdkHooks(this.options.hooks)
+    if (this.options.hooks) options.hooks = sdkHooks(this.options.hooks)
     if (this.options.systemPrompt !== undefined) options.systemPrompt = this.options.systemPrompt
     else if (this.options.appendSystemPrompt !== undefined)
       options.systemPrompt = { type: 'preset', preset: 'claude_code', append: this.options.appendSystemPrompt }
@@ -232,129 +203,9 @@ export class SdkSession implements CodeSession {
     // The workspace's servers go in as dynamic ones, which the host can
     // replace; the engine's own reading of the file yields to a dynamic
     // server of the same name, so it never spawns them itself.
-    const servers = this.allServers()
+    const servers = this.mcpServers.all()
     if (Object.keys(servers).length) options.mcpServers = servers
     return options
-  }
-
-  /** Every server the engine runs with: the own one, then the workspace's. */
-  private allServers(): Record<string, McpServerConfig> {
-    return {
-      ...(this.ownServer ? { [this.ownServer.name]: this.ownServer } : {}),
-      ...Object.fromEntries([...this.proxies].map(([name, proxy]) => [name, proxy.config])),
-    }
-  }
-
-  /** Takes the servers into the host before the engine starts, so its first look at their tools waits on them. */
-  private mcpControl(host: McpToolHost, servers: McpServers): McpControl {
-    host.watch(() => {
-      for (const proxy of this.proxies.values()) proxy.refresh()
-      this.reportMcp(host)
-    })
-    const load = (next: McpServers): Promise<void> => {
-      const loading = host.load(next)
-      this.proxies = new Map(Object.keys(next).map((name) => [name, mcpProxy(name, host)]))
-      return loading
-    }
-    load(servers).catch((error: unknown) => this.mcpFailed(error))
-    return {
-      reload: async (next) => {
-        const loading = load(next)
-        await this.query.setMcpServers(this.allServers())
-        await loading
-        this.reportMcp(host)
-      },
-      start: async (name) => {
-        await host.start(name)
-        this.reportMcp(host)
-      },
-      stop: async (name) => {
-        await host.stop(name)
-        this.reportMcp(host)
-      },
-    }
-  }
-
-  /** The workspace's servers as the host holds them; the own server is not the user's business. */
-  private reportMcp(host: McpToolHost): void {
-    if (!this.output.isEnded) this.output.push({ type: 'mcp_servers', servers: host.statuses() })
-  }
-
-  private mcpFailed(error: unknown): void {
-    if (!this.output.isEnded) this.output.push({ type: 'error', message: `MCP servers: ${errorMessage(error)}`, fatal: false })
-  }
-
-  /** Maps the engine-agnostic hooks onto the SDK's hook protocol. */
-  private sdkHooks(hooks: SessionHooks): NonNullable<Options['hooks']> {
-    const registered: NonNullable<Options['hooks']> = {}
-    if (hooks.preToolUse) {
-      const pre = hooks.preToolUse.bind(hooks)
-      const callback: HookCallback = async (input): Promise<HookJSONOutput> => {
-        if (input.hook_event_name !== 'PreToolUse') return {}
-        // The hook's `cwd` follows the engine's shell from one call to the next.
-        // Only a sub agent's call carries an agent id; a session started as an agent carries its type without one.
-        const agent = input.agent_id !== undefined ? input.agent_type : undefined
-        const outcome = await pre({ toolName: bareToolName(input.tool_name), input: input.tool_input, toolUseId: input.tool_use_id, cwd: input.cwd, ...(agent ? { agent } : {}) })
-        if (outcome && 'deny' in outcome) {
-          return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: outcome.deny } }
-        }
-        if (!outcome?.allow && !outcome?.ask && !outcome?.additionalContext) return {}
-        return {
-          hookSpecificOutput: {
-            hookEventName: 'PreToolUse',
-            // An ask is explicit so the engine's own allow rules, which the policy has already read as grants, cannot let the call past it.
-            ...(outcome.allow ? { permissionDecision: 'allow' } : outcome.ask ? { permissionDecision: 'ask' } : {}),
-            ...(outcome.additionalContext ? { additionalContext: outcome.additionalContext } : {}),
-          },
-        }
-      }
-      registered.PreToolUse = [{ hooks: [callback] }]
-    }
-    if (hooks.postToolUse) {
-      const post = hooks.postToolUse.bind(hooks)
-      const callback: HookCallback = async (input): Promise<HookJSONOutput> => {
-        if (input.hook_event_name !== 'PostToolUse') return {}
-        const output = typeof input.tool_response === 'string' ? input.tool_response : JSON.stringify(input.tool_response)
-        const outcome = await post({
-          toolName: bareToolName(input.tool_name),
-          input: input.tool_input,
-          toolUseId: input.tool_use_id,
-          output,
-          isError: false,
-        })
-        if (outcome?.additionalContext) {
-          return { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: outcome.additionalContext } }
-        }
-        return {}
-      }
-      registered.PostToolUse = [{ hooks: [callback] }]
-    }
-    return registered
-  }
-
-  private requestPermission(
-    toolName: string,
-    input: Record<string, unknown>,
-    ctx: Parameters<NonNullable<Options['canUseTool']>>[2],
-  ): Promise<PermissionResult> {
-    return new Promise((resolve) => {
-      const requestId = ctx.toolUseID
-      this.pending.set(requestId, { resolve, input })
-      ctx.signal.addEventListener('abort', () => {
-        if (this.pending.delete(requestId)) resolve({ behavior: 'deny', message: 'Cancelled' })
-      })
-      const reason = ctx.decisionReason ?? (ctx.blockedPath ? `Touches ${ctx.blockedPath}` : undefined)
-      this.output.push({
-        type: 'permission_request',
-        requestId,
-        toolUseId: ctx.toolUseID,
-        toolName: bareToolName(toolName),
-        input,
-        ...(ctx.title ? { title: ctx.title } : {}),
-        ...(ctx.description ? { description: ctx.description } : {}),
-        ...(reason ? { reason } : {}),
-      })
-    })
   }
 
   /**
@@ -363,7 +214,7 @@ export class SdkSession implements CodeSession {
    * implementations of them here, through the same permission gate.
    */
   private scriptAccess(): Pick<ToolContext, 'call' | 'authorize' | 'confirm' | 'review' | 'observed'> {
-    const ask: AskPermission = (id, toolName, input, shown) => this.askScriptPermission(id, toolName, input, shown)
+    const ask: AskPermission = (id, toolName, input, shown) => this.permissions.askScript(id, toolName, input, shown)
     const use = (toolName: string, input: unknown) => ({ toolName, input, toolUseId: crypto.randomUUID() })
     return {
       call: async (name, input) => {
@@ -386,48 +237,6 @@ export class SdkSession implements CodeSession {
     }
   }
 
-  private askScriptPermission(requestId: string, toolName: string, input: unknown, shown: PermissionShown = {}): Promise<PermissionDecision> {
-    return new Promise((resolve) => {
-      const ended = (result: PermissionResult) => resolve({ kind: 'deny', message: result.behavior === 'deny' ? result.message : 'Cancelled' })
-      this.pending.set(requestId, { resolve: ended, input: {}, decided: resolve })
-      this.abort.signal.addEventListener('abort', () => {
-        if (this.pending.delete(requestId)) resolve({ kind: 'deny', message: 'Cancelled' })
-      })
-      this.output.push({ type: 'permission_request', requestId, toolUseId: requestId, toolName, input, ...shown })
-    })
-  }
-
-  /**
-   * A question from one of this session's own tools. The wait has no deadline:
-   * the card decides when it settles. Should the engine give up on the tool
-   * call before then — its request timeout is its own — the card stays
-   * answerable, and the answer reaches the session as its next prompt.
-   */
-  private askUser(request: UserQuestionRequest): Promise<QuestionOutcome> {
-    return new Promise((resolve) => {
-      const requestId = crypto.randomUUID()
-      this.questions.set(requestId, resolve)
-      this.output.push({ type: 'question_request', requestId, request })
-    })
-  }
-
-  /** Nothing is left waiting: every open question ends unanswered, never with a choice the user did not make. */
-  private cancelQuestions(reason: string): void {
-    for (const [id, resolve] of this.questions) {
-      this.questions.delete(id)
-      const outcome: QuestionOutcome = { kind: 'unanswered', reason }
-      if (!this.output.isEnded) this.output.push({ type: 'question_resolved', requestId: id, outcome })
-      resolve(outcome)
-    }
-  }
-
-  private denyAllPending(message: string): void {
-    for (const [id, pending] of this.pending) {
-      this.pending.delete(id)
-      pending.resolve({ behavior: 'deny', message })
-    }
-  }
-
   private async pump(): Promise<void> {
     try {
       for await (const message of this.query) {
@@ -435,7 +244,7 @@ export class SdkSession implements CodeSession {
         for (const event of this.compaction.filter(message, this.mapper.map(message))) {
           if (event.type === 'session_started') this.engineSessionId = event.engineSessionId
           this.output.push(event)
-          if (event.type === 'session_started' && this.options.mcp) this.reportMcp(this.options.mcp.host)
+          if (event.type === 'session_started' && this.options.mcp) this.mcpServers.report(this.options.mcp.host)
         }
       }
     } catch (error) {
@@ -443,8 +252,8 @@ export class SdkSession implements CodeSession {
         this.output.push({ type: 'error', message: errorMessage(error), fatal: true })
       }
     } finally {
-      this.denyAllPending('Session ended')
-      this.cancelQuestions('Session ended')
+      this.permissions.denyAllPending('Session ended')
+      this.permissions.cancelQuestions('Session ended')
       this.finish()
     }
   }
@@ -453,20 +262,6 @@ export class SdkSession implements CodeSession {
     if (this.output.isEnded) return
     this.output.push({ type: 'ended' })
     this.output.end()
-  }
-}
-
-/**
- * The engine validates an allow as `{ updatedInput: record }`, so the
- * unchanged input is echoed back; the typings mark it optional but the
- * CLI does not.
- */
-function toPermissionResult(decision: PermissionDecision, input: Record<string, unknown>): PermissionResult {
-  switch (decision.kind) {
-    case 'allow':
-      return { behavior: 'allow', updatedInput: input, decisionClassification: 'user_temporary' }
-    case 'deny':
-      return { behavior: 'deny', message: `Denied by user${decision.message ? `: ${decision.message}` : ''}`, decisionClassification: 'user_reject' }
   }
 }
 

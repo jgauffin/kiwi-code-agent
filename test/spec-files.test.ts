@@ -59,4 +59,8 @@ describe('planning the spec being read', () => {
     })
     expect(specFeatureOf('D:/work/app', 'D:/work/app/readme.md', '# Readme\n')).toBeUndefined()
   })
+
+  it('a_spec_whose_name_does_not_lead_back_to_its_file_is_named_by_its_slug', () => {
+    expect(specFeatureOf('D:/work/app', 'D:/work/app/specs/dotnet-analyzer.spec.md', '---\nfeature: .NET analyzer\nstatus: approved\n---\n')?.feature).toBe('dotnet-analyzer')
+  })
 })

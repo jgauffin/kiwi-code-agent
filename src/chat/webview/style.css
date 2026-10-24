@@ -1247,6 +1247,18 @@ chat-app {
         opacity: 0.7;      }
     }
 
+    /* Two ways to the same link, one under the other: make a code here, or take the one the other window made. */
+    & .linked-fields {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+
+      & > .hint {
+        margin: 0;
+        opacity: 0.7;
+      }
+    }
+
     & form {
       display: flex;
       flex-direction: column;
@@ -1600,6 +1612,19 @@ chat-app {
       padding: 0.4rem 0.6rem;
       white-space: pre-wrap;
       color: var(--vscode-foreground);
+    }
+
+    & .background-command,
+    & .scheduled-return {
+      display: flex;
+      gap: 0.5rem;
+      align-items: baseline;
+      color: var(--vscode-descriptionForeground);
+
+      & .background-line {
+        margin: 0;
+        flex: 1;
+      }
     }
 
     /*
@@ -2487,6 +2512,53 @@ linked-files-row {
         opacity: 1;
       }
     }
+  }
+}
+
+/* Thumbnails of the images the next prompt carries, each with an X. */
+attached-images-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  min-width: 0;
+  & .image {
+    position: relative;
+    display: inline-flex;
+    border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+    border-radius: 3px;
+    & img {
+      max-height: 3.5rem;
+      max-width: 6rem;
+      object-fit: cover;
+    }
+
+    & .remove-image {
+      position: absolute;
+      top: 0;
+      right: 0;
+      padding: 0 0.2rem;
+      line-height: 1;
+      opacity: 0.8;
+    }
+  }
+}
+
+.image-note {
+  opacity: 0.7;
+  font-size: 0.9em;
+}
+
+.sent-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.3rem;
+  & img {
+    max-height: 5rem;
+    max-width: 8rem;
+    object-fit: cover;
+    border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+    border-radius: 3px;
   }
 }
 

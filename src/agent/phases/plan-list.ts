@@ -54,7 +54,7 @@ export async function specFiles(dir: string): Promise<{ slug: string; path: stri
   return files.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0)).map(({ slug, path, folder }) => ({ slug, path, ...(folder ? { folder } : {}) }))
 }
 
-/** Every spec in the plan directory, at the root or any folder beneath it; the slug stands in when the front matter names no feature. */
+/** Every spec in the plan directory, at the root or any folder beneath it, each by the name its sessions go by. */
 export async function listPlans(cwd: string): Promise<PlanSummary[]> {
   const dir = join(cwd, SPECS_DIR)
   const plans: PlanSummary[] = []
@@ -64,7 +64,7 @@ export async function listPlans(cwd: string): Promise<PlanSummary[]> {
     const tasks = await readTasks(join(cwd, WORK_DIR, `${slug}${TASKS_SUFFIX}`))
     const status = finished(rawStatus, tasks) ? 'verified' : rawStatus
     const draft = status === 'draft' ? { authored: authorshipOf(text), review: await reviewProgress(cwd, slug, text) } : {}
-    plans.push({ feature: featureOf(text) ?? slug, path, status, ...(folder ? { folder } : {}), ...draft })
+    plans.push({ feature: featureNameOf(text, slug), path, status, ...(folder ? { folder } : {}), ...draft })
   }
   return plans
 }
@@ -114,6 +114,16 @@ export function finished(status: SpecStatus, tasks: TasksState): boolean {
 /** The specs still waiting for approval. */
 export async function listDraftPlans(cwd: string): Promise<PlanSummary[]> {
   return (await listPlans(cwd)).filter((p) => p.status === 'draft')
+}
+
+/**
+ * The name a spec's sessions go by. Sessions find the spec and its working files by the slug of
+ * that name, so the spec's own name is used only when it leads back to its file; one that does not
+ * (`.NET analyzer` in `dotnet-analyzer.spec.md`) gives way to the file's slug.
+ */
+export function featureNameOf(text: string, slug: string): string {
+  const named = featureOf(text)
+  return named !== undefined && featureSlug(named) === slug ? named : slug
 }
 
 /** The feature name a spec's front matter carries, read straight off its raw text. */

@@ -24,7 +24,8 @@ export function mcpProxy(name: string, host: McpToolHost): McpProxy {
   })
   instance.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const output = await host.call(name, request.params.name, request.params.arguments ?? {}, extra.signal)
-    return { content: [{ type: 'text', text: modelText(output) }], isError: output.isError }
+    const images = (output.images ?? []).map((image) => ({ type: 'image' as const, data: image.data, mimeType: image.mediaType }))
+    return { content: [{ type: 'text' as const, text: modelText(output) }, ...images], isError: output.isError }
   })
   return {
     config: { type: 'sdk', name, instance },

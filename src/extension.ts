@@ -26,6 +26,8 @@ import { errorMessage } from './error-message'
 import type { RemoteControlService } from './remote-control/remote-control-service'
 import { configPort } from './config-port'
 import { runStartupMigrations } from './agent/startup-migrations'
+import { BackgroundCommands } from './agent/background/background-commands'
+import { ScheduledReturns } from './agent/background/scheduled-returns'
 import {
   createAllowWritesControl,
   createEngines,
@@ -303,9 +305,23 @@ export function activate(context: vscode.ExtensionContext): void {
   const planIgnore = (): string[] => vscode.workspace.getConfiguration('kiwiAgent').get<string[]>('planIgnore', [])
 
   const mcp = createMcp(workspaceRoot, () => sessions, output)
-  engines = createEngines({ context, output, workspaceRoot, mcp, verifier, policyFor, planIgnore, getChat: () => chat, getSessions: () => sessions, getExchange: () => crossWindow.exchange })
-  sessions = createSessions(store, engines, workspaceRoot, policyFor, () => chat, (id, event) =>
-    crossWindow.sessionEvent(id, event).catch((error: unknown) => output.appendLine(`cross-window chat: ${errorMessage(error)}`)),
+  // Outside any engine and any session record, so a command outlives a switch of model or engine.
+  const background = new BackgroundCommands(workspaceRoot, (id, event) =>
+    sessions.backgroundEvent(id, event).catch((error: unknown) => output.appendLine(`background command: ${errorMessage(error)}`)),
+  )
+  const returns = new ScheduledReturns((id, event) =>
+    sessions.returnEvent(id, event).catch((error: unknown) => output.appendLine(`scheduled return: ${errorMessage(error)}`)),
+  )
+  engines = createEngines({ context, output, workspaceRoot, mcp, verifier, policyFor, planIgnore, getChat: () => chat, getSessions: () => sessions, getExchange: () => crossWindow.exchange, background, returns })
+  sessions = createSessions(
+    store,
+    engines,
+    workspaceRoot,
+    policyFor,
+    () => chat,
+    (id, event) => crossWindow.sessionEvent(id, event).catch((error: unknown) => output.appendLine(`cross-window chat: ${errorMessage(error)}`)),
+    background,
+    returns,
   )
   crossWindow = createCrossWindow(context, workspaceRoot, sessions, () => chat.refresh(), output)
   const permissionStore = createPermissionStore(() => sessions, grants, workspaceRoot)
@@ -323,15 +339,11 @@ export function activate(context: vscode.ExtensionContext): void {
 
   registerSubscriptions(context, output, chat, tree, sessions, settingsPanel, mcp, workspaceRoot, planIgnore)
   syncRemoteControlConnection(remoteControl)
-  context.subscriptions.push(
-    vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('kiwiAgent.remoteControl.enabled') || e.affectsConfiguration('kiwiAgent.remoteControl.serviceUrl')) {
-        syncRemoteControlConnection(remoteControl)
-      }
-    }),
-  )
+  context.subscriptions.push(watchRemoteControlSettings(remoteControl))
   stopSessions = () => sessions.disposeAll()
   disconnectRemoteControl = () => remoteControl.disconnect()
+  // A return the last window recorded is re-armed, or shown missed when its time passed while no window was open.
+  sessions.resumeReturns().catch((error: unknown) => output.appendLine(`resuming scheduled returns failed: ${errorMessage(error)}`))
   // A build the last window cut off mid-turn carries on without a prompt.
   chat.resumeCutOffBuilds().catch((error: unknown) => output.appendLine(`resuming cut-off builds failed: ${errorMessage(error)}`))
 }
@@ -344,6 +356,15 @@ let disconnectRemoteControl: (() => void) | undefined
 export function deactivate(): Promise<void> | undefined {
   disconnectRemoteControl?.()
   return stopSessions?.()
+}
+
+/** A change of the remote control's switch or service address reaches the link out. */
+function watchRemoteControlSettings(remoteControl: Parameters<typeof syncRemoteControlConnection>[0]): vscode.Disposable {
+  return vscode.workspace.onDidChangeConfiguration((e) => {
+    if (e.affectsConfiguration('kiwiAgent.remoteControl.enabled') || e.affectsConfiguration('kiwiAgent.remoteControl.serviceUrl')) {
+      syncRemoteControlConnection(remoteControl)
+    }
+  })
 }
 
 /** A save of the workspace's `.mcp.json` reaches the running sessions; so does deleting it. */

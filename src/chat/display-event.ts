@@ -7,7 +7,10 @@ import type { SessionEvent } from '../agent/session/code-session'
  * the webview, whose messages anyone can inspect.
  */
 export function forDisplay(event: SessionEvent): SessionEvent {
-  if (event.type === 'user_message' && event.label) return { type: 'user_message', text: '', label: event.label }
+  if (event.type === 'user_message' && event.label) {
+    const { text: _text, ...shown } = event
+    return { ...shown, text: '' }
+  }
   if (event.type === 'tool_result' && event.context !== undefined) {
     const { context: _context, ...shown } = event
     return shown

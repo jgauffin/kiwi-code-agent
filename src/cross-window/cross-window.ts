@@ -7,6 +7,9 @@ import { WindowLinks, type LinkStore } from './window-links'
 /** What the person can do with a chat session's link from its composer. */
 export type LinkAct = 'link' | 'unlink' | 'pause' | 'resume'
 
+/** How the new-session screen's Linked work joins a new chat to another window: by a code made here, or by the code the other window made. */
+export type LinkWay = { way: 'create' } | { way: 'enter'; code: string }
+
 /** A chat session's link as the composer shows it, the other side named by its workspace. */
 export type WindowLinkState = { state: 'none' } | { state: 'linked' | 'disconnected' | 'ended'; workspace: string; paused: boolean }
 
@@ -15,6 +18,8 @@ export interface WindowLinkControl {
   /** Nothing for a session that is not a chat: only a chat is linked. */
   viewOf(sessionId: string): WindowLinkState | undefined
   act(sessionId: string, act: LinkAct): Promise<void>
+  /** Starts a chat through `startChat`, which answers its id, and links it the way the person picked. */
+  startLinked(way: LinkWay, startChat: () => Promise<string | undefined>): Promise<void>
 }
 
 export interface Mailbox extends MessageTransport {
@@ -108,6 +113,17 @@ export class CrossWindow implements WindowLinkControl {
     this.noticeChanges()
   }
 
+  async startLinked(way: LinkWay, startChat: () => Promise<string | undefined>): Promise<void> {
+    // Checked before the chat starts, so a code that cannot link leaves no empty chat behind.
+    if (way.way === 'enter') this.links.assertCodeUsable(way.code)
+    else this.links.assertOnLocalMachine()
+    const sessionId = await startChat()
+    if (!sessionId) return
+    if (way.way === 'create') await this.showCode(sessionId)
+    else this.links.enterCode(sessionId, way.code)
+    this.noticeChanges()
+  }
+
   /** Marks this window as open for the other side. */
   heartbeat(): void {
     this.links.heartbeat()
@@ -133,12 +149,16 @@ export class CrossWindow implements WindowLinkControl {
     const { prompts } = this.deps
     const way = await prompts.pickWay()
     if (way === 'create') {
-      const { code } = this.links.requestCode(sessionId)
-      await prompts.showCode(code, Math.round(CODE_TTL_MS / 60_000))
+      await this.showCode(sessionId)
     } else if (way === 'enter') {
       const code = await prompts.askCode()
       if (code?.trim()) this.links.enterCode(sessionId, code)
     }
+  }
+
+  private async showCode(sessionId: string): Promise<void> {
+    const { code } = this.links.requestCode(sessionId)
+    await this.deps.prompts.showCode(code, Math.round(CODE_TTL_MS / 60_000))
   }
 
   private noticeChanges(): void {

@@ -1,6 +1,6 @@
 import { EFFORTS, effortLevels, STEP_EFFORT } from '../../agent/session/effort'
 import type { Effort, ModelChoice, Profile, Provider, Step, StepChoice } from '../../agent/session/model-profile'
-import { STEP_GROUPS, STEPS, stepTitle, type StepGroup } from '../../agent/session/session-manager'
+import { STEP_GROUPS, STEPS, stepTitle, type StepGroup } from '../../agent/session/steps'
 import type { SettingsSnapshot } from '../protocol'
 import { DefaultProfileChangedEvent } from '../../chat/webview/events'
 import { ProfileRemovedEvent, ProfileSavedEvent, ProfileStepGroupSelectedEvent } from './events'

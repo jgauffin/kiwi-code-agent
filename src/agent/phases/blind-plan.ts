@@ -338,8 +338,8 @@ export function changePrompt(feature: string): string {
 }
 
 /**
- * The first message of a session the new-session screen's "Update spec"
- * starts on an already-settled feature with nothing open: unlike `changePrompt`,
+ * The first message of a change started by opening a done feature with its
+ * change already typed on the new-session screen: unlike `changePrompt`,
  * it never asks, since the developer's description is already on its way as
  * the next message, in their own words rather than folded into this kickoff.
  */

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { OpenAiSession } from '../src/agent/openai-session/openai-session'
+import { OpenAiSession, TOOL_IMAGES_NOTE } from '../src/agent/openai-session/openai-session'
 import type { ChatCompletionClient, CompletionDelta, CompletionRequest } from '../src/agent/openai-session/chat-messages'
 import type { Tool } from '../src/agent/openai-session/tools/tool'
 import { askUserTool } from '../src/agent/openai-session/tools/ask-user'
@@ -156,6 +156,35 @@ describe('OpenAiSession', () => {
     const second = model.requests[1]!.messages
     expect(second.at(-2)).toEqual({ role: 'assistant', content: '', toolCalls: [{ id: 'c1', name: 'Echo', arguments: '{"value":"x"}' }] })
     expect(second.at(-1)).toEqual({ role: 'tool', toolCallId: 'c1', content: 'echo:x' })
+    await s.dispose()
+  })
+
+  it('images_a_tool_returns_reach_the_model_after_the_round_s_results', async () => {
+    const picture: Tool<typeof echoSchema> = {
+      ...echoTool,
+      name: 'Picture',
+      async execute() {
+        return { text: '[image]', isError: false, images: [{ mediaType: 'image/png', data: 'iVBORw0K' }] }
+      },
+    }
+    const model = new ScriptedModel(
+      [
+        { type: 'tool_call_start', index: 0, id: 'c1', name: 'Picture' },
+        { type: 'tool_call_arguments', index: 0, text: '{"value":"a"}' },
+        { type: 'tool_call_start', index: 1, id: 'c2', name: 'Echo' },
+        { type: 'tool_call_arguments', index: 1, text: '{"value":"b"}' },
+        { type: 'done', finishReason: 'tool_calls', usage: undefined },
+      ],
+      text('done'),
+    )
+    const s = session(model, [echoTool as Tool, picture as Tool])
+    s.send('go')
+    await untilTurnDone(s)
+    expect(model.requests[1]!.messages.slice(-3)).toEqual([
+      { role: 'tool', toolCallId: 'c1', content: '[image]' },
+      { role: 'tool', toolCallId: 'c2', content: 'echo:b' },
+      { role: 'user', content: TOOL_IMAGES_NOTE, images: [{ mediaType: 'image/png', data: 'iVBORw0K' }] },
+    ])
     await s.dispose()
   })
 
@@ -683,13 +712,19 @@ describe('OpenAiSession', () => {
       const model = new ScriptedModel(text('one'), text('two'))
       const s = mcpSession(model)
       const events: SessionEvent[] = []
+      let firstTurnDone!: () => void
+      const firstTurn = new Promise<void>((resolve) => (firstTurnDone = resolve))
       const reading = (async () => {
         for await (const e of s.events()) {
           events.push(e)
-          if (events.filter((x) => x.type === 'turn_done').length === 2) break
+          const done = events.filter((x) => x.type === 'turn_done').length
+          if (done === 1 && e.type === 'turn_done') firstTurnDone()
+          if (done === 2) break
         }
       })()
+      // The reload lands between the turns, so which servers each turn saw is not a race.
       s.send('a')
+      await firstTurn
       await s.mcp!.reload({ other: docs, broken: docs })
       s.send('b')
       await reading

@@ -77,14 +77,7 @@ export class WindowLinks {
   enterCode(sessionId: string, code: string): LinkView {
     this.assertMayLink(sessionId)
     const state = this.store.read()
-    const pending = state.codes.find((c) => c.code === code.trim())
-    if (!pending) throw new Error('That pairing code is not valid.')
-    if (this.clock.now() >= pending.expiresAt) {
-      this.dropExpired(state)
-      this.store.write(state)
-      throw new Error('That pairing code has expired.')
-    }
-    if (pending.end.workspaceId === this.self.workspaceId) throw new Error('That code was produced in this workspace; enter it in a session of another window.')
+    const pending = this.usableCode(state, code)
     const mine = this.endOf(sessionId)
     state.codes = state.codes.filter((c) => c !== pending)
     state.links = state.links.filter((l) => l.endedAt === undefined || !(involves(l, mine) || involves(l, pending.end)))
@@ -162,9 +155,31 @@ export class WindowLinks {
     }
   }
 
+  /** Refuses a code that could not link a session of this window, before any session is started for it. */
+  assertCodeUsable(code: string): void {
+    this.assertOnLocalMachine()
+    this.usableCode(this.store.read(), code)
+  }
+
+  assertOnLocalMachine(): void {
+    if (!this.env.onLocalMachine()) throw new Error('This window runs on a remote, container or WSL host, so it cannot link to windows on your machine.')
+  }
+
+  private usableCode(state: SharedLinkState, code: string): PendingLinkCode {
+    const pending = state.codes.find((c) => c.code === code.trim())
+    if (!pending) throw new Error('That pairing code is not valid.')
+    if (this.clock.now() >= pending.expiresAt) {
+      this.dropExpired(state)
+      this.store.write(state)
+      throw new Error('That pairing code has expired.')
+    }
+    if (pending.end.workspaceId === this.self.workspaceId) throw new Error('That code was produced in this workspace; enter it in a session of another window.')
+    return pending
+  }
+
   private assertMayLink(sessionId: string): void {
     if (this.env.modeOf(sessionId) !== 'chat') throw new Error('Only a chat session can be linked to another window.')
-    if (!this.env.onLocalMachine()) throw new Error('This window runs on a remote, container or WSL host, so it cannot link to windows on your machine.')
+    this.assertOnLocalMachine()
     const view = this.viewOf(sessionId)
     if (view.state === 'linked' || view.state === 'disconnected') throw new Error('This session is already linked; unlink it before taking another code.')
   }

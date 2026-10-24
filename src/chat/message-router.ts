@@ -1,7 +1,9 @@
 import type { SessionManager, SessionMode, SessionRecord } from '../agent/session/session-manager'
 import type { ModelOffer, ModelProfile, Step } from '../agent/session/model-profile'
 import { addComment, editComment, removeComment, resolveComment, strikeItem, unstrikeItem } from '../agent/phases/plan-review'
+import type { PromptImage } from '../agent/session/code-session'
 import { withLinkedFiles } from './linked-files'
+import { imageOnlyLabel } from './image-note'
 import { handleRunMessage } from './run-messages'
 import { copyText, linkOpenFile, openEditDiff, openFile, startFromCard, suggestName } from './tab-messages'
 import type { FromWebview } from './protocol'
@@ -35,7 +37,7 @@ export type MessageRouterDeps = {
   planActions: PlanActions
   cleanup: FeatureCleanup
   build: FeatureBuild
-  newSession: (mode: SessionMode, feature?: string, prompt?: string, into?: ChatPanel, label?: string) => Promise<SessionRecord | undefined>
+  newSession: (mode: SessionMode, feature?: string, prompt?: string, into?: ChatPanel, label?: string, images?: PromptImage[]) => Promise<SessionRecord | undefined>
   open: (sessionId: string, into?: ChatPanel) => Promise<void>
   /** One prompt on the model new plan sessions run on, answered as text: for the small asks that are not a session. */
   ask: (prompt: string) => Promise<string>
@@ -96,8 +98,8 @@ export class MessageRouter {
         if (message.ownTab) await this.deps.resumePlanAside(message.feature, entry)
         else await this.deps.resumePlan(message.feature, entry, message.note)
         return true
-      case 'update_spec':
-        await this.deps.planActions.startUpdate(message.feature, message.description, entry)
+      case 'linked_work':
+        await this.deps.windowLinks.startLinked(message.link, async () => (await this.deps.newSession('chat', undefined, undefined, entry))?.id)
         return true
       case 'copy_text':
         await copyText(message)
@@ -204,8 +206,9 @@ export class MessageRouter {
   private async sendFromTab(message: WebviewMessage<'send'>, shown: SessionRecord | undefined, entry: ChatPanel): Promise<void> {
     const { sessions, tabView, tracker, cleanup } = this.deps
     const text = withLinkedFiles(message.text, message.files ?? [])
+    const label = imageOnlyLabel(text, message.images?.length ?? 0)
     if (!shown) {
-      await this.deps.newSession('chat', undefined, text, entry)
+      await this.deps.newSession('chat', undefined, text, entry, label, message.images ?? [])
       return
     }
     // The phase the person picked names the run they talk to; nothing here guesses another.
@@ -215,6 +218,6 @@ export class MessageRouter {
     await tracker.followProfile(run)
     // A model switch picked while a turn of this chat session was in flight takes effect now (B10).
     await tracker.applyPendingProfileSwitch(run)
-    await sessions.send(run.id, text)
+    await sessions.send(run.id, text, label, message.images ?? [])
   }
 }

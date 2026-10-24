@@ -10,7 +10,7 @@ import { isWithin, parentPlace, type Reach } from './places'
 export type Ground = {
   /** The workspace root, normalized. */
   workspace: string
-  /** Where the session's own instructions live: read unasked wherever that is. */
+  /** Where the session's own instructions and its engine's command output live: read unasked wherever that is. */
   readable: readonly string[]
   /** Where the session is told to keep its memory notes: written unasked wherever that is. */
   writable?: readonly string[]
@@ -83,7 +83,7 @@ export function judgeEffect(judged: Judged, grants: readonly KeptGrant[], ground
       if (!isKnown(effect.place)) return asked(`${effect.place.unknown} could be any folder`, unknownOffer(invocation, ground, flags))
       const path = effect.place.path
       if (isWithin(ground.workspace, path)) return { kind: 'passes', by: 'reading in the workspace' }
-      if (ground.readable.some((place) => isWithin(place, path))) return { kind: 'passes', by: "the session's own instructions" }
+      if (ground.readable.some((place) => isWithin(place, path))) return { kind: 'passes', by: 'a place the session always reads' }
       if (keptBy) return keptBy
       return asked('outside the workspace', placeOffer({ action: 'read' }, path, effect.extent, ground, flags))
     }

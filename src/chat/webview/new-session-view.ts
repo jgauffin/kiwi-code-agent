@@ -2,46 +2,25 @@ import { compileTemplate } from '@relax.js/core/html'
 import { readData } from '@relax.js/core/forms'
 import type { SessionMode } from '../../agent/session/session-manager'
 import type { ProfileDefaults } from '../../settings/settings-store'
-import type { ResumableChat, ResumablePlan, UpdatableSpec } from '../protocol'
+import type { ResumableChat, ResumablePlan } from '../protocol'
 import { LinkedFilesRow } from './linked-files-row'
+import { acceptImages, AttachedImagesRow } from './attached-images-row'
 import {
   DefaultProfileChangedEvent,
   FeatureNameSuggestionRequestedEvent,
+  LinkedWorkRequestedEvent,
   NewSessionRequestedEvent,
   PlanResumeRequestedEvent,
   SessionSelectedEvent,
-  UpdateSpecRequestedEvent,
 } from './events'
 
 type NewSessionForm = { mode: SessionMode; feature?: string; prompt?: string }
 
-/** A card the new-session screen offers beside the engine's own session types: pick a spec, rather than start one from nothing. */
-type Card = SessionMode | 'update-spec'
+/** A card the new-session screen offers beside the engine's own session types: a chat joined to another window, rather than one on its own. */
+type Card = SessionMode | 'linked-work'
 
 /** Work already on disk this screen offers to pick up rather than start over. */
-export type PickUp = { plans: ResumablePlan[]; chats: ResumableChat[]; unfiled: number; updates: UpdatableSpec[] }
-
-/** One spec on the Update spec card's picker: pickable once nothing is in flight, saying what it waits for otherwise. */
-const updateChoice = (u: UpdatableSpec) => {
-  const pickable = u.status === 'draft' || u.changeable === true
-  return { feature: u.feature, disabled: !pickable, label: pickable ? `${u.feature} (${u.status})` : `${u.feature} (${u.status}) — waiting: ${u.waiting}` }
-}
-
-/** One folder's specs, in the Update spec picker: an `<optgroup>` of its own, named after it. */
-type UpdateGroup = { folder: string; items: ReturnType<typeof updateChoice>[] }
-
-/**
- * `folder`-carrying items, root first as they always sorted, then one
- * `<optgroup>` per folder: the folder groups specs, so the ones it holds sit
- * together, named by their feature same as any other.
- */
-function groupUpdates(updates: UpdatableSpec[]): { rootUpdates: ReturnType<typeof updateChoice>[]; updateGroups: UpdateGroup[] } {
-  const rootUpdates = updates.filter((u) => !u.folder).map(updateChoice)
-  const byFolder = new Map<string, UpdatableSpec[]>()
-  for (const u of updates) if (u.folder) byFolder.set(u.folder, [...(byFolder.get(u.folder) ?? []), u])
-  const groups = [...byFolder.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([folder, items]) => ({ folder, items: items.map(updateChoice) }))
-  return { rootUpdates, updateGroups: groups }
-}
+export type PickUp = { plans: ResumablePlan[]; chats: ResumableChat[]; unfiled: number }
 
 /**
  * The pick-up list's plans, root first as they always sorted, then grouped by
@@ -60,7 +39,7 @@ const STATUS_HINT: Record<ResumablePlan['status'], string> = {
   draft: 'draft: review, check or approve',
   approved: 'approved: ready to implement',
   implemented: 'implemented: ready to verify',
-  verified: 'verified: done',
+  verified: 'verified: done, opens to change it',
 }
 
 /** How a draft came to be, for the pick-up list; nothing recorded reads as hand-written. */
@@ -103,7 +82,7 @@ const chatPick = (chat: ResumableChat) => {
 /** The text fields, held by the view rather than by the form that happens to show them. */
 type Draft = { feature: string; prompt: string }
 
-type TextField = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+type TextField = HTMLInputElement | HTMLTextAreaElement
 
 /**
  * The two halves of the screen. Work in the code is what a person comes here
@@ -135,7 +114,7 @@ function filterPlans(plans: ResumablePlan[], { text, notDone }: SpecFilter): Res
 /** The template data for a render: what each card and tab shows, from the screen and mode shown and what is there to pick up. */
 function renderData(screen: Screen, mode: Card, profileDefaults: ProfileDefaults, pickUp: PickUp, naming: Naming, specFilter: SpecFilter) {
   const { names, active } = profileDefaults
-  const { chats, unfiled, updates } = pickUp
+  const { chats, unfiled } = pickUp
   // Headings are given after filtering, so a folder is named on the first of its specs still shown.
   const plans = filterPlans(pickUp.plans, specFilter)
   return {
@@ -152,8 +131,6 @@ function renderData(screen: Screen, mode: Card, profileDefaults: ProfileDefaults
     filingHint: unfiled > 0 ? `${unfiled} decided, not yet in the specs or docs` : 'Nothing waiting to be filed',
     plans: withFolderHeadings(plans).map((p) => ({ ...p, stage: p.status, hint: planHint(p) })),
     chats: chats.map(chatPick),
-    ...groupUpdates(updates),
-    noUpdates: updates.length === 0,
     onCode: screen === 'code',
     onMaintenance: screen === 'maintenance',
     codeScreenState: screen === 'code' ? 'active' : '',
@@ -161,13 +138,13 @@ function renderData(screen: Screen, mode: Card, profileDefaults: ProfileDefaults
     isChat: mode === 'chat',
     isCodePlan: mode === 'code-plan',
     isPlan: mode === 'plan',
-    isUpdate: mode === 'update-spec',
+    isLinked: mode === 'linked-work',
     isFiling: mode === 'file-decisions',
     isMigration: mode === 'doc-migration',
     chatState: mode === 'chat' ? 'selected' : '',
     codePlanState: mode === 'code-plan' ? 'selected' : '',
     planState: mode === 'plan' ? 'selected' : '',
-    updateState: mode === 'update-spec' ? 'selected' : '',
+    linkedState: mode === 'linked-work' ? 'selected' : '',
     filingState: mode === 'file-decisions' ? 'selected' : '',
     migrationState: mode === 'doc-migration' ? 'selected' : '',
   }
@@ -217,10 +194,10 @@ export class NewSessionView extends HTMLElement {
         <strong>Feature planning</strong>
         <span class="hint">Write a spec from the intent docs, blind to the code.</span>
       </button>
-      <button type="button" class="type {{updateState}}" r-click="choose('update-spec')">
-        <span class="icon">🔄</span>
-        <strong>Update spec</strong>
-        <span class="hint">Pick a spec, whatever its state, and say what should change.</span>
+      <button type="button" class="type {{linkedState}}" r-click="choose('linked-work')">
+        <span class="icon">🔗</span>
+        <strong>Linked work</strong>
+        <span class="hint">A chat linked to one in another VS Code window, so the two agents can talk.</span>
       </button>
     </div>
     <div class="types" if="onMaintenance">
@@ -242,6 +219,7 @@ export class NewSessionView extends HTMLElement {
       <div class="submit">
         <button type="submit">Start chat</button>
         <linked-files-row class="linked-files"></linked-files-row>
+        <attached-images-row class="attached-images"></attached-images-row>
       </div>
     </form>
     <form class="code-plan-fields" if="isCodePlan" r-submit="create(event)">
@@ -252,6 +230,7 @@ export class NewSessionView extends HTMLElement {
       <div class="submit">
         <button type="submit">Start planning</button>
         <linked-files-row class="linked-files"></linked-files-row>
+        <attached-images-row class="attached-images"></attached-images-row>
       </div>
     </form>
     <form class="plan-fields" if="isPlan" r-submit="create(event)">
@@ -269,26 +248,22 @@ export class NewSessionView extends HTMLElement {
       <div class="submit">
         <button type="submit">Start feature planning</button>
         <linked-files-row class="linked-files"></linked-files-row>
+        <attached-images-row class="attached-images"></attached-images-row>
       </div>
     </form>
-    <form class="update-fields" if="isUpdate" r-submit="create(event)">
-      <label>Which spec?
-        <select name="feature" required r-change="edit('feature', event)">
-          <option value="" disabled selected hidden>Pick a spec</option>
-          <option loop="u in rootUpdates" value="{{u.feature}}" disabled="{{u.disabled}}">{{u.label}}</option>
-          <optgroup loop="g in updateGroups" label="{{g.folder}}">
-            <option loop="u in g.items" value="{{u.feature}}" disabled="{{u.disabled}}">{{u.label}}</option>
-          </optgroup>
-        </select>
-      </label>
-      <label>What should change, and why?
-        <textarea name="prompt" rows="6" required placeholder="What should change, and why" r-input="edit('prompt', event)"></textarea>
-      </label>
-      <p class="hint" if="noUpdates">No spec yet: write one with Feature planning first.</p>
-      <div class="submit">
-        <button type="submit">Update spec</button>
-      </div>
-    </form>
+    <div class="linked-fields" if="isLinked">
+      <p class="hint">Starts a chat whose agent can message the agent of a chat in another VS Code window on this machine, such as a backend's beside its frontend.</p>
+      <form class="link-create" r-submit="createCode(event)">
+        <p class="hint">Start here, then enter the code in the other window.</p>
+        <button type="submit">Create a code</button>
+      </form>
+      <form class="link-enter" r-submit="enterCode(event)">
+        <label>Code from the other window
+          <input name="code" required autocomplete="off" inputmode="numeric" placeholder="123456">
+        </label>
+        <button type="submit">Connect</button>
+      </form>
+    </div>
     <form class="filing-fields" if="isFiling" r-submit="create(event)">
       <p class="hint">Reads the unfiled decisions with the docs and the specs, says where each one belongs, and moves it there one confirmed write at a time. An entry leaves the file once it stands where a planner looks for it.</p>
       <p class="hint" if="nothingUnfiled">Nothing is waiting. An entry lands there when a chat or an implement run settles something that reaches features other than the one at hand.</p>
@@ -334,7 +309,7 @@ export class NewSessionView extends HTMLElement {
   /** What has been typed, so swapping card keeps it: the same intent describes either session type. */
   private draft: Draft = { feature: '', prompt: '' }
   private profileDefaults: ProfileDefaults = { names: [], active: '' }
-  private pickUp: PickUp = { plans: [], chats: [], unfiled: 0, updates: [] }
+  private pickUp: PickUp = { plans: [], chats: [], unfiled: 0 }
   /** An ask for a name in flight, and what the last one left to say. */
   private asking = false
   private nameReason = ''
@@ -344,6 +319,8 @@ export class NewSessionView extends HTMLElement {
     if (this.childElementCount > 0) return
     this.appendChild(this.template.content)
     this.render()
+    // Each card has a row of its own; an image lands in the one of the form it was pasted or dropped on.
+    acceptImages(this, (target) => (target instanceof Element ? target.closest('form')?.querySelector<AttachedImagesRow>('attached-images-row') : null) ?? null)
   }
 
   reset(): void {
@@ -399,27 +376,43 @@ export class NewSessionView extends HTMLElement {
           this.draft[field] = (event.target as TextField).value
         },
         choose: (mode: Card) => this.choose(mode),
+        createCode: (event: SubmitEvent) => {
+          event.preventDefault()
+          this.dispatchEvent(new LinkedWorkRequestedEvent({ way: 'create' }))
+        },
+        enterCode: (event: SubmitEvent) => {
+          event.preventDefault()
+          const field = (event.target as HTMLFormElement).querySelector<HTMLInputElement>('input[name="code"]')!
+          const code = field.value.trim()
+          if (!code) return
+          field.value = ''
+          this.dispatchEvent(new LinkedWorkRequestedEvent({ way: 'enter', code }))
+        },
         create: (event: SubmitEvent) => {
           event.preventDefault()
+          // Linked work's forms submit through createCode and enterCode instead.
+          if (this.mode === 'linked-work') return
           const form = event.target as HTMLFormElement
-          if (this.mode === 'update-spec') return this.updateSpec(form)
           const data = readData<NewSessionForm>(form)
           const row = form.querySelector('linked-files-row') as LinkedFilesRow | null
+          const imageRow = form.querySelector('attached-images-row') as AttachedImagesRow | null
           const request = new NewSessionRequestedEvent(
             this.mode,
             data.feature?.trim() || undefined,
             data.prompt?.trim() || undefined,
             row?.paths ?? [],
+            imageRow?.images ?? [],
           )
           // The session carries all of it now; what stays behind would only be sent twice.
           this.draft = { feature: '', prompt: '' }
           row?.clear()
+          imageRow?.clear()
           this.render()
           this.dispatchEvent(request)
         },
       },
     )
-    this.fill('input[name="feature"], select[name="feature"]', this.draft.feature)
+    this.fill('input[name="feature"]', this.draft.feature)
     this.fill('textarea[name="prompt"]', this.draft.prompt)
     this.fill('input[name="specFilter"]', this.specFilter.text)
   }
@@ -444,17 +437,6 @@ export class NewSessionView extends HTMLElement {
     if (answer.name) this.draft.feature = answer.name
     this.nameReason = answer.reason ?? ''
     this.render()
-  }
-
-  /** Update spec's own submit: a pick and a description, neither of which starts anything on its own. */
-  private updateSpec(form: HTMLFormElement): void {
-    const data = readData<{ feature?: string; prompt?: string }>(form)
-    const feature = data.feature?.trim()
-    const description = data.prompt?.trim()
-    if (!feature || !description) return
-    this.draft = { feature: '', prompt: '' }
-    this.render()
-    this.dispatchEvent(new UpdateSpecRequestedEvent(feature, description))
   }
 
   private choose(mode: Card): void {

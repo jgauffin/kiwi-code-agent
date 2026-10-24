@@ -1,6 +1,6 @@
 import type { McpServerState, PermissionDecision, SessionEvent } from '../agent/session/code-session'
 import type { QuestionOutcome } from '../agent/session/user-question'
-import type { LinkAct, WindowLinkState } from '../cross-window/cross-window'
+import type { LinkAct, LinkWay, WindowLinkState } from '../cross-window/cross-window'
 import type { KeptGrant } from '../agent/permissions/grants'
 import type { Decision } from '../agent/phases/decisions'
 import type { CommentRef, Review } from '../agent/phases/plan-review'
@@ -17,6 +17,9 @@ import type { RunBlock, SessionStatus } from '../agent/session/session-status'
 import type { ProfileDefaults } from '../settings/settings-store'
 import type { BundleScope } from '../agent/instructions/bundles'
 import type { CleanupProgress } from './cleanup-progress'
+
+/** An image pasted or dropped onto a prompt box: its type and its bytes in base64. It rides with one prompt and is kept nowhere. */
+export type AttachedImage = { mediaType: string; data: string }
 
 /** The session the chat view shows; its `title` heads the view. */
 export type SessionTab = {
@@ -170,14 +173,6 @@ export type ResumablePlan = { feature: string; status: SpecStatus; lastActiveAt?
 export type ResumableChat = { sessionId: string; title: string; mode: SessionMode; lastActiveAt: string }
 
 /**
- * Every feature's spec, for Update spec on the new-session screen's Code
- * tab: a draft is always pickable, carried on there as a draft pickup, so
- * `changeable` is absent on one. A settled spec is pickable only once
- * `changeable`; `waiting` says what it is waiting for otherwise.
- */
-export type UpdatableSpec = { feature: string; status: SpecStatus; changeable?: boolean; waiting?: string; folder?: string }
-
-/**
  * What is put to the person about one scope's `AGENTS.md`, over the chat:
  * moving a `CLAUDE.md` that still holds rules into it, tidying it once it is
  * long, or both. `text` is what `AGENTS.md` reads, after the move when one is offered.
@@ -211,8 +206,6 @@ export type ToWebview =
       plans: ResumablePlan[]
       /** Conversations no tab is showing, newest worked in first, for the same list. */
       chats: ResumableChat[]
-      /** Every feature's spec, whatever its state, for the new-session screen's Update spec card. */
-      updates: UpdatableSpec[]
       /** Entries in `specs/unfiled-decisions.md` and `specs/future-work.md` waiting to be filed into the specs and docs, for the same list. */
       unfiled: number
       /** The profiles by name and which of them new sessions get, for the new-session screen's pickers. */
@@ -251,7 +244,7 @@ export type ReviewAction =
 export type FromWebview =
   | { type: 'ready' }
   /** `files` are the composer's linked files; the prompt tells the agent to read them. `sessionId` is the run typed to, absent on the new-session screen. */
-  | { type: 'send'; text: string; files?: string[]; sessionId?: string }
+  | { type: 'send'; text: string; files?: string[]; images?: AttachedImage[]; sessionId?: string }
   /** Answers with `linked_file` for the file open in the editor, so the composer can link it. */
   | { type: 'link_open_file' }
   /** Answers with `suggested_feature_name`: a name for the feature `description` is about, clear of the names already taken. */
@@ -262,6 +255,10 @@ export type FromWebview =
   | { type: 'question'; sessionId: string; requestId: string; outcome: QuestionOutcome }
   /** The next five name the run the phase's chat talks to: a tab holds several. */
   | { type: 'interrupt'; sessionId: string }
+  /** Stops one of the run's background commands, by the id its row shows. */
+  | { type: 'stop_background'; sessionId: string; id: string }
+  /** Cancels the run's scheduled return. */
+  | { type: 'cancel_return'; sessionId: string }
   /** Folds the run's conversation into a summary to make room; a turn in flight carries on after it. */
   | { type: 'compact'; sessionId: string }
   /** File writes in the run go through without a prompt while on. */
@@ -279,13 +276,13 @@ export type FromWebview =
   /** Switches the view to the session. */
   | { type: 'switch_session'; sessionId: string }
   /** `prompt`, when given, is sent as the first message; `files` are linked files it should read. */
-  | { type: 'new_session'; mode: SessionMode; feature?: string; prompt?: string; files?: string[] }
+  | { type: 'new_session'; mode: SessionMode; feature?: string; prompt?: string; files?: string[]; images?: AttachedImage[] }
   /** Sets the profile new sessions run on. */
   | { type: 'set_default_profile'; name: string }
-  /** Opens the plan session behind a spec on disk, or starts one on it when none remains; what it offers follows the spec's status. `note` is what was typed on the screen the pickup came from, said in the plan's chat. `ownTab` opens it in a tab of its own, leaving the screen it was picked from as it is. */
+  /** Opens the plan session behind a spec on disk, or starts one on it when none remains; what it offers follows the spec's status, and a verified one opens as a change. `note` is what was typed on the screen the pickup came from, said in the plan's chat. `ownTab` opens it in a tab of its own, leaving the screen it was picked from as it is. */
   | { type: 'resume_plan'; feature: string; note?: string; ownTab?: boolean }
-  /** The new-session screen's Update spec: picks a feature's spec, whatever its state, and says `description` in its planning session as the developer's own first message. */
-  | { type: 'update_spec'; feature: string; description: string }
+  /** The new-session screen's Linked work: a new chat, linked to a chat of another window by a code made here or entered from there. */
+  | { type: 'linked_work'; link: LinkWay }
   /** Approves the draft and starts its check against the code; refused while a comment is open. */
   | { type: 'approve_spec' }
   /** The toggle beside Approve: whether approving goes on to start the build by itself. Remembered for the workspace. */

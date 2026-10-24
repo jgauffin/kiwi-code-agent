@@ -12,8 +12,12 @@ export interface McpConnection {
   close(): Promise<void>
 }
 
-/** Opens a connection to one server; rejects when the server cannot be reached. A test swaps a fake in. */
-export type McpConnector = (name: string, config: McpServerConfig) => Promise<McpConnection>
+/**
+ * Opens a connection to one server; rejects when the server cannot be reached.
+ * `onClosed` is called once the connection ends, whoever ended it: a server
+ * killed from outside, to rebuild it, is told this way. A test swaps a fake in.
+ */
+export type McpConnector = (name: string, config: McpServerConfig, onClosed: () => void) => Promise<McpConnection>
 
 /** The name both engines, the permission rules and the transcript use for a server's tool. */
 export const mcpToolName = (server: string, tool: string): string => `mcp__${server}__${tool}`

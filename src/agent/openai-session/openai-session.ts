@@ -1,21 +1,24 @@
-import { permissionResolved, type CodeSession, type FileEditChange, type McpControl, type PermissionDecision, type SessionEvent, type TurnUsage } from '../session/code-session'
-import type { QuestionOutcome, UserQuestionRequest } from '../session/user-question'
-import type { SessionHooks, ToolUse } from '../session/hooks'
-import { confirmReason, denyReason, gateCall, noteCall, reviewEdits, type AskPermission, type PermissionAsker } from '../permissions/gate'
+import type { CodeSession, McpControl, PermissionDecision, PromptImage, SessionEvent, TurnUsage } from '../session/code-session'
+import type { QuestionOutcome } from '../session/user-question'
+import type { SessionHooks } from '../session/hooks'
+import type { PermissionAsker } from '../permissions/gate'
 import type { ModelProfile } from '../session/model-profile'
 import { AsyncQueue } from '../session/async-queue'
 import type { McpServers } from '../mcp/mcp-config'
 import type { McpToolHost } from '../mcp/mcp-tool-host'
-import type { ChatCompletionClient, ChatMessage, CompletionRequest, ToolCall, ToolDefinition, Usage } from './chat-messages'
+import type { ChatCompletionClient, ChatMessage, CompletionRequest, ToolCall } from './chat-messages'
 import { ReadTracker } from './tools/read-tracker'
-import { folded, modelText, toDefinition, type Tool, type ToolContext, type ToolOutput } from './tools/tool'
-import { UNANSWERED_TOOL_RESULT } from './history'
-import { isAbsolute, resolve } from 'node:path'
-import { COMPACT_AT, compact, DEFAULT_CONTEXT_WINDOW, estimateTokens, isContextTooLong, KEEP_SHARE, pathsReadIn, SUMMARY_MAX_TOKENS, summaryPrompt } from './compaction'
+import { modelText, type Tool } from './tools/tool'
+import { isContextTooLong } from './compaction'
 import type { CompactionFocus } from '../session/compaction-focus'
 import { FileLedger } from './file-ledger'
-import { compactionPoint } from '../session/compaction-point'
 import { errorMessage } from '../../error-message'
+import { type StreamedCompletion, streamCompletion } from './completion-stream'
+import { dropImages, repairAfterAbort } from './message-repair'
+import { PromptBroker } from './prompt-broker'
+import { SessionCompactor } from './session-compactor'
+import { SessionMcp } from './session-mcp'
+import { ToolRunner } from './tool-runner'
 
 /**
  * Room for a reasoning model to think through a task and then write a whole
@@ -26,6 +29,9 @@ const MAX_OUTPUT_TOKENS = 32768
 
 /** A compaction waiting its place in the queue among the user's turns. */
 const COMPACT = Symbol('compact')
+
+/** The words beside the images a round of tool calls returned. */
+export const TOOL_IMAGES_NOTE = 'The images returned by the tool calls above.'
 
 export type OpenAiSessionOptions = {
   id: string
@@ -53,6 +59,16 @@ export type OpenAiSessionOptions = {
   mcp?: { host: McpToolHost; servers: McpServers }
 }
 
+/** What one user turn carries from round to round. */
+type TurnState = {
+  signal: AbortSignal
+  turn: number
+  usage: TurnUsage
+  started: number
+  /** The turn gets one compaction to rescue it from a provider that says the conversation is too long. */
+  rescued: boolean
+}
+
 /**
  * Our own agent loop over an OpenAI-compatible model: stream a completion,
  * run the tool calls it asked for, feed results back, repeat until it
@@ -64,50 +80,58 @@ export class OpenAiSession implements CodeSession {
   private readonly output = new AsyncQueue<SessionEvent>()
   private readonly messages: ChatMessage[]
   /** User turns waiting, and compactions asked for while no turn ran. */
-  private readonly queue: (string | typeof COMPACT)[] = []
+  private readonly queue: (string | { text: string; images: PromptImage[] } | typeof COMPACT)[] = []
   /** A compaction asked for during a turn; it runs before the turn's next request. */
   private compactRequested = false
-  private readonly files = new ReadTracker()
-  /** Where the session has been in the workspace; outlives the messages that say so. */
-  private readonly ledger = new FileLedger()
-  private readonly pending = new Map<string, (d: PermissionDecision) => void>()
-  /** Questions the model put to the user, by the id of the tool call that asked. */
-  private readonly questions = new Map<string, (outcome: QuestionOutcome) => void>()
-  /** The built-in tools plus what the MCP servers offer now; swapped as one when the servers change. */
-  private tools: Tool[]
-  private definitions: ToolDefinition[]
-  /** MCP changes run one after another; a turn waits for the one in flight before it starts. */
-  private mcpChain: Promise<void> = Promise.resolve()
+  private readonly prompts = new PromptBroker((event) => this.emit(event))
+  private readonly mcpTools: SessionMcp
+  private readonly compactor: SessionCompactor
+  private readonly toolRunner: ToolRunner
   readonly mcp: McpControl | undefined
   private turnAbort = new AbortController()
   private running = false
   private disposed = false
   private turnCounter = 0
-  /** What the last completion said its prompt cost: how full the window is now. */
-  private promptTokens = 0
 
   constructor(private readonly options: OpenAiSessionOptions) {
     this.id = options.id
     this.profile = options.profile
     this.messages = [{ role: 'system', content: options.systemPrompt }, ...(options.resume?.history ?? [])]
-    this.tools = options.tools
-    this.definitions = options.tools.map(toDefinition)
+    const files = new ReadTracker()
+    // Where the session has been in the workspace; outlives the messages that say so.
+    const ledger = new FileLedger()
+    this.mcpTools = new SessionMcp(
+      options.tools,
+      options.mcp,
+      (event) => this.emit(event),
+      (message) => this.emitError(message),
+    )
+    this.mcp = this.mcpTools.control
+    this.compactor = new SessionCompactor(
+      {
+        client: options.client,
+        model: options.profile.model,
+        cwd: options.cwd,
+        contextWindow: options.contextWindow,
+        compactAtTokens: options.compactAtTokens,
+        compactionFocus: options.compactionFocus,
+      },
+      this.messages,
+      files,
+      ledger,
+      (event) => this.emit(event),
+    )
+    this.toolRunner = new ToolRunner(
+      { cwd: options.cwd, hooks: options.hooks, ask: options.ask, tools: () => this.mcpTools.tools, files, ledger, prompts: this.prompts },
+      (event) => this.emit(event),
+    )
     this.emit({ type: 'session_started', engineSessionId: options.resume?.engineSessionId ?? options.id, model: options.profile.model })
-    const { mcp } = options
-    if (mcp) {
-      mcp.host.watch(() => this.mcpChanged())
-      this.mcp = {
-        reload: (servers) => this.applyMcp(() => mcp.host.load(servers)),
-        start: (name) => this.applyMcp(() => mcp.host.start(name)),
-        stop: (name) => this.applyMcp(() => mcp.host.stop(name)),
-      }
-      void this.applyMcp(() => mcp.host.load(mcp.servers))
-    }
+    this.mcpTools.start()
   }
 
-  send(text: string): void {
+  send(text: string, images: PromptImage[] = []): void {
     if (this.disposed) return
-    this.queue.push(text)
+    this.queue.push(images.length > 0 ? { text, images } : text)
     if (!this.running) void this.drain()
   }
 
@@ -126,30 +150,17 @@ export class OpenAiSession implements CodeSession {
   }
 
   respondToPermission(requestId: string, decision: PermissionDecision): boolean {
-    const resolve = this.pending.get(requestId)
-    if (!resolve) return false
-    this.pending.delete(requestId)
-    this.emit(permissionResolved(requestId, decision))
-    resolve(decision)
-    return true
+    return this.prompts.respondToPermission(requestId, decision)
   }
 
   respondToQuestion(requestId: string, outcome: QuestionOutcome): boolean {
-    const resolve = this.questions.get(requestId)
-    if (!resolve) return false
-    this.questions.delete(requestId)
-    this.emit({ type: 'question_resolved', requestId, outcome })
-    resolve(outcome)
-    return true
+    return this.prompts.respondToQuestion(requestId, outcome)
   }
 
   async interrupt(): Promise<void> {
     this.turnAbort.abort()
-    for (const [id, resolve] of this.pending) {
-      this.pending.delete(id)
-      resolve({ kind: 'deny', message: 'Interrupted' })
-    }
-    this.cancelQuestions('Interrupted')
+    this.prompts.denyPending('Interrupted')
+    this.prompts.cancelQuestions('Interrupted')
   }
 
   async dispose(): Promise<void> {
@@ -161,38 +172,17 @@ export class OpenAiSession implements CodeSession {
     this.output.end()
   }
 
-  /** One MCP change at a time; a turn waits for the one in flight, so its first round sees the servers' tools. */
-  private applyMcp(change: () => Promise<void>): Promise<void> {
-    this.mcpChain = this.mcpChain
-      .then(change)
-      .catch((error: unknown) => this.emitError(`MCP servers: ${errorMessage(error)}`))
-      .then(() => this.mcpChanged())
-    return this.mcpChain
-  }
-
-  /**
-   * A server started, stopped or listed other tools. A round in flight keeps
-   * the definitions it was sent; the next round sees the new set, and a call
-   * to a tool that went away fails like any unknown tool.
-   */
-  private mcpChanged(): void {
-    const host = this.options.mcp!.host
-    this.tools = [...this.options.tools, ...host.tools()]
-    this.definitions = this.tools.map(toDefinition)
-    this.emit({ type: 'mcp_servers', servers: host.statuses() })
-  }
-
   private async drain(): Promise<void> {
     this.running = true
     try {
-      await this.mcpChain
+      await this.mcpTools.settled()
       while (this.queue.length > 0 && !this.disposed) {
         const next = this.queue.shift()!
         if (next === COMPACT) {
           await this.compactBetweenTurns()
           continue
         }
-        this.messages.push({ role: 'user', content: next })
+        this.messages.push(typeof next === 'string' ? { role: 'user', content: next } : { role: 'user', content: next.text, images: next.images })
         await this.runTurn()
       }
     } finally {
@@ -202,158 +192,110 @@ export class OpenAiSession implements CodeSession {
 
   private async runTurn(): Promise<void> {
     this.turnAbort = new AbortController()
-    const signal = this.turnAbort.signal
-    const turn = ++this.turnCounter
-    const usage: TurnUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
-    const started = Date.now()
-    const maxRounds = this.options.maxRoundsPerTurn ?? 50
-    /** The turn gets one compaction to rescue it from a provider that says the conversation is too long. */
-    let rescued = false
+    const state: TurnState = {
+      signal: this.turnAbort.signal,
+      turn: ++this.turnCounter,
+      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      started: Date.now(),
+      rescued: false,
+    }
     try {
-      for (let round = 1; ; round++) {
-        if (round > maxRounds) {
-          this.emit({ type: 'error', message: `Stopped after ${maxRounds} tool rounds in one turn`, fatal: false, resumable: true })
-          return this.finishTurn(usage, started, true, ['max tool rounds'])
-        }
-        if (this.compactRequested || this.promptTokens >= this.compactAt) {
-          const asked = this.compactRequested
-          this.compactRequested = false
-          if (!(await this.compactNow(signal, usage)) && asked) this.emitError('Nothing old enough to fold into a summary yet')
-        }
-        this.emit({ type: 'status', status: 'requesting' })
-        let completion: Awaited<ReturnType<OpenAiSession['complete']>>
-        try {
-          completion = await this.complete(`${turn}.${round}`, signal, usage)
-        } catch (error) {
-          if (rescued || signal.aborted || !isContextTooLong(error) || !(await this.compactNow(signal, usage))) throw error
-          rescued = true
-          continue
-        }
-        const { assistant, finishReason } = completion
-        this.messages.push(assistant)
-        // A reply cut mid-thought has not decided anything, and a tool call cut mid-arguments is not the call the model meant.
-        if (finishReason === 'length') {
-          throw new Error(`The model hit its output limit of ${MAX_OUTPUT_TOKENS} tokens before it finished its reply`)
-        }
-        if (assistant.toolCalls.length === 0) return this.finishTurn(usage, started, false, [])
-        for (const call of assistant.toolCalls) {
-          if (signal.aborted) throw new InterruptedError()
-          const result = await this.runTool(call, signal, usage)
-          this.emit({
-            type: 'tool_result',
-            toolUseId: call.id,
-            text: result.text,
-            isError: result.isError,
-            ...(result.context ? { context: result.context } : {}),
-            ...(result.subAgent ? { subAgent: result.subAgent } : {}),
-          })
-          this.messages.push({ role: 'tool', toolCallId: call.id, content: modelText(result) })
-        }
-        if (signal.aborted) throw new InterruptedError()
-      }
+      await this.runRounds(state)
     } catch (error) {
-      this.repairAfterAbort()
-      if (error instanceof InterruptedError || signal.aborted) {
-        return this.finishTurn(usage, started, true, ['interrupted'])
-      }
-      const message = errorMessage(error)
-      this.emitError(message)
-      return this.finishTurn(usage, started, true, [message])
+      this.failTurn(error, state)
     }
   }
 
-  /** Streams one completion, emitting deltas, and returns the assembled assistant message. */
-  private async complete(
-    messageId: string,
-    signal: AbortSignal,
-    usage: TurnUsage,
-  ): Promise<{ assistant: Extract<ChatMessage, { role: 'assistant' }>; finishReason: string | undefined }> {
-    let text = ''
-    let reasoning = ''
-    let finishReason: string | undefined
-    const calls = new Map<number, ToolCall>()
-    for await (const delta of this.options.client.stream({
-      model: this.options.profile.model,
-      messages: this.messages,
-      tools: this.definitions,
-      maxTokens: MAX_OUTPUT_TOKENS,
-      ...(this.options.reasoningEffort ? { reasoningEffort: this.options.reasoningEffort } : {}),
-      signal,
-    })) {
-      switch (delta.type) {
-        case 'text':
-          text += delta.text
-          this.emit({ type: 'assistant_text', messageId, delta: delta.text })
-          break
-        case 'reasoning':
-          reasoning += delta.text
-          this.emit({ type: 'assistant_thinking', messageId, delta: delta.text })
-          break
-        case 'tool_call_start':
-          calls.set(delta.index, { id: delta.id, name: delta.name, arguments: '' })
-          break
-        case 'tool_call_arguments': {
-          const call = calls.get(delta.index)
-          if (call) call.arguments += delta.text
-          break
-        }
-        case 'done':
-          if (delta.usage) {
-            addUsage(usage, delta.usage)
-            this.promptTokens = delta.usage.promptTokens
-            this.reportUsage(this.promptTokens)
-            this.emit({ type: 'reply_usage', messageId, outputTokens: delta.usage.completionTokens })
-          }
-          finishReason = delta.finishReason
-          break
+  private async runRounds(state: TurnState): Promise<void> {
+    const { signal, usage } = state
+    const maxRounds = this.options.maxRoundsPerTurn ?? 50
+    for (let round = 1; ; round++) {
+      if (round > maxRounds) {
+        this.emit({ type: 'error', message: `Stopped after ${maxRounds} tool rounds in one turn`, fatal: false, resumable: true })
+        return this.finishTurn(usage, state.started, true, ['max tool rounds'])
       }
+      await this.compactIfDue(signal, usage)
+      this.emit({ type: 'status', status: 'requesting' })
+      const completion = await this.completeOrRescue(state, round)
+      if (!completion) continue
+      const { assistant, finishReason } = completion
+      this.messages.push(assistant)
+      // A reply cut mid-thought has not decided anything, and a tool call cut mid-arguments is not the call the model meant.
+      if (finishReason === 'length') {
+        throw new Error(`The model hit its output limit of ${MAX_OUTPUT_TOKENS} tokens before it finished its reply`)
+      }
+      if (assistant.toolCalls.length === 0) return this.finishTurn(usage, state.started, false, [])
+      await this.runToolCalls(assistant.toolCalls, signal, usage)
+      if (signal.aborted) throw new InterruptedError()
     }
-    if (text) this.emit({ type: 'assistant_message', messageId, text })
-    const toolCalls = [...calls.entries()].sort((a, b) => a[0] - b[0]).map(([, c]) => c)
-    for (const call of toolCalls) {
-      const input = parseArguments(call.arguments)
+  }
+
+  private async compactIfDue(signal: AbortSignal, usage: TurnUsage): Promise<void> {
+    if (!this.compactRequested && !this.compactor.due) return
+    const asked = this.compactRequested
+    this.compactRequested = false
+    if (!(await this.compactor.compactNow(signal, usage)) && asked) this.emitError('Nothing old enough to fold into a summary yet')
+  }
+
+  /** The completion of a round, or nothing when the provider said the conversation is too long and a compaction made room to try again. */
+  private async completeOrRescue(state: TurnState, round: number): Promise<StreamedCompletion | undefined> {
+    const { signal, usage } = state
+    try {
+      return await this.complete(`${state.turn}.${round}`, signal, usage)
+    } catch (error) {
+      if (state.rescued || signal.aborted || !isContextTooLong(error) || !(await this.compactor.compactNow(signal, usage))) throw error
+      state.rescued = true
+      return undefined
+    }
+  }
+
+  private async runToolCalls(calls: ToolCall[], signal: AbortSignal, usage: TurnUsage): Promise<void> {
+    const images: PromptImage[] = []
+    for (const call of calls) {
+      if (signal.aborted) throw new InterruptedError()
+      const result = await this.toolRunner.run(call, signal, usage)
       this.emit({
-        type: 'tool_call',
+        type: 'tool_result',
         toolUseId: call.id,
-        name: call.name,
-        ...(input === undefined ? { input: call.arguments, malformed: true } : { input }),
+        text: result.text,
+        isError: result.isError,
+        ...(result.context ? { context: result.context } : {}),
+        ...(result.subAgent ? { subAgent: result.subAgent } : {}),
       })
+      this.messages.push({ role: 'tool', toolCallId: call.id, content: modelText(result) })
+      images.push(...(result.images ?? []))
     }
-    return { assistant: { role: 'assistant', content: text, ...(reasoning ? { reasoning } : {}), toolCalls }, finishReason }
+    // A tool message carries only text on this wire, so the pictures follow the round's results as a user message, as pasted ones do.
+    if (images.length > 0) this.messages.push({ role: 'user', content: TOOL_IMAGES_NOTE, images })
   }
 
-  private get contextWindow(): number {
-    return this.options.contextWindow ?? DEFAULT_CONTEXT_WINDOW
+  private failTurn(error: unknown, state: TurnState): void {
+    repairAfterAbort(this.messages)
+    if (error instanceof InterruptedError || state.signal.aborted) {
+      return this.finishTurn(state.usage, state.started, true, ['interrupted'])
+    }
+    const dropped = dropImages(this.messages)
+    const message = dropped > 0 ? `${errorMessage(error)} (the prompt carried ${dropped} ${dropped === 1 ? 'image' : 'images'}; they are dropped from the conversation)` : errorMessage(error)
+    this.emitError(message)
+    return this.finishTurn(state.usage, state.started, true, [message])
   }
 
-  /**
-   * Folds the older turns into a summary. False when there was nothing old
-   * enough to fold: the caller is then out of room and has to say so.
-   */
-  private async compactNow(signal: AbortSignal, usage: TurnUsage): Promise<boolean> {
-    this.emit({ type: 'status', status: 'compacting' })
-    const before = this.promptTokens
-    const ledger = this.ledger.render(this.options.cwd)
-    // The kept tail scales with where compaction happens, so a ceiling well below the window still has something to fold.
-    const keepBudget = this.compactAt * (KEEP_SHARE / COMPACT_AT)
-    const result = await compact(this.messages, (t) => this.summarise(t, signal, usage), keepBudget, ledger)
-    if (!result) return false
-    this.messages.splice(0, this.messages.length, ...result.messages)
-    // A file whose read was folded away is one the model can no longer see, whatever the ledger says it once knew.
-    this.files.forgetExcept(pathsReadIn(result.kept).map((p) => (isAbsolute(p) ? p : resolve(this.options.cwd, p))))
-    this.promptTokens = 0
-    this.emit({ type: 'compacted', summary: result.summary, preTokens: before })
-    // No request has measured the folded conversation yet; the estimate stands in until one does.
-    this.reportUsage(this.messages.reduce((sum, m) => sum + estimateTokens(m), 0))
-    return true
-  }
-
-  private get compactAt(): number {
-    return compactionPoint(this.contextWindow, COMPACT_AT, this.options.compactAtTokens)
-  }
-
-  private reportUsage(usedTokens: number): void {
-    this.emit({ type: 'context_usage', usedTokens, windowTokens: this.contextWindow, compactAtTokens: this.compactAt })
+  private complete(messageId: string, signal: AbortSignal, usage: TurnUsage): Promise<StreamedCompletion> {
+    return streamCompletion(
+      this.options.client,
+      {
+        model: this.options.profile.model,
+        messages: this.messages,
+        tools: this.mcpTools.definitions,
+        maxTokens: MAX_OUTPUT_TOKENS,
+        ...(this.options.reasoningEffort ? { reasoningEffort: this.options.reasoningEffort } : {}),
+        signal,
+      },
+      messageId,
+      usage,
+      (event) => this.emit(event),
+      (promptTokens) => this.compactor.measured(promptTokens),
+    )
   }
 
   /** A compaction the user asked for while no turn ran; what it costs is not a turn's, so it ends without one. */
@@ -361,158 +303,11 @@ export class OpenAiSession implements CodeSession {
     this.turnAbort = new AbortController()
     const usage: TurnUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
     try {
-      if (!(await this.compactNow(this.turnAbort.signal, usage))) this.emitError('Nothing old enough to fold into a summary yet')
+      if (!(await this.compactor.compactNow(this.turnAbort.signal, usage))) this.emitError('Nothing old enough to fold into a summary yet')
     } catch (error) {
       if (!this.turnAbort.signal.aborted) this.emitError(`Compaction failed: ${errorMessage(error)}`)
     }
     this.emit({ type: 'status', status: 'idle' })
-  }
-
-  /** The summary that stands in for the folded turns, written by the session's own model without tools. */
-  private async summarise(transcript: string, signal: AbortSignal, usage: TurnUsage): Promise<string> {
-    let summary = ''
-    for await (const delta of this.options.client.stream({
-      model: this.options.profile.model,
-      messages: [
-        { role: 'system', content: summaryPrompt(this.options.compactionFocus?.keep ?? '') },
-        { role: 'user', content: transcript },
-      ],
-      tools: [],
-      maxTokens: SUMMARY_MAX_TOKENS,
-      signal,
-    })) {
-      if (delta.type === 'text') summary += delta.text
-      if (delta.type === 'done' && delta.usage) addUsage(usage, delta.usage)
-    }
-    return summary
-  }
-
-  private async runTool(call: ToolCall, signal: AbortSignal, usage: TurnUsage): Promise<ToolOutput> {
-    const tool = this.tools.find((t) => t.name === call.name)
-    if (!tool) return { text: `Unknown tool: ${call.name}`, isError: true }
-    const raw = parseArguments(call.arguments)
-    if (raw === undefined) return { text: `Tool arguments are not valid JSON: ${call.arguments.slice(0, 200)}`, isError: true }
-    const parsed = tool.schema.safeParse(raw)
-    if (!parsed.success) {
-      const issues = parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ')
-      return { text: `Invalid arguments for ${tool.name}: ${issues}`, isError: true }
-    }
-    const use = { toolName: tool.name, input: parsed.data, toolUseId: call.id }
-    const gate = await this.gate(tool, use, signal)
-    if (gate.refused) return gate.refused
-    const pre = gate.pre
-    let output: ToolOutput
-    try {
-      output = await tool.execute(parsed.data, this.contextFor(call.id, signal, usage))
-    } catch (error) {
-      output = { text: `${tool.name} failed: ${errorMessage(error)}`, isError: true }
-    }
-    const post = await this.options.hooks?.postToolUse?.({ ...use, output: output.text, isError: output.isError })
-    // Kept apart from the text: the model reads it, the chat does not show it.
-    const context = [output.context, pre?.additionalContext, post?.additionalContext].filter((c): c is string => !!c)
-    return context.length ? { ...output, context: context.join('\n\n') } : output
-  }
-
-  /** The permission decision every call passes, whether the model or a running script makes it. */
-  private gate(tool: Tool, use: ToolUse, signal: AbortSignal) {
-    const ask: AskPermission = this.options.ask
-      ? (_id, name, input, shown) => this.options.ask!(name, input, shown)
-      : (id, name, input, shown) => this.askPermission(id, name, input, signal, shown)
-    return gateCall(this.options.hooks, ask, tool, use)
-  }
-
-  /** What a tool gets to work with; a script's calls back into other tools take the same gate as the model's own. */
-  private contextFor(callId: string, signal: AbortSignal, usage: TurnUsage): ToolContext {
-    let nested = 0
-    const nextId = () => `${callId}/${++nested}`
-    return {
-      cwd: this.options.cwd,
-      signal,
-      files: this.files,
-      ledger: this.ledger,
-      ask: (request) => this.askUser(callId, request),
-      call: async (name, input) => folded(await this.runTool({ id: nextId(), name, arguments: JSON.stringify(input) }, signal, usage)),
-      authorize: (name, input) => denyReason(this.options.hooks, { toolName: name, input, toolUseId: nextId() }),
-      confirm: (name, input) =>
-        confirmReason(this.options.hooks, (id, n, v, shown) => this.askPermission(id, n, v, signal, shown), { toolName: name, input, toolUseId: nextId() }),
-      review: (title, edits) =>
-        reviewEdits(
-          this.options.hooks,
-          (id, n, v, shown) => this.askPermission(id, n, v, signal, shown),
-          { toolName: 'RunScript', input: { files: edits.map((e) => e.label) }, toolUseId: nextId() },
-          { title, edits },
-        ),
-      observed: (name, input) => noteCall(this.options.hooks, { toolName: name, input, toolUseId: nextId() }),
-      askPermission: (toolName, input, shown) => this.askPermission(nextId(), toolName, input, signal, shown),
-      // A delegated run's spend is the caller's own, so it folds into this turn's total rather than one of its own.
-      addUsage: (added) => {
-        usage.inputTokens += added.inputTokens
-        usage.outputTokens += added.outputTokens
-        usage.cacheReadTokens += added.cacheReadTokens
-        usage.cacheWriteTokens += added.cacheWriteTokens
-        if (added.costUsd) usage.costUsd = (usage.costUsd ?? 0) + added.costUsd
-      },
-      report: (event) => this.emit({ ...event, parentToolUseId: callId } as SessionEvent),
-    }
-  }
-
-  private askPermission(
-    toolUseId: string,
-    toolName: string,
-    input: unknown,
-    signal: AbortSignal,
-    shown: { title?: string; edits?: FileEditChange[] } = {},
-  ): Promise<PermissionDecision> {
-    return new Promise((resolve) => {
-      this.pending.set(toolUseId, resolve)
-      signal.addEventListener('abort', () => {
-        if (this.pending.delete(toolUseId)) resolve({ kind: 'deny', message: 'Interrupted' })
-      })
-      this.emit({ type: 'permission_request', requestId: toolUseId, toolUseId, toolName, input, ...shown })
-    })
-  }
-
-  /**
-   * The model's question to the user. The card decides when this settles, so
-   * there is no deadline: the loop holds the tool call open, and the session
-   * makes no further progress until the request is resolved one way or the
-   * other. The tool call's id is the request's, so the answer comes back as
-   * that call's own result.
-   */
-  private askUser(requestId: string, request: UserQuestionRequest): Promise<QuestionOutcome> {
-    return new Promise((resolve) => {
-      this.questions.set(requestId, resolve)
-      this.emit({ type: 'question_request', requestId, request })
-    })
-  }
-
-  /** Every question still on screen goes unanswered; the model is never handed a choice the user did not make. */
-  private cancelQuestions(reason: string): void {
-    for (const [id, resolve] of this.questions) {
-      this.questions.delete(id)
-      const outcome: QuestionOutcome = { kind: 'unanswered', reason }
-      this.emit({ type: 'question_resolved', requestId: id, outcome })
-      resolve(outcome)
-    }
-  }
-
-  /**
-   * An assistant message with tool calls must be answered before the next
-   * user message, or the API rejects the history. After an abort, whatever
-   * calls are still unanswered get a synthetic result.
-   */
-  private repairAfterAbort(): void {
-    const last = this.messages[this.messages.length - 1]
-    if (!last || last.role !== 'assistant') return
-    const answered = new Set<string>()
-    for (let i = this.messages.length - 1; i >= 0; i--) {
-      const m = this.messages[i]!
-      if (m.role === 'tool') answered.add(m.toolCallId)
-      else break
-    }
-    for (const call of last.toolCalls) {
-      if (!answered.has(call.id)) this.messages.push({ role: 'tool', toolCallId: call.id, content: UNANSWERED_TOOL_RESULT })
-    }
   }
 
   private finishTurn(usage: TurnUsage, started: number, isError: boolean, errors: string[]): void {
@@ -538,20 +333,5 @@ export class OpenAiSession implements CodeSession {
 class InterruptedError extends Error {
   constructor() {
     super('interrupted')
-  }
-}
-
-function addUsage(total: TurnUsage, usage: Usage): void {
-  total.inputTokens += usage.promptTokens - usage.cachedTokens
-  total.cacheReadTokens += usage.cachedTokens
-  total.outputTokens += usage.completionTokens
-}
-
-function parseArguments(text: string): unknown {
-  if (text.trim() === '') return {}
-  try {
-    return JSON.parse(text)
-  } catch {
-    return undefined
   }
 }

@@ -1,21 +1,16 @@
 import type { SessionEvent } from '../../agent/session/code-session'
-import { renderAnsi } from './ansi'
 import { AssistantBubbles } from './assistant-bubbles'
+import { BackgroundRows } from './background-rows'
+import { StatusLine } from './transcript-status-line'
 import { PromptSubmittedEvent } from './events'
 import { PermissionCard } from './permission-card'
 import { PromptCards } from './prompt-cards'
 import { isQuestionTool, QuestionCard } from './question-card'
 import { ToolSteps } from './tool-steps'
-import { agentMessage, block, compactionMarker, copyButton, switchMarker, turnLine } from './transcript-blocks'
+import { atWork, currentActivity, statusActivity, WAITING_ON_MODEL } from './transcript-activity'
+import { agentMessage, block, compactionMarker, fillBackgroundCommand, fillScheduledReturn, switchMarker, turnLine } from './transcript-blocks'
+import { resumeButton, userMessageBlock } from './transcript-user-message'
 import { type Activity, WorkingRow } from './working-row'
-
-const WAITING_ON_MODEL = 'Waiting on model'
-const STARTING = 'Starting the session'
-const NEEDS_APPROVAL = 'Waiting for you to allow or deny'
-const NEEDS_ANSWER = 'Waiting for your answer'
-
-const atWork = (label: string): Activity => ({ label, needsUser: false })
-const awaitingUser = (label: string): Activity => ({ label, needsUser: true })
 
 /**
  * The conversation as an append-only stream. Events patch the DOM directly:
@@ -32,7 +27,8 @@ export class ChatTranscript extends HTMLElement {
   private readonly steps = new ToolSteps()
   private readonly cards = new PromptCards()
   private readonly workingRow = new WorkingRow()
-  private statusLine!: HTMLElement
+  private readonly backgroundRows = new BackgroundRows()
+  private readonly statusLine = new StatusLine()
   /** What the session is doing right now, or what it needs from the user; nothing when idle. */
   private activity: Activity | undefined
   /** The offer to carry on a turn that stopped short; it stands only until the conversation moves on. */
@@ -44,12 +40,9 @@ export class ChatTranscript extends HTMLElement {
     this.ensureStatusLine()
   }
 
-  /** The status line is the transcript's own first child; history can be replayed into it before it is on screen. */
+  /** The status line is the transcript's own first child. */
   private ensureStatusLine(): void {
-    if (this.statusLine) return
-    this.statusLine = document.createElement('p')
-    this.statusLine.className = 'status'
-    this.appendChild(this.statusLine)
+    this.statusLine.attachTo(this)
   }
 
   /**
@@ -60,10 +53,11 @@ export class ChatTranscript extends HTMLElement {
    */
   reset(events: SessionEvent[], live: boolean): void {
     this.ensureStatusLine()
-    this.replaceChildren(this.statusLine)
+    this.replaceChildren(this.statusLine.element)
     this.bubbles.clear()
     this.steps.clear()
     this.cards.clear()
+    this.backgroundRows.clear()
     this.resume = undefined
     this.currentModel = undefined
     this.workingRow.clear()
@@ -103,11 +97,9 @@ export class ChatTranscript extends HTMLElement {
   private handle(event: SessionEvent, live: boolean): void {
     switch (event.type) {
       case 'session_started':
-        this.sessionStarted(event)
-        break
+        return this.sessionStarted(event)
       case 'user_message':
-        this.userMessage(event)
-        break
+        return this.userMessage(event)
       // What a subagent is doing never renames the row: the main thread is waiting on
       // the step that spawned it, and several threads renaming the one row in turn reads
       // as a stall, the time spent restarting at every change of name.
@@ -125,31 +117,16 @@ export class ChatTranscript extends HTMLElement {
         if (!event.parentToolUseId) this.activity = atWork(WAITING_ON_MODEL)
         break
       case 'tool_call':
-        this.toolCalled(event)
-        break
+        return this.toolCalled(event)
       case 'tool_result':
-        this.toolResulted(event)
-        break
+        return this.toolResulted(event)
       case 'permission_request':
-        // A prompt stands where the call it asks about stands, so one raised inside a
-        // subagent is read in that agent's step and not at the foot of the transcript.
-        this.cards.requestPermission(event, (card) => this.insert(card, event.toolUseId ? this.steps.threadOf(event.toolUseId) : undefined))
-        this.activity = this.currentActivity()
-        break
       case 'permission_resolved':
-        this.cards.resolvePermission(event)
-        this.activity = this.currentActivity()
-        break
       case 'question_request':
-        this.cards.requestQuestion(event, (card) => this.insert(card))
-        this.activity = this.currentActivity()
-        break
       case 'question_resolved':
-        this.cards.resolveQuestion(event)
-        this.activity = this.currentActivity()
-        break
+        return this.cardEvent(event)
       case 'status':
-        this.statusChanged(event)
+        this.activity = statusActivity(event) ?? this.activity
         break
       case 'compacted':
         this.insert(compactionMarker(event))
@@ -159,11 +136,14 @@ export class ChatTranscript extends HTMLElement {
         this.insert(turnLine(event))
         break
       case 'error':
-        this.errored(event)
-        break
+        return this.errored(event)
       case 'agent_message':
         this.insert(agentMessage(event))
         break
+      case 'background_command':
+        return this.backgroundCommand(event)
+      case 'scheduled_return':
+        return this.scheduledReturn(event)
       case 'agent_exchange_capped':
         this.insert(block('error', `The agents exchanged ${event.limit} messages with ${event.workspace} without a word from you, so the next one was refused. Write in this chat to let them go on.`))
         break
@@ -175,6 +155,36 @@ export class ChatTranscript extends HTMLElement {
     }
   }
 
+  /** One row per command: its later events change the row in place, so the transcript shows it running and then how it ended. */
+  private backgroundCommand(event: Extract<SessionEvent, { type: 'background_command' }>): void {
+    fillBackgroundCommand(this.backgroundRows.rowFor(event.id, (row) => this.insert(row)), event)
+  }
+
+  /** One row per return, found by its time: its later events change the row in place. */
+  private scheduledReturn(event: Extract<SessionEvent, { type: 'scheduled_return' }>): void {
+    fillScheduledReturn(this.backgroundRows.rowFor(`return ${event.dueAt}`, (row) => this.insert(row)), event)
+  }
+
+  private cardEvent(event: Extract<SessionEvent, { type: 'permission_request' | 'permission_resolved' | 'question_request' | 'question_resolved' }>): void {
+    switch (event.type) {
+      case 'permission_request':
+        // A prompt stands where the call it asks about stands, so one raised inside a
+        // subagent is read in that agent's step and not at the foot of the transcript.
+        this.cards.requestPermission(event, (card) => this.insert(card, event.toolUseId ? this.steps.threadOf(event.toolUseId) : undefined))
+        break
+      case 'permission_resolved':
+        this.cards.resolvePermission(event)
+        break
+      case 'question_request':
+        this.cards.requestQuestion(event, (card) => this.insert(card))
+        break
+      case 'question_resolved':
+        this.cards.resolveQuestion(event)
+        break
+    }
+    this.activity = currentActivity(this.cards, this.steps)
+  }
+
   private sessionStarted(event: Extract<SessionEvent, { type: 'session_started' }>): void {
     // A restart on the same model (a reconnect, a resumed turn) says nothing new; a switch
     // to another model is marked in the scrolling transcript, not only in the status line,
@@ -183,19 +193,13 @@ export class ChatTranscript extends HTMLElement {
     this.currentModel = event.model
     this.setStatus(`${event.model} · Claude Code ${event.engineVersion ?? ''}`.trim())
     // The engine is up, so what the turn waits on takes over from the start-up.
-    if (this.activity) this.activity = this.currentActivity()
+    if (this.activity) this.activity = currentActivity(this.cards, this.steps)
   }
 
   private userMessage(event: Extract<SessionEvent, { type: 'user_message' }>): void {
     this.resume?.remove()
     this.resume = undefined
-    // What the extension sent on the person's behalf is named, not quoted; the host never passes its text on.
-    if (event.label) this.insert(block('turn kickoff', event.label))
-    else {
-      const message = block('user', event.text, renderAnsi)
-      message.appendChild(copyButton(() => event.text))
-      this.insert(message)
-    }
+    this.insert(userMessageBlock(event))
     this.activity = atWork(WAITING_ON_MODEL)
   }
 
@@ -209,23 +213,15 @@ export class ChatTranscript extends HTMLElement {
     this.insert(details, event.parentToolUseId)
     if (event.parentToolUseId) return
     this.steps.trackPending(event, details)
-    this.activity = this.currentActivity()
+    this.activity = currentActivity(this.cards, this.steps)
   }
 
   private toolResulted(event: Extract<SessionEvent, { type: 'tool_result' }>): void {
     if (this.steps.isQuestionCall(event.toolUseId)) return
     this.steps.finishPending(event.toolUseId)
     this.cards.dropAnsweredPrompt(event.toolUseId)
-    this.activity = this.currentActivity()
+    this.activity = currentActivity(this.cards, this.steps)
     this.steps.result(event, this.cards.isApprovedByHand(event.toolUseId), (element, parentToolUseId) => this.insert(element, parentToolUseId))
-  }
-
-  private statusChanged(event: Extract<SessionEvent, { type: 'status' }>): void {
-    // 'idle' also arrives mid-turn (after compaction, between requests); only the turn's end clears the activity.
-    // The row adds its own ellipsis to whatever phase it names.
-    if (event.status === 'starting') this.activity = atWork(event.detail?.replace(/…$/, '') ?? STARTING)
-    if (event.status === 'requesting') this.activity = atWork(WAITING_ON_MODEL)
-    if (event.status === 'compacting') this.activity = atWork('Compacting context')
   }
 
   private errored(event: Extract<SessionEvent, { type: 'error' }>): void {
@@ -237,23 +233,9 @@ export class ChatTranscript extends HTMLElement {
 
   private offerResume(message: HTMLElement): void {
     this.resume?.remove()
-    const button = document.createElement('button')
-    button.className = 'resume'
-    button.textContent = 'Resume'
-    button.addEventListener('click', () => this.dispatchEvent(new PromptSubmittedEvent('Continue where you stopped.')))
+    const button = resumeButton(() => this.dispatchEvent(new PromptSubmittedEvent('Continue where you stopped.')))
     message.append(button)
     this.resume = button
-  }
-
-  /**
-   * Who the turn is waiting on: the user while a card of theirs is open, else
-   * the newest tool call still running, else the model.
-   */
-  private currentActivity(): Activity {
-    const waiting = this.cards.waitingCards()
-    if (waiting.some((card) => card instanceof PermissionCard)) return awaitingUser(NEEDS_APPROVAL)
-    if (waiting.some((card) => card instanceof QuestionCard)) return awaitingUser(NEEDS_ANSWER)
-    return atWork(this.steps.latestPending() ?? WAITING_ON_MODEL)
   }
 
   /** A pulsing row naming the current activity, with the time spent in it, kept last while the session is at work. */
@@ -287,8 +269,7 @@ export class ChatTranscript extends HTMLElement {
   }
 
   private setStatus(text: string): void {
-    this.statusLine.textContent = text
-    this.statusLine.hidden = text === ''
+    this.statusLine.set(text)
   }
 
   private scrollToEnd(): void {

@@ -9,7 +9,7 @@ import { compactAppliedDecisions, decisionsPath, readDecisions } from '../agent/
 import { mappedFiles, writeMappingSnapshot } from '../agent/phases/mapping-snapshot'
 import { contextPath, readScenarioContext } from '../agent/phases/scenario-context'
 import { pickUpPlan } from '../agent/phases/plan-pickup'
-import { startUpdate as startUpdateSpec } from '../agent/phases/update-spec'
+import { isDone, startChange as startDoneChange } from '../agent/phases/change-done-feature'
 import { assertImplementable } from '../agent/phases/implement'
 import { checkDue } from '../agent/phases/plan-stage'
 import { parseSpec, specFingerprint } from '../agent/phases/spec-model'
@@ -129,15 +129,16 @@ export class PlanActions {
 
   /**
    * Picks a plan up where its spec leaves it: the plan session that wrote it
-   * when one remains, at any stage, verified included (its transcript is the
-   * context; the engine resumes on the next prompt), else a fresh plan session
-   * told to read the files. The plan bar then offers what the stage allows:
+   * when one remains (its transcript is the context; the engine resumes on
+   * the next prompt), else a fresh plan session told to read the files. A
+   * done feature opens as a change instead. The plan bar then offers what the stage allows:
    * review and mapping on a draft, implement on an approved one, the test run
    * on a tested board. `note` is what the person had typed where they picked
    * the plan up from, said in the plan's chat in their own words.
    */
   async resumePlan(feature: string, into?: ChatPanel, note?: string): Promise<void> {
     const { workspaceRoot, sessions } = this.deps
+    if (await isDone(workspaceRoot, feature)) return this.changeDone(feature, into, note)
     const path = specPath(workspaceRoot, feature)
     // The list is newest first; the latest session on the spec is the one that knows it best.
     const owner = sessions.list().find((r) => r.mode === 'plan' && r.feature && specPath(workspaceRoot, r.feature) === path)
@@ -176,17 +177,14 @@ export class PlanActions {
   }
 
   /**
-   * The new-session screen's "Update spec": picks a feature's spec,
-   * whatever its state, and starts or carries on its planning session with
-   * the description as the developer's own first message rather than a
-   * prompt written for them. Same guarantees as a change: a stale cleanup
-   * offer is dropped, and the bar stands at Plan until the revision lands.
+   * A done feature opened from the list opens as a change, since there is
+   * nothing left to pick up: `note`, when typed, is the change in the
+   * developer's own words. Same guarantees as Change: a stale cleanup offer
+   * is dropped, and the bar stands at Plan until the revision lands.
    */
-  async startUpdate(feature: string, description: string, into: ChatPanel): Promise<void> {
+  private async changeDone(feature: string, into?: ChatPanel, note?: string): Promise<void> {
     const { workspaceRoot, sessions } = this.deps
-    const path = specPath(workspaceRoot, feature)
-    const owner = sessions.list().find((r) => r.mode === 'plan' && r.feature && specPath(workspaceRoot, r.feature) === path)
-    await startUpdateSpec({
+    await startDoneChange({
       courier: {
         open: (sessionId) => this.deps.open(sessionId, into),
         start: async (f, prompt, label) => (await this.deps.newSession('plan', f, prompt, into, label))?.id,
@@ -196,10 +194,9 @@ export class PlanActions {
       },
       cwd: workspaceRoot,
       feature,
-      description,
-      ...(owner ? { owner: { sessionId: owner.id } } : {}),
+      ...(note ? { description: note } : {}),
     })
-    // Refused above (still at work) throws before this line; reached only once the description is on its way.
+    // Refused above (still at work) throws before this line; reached only once the change has started.
     this.startingChange.add(feature)
     this.deps.cleanup.clear(feature)
   }

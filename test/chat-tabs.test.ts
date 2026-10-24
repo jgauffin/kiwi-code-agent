@@ -58,7 +58,6 @@ const state = (runs: RunControls[] = [planRun()]): Extract<ToWebview, { type: 's
   plan: plan(),
   plans: [],
   chats: [],
-  updates: [],
   unfiled: 0,
   profiles: { names: ['Claude'], active: 'Claude' },
   models: [],

@@ -1,6 +1,7 @@
 import { basename, relative } from 'node:path'
 import { SPECS_DIR } from '../agent/phases/blind-plan'
-import { frontMatterValue, statusOf } from '../agent/phases/spec-file'
+import { featureNameOf } from '../agent/phases/plan-list'
+import { statusOf } from '../agent/phases/spec-file'
 import type { SpecStatus } from '../agent/phases/spec-status'
 
 /**
@@ -34,7 +35,7 @@ export function isSpecPath(workspaceRoot: string, path: string): boolean {
 /** The feature a spec file plans, named as the planner knows it, and where it stands; undefined for any file that is not one of this workspace's specs. */
 export function specFeatureOf(workspaceRoot: string, path: string, text: string): { feature: string; status: SpecStatus } | undefined {
   if (!isSpecPath(workspaceRoot, path)) return undefined
-  return { feature: frontMatterValue(text, 'feature') ?? basename(path).slice(0, -SPEC_SUFFIX.length), status: statusOf(text) }
+  return { feature: featureNameOf(text, basename(path).slice(0, -SPEC_SUFFIX.length)), status: statusOf(text) }
 }
 
 /** The feature of a spec still in draft, which is what the editor's planner button is offered for; undefined for anything else. */

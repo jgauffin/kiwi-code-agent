@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { exists, namesIn, readOptional } from '../workspace-files'
-import { SPECS_DIR, WORK_DIR, featureSlug, specPath } from './blind-plan'
-import { featureOf, specFiles } from './plan-list'
+import { SPECS_DIR, WORK_DIR, specPath } from './blind-plan'
+import { featureNameOf, specFiles } from './plan-list'
 import { frontMatterValue, withFrontMatterValue } from './spec-file'
 
 /**
@@ -58,12 +58,6 @@ async function stampedId(path: string, taken: ReadonlySet<string>): Promise<{ id
   return { id: fresh, stamped: true }
 }
 
-/** A session's feature name has to lead back to the file name; the spec's own name does unless the file was renamed apart from it. */
-function featureFor(text: string, slug: string): string {
-  const named = featureOf(text)
-  return named !== undefined && featureSlug(named) === slug ? named : slug
-}
-
 async function moveWorkingFiles(cwd: string, from: string, to: string, report: IdentityReport): Promise<void> {
   const workDir = join(cwd, WORK_DIR)
   // A slug holds no dot, so the prefix names this feature's files and no other's.
@@ -96,7 +90,7 @@ export async function followSpecRenames(cwd: string): Promise<IdentityReport> {
     const previous = ledger[id]
     if (previous !== undefined && previous !== slug) {
       await moveWorkingFiles(cwd, previous, slug, report)
-      report.renamed.push({ from: previous, to: slug, feature: featureFor(await readFile(path, 'utf8'), slug) })
+      report.renamed.push({ from: previous, to: slug, feature: featureNameOf(await readFile(path, 'utf8'), slug) })
     }
     if (previous !== slug) {
       ledger[id] = slug

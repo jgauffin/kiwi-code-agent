@@ -6,7 +6,6 @@ import type { ModelOffer } from '../agent/session/model-profile'
 import { listPlans, type PlanSummary } from '../agent/phases/plan-list'
 import { readUnfiled } from '../agent/phases/unfiled-decisions'
 import { sessionGroups } from './session-groups'
-import { updatableSpecs } from './update-candidates'
 import type { ResumableChat, RunSection, ToWebview } from './protocol'
 import { forDisplay } from './display-event'
 import { runRef, runsOf, tabIdOf } from './tab-view'
@@ -99,7 +98,6 @@ export class StateBroadcaster {
         ...(p.folder ? { folder: p.folder } : {}),
       })),
       chats: this.pastChats(groups.chats),
-      updates: await updatableSpecs(workspaceRoot, sessions, plans),
       unfiled: unfiledCount,
       profiles: profileDefaults.read(),
       models: registeredModels().map((m) => ({ name: m.profile.name, efforts: [...m.efforts] })),

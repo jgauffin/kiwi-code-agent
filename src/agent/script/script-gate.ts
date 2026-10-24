@@ -10,7 +10,7 @@ import type { PreToolUseOutcome, SessionHooks, ToolUse } from '../session/hooks'
 export const SCRIPT_WRITING =
   'The same change in more than two files is one RunScript, not a tool call per file, and so is a question about several files whose answer is computed (a count, which files match, what refers to what) rather than read: its JavaScript reads, greps, globs and searches code, returns only what you ask for, and its changes reach the user as one diff. Use it too for what you would write in python, node or powershell through the shell, such as a regex rewrite or parsing XML or HTML; to look inside JSON, JsonQuery and JsonSchema are cheaper. A read inside a script does not count as reading the file for Edit.'
 
-const SHELL_TOOLS = new Set(['Bash', 'PowerShell'])
+const SHELL_TOOLS = new Set(['Bash', 'PowerShell', 'BackgroundBash'])
 
 /** Per interpreter, whether its arguments carry the program inline rather than naming a file. */
 const INLINE: Record<string, (args: string[], heredoc: boolean) => boolean> = {

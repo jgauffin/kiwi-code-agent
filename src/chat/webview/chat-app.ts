@@ -113,7 +113,7 @@ export class ChatApp extends HTMLElement {
     }
     // What the tab shows follows what it is: a session, or no session yet.
     if ((tab === undefined) !== this.nav.creating) this.showCreating(tab === undefined)
-    this.newSession.update(message.profiles, { plans: message.plans, chats: message.chats, unfiled: message.unfiled, updates: message.updates })
+    this.newSession.update(message.profiles, { plans: message.plans, chats: message.chats, unfiled: message.unfiled })
     this.tab = tab
     this.models = message.models
     this.runs = message.runs

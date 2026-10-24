@@ -13,7 +13,7 @@ const { NewSessionView } = await import('../src/chat/webview/new-session-view')
 const { LinkedFilesRow } = await import('../src/chat/webview/linked-files-row')
 const events = await import('../src/chat/webview/events')
 
-const NOTHING: PickUp = { plans: [], chats: [], unfiled: 0, updates: [] }
+const NOTHING: PickUp = { plans: [], chats: [], unfiled: 0 }
 
 function view(profiles = { names: ['Claude', 'Kimi'], active: 'Claude' }, pickUp: PickUp = NOTHING) {
   const node = new NewSessionView()
@@ -28,10 +28,10 @@ const tab = (node: HTMLElement, name: 'code' | 'maintenance') =>
   [...node.querySelectorAll<HTMLButtonElement>('.screens .tab')][name === 'code' ? 0 : 1]!
 
 /** The maintenance cards are on the other tab, so reaching one opens it first. */
-function card(node: HTMLElement, name: 'chat' | 'code-plan' | 'plan' | 'update-spec' | 'file-decisions' | 'doc-migration'): HTMLButtonElement {
+function card(node: HTMLElement, name: 'chat' | 'code-plan' | 'plan' | 'linked-work' | 'file-decisions' | 'doc-migration'): HTMLButtonElement {
   const maintenance = name === 'file-decisions' || name === 'doc-migration'
   tab(node, maintenance ? 'maintenance' : 'code').click()
-  const at = maintenance ? { 'doc-migration': 0, 'file-decisions': 1 }[name] : { chat: 0, 'code-plan': 1, plan: 2, 'update-spec': 3 }[name]
+  const at = maintenance ? { 'doc-migration': 0, 'file-decisions': 1 }[name] : { chat: 0, 'code-plan': 1, plan: 2, 'linked-work': 3 }[name]
   return [...node.querySelectorAll<HTMLButtonElement>('.types button')][at]!
 }
 
@@ -141,10 +141,10 @@ describe('NewSessionView fields across cards', () => {
     node.remove()
   })
 
-  it('the_button_that_links_a_file_stands_beside_the_one_that_starts_the_session', () => {
+  it('the_buttons_that_link_a_file_and_attach_images_stand_beside_the_one_that_starts_the_session', () => {
     const node = view()
     const submit = node.querySelector('.chat-fields .submit')!
-    expect([...submit.children].map((c) => c.tagName.toLowerCase())).toEqual(['button', 'linked-files-row'])
+    expect([...submit.children].map((c) => c.tagName.toLowerCase())).toEqual(['button', 'linked-files-row', 'attached-images-row'])
     node.remove()
   })
 
@@ -234,12 +234,11 @@ describe('NewSessionView pick-up list', () => {
     plans: [{ feature: 'Orders', status: 'approved' as const }],
     chats: [{ sessionId: 's9', title: 'Why does the cart double-count?', mode: 'chat' as const, lastActiveAt: '2026-01-02T10:00:00.000Z' }],
     unfiled: 2,
-    updates: [],
   }
 
   it('a_finished_plan_stays_on_the_list_saying_it_is_done', () => {
     const node = view(undefined, { ...waiting, plans: [{ feature: 'Dashboards', status: 'verified', lastActiveAt: '2026-10-03T11:20:00.000Z' }] })
-    expect(planPicks(node)[0]!.querySelector('.hint')!.textContent).toMatch(/^verified: done · last worked on /)
+    expect(planPicks(node)[0]!.querySelector('.hint')!.textContent).toMatch(/^verified: done, opens to change it · last worked on /)
     node.remove()
   })
 
@@ -476,7 +475,7 @@ const cards = (node: HTMLElement) => [...node.querySelectorAll<HTMLElement>('.ty
 describe('NewSessionView tabs', () => {
   it('the_code_tab_offers_the_session_types_that_work_in_the_code', () => {
     const node = view()
-    expect(cards(node)).toEqual(['Chat', 'Plan', 'Feature planning', 'Update spec'])
+    expect(cards(node)).toEqual(['Chat', 'Plan', 'Feature planning', 'Linked work'])
     node.remove()
   })
 
@@ -500,7 +499,7 @@ describe('NewSessionView tabs', () => {
   })
 
   it('the_migration_card_shows_no_count_of_its_own_unlike_the_waiting_unfiled_decisions', () => {
-    const node = view(undefined, { plans: [], chats: [], unfiled: 3, updates: [] })
+    const node = view(undefined, { plans: [], chats: [], unfiled: 3 })
     tab(node, 'maintenance').click()
     const migration = card(node, 'doc-migration')
     expect(migration.querySelector('.waiting')).toBeNull()
@@ -518,7 +517,7 @@ describe('NewSessionView tabs', () => {
   })
 
   it('the_maintenance_tab_counts_what_waits_to_be_filed', () => {
-    const node = view(undefined, { plans: [], chats: [], unfiled: 2, updates: [] })
+    const node = view(undefined, { plans: [], chats: [], unfiled: 2 })
     expect(tab(node, 'maintenance').querySelector('.waiting')!.textContent).toBe('2')
     node.remove()
   })
@@ -530,7 +529,7 @@ describe('NewSessionView tabs', () => {
   })
 
   it('the_filing_card_starts_the_session_that_files_the_decisions', () => {
-    const node = view(undefined, { plans: [], chats: [], unfiled: 2, updates: [] })
+    const node = view(undefined, { plans: [], chats: [], unfiled: 2 })
     card(node, 'file-decisions').click()
     let seen: unknown
     node.addEventListener(events.NewSessionRequestedEvent.type, (e) => (seen = [e.mode, e.feature, e.prompt]))
@@ -547,106 +546,37 @@ describe('NewSessionView tabs', () => {
   })
 })
 
-const updateOptions = (node: HTMLElement) => [...node.querySelectorAll<HTMLOptionElement>('.update-fields select[name=feature] option')].filter((o) => o.value !== '')
-
-describe('NewSessionView Update spec card', () => {
-  const updates: PickUp = {
-    plans: [],
-    chats: [],
-    unfiled: 0,
-    updates: [
-      { feature: 'Orders', status: 'draft' },
-      { feature: 'Dashboards', status: 'approved', changeable: true },
-      { feature: 'Refunds', status: 'approved', changeable: false, waiting: 'an unfinished task' },
-    ],
-  }
-
-  it('every_spec_is_listed_whatever_its_state', () => {
-    const node = view(undefined, updates)
-    card(node, 'update-spec').click()
-    expect(updateOptions(node).map((o) => o.value)).toEqual(['Orders', 'Dashboards', 'Refunds'])
-    node.remove()
-  })
-
-  it('a_spec_sitting_in_a_folder_is_grouped_under_it_while_a_root_spec_stays_ungrouped', () => {
-    const node = view(undefined, {
-      plans: [],
-      chats: [],
-      unfiled: 0,
-      updates: [
-        { feature: 'Orders', status: 'draft' },
-        { feature: 'Refunds', status: 'approved', changeable: true, folder: 'orders' },
-      ],
-    })
-    card(node, 'update-spec').click()
-    const select = node.querySelector<HTMLSelectElement>('.update-fields select[name=feature]')!
-    expect([...select.children].map((c) => c.tagName)).toEqual(['OPTION', 'OPTION', 'OPTGROUP'])
-    const group = select.querySelector('optgroup')!
-    expect(group.label).toBe('orders')
-    expect([...group.querySelectorAll('option')].map((o) => o.value)).toEqual(['Refunds'])
-    node.remove()
-  })
-
-  it('the_picker_and_the_description_sit_on_the_same_card_so_no_listed_spec_is_seen_without_the_way_to_ask_for_a_change', () => {
-    const node = view(undefined, updates)
-    card(node, 'update-spec').click()
-    const form = node.querySelector('.update-fields')!
-    expect(form.querySelector('select[name=feature]')).not.toBeNull()
-    expect(form.querySelector('textarea[name=prompt]')).not.toBeNull()
-    node.remove()
-  })
-
-  it('a_draft_and_a_changeable_settled_spec_are_pickable', () => {
-    const node = view(undefined, updates)
-    card(node, 'update-spec').click()
-    const [orders, dashboards] = updateOptions(node)
-    expect(orders!.disabled).toBe(false)
-    expect(dashboards!.disabled).toBe(false)
-    node.remove()
-  })
-
-  it('a_feature_with_build_in_flight_is_listed_as_not_changeable_saying_what_it_waits_for', () => {
-    const node = view(undefined, updates)
-    card(node, 'update-spec').click()
-    const refunds = updateOptions(node)[2]!
-    expect(refunds.disabled).toBe(true)
-    expect(refunds.textContent).toContain('waiting: an unfinished task')
-    node.remove()
-  })
-
-  it('picking_a_spec_and_describing_the_change_starts_the_update_in_the_persons_own_words', () => {
-    const node = view(undefined, updates)
-    card(node, 'update-spec').click()
-    const select = node.querySelector<HTMLSelectElement>('.update-fields select[name=feature]')!
-    select.value = 'Dashboards'
-    type(node, '.update-fields textarea[name=prompt]', 'Drop the refund rule')
+describe('NewSessionView Linked work card', () => {
+  it('creating_a_code_asks_for_a_new_chat_linked_by_a_code_made_here', () => {
+    const node = view()
+    card(node, 'linked-work').click()
     let seen: unknown
-    node.addEventListener(events.UpdateSpecRequestedEvent.type, (e) => (seen = [e.feature, e.description]))
-    node.querySelector('.update-fields')!.dispatchEvent(new Event('submit', { cancelable: true }))
-    expect(seen).toEqual(['Dashboards', 'Drop the refund rule'])
+    node.addEventListener(events.LinkedWorkRequestedEvent.type, (e) => (seen = e.link))
+    node.querySelector('.link-create')!.dispatchEvent(new Event('submit', { cancelable: true }))
+    expect(seen).toEqual({ way: 'create' })
     node.remove()
   })
 
-  it('a_pick_alone_starts_nothing_an_empty_description_is_refused', () => {
-    const node = view(undefined, updates)
-    card(node, 'update-spec').click()
-    const select = node.querySelector<HTMLSelectElement>('.update-fields select[name=feature]')!
-    select.value = 'Dashboards'
+  it('connecting_asks_for_a_new_chat_linked_by_the_code_the_other_window_made', () => {
+    const node = view()
+    card(node, 'linked-work').click()
+    let seen: unknown
+    node.addEventListener(events.LinkedWorkRequestedEvent.type, (e) => (seen = e.link))
+    type(node, '.link-enter input[name=code]', ' 123456 ')
+    node.querySelector('.link-enter')!.dispatchEvent(new Event('submit', { cancelable: true }))
+    expect(seen).toEqual({ way: 'enter', code: '123456' })
+    // Spent once sent: a code links one session only.
+    expect(node.querySelector<HTMLInputElement>('.link-enter input[name=code]')!.value).toBe('')
+    node.remove()
+  })
+
+  it('connecting_with_no_code_starts_nothing', () => {
+    const node = view()
+    card(node, 'linked-work').click()
     let seen = false
-    node.addEventListener(events.UpdateSpecRequestedEvent.type, () => (seen = true))
-    node.querySelector('.update-fields')!.dispatchEvent(new Event('submit', { cancelable: true }))
+    node.addEventListener(events.LinkedWorkRequestedEvent.type, () => (seen = true))
+    node.querySelector('.link-enter')!.dispatchEvent(new Event('submit', { cancelable: true }))
     expect(seen).toBe(false)
-    node.remove()
-  })
-
-  it('starting_an_update_empties_the_fields_so_the_next_one_does_not_repeat_the_description', () => {
-    const node = view(undefined, updates)
-    card(node, 'update-spec').click()
-    const select = node.querySelector<HTMLSelectElement>('.update-fields select[name=feature]')!
-    select.value = 'Dashboards'
-    type(node, '.update-fields textarea[name=prompt]', 'Drop the refund rule')
-    node.querySelector('.update-fields')!.dispatchEvent(new Event('submit', { cancelable: true }))
-    expect(node.querySelector<HTMLTextAreaElement>('.update-fields textarea[name=prompt]')!.value).toBe('')
     node.remove()
   })
 })

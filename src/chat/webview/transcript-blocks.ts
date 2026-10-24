@@ -1,5 +1,6 @@
 import type { SessionEvent } from '../../agent/session/code-session'
 import { editDiffView, fileLink } from './edit-diff'
+import { BackgroundStopRequestedEvent, ReturnCancelRequestedEvent } from './events'
 import { compact, formatUsage } from './format-usage'
 import { post } from './vscode-api'
 import { renderMarkdown } from './markdown'
@@ -101,11 +102,89 @@ export function agentMessage(event: Extract<SessionEvent, { type: 'agent_message
   return element
 }
 
+type BackgroundCommandEvent = Extract<SessionEvent, { type: 'background_command' }>
+
+/** How a background command stands, in words: running, or how it ended. */
+export function backgroundState(event: BackgroundCommandEvent): string {
+  switch (event.state) {
+    case 'running':
+      return 'running'
+    case 'ended':
+      return event.exitCode === 0 ? 'ended, exit code 0' : event.exitCode === null || event.exitCode === undefined ? 'could not be run' : `ended, exit code ${event.exitCode}`
+    case 'stopped':
+      return 'stopped'
+    case 'cut':
+      return 'stopped by the window reloading'
+  }
+}
+
+/** The row of a background command: what it runs and is for, how it stands, where its output is, and a stop while it runs. */
+export function fillBackgroundCommand(element: HTMLElement, event: BackgroundCommandEvent): void {
+  element.className = `background-command ${event.state}`
+  const line = document.createElement('p')
+  line.className = 'background-line'
+  line.textContent = `Background ${event.id}: ${event.command} · ${event.purpose} · ${backgroundState(event)} · output in ${event.outputFile}`
+  element.replaceChildren(line)
+  if (event.state !== 'running') return
+  const stop = document.createElement('button')
+  stop.type = 'button'
+  stop.className = 'background-stop'
+  stop.textContent = 'Stop'
+  stop.addEventListener('click', () => stop.dispatchEvent(new BackgroundStopRequestedEvent(event.id)))
+  element.appendChild(stop)
+}
+
+type ScheduledReturnEvent = Extract<SessionEvent, { type: 'scheduled_return' }>
+
+/** The row of a scheduled return: when the session resumes and why, or how it ended up, with a cancel while it waits. */
+export function fillScheduledReturn(element: HTMLElement, event: ScheduledReturnEvent): void {
+  element.className = `scheduled-return ${event.state}`
+  const line = document.createElement('p')
+  line.className = 'background-line'
+  const at = new Date(event.dueAt).toLocaleTimeString()
+  const text = {
+    scheduled: `Resuming at ${at}: ${event.reason}`,
+    cancelled: `Scheduled return for ${at} cancelled: ${event.reason}`,
+    due: `Resumed at ${at}: ${event.reason}`,
+    missed: `Scheduled return for ${at} missed, the window was closed: ${event.reason}. Waiting for you.`,
+  }[event.state]
+  line.textContent = text
+  element.replaceChildren(line)
+  if (event.state !== 'scheduled') return
+  const cancel = document.createElement('button')
+  cancel.type = 'button'
+  cancel.className = 'background-stop'
+  cancel.textContent = 'Cancel'
+  cancel.addEventListener('click', () => cancel.dispatchEvent(new ReturnCancelRequestedEvent()))
+  element.appendChild(cancel)
+}
+
 export function block(className: string, text: string, render: (text: string, into: HTMLElement) => void = plainText): HTMLElement {
   const element = document.createElement('article')
   element.className = className
   render(text, element)
   return element
+}
+
+/** How many images a prompt carried, stated where its words are. */
+export function imageNote(text: string): HTMLElement {
+  const note = document.createElement('div')
+  note.className = 'image-note'
+  note.textContent = text
+  return note
+}
+
+/** The pictures a prompt carried, small, for as long as the tab is open. */
+export function thumbnails(images: { mediaType: string; data: string }[]): HTMLElement {
+  const row = document.createElement('div')
+  row.className = 'sent-images'
+  for (const image of images) {
+    const thumbnail = document.createElement('img')
+    thumbnail.src = `data:${image.mediaType};base64,${image.data}`
+    thumbnail.alt = 'Attached image'
+    row.appendChild(thumbnail)
+  }
+  return row
 }
 
 function plainText(text: string, into: HTMLElement): void {

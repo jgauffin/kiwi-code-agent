@@ -2,6 +2,7 @@ import { compileTemplate } from '@relax.js/core/html'
 import type { McpServerState } from '../../agent/session/code-session'
 import type { Effort } from '../../agent/session/model-profile'
 import { LinkedFilesRow } from './linked-files-row'
+import { acceptImages, AttachedImagesRow } from './attached-images-row'
 import './context-meter'
 import type { ContextMeter, ContextUsage } from './context-meter'
 import './window-link-control'
@@ -75,6 +76,7 @@ export class ChatComposer extends HTMLElement {
       <p class="recipient" if="hasRecipient">{{recipientText}}</p>
       <p class="refusal" if="refused">{{refusal}}</p>
       <textarea name="prompt" rows="3" placeholder="{{placeholder}}" disabled="{{blocked}}" r-keydown="keydown(event)"></textarea>
+      <attached-images-row class="attached-images"></attached-images-row>
       <div class="actions">
         <span class="switches">
           <label class="allow-writes" if="allowWritesAvailable" title="Let this session write files without asking. Bash and other tools still ask; deny rules still block.">
@@ -118,6 +120,7 @@ export class ChatComposer extends HTMLElement {
     if (this.childElementCount > 0) return
     this.appendChild(this.template.content)
     this.render()
+    acceptImages(this, () => this.attachedImages)
   }
 
   setSwitches(switches: Switches): void {
@@ -221,13 +224,19 @@ export class ChatComposer extends HTMLElement {
     return this.querySelector('linked-files-row') as LinkedFilesRow
   }
 
+  private get attachedImages(): AttachedImagesRow {
+    return this.querySelector('attached-images-row') as AttachedImagesRow
+  }
+
   private send(): void {
     const text = this.textarea.value.trim()
-    if (text === '' || this.blocked) return
+    const images = this.attachedImages.images
+    if ((text === '' && images.length === 0) || this.blocked) return
     const files = this.linkedFiles.paths
     this.textarea.value = ''
     this.linkedFiles.clear()
-    this.dispatchEvent(new PromptSubmittedEvent(text, files))
+    this.attachedImages.clear()
+    this.dispatchEvent(new PromptSubmittedEvent(text, files, images))
   }
 }
 

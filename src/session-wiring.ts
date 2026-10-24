@@ -7,12 +7,15 @@ import { MCP_CONFIG_FILE, readMcpConfig } from './agent/mcp/mcp-config'
 import { migrateClaudeMcpServers } from './agent/mcp/migrate-claude-mcp'
 import { McpServerSet } from './agent/mcp/mcp-servers'
 import { runShell } from './agent/shell/run-shell'
+import type { BackgroundCommands } from './agent/background/background-commands'
+import type { ScheduledReturns } from './agent/background/scheduled-returns'
+import { DEFAULT_OWN_TURN_LIMIT } from './agent/background/session-background'
 import { packageScripts } from './agent/permissions/package-scripts'
 import { PermissionPolicy, type PermissionRules } from './agent/permissions/permission-policy'
 import type { ProjectCommands } from './agent/permissions/project-commands'
 import { readOnlyTools } from './agent/permissions/tool-classes'
 import { isWithin, normalizePlace } from './agent/permissions/places'
-import { instructionPlaces } from './agent/permissions/instruction-places'
+import { engineOutputPlace, instructionPlaces } from './agent/permissions/instruction-places'
 import { projectMemoryDir, userMemoryFile } from './agent/memory/memories'
 import { ClaudeRulesFile, existsAt, oldRulesAsGrants, PersonGrantsStore, personGrantsFile, readGrantList, withGrants } from './agent/permissions/grant-stores'
 import { parseGrant, type Grant, type GrantScope, type KeptGrant } from './agent/permissions/grants'
@@ -94,7 +97,7 @@ export function createPolicyFor(
       project: projectCommands,
       writesAllowed: () => allowWritesControl.isEnabled(sessionId),
       scratch: scratchDir(sessionId),
-      readable: instructionPlaces(workspaceRoot, [shippedPluginDir(context), skillsMirrorDir(context, sessionId)]),
+      readable: [...instructionPlaces(workspaceRoot, [shippedPluginDir(context), skillsMirrorDir(context, sessionId)]), engineOutputPlace(workspaceRoot)],
       writable: [projectMemoryDir(workspaceRoot), userMemoryFile()],
       rulesFiles: [personGrantsFile(), claudeUserSettingsFile()],
     })
@@ -134,6 +137,8 @@ export function createEngines(params: {
   getChat: () => ChatViewProvider
   getSessions: () => SessionManager
   getExchange: () => AgentExchange
+  background: BackgroundCommands
+  returns: ScheduledReturns
 }): SessionEngines {
   return new SessionEngines({
     context: params.context,
@@ -147,6 +152,8 @@ export function createEngines(params: {
     buildDocsMap: (ignored, onProgress) => params.getChat().buildDocsMap(ignored, onProgress),
     conversation: (id) => params.getSessions().conversation(id),
     exchange: params.getExchange,
+    background: params.background,
+    returns: params.returns,
   })
 }
 
@@ -159,6 +166,8 @@ export function createSessions(
   getChat: () => ChatViewProvider,
   /** Told of every event besides the chat, for what follows a session's turns from outside it. */
   observe: SessionListener,
+  background: BackgroundCommands,
+  returns: ScheduledReturns,
 ): SessionManager {
   return new SessionManager(
     store,
@@ -174,6 +183,9 @@ export function createSessions(
       const outcome = await policyFor(id).preToolUse(call)
       return outcome !== undefined && 'allow' in outcome && outcome.allow === true
     },
+    background,
+    returns,
+    () => vscode.workspace.getConfiguration('kiwiAgent').get<number>('ownTurnLimit', DEFAULT_OWN_TURN_LIMIT),
   )
 }
 

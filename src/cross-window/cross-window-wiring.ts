@@ -26,7 +26,9 @@ const prompts: LinkPrompts = {
   },
   async showCode(code, validMinutes) {
     await vscode.env.clipboard.writeText(code)
-    void vscode.window.showInformationMessage(`Kiwipow Agent: pairing code ${code}, copied to the clipboard. Enter it in a chat session of the other window within ${validMinutes} minutes.`)
+    void vscode.window.showInformationMessage(
+      `Kiwipow Agent: pairing code ${code}, copied to the clipboard. Enter it in the other window within ${validMinutes} minutes, under Linked work on its new-session screen or Link window on a chat.`,
+    )
   },
   async askCode() {
     return vscode.window.showInputBox({ title: 'Link this chat to another window', prompt: 'The pairing code the other window created', ignoreFocusOut: true })

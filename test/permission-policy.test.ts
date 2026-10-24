@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { instructionPlaces } from '../src/agent/permissions/instruction-places'
+import { engineOutputPlace, instructionPlaces } from '../src/agent/permissions/instruction-places'
 import { projectMemoryDir } from '../src/agent/memory/memories'
 import { PermissionPolicy, type PolicyContext } from '../src/agent/permissions/permission-policy'
 import type { KeptGrant } from '../src/agent/permissions/grants'
@@ -77,6 +77,16 @@ describe('PermissionPolicy', () => {
     expect(await use(p, 'Read', { file_path: join(home, 'notes.md') })).toEqual(ASKED)
     // Writing there is a write like any other.
     expect(await use(p, 'Write', { file_path: join(skill, 'SKILL.md'), content: 'x' })).toEqual(ASKED)
+  })
+
+  it('the_output_of_a_background_command_is_read_without_a_prompt_while_the_rest_of_temp_is_asked', async () => {
+    const temp = process.platform === 'win32' ? 'D:\\temp' : '/tmp'
+    const p = policy([], { readable: [engineOutputPlace(cwd, temp)] })
+    const output = join(engineOutputPlace(cwd, temp), '4891d4c2', 'tasks', 'boql1qdi5.output').split('\\').join('/')
+    expect(await use(p, 'Bash', { command: `sleep 270; tail -40 ${output}` })).toEqual({ allow: true })
+    expect(await use(p, 'Read', { file_path: output })).toEqual({ allow: true })
+    expect(await use(p, 'Read', { file_path: join(temp, 'claude', 'other-workspace', 'x', 'tasks', 'a.output') })).toEqual(ASKED)
+    expect(await use(p, 'Read', { file_path: join(temp, 'notes.txt') })).toEqual(ASKED)
   })
 
   it('a_call_is_judged_from_where_the_engine_says_its_shell_stands_and_its_prompt_from_the_same_place', async () => {

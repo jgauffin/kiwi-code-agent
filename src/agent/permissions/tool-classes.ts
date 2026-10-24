@@ -17,9 +17,10 @@ export const WRITES_NAMED_FILE: ReadonlySet<string> = new Set(['Write', 'Edit', 
 /**
  * Tools that run a command line. Both are judged, prompted and remembered
  * command by command, each under its own tool name: a rule for one shell says
- * nothing about the other.
+ * nothing about the other. A command run in the background is the same command line
+ * and is judged as the one run in the foreground.
  */
-const SHELL_TOOLS: ReadonlySet<string> = new Set(['Bash', 'PowerShell'])
+const SHELL_TOOLS: ReadonlySet<string> = new Set(['Bash', 'PowerShell', 'BackgroundBash'])
 
 export const isShellTool = (toolName: string): boolean => SHELL_TOOLS.has(toolName)
 

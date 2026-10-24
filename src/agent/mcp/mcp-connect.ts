@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js'
@@ -6,7 +7,7 @@ import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import type { McpServerConfig } from './mcp-config'
 import type { McpConnection, McpConnector, McpToolInfo } from './mcp-connection'
 import { toolResultText } from '../sdk-session/sdk-event-mapper'
-import { truncate } from '../openai-session/tools/tool'
+import { truncate, type ToolOutput } from '../openai-session/tools/tool'
 
 /**
  * Connects the own loop to a server the way the Claude engine's CLI would: a
@@ -14,15 +15,16 @@ import { truncate } from '../openai-session/tools/tool'
  * its own, a remote one is reached with its headers.
  */
 export function connectMcp(cwd: string, onStderr: (server: string, chunk: string) => void): McpConnector {
-  return async (name, config) => {
+  return async (name, config, onClosed) => {
     const transport = transportFor(config, cwd)
     if (transport instanceof StdioClientTransport) {
       transport.stderr?.on('data', (chunk: Buffer | string) => onStderr(name, chunk.toString()))
     }
     const client = new Client({ name: 'kiwipow-agent', version: '0.0.1' }, { capabilities: {} })
+    client.onclose = onClosed
     // The SDK's HTTP transport declares `sessionId?: string` but holds undefined; its own interface is stricter than it is.
     await client.connect(transport as Transport)
-    return connection(client)
+    return connection(client, transport instanceof StdioClientTransport ? transport : undefined)
   }
 }
 
@@ -43,7 +45,7 @@ function transportFor(config: McpServerConfig, cwd: string): StdioClientTranspor
   }
 }
 
-function connection(client: Client): McpConnection {
+function connection(client: Client, stdio: StdioClientTransport | undefined): McpConnection {
   return {
     async listTools() {
       const tools: McpToolInfo[] = []
@@ -58,9 +60,40 @@ function connection(client: Client): McpConnection {
       return tools
     },
     async callTool(name, args, signal) {
-      const result = await client.callTool({ name, arguments: args }, undefined, { signal })
-      return { text: truncate(toolResultText(result.content)), isError: result.isError === true }
+      return mcpToolOutput(await client.callTool({ name, arguments: args }, undefined, { signal }))
     },
-    close: () => client.close(),
+    close: () => (stdio ? closeStdio(client, stdio) : client.close()),
   }
+}
+
+/** A server's tool result as either engine takes it: its text, and the images it returned kept whole for the model to see. */
+export function mcpToolOutput(result: Record<string, unknown>): ToolOutput {
+  const images = (Array.isArray(result.content) ? result.content : []).filter(isImageContent).map((part) => ({ mediaType: part.mimeType, data: part.data }))
+  return { text: truncate(toolResultText(result.content)), isError: result.isError === true, ...(images.length > 0 ? { images } : {}) }
+}
+
+function isImageContent(part: unknown): part is { type: 'image'; data: string; mimeType: string } {
+  if (typeof part !== 'object' || part === null) return false
+  const { type, data, mimeType } = part as Record<string, unknown>
+  return type === 'image' && typeof data === 'string' && typeof mimeType === 'string'
+}
+
+/**
+ * The client ends the server's input and kills the process it spawned. On
+ * Windows that process is often a launcher (`dotnet run`, `npx`, a `.cmd`)
+ * whose child would outlive it and keep its build output locked, so a server
+ * that has not exited on its own within a second goes as a whole tree.
+ */
+async function closeStdio(client: Client, transport: StdioClientTransport): Promise<void> {
+  const pid = transport.pid
+  const tree = process.platform === 'win32' && pid !== null ? setTimeout(() => killTree(pid), 1000) : undefined
+  try {
+    await client.close()
+  } finally {
+    clearTimeout(tree)
+  }
+}
+
+function killTree(pid: number): void {
+  spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }).on('error', () => undefined)
 }

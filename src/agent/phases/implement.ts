@@ -7,6 +7,7 @@ import { CODE_OUTLINE_TOOL } from '../code-outline/code-outline-tool'
 import { CODE_READING } from '../code-outline/code-outline-gate'
 import { CODE_SEARCH_TOOL } from '../code-outline/code-search'
 import { SCRIPT_WRITING } from '../script/script-gate'
+import { BACKGROUND_TOOLS } from '../background/background-tools'
 import { projectScriptsInstruction } from '../permissions/package-scripts'
 import { PIPE_WRITING } from '../permissions/shell-guidance'
 import { driftLines, type FileDrift } from './mapping-snapshot'
@@ -24,6 +25,7 @@ import { verificationHandoffPrompt, type VerificationFailure, type VerifyRule } 
 export const IMPLEMENT_TOOLS = [
   'Read', 'Write', 'Edit', 'MultiEdit', 'Move', 'Copy', 'Glob', 'Grep', 'JsonSchema', 'JsonQuery', MARKDOWN_SEARCH_TOOL, SPEC_SEARCH_TOOL, CODE_OUTLINE_TOOL, CODE_SEARCH_TOOL, 'Bash', 'RunScript', 'Skill', ASK_USER_TOOL, DELEGATE_TOOL,
   READ_TASKS_TOOL, UPDATE_TASK_TOOL,
+  ...BACKGROUND_TOOLS,
 ]
 
 /**

@@ -7,6 +7,7 @@ import { featureAlreadyNamed, takenFeatureNames } from '../agent/phases/plan-lis
 import { suggestFeatureName } from '../agent/phases/feature-naming'
 import { errorMessage } from '../error-message'
 import { linkedFilePath, withLinkedFiles } from './linked-files'
+import { imageOnlyLabel } from './image-note'
 import type { ToWebview } from './protocol'
 import type { ChatPanel } from './panel-registry'
 import type { MessageRouterDeps, WebviewMessage } from './message-router'
@@ -53,7 +54,7 @@ export async function startFromCard(deps: MessageRouterDeps, message: WebviewMes
   // already taken would be swallowed by the first one's tab and plan over its spec.
   if (message.mode === 'plan' && message.feature) {
     const taken = await featureAlreadyNamed(deps.workspaceRoot, message.feature, plannedNames(sessions))
-    if (taken) throw new Error(`"${taken}" is already planned. Pick it up below to carry on with it, or use Update spec to say what should change.`)
+    if (taken) throw new Error(`"${taken}" is already planned. Pick it up below to carry on with it, or to change it once it is done.`)
   }
   const prompt = withLinkedFiles(message.prompt ?? '', message.files ?? [])
   // The filing and the docs cleanup have nothing to fill in, so their sessions start on the job rather than waiting for a prompt.
@@ -63,7 +64,7 @@ export async function startFromCard(deps: MessageRouterDeps, message: WebviewMes
       : message.mode === 'doc-migration'
         ? { text: docMigrationKickoff(), label: 'Cleaning up the docs' }
         : undefined
-  if (prompt !== '' || !kickoff) await newSession(message.mode, message.feature, prompt, entry)
+  if (prompt !== '' || !kickoff) await newSession(message.mode, message.feature, prompt, entry, imageOnlyLabel(prompt, message.images?.length ?? 0), message.images ?? [])
   else await newSession(message.mode, message.feature, kickoff.text, entry, kickoff.label)
 }
 

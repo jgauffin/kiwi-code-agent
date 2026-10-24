@@ -71,7 +71,20 @@ function setup() {
     showCode: async () => {},
     askCode: async () => shownCode,
   })
-  return { front, back }
+  return { front, back, shownCode: () => shownCode }
+}
+
+/** A chat the new-session screen starts, added to the window's sessions the way the session manager would. */
+function chatStarter(sessions: FakeSessions, id: string) {
+  const started: string[] = []
+  return {
+    started,
+    start: async () => {
+      sessions.list().push({ id, mode: 'chat' })
+      started.push(id)
+      return id
+    },
+  }
 }
 
 async function linked() {
@@ -134,5 +147,32 @@ describe('cross-window chat in a window', () => {
     const { back } = setup()
     await back.window.act('b1', 'link')
     expect(back.window.viewOf('b1')).toEqual({ state: 'none' })
+  })
+})
+
+describe('Linked work on the new-session screen', () => {
+  it('a_new_chat_made_with_a_code_here_and_one_connected_with_it_there_are_linked', async () => {
+    const { front, back, shownCode } = setup()
+    const here = chatStarter(front.sessions, 'f2')
+    const there = chatStarter(back.sessions, 'b2')
+    await front.window.startLinked({ way: 'create' }, here.start)
+    await back.window.startLinked({ way: 'enter', code: shownCode() }, there.start)
+    expect(front.window.viewOf('f2')).toEqual({ state: 'linked', workspace: 'back', paused: false })
+    expect(back.window.viewOf('b2')).toEqual({ state: 'linked', workspace: 'front', paused: false })
+  })
+
+  it('a_code_that_cannot_link_is_refused_before_any_chat_is_started', async () => {
+    const { back } = setup()
+    const there = chatStarter(back.sessions, 'b2')
+    await expect(back.window.startLinked({ way: 'enter', code: '000000' }, there.start)).rejects.toThrow('not valid')
+    expect(there.started).toEqual([])
+  })
+
+  it('a_code_made_in_this_workspace_is_refused_before_any_chat_is_started', async () => {
+    const { front, shownCode } = setup()
+    await front.window.startLinked({ way: 'create' }, chatStarter(front.sessions, 'f2').start)
+    const again = chatStarter(front.sessions, 'f3')
+    await expect(front.window.startLinked({ way: 'enter', code: shownCode() }, again.start)).rejects.toThrow('this workspace')
+    expect(again.started).toEqual([])
   })
 })

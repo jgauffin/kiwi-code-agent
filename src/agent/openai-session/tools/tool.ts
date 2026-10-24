@@ -4,7 +4,7 @@ import type { ReadTracker } from './read-tracker'
 import type { FileLedger } from '../file-ledger'
 import type { QuestionOutcome, UserQuestionRequest } from '../../session/user-question'
 import type { FileEditChange } from '../../edits/file-edit-diff'
-import type { NestedEvent, PermissionDecision, TurnUsage } from '../../session/code-session'
+import type { NestedEvent, PermissionDecision, PromptImage, TurnUsage } from '../../session/code-session'
 import type { PermissionAsker } from '../../permissions/gate'
 
 /**
@@ -54,7 +54,8 @@ export type SubAgentOutcome = { status: 'complete' | 'partial'; toolCalls: numbe
 /** `items`: the whole result, uncut, as plain JSON values for a script to work through; the model reads `text`. */
 /** `context` is read by the model after `text` and never shown in the chat: hook context, a skill's body. */
 /** `subAgent` is set on a delegation's own result, for the chat to show beside the task. */
-export type ToolOutput = { text: string; isError: boolean; items?: unknown[]; context?: string; subAgent?: SubAgentOutcome }
+/** `images` are pictures the tool returned for the model to see; the text holds a placeholder where each was. */
+export type ToolOutput = { text: string; isError: boolean; items?: unknown[]; context?: string; subAgent?: SubAgentOutcome; images?: PromptImage[] }
 
 /** A tool result as the model reads it: what the chat shows, then what only the model sees. */
 export function modelText(output: { text: string; context?: string }): string {

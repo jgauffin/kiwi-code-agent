@@ -36,3 +36,10 @@ Rules:
 - A rule that comes from a section of `docs/**` or of another feature's spec ends with its citation in parentheses, as `(path#Heading)`, after the text. A rule without a citation is your own default. The citation is what a later check against the code reads instead of the docs, so it must be exact.
 - What a research sub agent turns up is never a citation: a rule it informed stands as your own default, uncited, and the research is named in the direction instead of in the spec.
 - No code paths, class names or code: that is the implementation's business and you cannot know it.
+
+Where specs are grouped in folders by domain, a spec's folder is its home:
+- The home is the domain that owns the concepts whose information or states the feature changes; concepts it only reads do not count, so a feature that reads an order but changes its shipment belongs with shipping.
+- Where it changes concepts of several domains equally, its home is the domain of the role that acts in it.
+- A feature may reach several domains, which is no misfiling, but its spec sits in one folder, its home.
+- A feature that only derives a view from other domains' facts lives where most of those facts live.
+- If its sections each change a different domain's concepts and share nothing but a theme, it is two features: say so rather than picking a folder.

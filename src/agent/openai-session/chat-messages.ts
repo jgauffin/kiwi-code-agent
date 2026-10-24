@@ -4,7 +4,7 @@ export type ToolCall = { id: string; name: string; arguments: string }
 
 export type ChatMessage =
   | { role: 'system'; content: string }
-  | { role: 'user'; content: string }
+  | { role: 'user'; content: string; images?: { mediaType: string; data: string }[] }
   | { role: 'assistant'; content: string; reasoning?: string; toolCalls: ToolCall[] }
   | { role: 'tool'; toolCallId: string; content: string }
 

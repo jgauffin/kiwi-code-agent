@@ -24,7 +24,7 @@ export type PolicyContext = {
   writesAllowed?: () => boolean
   /** The session's scratch folder, project-relative: written without a prompt whatever the switch says. */
   scratch?: string
-  /** Files and folders outside the project the session may read unasked: where its own instructions live. */
+  /** Files and folders outside the project the session may read unasked: where its own instructions and its engine's command output live. */
   readable?: readonly string[]
   /** Files and folders outside the project the session writes unasked: where it is told to keep its memory notes. */
   writable?: readonly string[]

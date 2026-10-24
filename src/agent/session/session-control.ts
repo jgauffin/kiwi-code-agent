@@ -1,4 +1,4 @@
-import { permissionResolved, type CodeSession, type PermissionDecision } from './code-session'
+import { permissionResolved, type CodeSession, type PermissionDecision, type PromptImage } from './code-session'
 import { answerText, UNANSWERED_RESULT, type QuestionOutcome, type UserQuestionRequest } from './user-question'
 import { sameModelProfile, type ModelProfile } from './model-profile'
 import { continuationOf, type CallPasses, type SessionRecord } from './session-manager'
@@ -84,7 +84,7 @@ export class SessionControl {
   }
 
   /** `label` marks text the extension wrote: the chat and the title show it in the text's place. */
-  async send(id: string, text: string, label?: string): Promise<void> {
+  async send(id: string, text: string, label?: string, images: PromptImage[] = []): Promise<void> {
     const record = this.requireRecord(id)
     if (record.title === 'New session') {
       const title = label ?? text
@@ -97,7 +97,7 @@ export class SessionControl {
     await this.saveRecords()
     // Echoed here rather than by the engine, and the start-up said out loud: bringing an
     // engine up can take a repo or docs map build, and the wait is the user's to see.
-    await this.host.emit(record, { type: 'user_message', text, ...(label ? { label } : {}) })
+    await this.host.emit(record, { type: 'user_message', text, ...(label ? { label } : {}), ...(images.length > 0 ? { imageCount: images.length, images } : {}) })
     if (!this.host.liveSession(id)) await this.host.emit(record, { type: 'status', status: 'starting' })
     let session: CodeSession
     try {
@@ -107,7 +107,7 @@ export class SessionControl {
       await this.host.emit(record, { type: 'error', message: errorMessage(error), fatal: true })
       throw error
     }
-    session.send(text)
+    session.send(text, images)
   }
 
   /**

@@ -82,7 +82,11 @@ export class McpToolHost {
     await this.start(name)
     const server = this.servers.get(name)
     if (!server?.connection) return fail(`MCP server ${name} could not be started: ${server?.state.error ?? 'it was removed'}`)
-    return server.connection.callTool(tool, args, signal)
+    try {
+      return await server.connection.callTool(tool, args, signal)
+    } catch (error) {
+      return fail(`MCP server ${name} failed to run ${tool}: ${errorMessage(error)}`)
+    }
   }
 
   /** Every server's tools as the own loop runs them. */
@@ -112,8 +116,9 @@ export class McpToolHost {
     server.state = { name, status: 'pending' }
     this.changed()
     let listed: McpToolInfo[] | undefined
+    let connection: McpConnection | undefined
     try {
-      const connection = await this.connect(name, server.config)
+      connection = await this.connect(name, server.config, () => this.closed(name, server, connection))
       listed = await connection.listTools()
       if (this.servers.get(name) !== server) {
         // The set was replaced while this one started; nobody holds it any more.
@@ -128,6 +133,18 @@ export class McpToolHost {
     }
     this.changed()
     if (server.connection && listed) await this.cache.write(name, server.config, listed)
+  }
+
+  /**
+   * A server's process ended without being asked to, killed from outside to
+   * rebuild it, say. It is stopped like any other: its tools stay offered and
+   * the next call starts it again, from what is on disk now.
+   */
+  private closed(name: string, server: Server, connection: McpConnection | undefined): void {
+    if (!connection || server.connection !== connection) return
+    server.connection = undefined
+    server.state = { name, status: 'stopped' }
+    this.changed()
   }
 
   /** A connection that will not close is let go of anyway: its process is no longer this session's. */

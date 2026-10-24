@@ -43,7 +43,6 @@ const state = (at: Partial<PlanState>): ToWebview => ({
   plan: planState(at),
   plans: [],
   chats: [],
-  updates: [],
   unfiled: 0,
   profiles: { names: ['Claude'], active: 'Claude' },
   models: [],

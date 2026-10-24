@@ -6,6 +6,8 @@ import type { Step } from './plan-step'
 import {
   AgentsMdAnsweredEvent,
   AllowWritesToggledEvent,
+  BackgroundStopRequestedEvent,
+  ReturnCancelRequestedEvent,
   BuildStartToggledEvent,
   ChangeRequestedEvent,
   ChatTargetChangedEvent,
@@ -16,6 +18,7 @@ import {
   FeatureNameSuggestionRequestedEvent,
   ImplementRequestedEvent,
   InterruptRequestedEvent,
+  LinkedWorkRequestedEvent,
   LinkOpenFileRequestedEvent,
   McpSwitchRequestedEvent,
   NewSessionRequestedEvent,
@@ -38,7 +41,6 @@ import {
   SpecCheckStoppedEvent,
   SpecRepairRequestedEvent,
   SweepRequestedEvent,
-  UpdateSpecRequestedEvent,
   VerifyRequestedEvent,
   WindowLinkRequestedEvent,
 } from './events'
@@ -84,6 +86,14 @@ export function wireChatEvents(el: HTMLElement, actions: ChatAppActions): void {
   el.addEventListener(LinkOpenFileRequestedEvent.type, (e) => linkOpenFile(actions, e))
   el.addEventListener(InterruptRequestedEvent.type, () => actions.toTarget((sessionId) => post({ type: 'interrupt', sessionId })))
   el.addEventListener(CompactRequestedEvent.type, () => actions.toTarget((sessionId) => post({ type: 'compact', sessionId })))
+  el.addEventListener(BackgroundStopRequestedEvent.type, (e) => {
+    const sessionId = answeringSession(actions, e.target, 'stop of a background command')
+    if (sessionId) post({ type: 'stop_background', sessionId, id: e.commandId })
+  })
+  el.addEventListener(ReturnCancelRequestedEvent.type, (e) => {
+    const sessionId = answeringSession(actions, e.target, 'cancel of a scheduled return')
+    if (sessionId) post({ type: 'cancel_return', sessionId })
+  })
   el.addEventListener(PermissionDecidedEvent.type, (e) => answerPermission(actions, e))
   el.addEventListener(QuestionAnsweredEvent.type, (e) => answerQuestion(actions, e))
   el.addEventListener(AllowWritesToggledEvent.type, (e) => actions.toTarget((sessionId) => post({ type: 'set_allow_writes', sessionId, enabled: e.enabled })))
@@ -94,7 +104,7 @@ export function wireChatEvents(el: HTMLElement, actions: ChatAppActions): void {
   el.addEventListener(WindowLinkRequestedEvent.type, (e) => actions.toTarget((sessionId) => post({ type: 'window_link', sessionId, act: e.act })))
   el.addEventListener(SessionSelectedEvent.type, (e) => post({ type: 'switch_session', sessionId: e.sessionId }))
   el.addEventListener(PlanResumeRequestedEvent.type, (e) => post(planResumeMessage(e)))
-  el.addEventListener(UpdateSpecRequestedEvent.type, (e) => post({ type: 'update_spec', feature: e.feature, description: e.description }))
+  el.addEventListener(LinkedWorkRequestedEvent.type, (e) => post({ type: 'linked_work', link: e.link }))
   el.addEventListener(FeatureNameSuggestionRequestedEvent.type, (e) => post({ type: 'suggest_feature_name', description: e.description }))
   el.addEventListener(DefaultProfileChangedEvent.type, (e) => post({ type: 'set_default_profile', name: e.name }))
   el.addEventListener(AgentsMdAnsweredEvent.type, (e) => post({ type: 'agents_md_answer', scope: e.scope, answer: e.answer }))
@@ -104,7 +114,7 @@ export function wireChatEvents(el: HTMLElement, actions: ChatAppActions): void {
 /** A Resume button speaks for the run it sits under; the composer for the run the phase's chat talks to. */
 function sendPrompt(actions: ChatAppActions, e: PromptSubmittedEvent): void {
   const sessionId = runOf(e.target) ?? actions.target()?.sessionId
-  post({ type: 'send', text: e.text, ...(e.files.length > 0 ? { files: e.files } : {}), ...(sessionId ? { sessionId } : {}) })
+  post({ type: 'send', text: e.text, ...(e.files.length > 0 ? { files: e.files } : {}), ...(e.images.length > 0 ? { images: e.images } : {}), ...(sessionId ? { sessionId } : {}) })
 }
 
 function linkOpenFile(actions: ChatAppActions, e: LinkOpenFileRequestedEvent): void {
@@ -148,5 +158,6 @@ function newSessionMessage(e: NewSessionRequestedEvent) {
     ...(e.feature ? { feature: e.feature } : {}),
     ...(e.prompt ? { prompt: e.prompt } : {}),
     ...(e.files.length > 0 ? { files: e.files } : {}),
+    ...(e.images.length > 0 ? { images: e.images } : {}),
   }
 }

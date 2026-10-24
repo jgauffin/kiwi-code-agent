@@ -25,6 +25,7 @@ import { codeSearchTool } from './agent/code-outline/code-search'
 import { RepeatedEdit } from './agent/script/repeated-edit'
 import { InPlaceEditGate } from './agent/script/in-place-edit'
 import { ScriptGate } from './agent/script/script-gate'
+import { SleepGate } from './agent/script/sleep-gate'
 import { indexSkillsDetailed } from './agent/skills/skill-index'
 import { installedClaude } from './agent/sdk-session/installed-claude'
 import { shippedPluginDir } from './extension-paths'
@@ -51,6 +52,9 @@ import { errorMessage } from './error-message'
 import { EngineStarters, type EngineStart } from './session-engines-starters'
 import { MessagesFromOtherWindow, type AgentExchange } from './cross-window/agent-exchange'
 import { sendToLinkedAgentTool } from './cross-window/send-to-linked-agent-tool'
+import type { BackgroundCommands } from './agent/background/background-commands'
+import { BackgroundNotices, backgroundTools } from './agent/background/background-tools'
+import { scheduleReturnTool, type ScheduledReturns } from './agent/background/scheduled-returns'
 
 /**
  * Tools the extension provides to every engine, beside the engine's own file
@@ -76,6 +80,10 @@ export type EngineDeps = {
   conversation: (sessionId: string) => Promise<SessionEvent[]>
   /** How a chat session's agent reaches the agent of the session linked to it in another window. */
   exchange: () => AgentExchange
+  /** The commands sessions run in the background; they belong to the session, not to the engine it runs on now. */
+  background: BackgroundCommands
+  /** The returns sessions have scheduled; like the commands they belong to the session, not the engine. */
+  returns: ScheduledReturns
 }
 
 /** Starts a session's engine: its mode's setup, the hooks every session is held to, and the engine its profile names. */
@@ -151,6 +159,10 @@ export class SessionEngines {
       ...(record.feature ? taskBoardTools(record.feature, new FileHands(workspaceRoot, record.id, record.mode, record.feature)) : []),
       // Offered whether or not the session is linked yet: a link made mid-session needs no restart, and the tool says when there is none.
       ...(record.mode === 'chat' ? [sendToLinkedAgentTool(record.id, this.deps.exchange())] : []),
+      // Held outside the engine, so the commands go on across a switch of model or engine.
+      ...backgroundTools(record.id, this.deps.background),
+      // Only a chat resumes on its own; a run is offered background commands and waits but no return.
+      ...(record.mode === 'chat' || record.access === 'full' ? [scheduleReturnTool(record.id, this.deps.returns)] : []),
     ]
     // A mode with a tool set of its own names no MCP server; only a chat takes the workspace's.
     if (!setup.toolNames) onProgress('Reading the MCP servers')
@@ -213,8 +225,10 @@ export class SessionEngines {
         this.deps.policyFor(record.id),
         ...(setup.hooks ? [setup.hooks] : []),
         ...gate,
+        new SleepGate(),
         staleWrites,
         notice,
+        new BackgroundNotices(record.id, this.deps.background),
         new UnfiledContract(workspaceRoot),
         new MemoryContract(workspaceRoot),
         ...(record.mode === 'chat' ? [new MessagesFromOtherWindow(record.id, this.deps.exchange())] : []),

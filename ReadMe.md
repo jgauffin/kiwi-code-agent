@@ -10,8 +10,6 @@
 
 A VS Code coding agent that plans a feature before it reads your code, and calls nothing done until a test proves each rule.
 
-> **Early days.** Kiwipow Agent is young and you will hit bugs. Things are changing frequently, use at own risk! [Report them](https://github.com/jgauffin/kiwi-code-agent/issues); they usually get fixed fast.
-
 ## Why it's different
 
 | | What it does | Why you want it |

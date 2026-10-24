@@ -36,7 +36,6 @@ function state(at: Partial<PlanState> | undefined, runs: RunControls[]): Extract
     ...(at ? { plan: planState(at) } : {}),
     plans: [],
     chats: [],
-    updates: [],
     unfiled: 0,
     profiles: { names: ['Claude'], active: 'Claude' },
     models: [],

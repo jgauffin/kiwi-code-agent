@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { McpToolInfo } from '../src/agent/mcp/mcp-connection'
+import type { McpConnector, McpToolInfo } from '../src/agent/mcp/mcp-connection'
 import { McpToolCache } from '../src/agent/mcp/mcp-tool-cache'
 import { McpToolHost } from '../src/agent/mcp/mcp-tool-host'
 import { toDefinition } from '../src/agent/openai-session/tools/tool'
@@ -94,6 +94,37 @@ describe('McpToolHost', () => {
     await host.tools()[0]!.execute({}, ctx)
     expect(fake.connects).toEqual(['docs', 'docs'])
     expect(host.statuses()).toEqual([{ name: 'docs', status: 'connected' }])
+  })
+
+  it('a_server_killed_from_outside_is_stopped_and_the_next_call_starts_what_was_rebuilt', async () => {
+    const servers = { docs: [echo] }
+    const fake = fakeConnector(servers)
+    const host = new McpToolHost(fake.connect, new McpToolCache(memoryStore()))
+    const seen: string[] = []
+    host.watch(() => seen.push(host.statuses()[0]!.status))
+    await host.load({ docs })
+    fake.kill('docs')
+    expect(host.statuses()).toEqual([{ name: 'docs', status: 'stopped' }])
+    expect(seen.at(-1)).toBe('stopped')
+
+    servers.docs = [echo, shout]
+    expect(await host.tools()[0]!.execute({}, ctx)).toEqual({ text: 'docs:echo', isError: false })
+    expect(fake.connects).toEqual(['docs', 'docs'])
+    expect(host.statuses()).toEqual([{ name: 'docs', status: 'connected' }])
+    expect(host.tools().map((t) => t.name)).toEqual(['mcp__docs__echo', 'mcp__docs__shout'])
+  })
+
+  it('a_call_the_connection_fails_answers_with_why_instead_of_throwing', async () => {
+    const connect: McpConnector = async () => ({
+      listTools: async () => [echo],
+      callTool: async () => {
+        throw new Error('Connection closed')
+      },
+      close: async () => undefined,
+    })
+    const host = new McpToolHost(connect, new McpToolCache(memoryStore()))
+    await host.load({ docs })
+    expect(await host.tools()[0]!.execute({}, ctx)).toEqual({ text: 'MCP server docs failed to run echo: Connection closed', isError: true })
   })
 
   it('every_change_of_status_is_told_to_the_watchers', async () => {

@@ -4,6 +4,7 @@ import { expandBraces } from './places'
 import { DELEGATE_TOOL } from '../openai-session/tools/delegate'
 import { isResearchDelegation, RESEARCH_SUB_AGENT } from '../sub-agents/sub-agent-index'
 import { isSubagentTool } from './tool-classes'
+import { BACKGROUND_WAIT_TOOL } from '../background/wait-tool'
 
 /** What the tool classifiers are told besides the call itself. */
 export type ToolFacts = {
@@ -51,6 +52,13 @@ export function toolEffects(toolName: string, input: unknown, site: CommandSite,
     if (isSubagentTool(toolName)) return effects()
     // Approving a research delegation approved the question, not a list of addresses: its own searching and fetching is not asked again.
     if (NETWORK.has(toolName)) return agent === RESEARCH_SUB_AGENT.name ? effects() : effects({ action: 'reaches', what: 'network', place: site.cwd })
+    // A wait looks at something: the network for a URL or a port, a file for a file; a command's own exit or output is the session's own.
+    if (toolName === BACKGROUND_WAIT_TOOL) {
+      const until = text('until')
+      if (until === 'url' || until === 'port') return effects({ action: 'reaches', what: 'network', place: site.cwd })
+      if (until === 'file') return pathEffect('read', site, text('path'), 'file')
+      return effects()
+    }
     if (facts.readOnly(toolName)) return effects()
     return effects({ action: 'reaches', what: 'command', place: site.cwd })
   })()

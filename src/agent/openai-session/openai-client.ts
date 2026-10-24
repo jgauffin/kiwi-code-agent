@@ -19,6 +19,23 @@ export class OpenAiClient implements ChatCompletionClient {
   }
 
   async *stream(request: CompletionRequest): AsyncIterable<CompletionDelta> {
+    const body = await this.open(request)
+    let finishReason: string | undefined
+    let usage: Usage | undefined
+    for await (const data of sseData(body)) {
+      if (data === '[DONE]') break
+      const chunk = JSON.parse(data) as Chunk
+      if (chunk.error) throw new ApiError(0, JSON.stringify(chunk.error))
+      if (chunk.usage) usage = usageOf(chunk.usage)
+      const choice = chunk.choices?.[0]
+      if (!choice) continue
+      if (choice.finish_reason) finishReason = choice.finish_reason
+      if (choice.delta) yield* deltasOf(choice.delta)
+    }
+    yield { type: 'done', finishReason, usage }
+  }
+
+  private async open(request: CompletionRequest): Promise<ReadableStream<Uint8Array>> {
     const url = `${this.options.baseUrl.replace(/\/$/, '')}/chat/completions`
     let response: Response
     try {
@@ -50,32 +67,7 @@ export class OpenAiClient implements ChatCompletionClient {
       const text = await response.text().catch(() => '')
       throw new ApiError(response.status, text)
     }
-    let finishReason: string | undefined
-    let usage: Usage | undefined
-    for await (const data of sseData(response.body)) {
-      if (data === '[DONE]') break
-      const chunk = JSON.parse(data) as Chunk
-      if (chunk.error) throw new ApiError(0, JSON.stringify(chunk.error))
-      if (chunk.usage) {
-        usage = {
-          promptTokens: chunk.usage.prompt_tokens ?? 0,
-          completionTokens: chunk.usage.completion_tokens ?? 0,
-          cachedTokens: chunk.usage.prompt_tokens_details?.cached_tokens ?? 0,
-        }
-      }
-      const choice = chunk.choices?.[0]
-      if (!choice) continue
-      if (choice.finish_reason) finishReason = choice.finish_reason
-      const delta = choice.delta
-      if (!delta) continue
-      if (delta.reasoning_content) yield { type: 'reasoning', text: delta.reasoning_content }
-      if (delta.content) yield { type: 'text', text: delta.content }
-      for (const call of delta.tool_calls ?? []) {
-        if (call.id) yield { type: 'tool_call_start', index: call.index, id: call.id, name: call.function?.name ?? '' }
-        if (call.function?.arguments) yield { type: 'tool_call_arguments', index: call.index, text: call.function.arguments }
-      }
-    }
-    yield { type: 'done', finishReason, usage }
+    return response.body
   }
 
   /** What the endpoint says it serves, sorted; an offer for the settings page, never a replacement for what is configured. */
@@ -141,11 +133,38 @@ type Chunk = {
   }[]
 }
 
+type ChunkDelta = NonNullable<NonNullable<Chunk['choices']>[number]['delta']>
+
+function usageOf(usage: NonNullable<Chunk['usage']>): Usage {
+  return {
+    promptTokens: usage.prompt_tokens ?? 0,
+    completionTokens: usage.completion_tokens ?? 0,
+    cachedTokens: usage.prompt_tokens_details?.cached_tokens ?? 0,
+  }
+}
+
+function* deltasOf(delta: ChunkDelta): Iterable<CompletionDelta> {
+  if (delta.reasoning_content) yield { type: 'reasoning', text: delta.reasoning_content }
+  if (delta.content) yield { type: 'text', text: delta.content }
+  for (const call of delta.tool_calls ?? []) {
+    if (call.id) yield { type: 'tool_call_start', index: call.index, id: call.id, name: call.function?.name ?? '' }
+    if (call.function?.arguments) yield { type: 'tool_call_arguments', index: call.index, text: call.function.arguments }
+  }
+}
+
 function toWire(message: ChatMessage): Record<string, unknown> {
   switch (message.role) {
     case 'system':
-    case 'user':
       return { role: message.role, content: message.content }
+    case 'user':
+      if (!message.images?.length) return { role: 'user', content: message.content }
+      return {
+        role: 'user',
+        content: [
+          ...message.images.map((image) => ({ type: 'image_url', image_url: { url: `data:${image.mediaType};base64,${image.data}` } })),
+          ...(message.content ? [{ type: 'text', text: message.content }] : []),
+        ],
+      }
     case 'assistant':
       return {
         role: 'assistant',

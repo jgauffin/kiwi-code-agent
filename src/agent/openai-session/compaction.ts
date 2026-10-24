@@ -1,4 +1,5 @@
 import type { ChatMessage } from './chat-messages'
+import { withImagesNote, withoutImages } from './image-note'
 
 /** What a model whose context window nobody configured is assumed to hold. */
 export const DEFAULT_CONTEXT_WINDOW = 128_000
@@ -70,7 +71,7 @@ export function transcriptFor(messages: ChatMessage[]): string {
       case 'tool':
         break
       case 'user':
-        lines.push(`## User\n${message.content}`)
+        lines.push(`## User\n${withImagesNote(message.content, message.images?.length ?? 0)}`)
         break
       case 'assistant': {
         const calls = message.toolCalls.map((c) => `- called ${c.name} ${c.arguments.slice(0, 200)}`)
@@ -112,9 +113,10 @@ export async function compact(
   const pinned = pinnedFirst(messages, keep)
   const summary = await summarise(transcriptFor(messages.slice(pinned ? 2 : 1, keep)))
   if (!summary.trim()) return undefined
-  const head: ChatMessage[] = [messages[0]!, ...(pinned ? [pinned] : []), { role: 'user', content: `${SUMMARY_LEAD}\n\n${summary}` }]
+  // Pictures are not carried past a compaction; the note says they were there.
+  const head: ChatMessage[] = [messages[0]!, ...(pinned ? [withoutImages(pinned)] : []), { role: 'user', content: `${SUMMARY_LEAD}\n\n${summary}` }]
   if (ledger) head.push({ role: 'user', content: ledger })
-  const kept = messages.slice(keep)
+  const kept = messages.slice(keep).map(withoutImages)
   return { messages: [...head, ...kept], summary, kept }
 }
 

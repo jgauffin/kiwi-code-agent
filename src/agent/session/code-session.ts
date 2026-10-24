@@ -53,8 +53,10 @@ export type SessionEvent =
   /**
    * `label` is set when the extension wrote the text (a kickoff, a handoff): the chat
    * shows the label, and the text goes to the model and to the run log only, sealed.
+   * `images` are the pictures the person attached: shown while the tab lives, never logged
+   * (only their `imageCount` is), so a replay notes them without showing them.
    */
-  | { type: 'user_message'; text: string; label?: string }
+  | { type: 'user_message'; text: string; label?: string; imageCount?: number; images?: PromptImage[] }
   | { type: 'assistant_text'; messageId: string; delta: string; parentToolUseId?: string }
   | { type: 'assistant_thinking'; messageId: string; delta: string; parentToolUseId?: string }
   /** Final text of an assistant message, replaces whatever was streamed under the same id. */
@@ -128,9 +130,23 @@ export type SessionEvent =
   | { type: 'agent_message'; direction: 'sent' | 'received'; workspace: string; text: string }
   /** The agents exchanged as many messages as allowed without a word from the person; the next was refused. */
   | { type: 'agent_exchange_capped'; workspace: string; limit: number }
+  /**
+   * A command the session runs in the background, as it stands: running, ended on its own with its exit
+   * code, stopped by the person, the model or the session ending, or cut by a window reload. The newest
+   * event of an id replaces the last in the transcript.
+   */
+  | { type: 'background_command'; id: string; command: string; purpose: string; state: 'running' | 'ended' | 'stopped' | 'cut'; exitCode?: number | null; outputFile: string }
+  /**
+   * A turn the session asked to start later, as it stands: scheduled, cancelled, come due, or missed
+   * because the window was closed at its time. The newest event replaces the last in the transcript.
+   */
+  | { type: 'scheduled_return'; state: 'scheduled' | 'cancelled' | 'due' | 'missed'; dueAt: string; reason: string }
 
 /** An event that can come from inside a delegated run, nested in the transcript under the call that spawned it. */
 export type NestedEvent = Extract<SessionEvent, { parentToolUseId?: string }>
+
+/** An image attached to a prompt: base64 data, held in memory only for the turn it is sent with. */
+export type PromptImage = { mediaType: string; data: string }
 
 /**
  * A coding session on one engine. Session-centric on purpose: the extension
@@ -142,8 +158,8 @@ export interface CodeSession {
   readonly profile: ModelProfile
   /** Absent on a session that takes no MCP servers. */
   readonly mcp?: McpControl | undefined
-  /** Queue a user turn. Returns immediately. */
-  send(text: string): void
+  /** Queue a user turn, with the images that belong to this prompt alone. Returns immediately. */
+  send(text: string, images?: PromptImage[]): void
   /** Single consumer. Ends after the `ended` event. */
   events(): AsyncIterable<SessionEvent>
   /**

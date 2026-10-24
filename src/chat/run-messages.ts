@@ -16,6 +16,12 @@ export async function handleRunMessage(deps: MessageRouterDeps, message: FromWeb
     case 'interrupt':
       await interruptRun(deps, message, shown)
       return true
+    case 'stop_background':
+      deps.sessions.stopBackground(message.sessionId, message.id)
+      return true
+    case 'cancel_return':
+      deps.sessions.cancelReturn(message.sessionId)
+      return true
     case 'compact':
       compactRun(deps, message, shown)
       return true

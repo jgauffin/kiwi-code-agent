@@ -6,7 +6,7 @@ import { commandName, unwrapCommand } from '../permissions/command-wrappers'
 import { splitShellCommand, type ShellSegment } from '../permissions/shell-split'
 import type { PreToolUseOutcome, SessionHooks, ToolUse } from '../session/hooks'
 
-const SHELL_TOOLS = new Set(['Bash', 'PowerShell'])
+const SHELL_TOOLS = new Set(['Bash', 'PowerShell', 'BackgroundBash'])
 
 /** Past this many matching lines, one `replace` is cheaper than an Edit per line. */
 const EDIT_LIMIT = 2
@@ -118,47 +118,56 @@ type SedCall = { inPlace: boolean; script: string | undefined; files: string[]; 
 function sedCall(tokens: string[]): SedCall | undefined {
   const [raw, ...args] = tokens
   if (!raw || commandName(raw).toLowerCase() !== 'sed') return undefined
-  let inPlace = false
-  let extended = false
-  let fromFile = false
-  const scripts: string[] = []
-  const operands: string[] = []
+  const flags: SedFlags = { inPlace: false, extended: false, fromFile: false, scripts: [], operands: [] }
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!
     if (arg === '--') {
-      operands.push(...args.slice(i + 1))
+      flags.operands.push(...args.slice(i + 1))
       break
     }
-    if (arg.startsWith('--')) {
-      if (arg.startsWith('--in-place')) inPlace = true
-      else if (arg === '--regexp-extended') extended = true
-      else if (arg === '--expression') scripts.push(args[++i] ?? '')
-      else if (arg.startsWith('--expression=')) scripts.push(arg.slice('--expression='.length))
-      else if (arg === '--file' || arg.startsWith('--file=')) fromFile = true
-      continue
-    }
-    if (arg.length < 2 || !arg.startsWith('-')) {
-      operands.push(arg)
-      continue
-    }
-    // In a cluster of short flags, `i` takes the rest of the word as a backup suffix, and `e` and `f` the rest or the next word.
-    for (let at = 1; at < arg.length; at++) {
-      const letter = arg[at]
-      if (letter === 'i') {
-        inPlace = true
-        break
-      }
-      if (letter === 'E' || letter === 'r') extended = true
-      if (letter === 'e' || letter === 'f') {
-        const value = at + 1 < arg.length ? arg.slice(at + 1) : args[++i]
-        if (letter === 'e') scripts.push(value ?? '')
-        else fromFile = true
-        break
-      }
-    }
+    if (arg.startsWith('--')) i = longOption(arg, args, i, flags)
+    else if (arg.length < 2 || !arg.startsWith('-')) flags.operands.push(arg)
+    else i = shortFlags(arg, args, i, flags)
   }
+  const { inPlace, extended, fromFile, scripts, operands } = flags
   if (scripts.length === 0 && !fromFile) scripts.push(operands.shift() ?? '')
   return { inPlace, script: fromFile ? undefined : scripts.join('\n'), files: operands, extended }
+}
+
+type SedFlags = { inPlace: boolean; extended: boolean; fromFile: boolean; scripts: string[]; operands: string[] }
+
+/** One `--option` of a sed call; the index of the last word it used. */
+function longOption(arg: string, args: string[], index: number, flags: SedFlags): number {
+  let i = index
+  if (arg.startsWith('--in-place')) flags.inPlace = true
+  else if (arg === '--regexp-extended') flags.extended = true
+  else if (arg === '--expression') flags.scripts.push(args[++i] ?? '')
+  else if (arg.startsWith('--expression=')) flags.scripts.push(arg.slice('--expression='.length))
+  else if (arg === '--file' || arg.startsWith('--file=')) flags.fromFile = true
+  return i
+}
+
+/** A cluster of short flags, where `i` takes the rest of the word as a backup suffix; the index of the last word it used. */
+function shortFlags(arg: string, args: string[], index: number, flags: SedFlags): number {
+  for (let at = 1; at < arg.length; at++) {
+    const letter = arg[at]!
+    if (letter === 'i') {
+      flags.inPlace = true
+      break
+    }
+    if (letter === 'E' || letter === 'r') flags.extended = true
+    if (letter === 'e' || letter === 'f') return scriptFlag(letter, arg, at, args, index, flags)
+  }
+  return index
+}
+
+/** `e` and `f` take the rest of the word or the next word. */
+function scriptFlag(letter: 'e' | 'f', arg: string, at: number, args: string[], index: number, flags: SedFlags): number {
+  let i = index
+  const value = at + 1 < arg.length ? arg.slice(at + 1) : args[++i]
+  if (letter === 'e') flags.scripts.push(value ?? '')
+  else flags.fromFile = true
+  return i
 }
 
 type Substitution = { pattern: string; caseInsensitive: boolean }
@@ -190,6 +199,8 @@ function parseSubstitution(script: string): Substitution | undefined {
   return { pattern: parts[0]!, caseInsensitive: /[iI]/.test(flags) }
 }
 
+const BRE_OPERATORS = '(){}+?|'
+
 const POSIX_CLASSES: Record<string, string> = {
   alpha: 'a-zA-Z', digit: '0-9', alnum: 'a-zA-Z0-9', upper: 'A-Z', lower: 'a-z', space: '\\s', blank: ' \\t', xdigit: '0-9a-fA-F', punct: '!-\\/:-@\\[-`{-~',
 }
@@ -200,7 +211,6 @@ const POSIX_CLASSES: Record<string, string> = {
  * Undefined when the result is not a regex JavaScript accepts.
  */
 function jsPattern(pattern: string, extended: boolean): string | undefined {
-  const BRE_OPERATORS = '(){}+?|'
   let out = ''
   for (let at = 0; at < pattern.length; at++) {
     const character = pattern[at]!
@@ -209,12 +219,8 @@ function jsPattern(pattern: string, extended: boolean): string | undefined {
       if (end === undefined) return undefined
       out += pattern.slice(at, end).replace(/\[:(\w+):\]/g, (whole, name: string) => POSIX_CLASSES[name] ?? whole)
       at = end - 1
-    } else if (character === '\\') {
-      const next = pattern[++at] ?? ''
-      if (next === '<' || next === '>') out += '\\b'
-      else if (!extended && BRE_OPERATORS.includes(next)) out += next
-      else out += `\\${next}`
-    } else if (!extended && BRE_OPERATORS.includes(character)) out += `\\${character}`
+    } else if (character === '\\') out += escapedToJs(pattern[++at] ?? '', extended)
+    else if (!extended && BRE_OPERATORS.includes(character)) out += `\\${character}`
     else out += character
   }
   try {
@@ -223,6 +229,13 @@ function jsPattern(pattern: string, extended: boolean): string | undefined {
   } catch {
     return undefined
   }
+}
+
+/** The JavaScript for a backslash and the character after it. */
+function escapedToJs(next: string, extended: boolean): string {
+  if (next === '<' || next === '>') return '\\b'
+  if (!extended && BRE_OPERATORS.includes(next)) return next
+  return `\\${next}`
 }
 
 /** The index past a bracket expression's closing `]`, which may stand first in it as text. */

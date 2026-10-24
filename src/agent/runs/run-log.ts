@@ -34,7 +34,7 @@ export class RunLog {
   }
 
   append(event: SessionEvent): Promise<void> {
-    const entry: RunLogEntry = { at: new Date().toISOString(), event: sealEvent(event) }
+    const entry: RunLogEntry = { at: new Date().toISOString(), event: sealEvent(withoutImages(event)) }
     this.chain = this.chain.then(async () => {
       await mkdir(this.dir, { recursive: true })
       await appendFile(this.path, JSON.stringify(entry) + '\n', 'utf8')
@@ -58,6 +58,13 @@ export class RunLog {
         return { ...entry, event: unsealEvent(entry.event) }
       })
   }
+}
+
+/** The pictures a prompt carried are too heavy for the log; the count they leave is what a replay notes. */
+function withoutImages(event: SessionEvent): SessionEvent {
+  if (event.type !== 'user_message' || !event.images) return event
+  const { images: _images, ...logged } = event
+  return logged
 }
 
 function isMissingFile(error: unknown): boolean {

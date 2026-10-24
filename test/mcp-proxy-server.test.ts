@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
-import type { McpToolInfo } from '../src/agent/mcp/mcp-connection'
+import type { McpConnector, McpToolInfo } from '../src/agent/mcp/mcp-connection'
 import { mcpProxy } from '../src/agent/mcp/mcp-proxy-server'
 import { McpToolCache } from '../src/agent/mcp/mcp-tool-cache'
 import { McpToolHost } from '../src/agent/mcp/mcp-tool-host'
@@ -55,6 +55,23 @@ describe('mcpProxy', () => {
     expect(result).toMatchObject({ content: [{ type: 'text', text: 'docs:echo' }], isError: false })
     expect(fake.calls).toEqual([{ server: 'docs', tool: 'echo', args: { value: 'hi' } }])
     expect(host.statuses()).toEqual([{ name: 'docs', status: 'connected' }])
+    await client.close()
+  })
+
+  it('an_image_a_server_tool_returns_reaches_the_engine_as_an_image_not_a_placeholder', async () => {
+    const connector: McpConnector = async () => ({
+      listTools: async () => [echo],
+      callTool: async () => ({ text: 'Crafter\n[image]', isError: false, images: [{ mediaType: 'image/png', data: 'iVBORw0K' }] }),
+      close: async () => undefined,
+    })
+    const host = new McpToolHost(connector, new McpToolCache(memoryStore()))
+    await host.load({ docs })
+    const client = await engineClient(host)
+    const result = await client.callTool({ name: 'echo', arguments: {} })
+    expect(result.content).toEqual([
+      { type: 'text', text: 'Crafter\n[image]' },
+      { type: 'image', data: 'iVBORw0K', mimeType: 'image/png' },
+    ])
     await client.close()
   })
 })

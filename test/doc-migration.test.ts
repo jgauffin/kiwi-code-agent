@@ -257,6 +257,10 @@ describe('a migrated draft lands its folder the same way as a planning session',
     expect(prompt).toContain('write `specs/<folder>/<slug>.spec.md` with Write')
   })
 
+  it('a_draft_and_a_sorted_spec_are_homed_by_the_concepts_the_feature_changes', () => {
+    expect(docMigrationPrompt(cwd, 'by-domain')).toContain('the domain that owns the concepts whose information or states the feature changes')
+  })
+
   it('by_domain_mode_writes_a_draft_into_a_folder_at_any_depth', async () => {
     const domainGuard = new ScopeGuard(cwd, docMigrationScope(['docs/api/**'], 'by-domain'))
     const domainUse = (toolName: string, input: unknown) => domainGuard.preToolUse({ toolName, input, toolUseId: 't' })

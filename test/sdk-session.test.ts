@@ -218,7 +218,14 @@ describe('SdkSession', () => {
   it('the_engines_built_in_question_tool_is_withheld_so_questions_take_the_own_tool_and_its_card', () => {
     const fake = fakeQuery()
     createSession(fake)
-    expect(fake.options).toMatchObject({ disallowedTools: ['AskUserQuestion'] })
+    expect(fake.options!.disallowedTools).toContain('AskUserQuestion')
+  })
+
+  it('the_engines_own_background_commands_are_not_offered_so_background_commands_run_only_through_ours', () => {
+    const fake = fakeQuery()
+    createSession(fake)
+    expect(fake.options!.disallowedTools).toEqual(expect.arrayContaining(['BashOutput', 'KillShell', 'Monitor']))
+    expect(fake.options!.env).toMatchObject({ CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1' })
   })
 
   it('own_tools_are_served_in_process_and_reach_hooks_and_prompts_under_their_bare_name', async () => {
